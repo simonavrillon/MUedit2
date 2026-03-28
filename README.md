@@ -103,7 +103,6 @@ curl http://localhost:8000/api/v1/health
 
 ## Documentation
 
-- User manual: [docs/User_manual.pdf](docs/User_manual.pdf)
 - Workflow guide: [docs/WORKFLOWS.md](docs/WORKFLOWS.md)
 - Saved files reference: [docs/SAVED_FILES.md](docs/SAVED_FILES.md)
 - Frontend architecture: [docs/FRONTEND_ARCHITECTURE.md](docs/FRONTEND_ARCHITECTURE.md)
