@@ -45,7 +45,7 @@ def serve_api() -> None:
     app = create_app(title="MUedit API", version="2.0")
     include_routers(app)
     host = os.environ.get("MUEDIT_HOST", "0.0.0.0")
-    port = int(os.environ.get("MUEDIT_PORT", "8000"))
+    port = int(os.environ.get("MUEDIT_PORT") or os.environ.get("MUEDIT_BACKEND_PORT", "8000"))
     uvicorn.run(app, host=host, port=port)
 
 
