@@ -1,0 +1,58 @@
+# ── OS & editor artefacts ──────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# IDE configs
+.vscode/
+.idea/
+*.iml
+
+# ── Python ─────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+.env
+
+# Type-checking caches
+.mypy_cache/
+.pytype/
+.ruff_cache/
+
+# Test caches
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ── Jupyter ─────────────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+
+# ── Logs ───────────────────────────────────────────────────────────────────
+*.log
+python/*.log
+
+# ── Frontend ────────────────────────────────────────────────────────────────
+frontend/node_modules/
+
+# ── EMG data files (large binaries — store on Figshare or similar) ─────────
+*.mat
+*.bdf
+*.edf
+*.otb4
+*.otb+
+*.npz
+
+# ── BIDS output directories ────────────────────────────────────────────────
+bids_out/
+bids_export/
+data/datasamples/

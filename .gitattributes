@@ -1,0 +1,10 @@
+* text=auto eol=lf
+
+# Binary scientific/recording artifacts
+*.mat binary
+*.bdf binary
+*.edf binary
+*.otb4 binary
+*.otb+ binary
+*.npz binary
+*.h5 binary

@@ -1,0 +1,26 @@
+name: MUedit
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - pip
+  # Numerical / scientific core
+  - numpy=1.26.4
+  - scipy=1.13.1
+  - matplotlib=3.9.2
+  - pandas=2.2.2
+  - xmltodict=0.14.2
+  - pydantic=2.10.2
+  - pyyaml=6.0.2
+  - h5py=3.12.1
+  # Web server
+  - fastapi=0.115.5
+  - uvicorn=0.32.0
+  - python-multipart=0.0.12
+  # EMG / EEG file I/O
+  - pyedflib=0.1.36
+  - pip:
+    # PyTorch installed via pip because the conda package pulls CUDA by default.
+    # Pin to the CPU-only wheel for portability; GPU users can swap for their build.
+    - torch==2.5.1

@@ -1,0 +1,648 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MUedit</title>
+    <link rel="icon" href="data:," />
+    <link rel="shortcut icon" href="data:," />
+    <link rel="stylesheet" href="style.css?v=52" />
+  </head>
+
+  <body>
+    <div id="app">
+      <main class="page">
+        <div class="workspace-header">
+          <button
+            class="settings-toggle-btn"
+            id="settingsToggleBtn"
+            type="button"
+            aria-controls="settingsPanel"
+            aria-expanded="false"
+            aria-label="Toggle settings panel"
+          >
+            <span class="hamburger-icon" aria-hidden="true">
+              <span></span>
+              <span></span>
+              <span></span>
+            </span>
+          </button>
+          <div
+            class="workflow-stepper"
+            id="workflowStepper"
+            aria-label="Workflow"
+          >
+            <button
+              class="step-chip active"
+              id="stepImport"
+              data-step="import"
+              type="button"
+            >
+              <span class="step-chip-label">Import</span>
+            </button>
+            <button
+              class="step-chip pending"
+              id="stepQc"
+              data-step="qc"
+              type="button"
+            >
+              <span class="step-chip-label">QC / ROI</span>
+            </button>
+            <button
+              class="step-chip pending"
+              id="stepRun"
+              data-step="run"
+              type="button"
+            >
+              <span class="step-chip-label">Decompose</span>
+            </button>
+            <button
+              class="step-chip pending"
+              id="stepEdit"
+              data-step="edit"
+              type="button"
+            >
+              <span class="step-chip-label">Edit</span>
+            </button>
+          </div>
+        </div>
+
+        <section class="landing" id="landing">
+          <div class="landing-top-row">
+            <p class="headline">Select your file to get started</p>
+            <button
+              class="browse-icon-btn"
+              id="browseSignalBtn"
+              type="button"
+              aria-label="Browse EMG files"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke-width="1.5"
+                stroke="currentColor"
+                class="size-6"
+                aria-hidden="true"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m6.75 12-3-3m0 0-3 3m3-3v6m-1.5-15H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"
+                />
+              </svg>
+            </button>
+          </div>
+          <div class="landing-card">
+            <div
+              id="uploadLoader"
+              class="upload-loader hidden"
+              aria-live="polite"
+              aria-label="Uploading file"
+            >
+              <span></span>
+              <span></span>
+              <span></span>
+              <span></span>
+              <span></span>
+            </div>
+            <div
+              id="uploadFormatError"
+              class="upload-format-error hidden"
+              role="alert"
+              aria-live="polite"
+            ></div>
+          </div>
+        </section>
+
+        <section class="workspace hidden" id="workspace">
+          <div
+            class="settings-overlay"
+            id="settingsOverlay"
+            aria-hidden="true"
+          ></div>
+          <aside class="control-panel glass settings-panel" id="settingsPanel">
+            <!-- Session Info -->
+            <section class="panel-section collapsed" id="recordingSection">
+              <div class="section-header">
+                <span class="section-header-main">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke-width="1.5"
+                    stroke="currentColor"
+                    aria-hidden="true"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"
+                    />
+                  </svg>
+                  <span>Session Info</span>
+                </span>
+              </div>
+              <div class="section-content">
+                <div class="row file-row">
+                  <span class="field-label">File:</span>
+                  <span class="file-display" id="fileName">None</span>
+                </div>
+                <div class="form-row">
+                  <label>Fs (Hz)</label>
+                  <input
+                    type="number"
+                    id="fsamp"
+                    value="2048"
+                    readonly
+                    class="muted"
+                  />
+                </div>
+                <div class="form-row">
+                  <label>BIDS root path</label>
+                  <input
+                    type="text"
+                    id="editBidsRoot"
+                    placeholder="/path/to/bids_root"
+                  />
+                </div>
+                <div class="form-row">
+                  <label>Subject</label>
+                  <input type="text" id="bidsSubject" value="01" />
+                </div>
+                <div class="form-row">
+                  <label>Task</label>
+                  <input
+                    type="text"
+                    id="bidsTask"
+                    value="trapezoid"
+                    list="bidsTaskSuggestions"
+                  />
+                  <datalist id="bidsTaskSuggestions">
+                    <option value="ramp up"></option>
+                    <option value="ramp down"></option>
+                    <option value="trapezoid"></option>
+                    <option value="stairs"></option>
+                    <option value="sinusoid"></option>
+                    <option value="dynamic"></option>
+                  </datalist>
+                </div>
+                <div class="form-row">
+                  <label>Session</label>
+                  <input type="number" id="bidsSession" value="01" min="1" />
+                </div>
+                <div class="form-row">
+                  <label>Run</label>
+                  <input type="number" id="bidsRun" value="01" min="1" />
+                </div>
+                <div id="bidsMuscleContainer">
+                  <div class="form-row">
+                    <label>Muscle</label>
+                    <input
+                      type="text"
+                      id="bidsMuscle_0"
+                      placeholder="e.g. TA"
+                      class="bids-muscle-input"
+                    />
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <!-- Decomposition Settings -->
+            <section class="panel-section collapsed" id="decompSettingsSection">
+              <div class="section-header">
+                <span class="section-header-main">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke-width="1.5"
+                    stroke="currentColor"
+                    aria-hidden="true"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z"
+                    />
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"
+                    />
+                  </svg>
+                  <span>Decomposition Settings</span>
+                </span>
+              </div>
+              <div class="section-content">
+                <div class="form-row">
+                  <label>Iterations</label>
+                  <input type="number" id="niter" value="150" min="1" />
+                </div>
+                <div class="form-row">
+                  <label>Analysis windows (count)</label>
+                  <input type="number" id="nwindows" value="1" min="1" />
+                </div>
+                <div class="form-row">
+                  <label>Duplicates thresh</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    id="duplicatesthresh"
+                    value="0.3"
+                    min="0"
+                    max="1"
+                  />
+                </div>
+                <div class="toggle-row">
+                  <button
+                    class="pill-toggle"
+                    id="peelOffToggle"
+                    data-state="off"
+                  >
+                    Peeloff: Off
+                  </button>
+                </div>
+                <div class="form-row conditional hidden" id="peelOffSettings">
+                  <label>Window (ms)</label>
+                  <input type="number" id="peelOffWindow" value="25" min="1" />
+                </div>
+                <div class="toggle-row">
+                  <button
+                    class="pill-toggle"
+                    id="useAdaptiveToggle"
+                    data-state="off"
+                    type="button"
+                  >
+                    Use adaptive: Off
+                  </button>
+                </div>
+              </div>
+            </section>
+
+            <!-- Quality Filters -->
+            <section class="panel-section collapsed" id="filterSettingsSection">
+              <div class="section-header">
+                <span class="section-header-main">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke-width="1.5"
+                    stroke="currentColor"
+                    aria-hidden="true"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456ZM16.894 20.567 16.5 21.75l-.394-1.183a2.25 2.25 0 0 0-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 0 0 1.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 0 0 1.423 1.423l1.183.394-1.183.394a2.25 2.25 0 0 0-1.423 1.423Z"
+                    />
+                  </svg>
+                  <span>Quality Filters</span>
+                </span>
+              </div>
+              <div class="section-content">
+                <div class="toggle-row">
+                  <button class="pill-toggle on" id="silToggle" data-state="on">
+                    SIL filter: On
+                  </button>
+                </div>
+                <div class="form-row" id="silSettings">
+                  <label>SIL threshold</label>
+                  <input type="number" step="0.01" id="silValue" value="0.9" />
+                </div>
+                <div class="toggle-row">
+                  <button class="pill-toggle" id="covToggle" data-state="off">
+                    COV tool: Off
+                  </button>
+                </div>
+                <div class="form-row conditional hidden" id="covSettings">
+                  <label>COV threshold</label>
+                  <input type="number" step="0.01" id="covValue" value="0.5" />
+                </div>
+              </div>
+            </section>
+          </aside>
+
+          <div class="layout workspace-grid">
+            <main class="visual-panel">
+              <!-- Quality Check Stage -->
+              <div class="stage stage-qc active" id="stageQc">
+                <div class="qc-tabs-row">
+                  <div class="qc-tabs stage-tabs" id="qcGridTabs">
+                    <!-- Dynamically populated Grid 1, Grid 2, etc. -->
+                  </div>
+                  <button class="start-btn qc-run-btn" id="startBtn">
+                    <span>Decompose Signal</span>
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke-width="1.5"
+                      stroke="currentColor"
+                      class="size-6"
+                      aria-hidden="true"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5"
+                      />
+                    </svg>
+                  </button>
+                </div>
+                <div class="split">
+                  <div class="chart-card qc-card scroll-card glass">
+                    <div class="chart-title">Grid Channel Quality</div>
+                    <div id="qcSection" class="qc-section"></div>
+                  </div>
+                  <div class="qc-right-column">
+                    <div class="chart-card glass">
+                      <div class="chart-title">Average EMG Activity</div>
+                      <canvas id="emgCanvas" height="180"></canvas>
+                    </div>
+                    <div class="chart-card glass">
+                      <div class="chart-title">Auxiliary Channels</div>
+                      <div class="form-row slim aux-selector-row">
+                        <select id="auxSelector"></select>
+                      </div>
+                      <canvas id="auxCanvas" height="120"></canvas>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Run Stage -->
+              <div class="stage stage-run" id="stageRun">
+                <div class="run-kpis">
+                  <div class="kpi-card">
+                    <div class="kpi-label">Pipeline Phase</div>
+                    <div class="kpi-value" id="runPhase">Idle</div>
+                  </div>
+                </div>
+                <div class="progress-row">
+                  <div class="progress-text" id="progressText">Idle</div>
+                  <div class="progress-track">
+                    <div
+                      class="progress-bar"
+                      id="progressBar"
+                      style="width: 0%"
+                    ></div>
+                  </div>
+                </div>
+                <div class="chart-card glass">
+                  <div class="chart-title">Motor Unit Pulse Trains</div>
+                  <div class="mu-controls">
+                    <select id="muGridSelect" aria-label="Grid"></select>
+                    <select id="muSelect" aria-label="Motor unit"></select>
+                    <div class="mu-meta" id="muMeta">
+                      Decompose to see results
+                    </div>
+                  </div>
+                  <canvas
+                    id="muPulseCanvas"
+                    height="220"
+                    class="mu-canvas"
+                  ></canvas>
+                </div>
+              </div>
+
+              <!-- Edit Stage -->
+              <div class="stage stage-edit" id="stageEdit">
+                <div class="edit-top-row">
+                  <div class="chart-card glass">
+                    <div class="chart-title">Editing Workspace</div>
+                    <div class="edit-controls-row">
+                      <div class="mu-controls edit-selects">
+                        <select
+                          id="editMuGridSelect"
+                          aria-label="Grid"
+                        ></select>
+                        <select
+                          id="editMuSelect"
+                          aria-label="Motor unit"
+                        ></select>
+                      </div>
+                      <div
+                        class="edit-toolbar"
+                        role="toolbar"
+                        aria-label="Edit actions"
+                      >
+                        <div class="edit-toolbar-row">
+                          <div class="edit-toolbar-group">
+                            <button
+                              class="pill-toggle icon-expand-btn"
+                              id="editFlagBtn"
+                            >
+                              <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke-width="1.5"
+                                stroke="currentColor"
+                                aria-hidden="true"
+                              >
+                                <path
+                                  stroke-linecap="round"
+                                  stroke-linejoin="round"
+                                  d="M18.364 18.364A9 9 0 0 0 5.636 5.636m12.728 12.728A9 9 0 0 1 5.636 5.636m12.728 12.728L5.636 5.636"
+                                />
+                              </svg>
+                              <span>Flag MU</span>
+                            </button>
+                          </div>
+                          <div class="edit-toolbar-group">
+                            <button
+                              class="pill-toggle icon-expand-btn"
+                              id="editOutliersBtn"
+                            >
+                              <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke-width="1.5"
+                                stroke="currentColor"
+                                aria-hidden="true"
+                              >
+                                <path
+                                  stroke-linecap="round"
+                                  stroke-linejoin="round"
+                                  d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456ZM16.894 20.567 16.5 21.75l-.394-1.183a2.25 2.25 0 0 0-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 0 0 1.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 0 0 1.423 1.423l1.183.394-1.183.394a2.25 2.25 0 0 0-1.423 1.423Z"
+                                />
+                              </svg>
+                              <span>Remove Outliers</span>
+                            </button>
+                            <button
+                              class="pill-toggle icon-expand-btn"
+                              id="editAddBtn"
+                            >
+                              <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke-width="1.5"
+                                stroke="currentColor"
+                                aria-hidden="true"
+                              >
+                                <path
+                                  stroke-linecap="round"
+                                  stroke-linejoin="round"
+                                  d="M12 9v6m3-3H9m12 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
+                                />
+                              </svg>
+                              <span>Add Spike</span>
+                            </button>
+                            <button
+                              class="pill-toggle icon-expand-btn"
+                              id="editDeleteSpikeBtn"
+                            >
+                              <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke-width="1.5"
+                                stroke="currentColor"
+                                aria-hidden="true"
+                              >
+                                <path
+                                  stroke-linecap="round"
+                                  stroke-linejoin="round"
+                                  d="M15 12H9m12 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
+                                />
+                              </svg>
+                              <span>Delete Spike</span>
+                            </button>
+                          </div>
+                          <div class="edit-toolbar-group">
+                            <button
+                              class="pill-toggle icon-expand-btn"
+                              id="editUpdateBtn"
+                            >
+                              <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke-width="1.5"
+                                stroke="currentColor"
+                                aria-hidden="true"
+                              >
+                                <path
+                                  stroke-linecap="round"
+                                  stroke-linejoin="round"
+                                  d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99"
+                                />
+                              </svg>
+                              <span>Update Filter</span>
+                            </button>
+                          </div>
+                          <div class="edit-toolbar-group">
+                            <button
+                              class="pill-toggle icon-expand-btn"
+                              id="editUndoBtn"
+                            >
+                              <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke-width="1.5"
+                                stroke="currentColor"
+                                aria-hidden="true"
+                              >
+                                <path
+                                  stroke-linecap="round"
+                                  stroke-linejoin="round"
+                                  d="M9 15 3 9m0 0 6-6M3 9h12a6 6 0 0 1 0 12h-3"
+                                />
+                              </svg>
+                              <span>Undo</span>
+                            </button>
+                            <button
+                              class="pill-toggle icon-expand-btn"
+                              id="editResetBtn"
+                            >
+                              <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke-width="1.5"
+                                stroke="currentColor"
+                                aria-hidden="true"
+                              >
+                                <path
+                                  stroke-linecap="round"
+                                  stroke-linejoin="round"
+                                  d="M12 9.75 14.25 12m0 0 2.25 2.25M14.25 12l2.25-2.25M14.25 12 12 14.25m-2.58 4.92-6.374-6.375a1.125 1.125 0 0 1 0-1.59L9.42 4.83c.21-.211.497-.33.795-.33H19.5a2.25 2.25 0 0 1 2.25 2.25v10.5a2.25 2.25 0 0 1-2.25 2.25h-9.284c-.298 0-.585-.119-.795-.33Z"
+                                />
+                              </svg>
+                              <span>Reset</span>
+                            </button>
+                          </div>
+                          <div
+                            class="edit-toolbar-group edit-toolbar-group-save"
+                          >
+                            <button
+                              class="start-btn icon-expand-btn"
+                              id="editSaveBtn"
+                              disabled
+                            >
+                              <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke-width="1.5"
+                                stroke="currentColor"
+                                aria-hidden="true"
+                              >
+                                <path
+                                  stroke-linecap="round"
+                                  stroke-linejoin="round"
+                                  d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m.75 12 3 3m0 0 3-3m-3 3v-6m-1.5-9H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"
+                                />
+                              </svg>
+                              <span>Save</span>
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <p class="hint muted">
+                      Shortcuts: `<`/`>` previous-next MU, `R` remove outliers,
+                      `A` add spikes, `D` delete spikes, `Space` update filter,
+                      `←`/`→` scroll, `↑`/`↓` zoom.
+                    </p>
+                  </div>
+                </div>
+                <div class="chart-card glass edit-full">
+                  <div class="chart-title">Firing Rate (Hz)</div>
+                  <canvas
+                    id="editDrCanvas"
+                    height="180"
+                    class="mu-canvas muted-bg"
+                  ></canvas>
+                </div>
+                <div class="chart-card glass edit-full">
+                  <div class="chart-title">Pulse Train (Interactive)</div>
+                  <canvas
+                    id="editPulseCanvas"
+                    height="200"
+                    class="mu-canvas"
+                  ></canvas>
+                </div>
+              </div>
+            </main>
+          </div>
+        </section>
+      </main>
+
+      <input
+        id="signalFileInput"
+        type="file"
+        accept=".mat,.otb+,.otb4,.npz"
+        class="hidden"
+      />
+    </div>
+
+    <script type="module" src="app.js?v=61"></script>
+  </body>
+</html>
