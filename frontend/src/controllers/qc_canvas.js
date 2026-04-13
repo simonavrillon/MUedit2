@@ -59,7 +59,7 @@ export function enableRoiSelection(
   const commitSelection = () => {
     if (!state.seriesLength) return;
     const { startSample, endSample } = toSamples(startX, endX);
-    const nwin = Number(els.nwindows?.value) || 1;
+    const nwin = Number(els.nwindows?.value) ?? 1;
     syncRoisFn(nwin);
     let idx = 0;
     let best = Number.MAX_SAFE_INTEGER;

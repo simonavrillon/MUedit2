@@ -78,16 +78,16 @@ function getCurrentGrid() {
 }
 
 function buildParams(isToggleOn) {
-  const niter = Number(els.niter?.value) || 150;
-  const nwindows = Number(els.nwindows?.value) || 1;
+  const niter = Number(els.niter?.value) ?? 150;
+  const nwindows = Number(els.nwindows?.value) ?? 1;
   const peelOn = isToggleOn(els.peelOffToggle);
   const adaptiveOn = isToggleOn(els.useAdaptiveToggle);
   const covOn = isToggleOn(els.covToggle);
   const silOn = isToggleOn(els.silToggle);
-  const peelWindow = Number(els.peelOffWindow?.value) || 25;
-  const covVal = Number(els.covValue?.value) || 0.5;
-  const silVal = Number(els.silValue?.value) || 0.9;
-  const duplicatesthresh = Number(els.duplicatesthresh?.value) || 0.3;
+  const peelWindow = Number(els.peelOffWindow?.value) ?? 25;
+  const covVal = Number(els.covValue?.value) ?? 0.5;
+  const silVal = Number(els.silValue?.value) ?? 0.9;
+  const duplicatesthresh = Number(els.duplicatesthresh?.value) ?? 0.3;
 
   return {
     niter,

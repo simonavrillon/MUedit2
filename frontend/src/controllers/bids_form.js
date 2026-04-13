@@ -1,3 +1,15 @@
+function makeInfoItem(label, value) {
+  const row = document.createElement("div");
+  row.className = "auto-info-item";
+  const l = document.createElement("span");
+  l.textContent = label;
+  const v = document.createElement("span");
+  v.textContent = value;
+  row.appendChild(l);
+  row.appendChild(v);
+  return row;
+}
+
 export function renderBidsAutoInfo(els, model) {
   const box = els.bidsAutoInfo;
   if (!box) return;
@@ -6,21 +18,16 @@ export function renderBidsAutoInfo(els, model) {
     return;
   }
   box.classList.remove("hidden");
+  box.innerHTML = "";
 
-  let html = "<b>Auto-detected Metadata</b>";
-  if (model.deviceName) {
-    html += `<div class="auto-info-item"><span>Device:</span> <span>${model.deviceName}</span></div>`;
-  }
-  if (model.musclesText) {
-    html += `<div class="auto-info-item"><span>Muscles:</span> <span>${model.musclesText}</span></div>`;
-  }
-  if (model.filtersText) {
-    html += `<div class="auto-info-item"><span>Filters:</span> <span>${model.filtersText}</span></div>`;
-  }
-  if (model.gainText) {
-    html += `<div class="auto-info-item"><span>Amplifier Gain:</span> <span>${model.gainText}</span></div>`;
-  }
-  box.innerHTML = html;
+  const title = document.createElement("b");
+  title.textContent = "Auto-detected Metadata";
+  box.appendChild(title);
+
+  if (model.deviceName) box.appendChild(makeInfoItem("Device:", model.deviceName));
+  if (model.musclesText) box.appendChild(makeInfoItem("Muscles:", model.musclesText));
+  if (model.filtersText) box.appendChild(makeInfoItem("Filters:", model.filtersText));
+  if (model.gainText) box.appendChild(makeInfoItem("Amplifier Gain:", model.gainText));
 }
 
 export function renderBidsMuscleFields(els, rows) {

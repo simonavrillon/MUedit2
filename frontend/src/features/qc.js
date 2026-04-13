@@ -345,7 +345,7 @@ export async function requestPreview(deps, options = {}) {
     populateAuxSelectorFn();
     ensureDiscardMasks();
     populateGridTabs();
-    const nwin = Number(els.nwindows?.value) || 1;
+    const nwin = Number(els.nwindows?.value) ?? 1;
     const defaultEnd = state.seriesLength || 0;
     const rois = [];
     for (let i = 0; i < nwin; i++) {

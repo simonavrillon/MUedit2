@@ -29,7 +29,7 @@ export function setupRunEvents(deps) {
 
   if (els.nwindows) {
     els.nwindows.addEventListener("change", () => {
-      const nwin = Number(els.nwindows.value) || 1;
+      const nwin = Number(els.nwindows.value) ?? 1;
       syncRois(nwin);
       refreshVisuals();
     });

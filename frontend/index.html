@@ -65,6 +65,11 @@
               <span class="step-chip-label">Edit</span>
             </button>
           </div>
+          <span
+            id="status"
+            class="status-pill"
+            aria-live="polite"
+          ></span>
         </div>
 
         <section class="landing" id="landing">
@@ -206,6 +211,11 @@
                     />
                   </div>
                 </div>
+                <div
+                  id="bidsAutoInfo"
+                  class="auto-info-box hidden"
+                  aria-live="polite"
+                ></div>
               </div>
             </section>
 
@@ -260,6 +270,7 @@
                     class="pill-toggle"
                     id="peelOffToggle"
                     data-state="off"
+                    type="button"
                   >
                     Peeloff: Off
                   </button>
@@ -304,7 +315,7 @@
               </div>
               <div class="section-content">
                 <div class="toggle-row">
-                  <button class="pill-toggle on" id="silToggle" data-state="on">
+                  <button class="pill-toggle on" id="silToggle" data-state="on" type="button">
                     SIL filter: On
                   </button>
                 </div>
@@ -313,7 +324,7 @@
                   <input type="number" step="0.01" id="silValue" value="0.9" />
                 </div>
                 <div class="toggle-row">
-                  <button class="pill-toggle" id="covToggle" data-state="off">
+                  <button class="pill-toggle" id="covToggle" data-state="off" type="button">
                     COV tool: Off
                   </button>
                 </div>
@@ -333,7 +344,7 @@
                   <div class="qc-tabs stage-tabs" id="qcGridTabs">
                     <!-- Dynamically populated Grid 1, Grid 2, etc. -->
                   </div>
-                  <button class="start-btn qc-run-btn" id="startBtn">
+                  <button class="start-btn qc-run-btn" id="startBtn" type="button">
                     <span>Decompose Signal</span>
                     <svg
                       xmlns="http://www.w3.org/2000/svg"
@@ -434,6 +445,7 @@
                             <button
                               class="pill-toggle icon-expand-btn"
                               id="editFlagBtn"
+                              type="button"
                             >
                               <svg
                                 xmlns="http://www.w3.org/2000/svg"
@@ -456,6 +468,7 @@
                             <button
                               class="pill-toggle icon-expand-btn"
                               id="editOutliersBtn"
+                              type="button"
                             >
                               <svg
                                 xmlns="http://www.w3.org/2000/svg"
@@ -476,6 +489,7 @@
                             <button
                               class="pill-toggle icon-expand-btn"
                               id="editAddBtn"
+                              type="button"
                             >
                               <svg
                                 xmlns="http://www.w3.org/2000/svg"
@@ -496,6 +510,7 @@
                             <button
                               class="pill-toggle icon-expand-btn"
                               id="editDeleteSpikeBtn"
+                              type="button"
                             >
                               <svg
                                 xmlns="http://www.w3.org/2000/svg"
@@ -518,6 +533,7 @@
                             <button
                               class="pill-toggle icon-expand-btn"
                               id="editUpdateBtn"
+                              type="button"
                             >
                               <svg
                                 xmlns="http://www.w3.org/2000/svg"
@@ -540,6 +556,7 @@
                             <button
                               class="pill-toggle icon-expand-btn"
                               id="editUndoBtn"
+                              type="button"
                             >
                               <svg
                                 xmlns="http://www.w3.org/2000/svg"
@@ -560,6 +577,7 @@
                             <button
                               class="pill-toggle icon-expand-btn"
                               id="editResetBtn"
+                              type="button"
                             >
                               <svg
                                 xmlns="http://www.w3.org/2000/svg"
@@ -584,6 +602,7 @@
                             <button
                               class="start-btn icon-expand-btn"
                               id="editSaveBtn"
+                              type="button"
                               disabled
                             >
                               <svg
@@ -611,6 +630,11 @@
                       `A` add spikes, `D` delete spikes, `Space` update filter,
                       `←`/`→` scroll, `↑`/`↓` zoom.
                     </p>
+                    <span
+                      id="editStatus"
+                      class="status-pill"
+                      aria-live="polite"
+                    ></span>
                   </div>
                 </div>
                 <div class="chart-card glass edit-full">
