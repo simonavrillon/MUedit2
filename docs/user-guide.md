@@ -130,10 +130,13 @@ Use the **Grid** and **Motor Unit** dropdowns, or the keyboard shortcuts `<` (pr
 | Delete Spike | `D` | Activate delete mode, then drag a box (or click) to remove spikes |
 | Remove Outliers | `R` | Automatically remove spikes with abnormally high discharge rates |
 | Update Filter | `Space` | Recompute the MU filter from the BIDS EMG signal over the current view window |
+| Peel-off | — | Toggle peel-off for filter updates (see below) |
 | Flag MU | — | Mark the current MU for deletion — it will be excluded when saving |
 | Undo | — | Undo the last edit on the current MU |
 | Reset | — | Revert all edits on the current MU to the original decomposition values |
 | Save | — | Write the edited decomposition to disk |
+
+**Peel-off during filter update:** when the Peel-off toggle is **On**, Update Filter subtracts the waveform contributions of all other motor units on the same grid from the whitened signal before recomputing the filter. This can improve separation in crowded windows where spike trains overlap, but may also overcorrect if the other units are not well estimated. It is off by default. Toggle it on or off as needed before pressing Update Filter or `Space`.
 
 **Add / Delete workflow:** press the shortcut or click the button to enter the mode (button highlights), then drag a rectangular region on the pulse train canvas. The action applies to all spikes within the box. Press the shortcut again or click elsewhere to exit the mode.
 
