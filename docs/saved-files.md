@@ -106,6 +106,74 @@ Edited NPZ keys:
 - `parameters`
 - `total_samples`
 
+### Edit Log Sidecar
+
+Alongside the NPZ, MUedit writes a JSON sidecar with the same stem:
+
+```text
+<bids_root>/sub-<subject>/[ses-<session>/]decomp/<entity>_edited.json
+```
+
+The sidecar contains:
+
+```json
+{
+  "mu_uids": ["g0_mu0", "g0_mu1", "g1_mu0"],
+  "history": [
+    {
+      "type": "add_spikes",
+      "mu_uid": "g0_mu1",
+      "timestamp": "2026-04-16T14:30:00.000Z",
+      "spikes_added": [1024, 2048]
+    },
+    {
+      "type": "delete_spikes",
+      "mu_uid": "g0_mu0",
+      "timestamp": "2026-04-16T14:31:05.123Z",
+      "spikes_removed": [512]
+    },
+    {
+      "type": "update_filter",
+      "mu_uid": "g0_mu1",
+      "timestamp": "2026-04-16T14:32:10.000Z",
+      "view_start": 0,
+      "view_end": 40000,
+      "spikes_added": [],
+      "spikes_removed": [3000]
+    },
+    {
+      "type": "remove_outliers",
+      "mu_uid": "g1_mu0",
+      "timestamp": "2026-04-16T14:33:00.000Z",
+      "spikes_removed": [7200, 9100]
+    },
+    {
+      "type": "flag_mu",
+      "mu_uid": "g0_mu0",
+      "timestamp": "2026-04-16T14:34:00.000Z",
+      "flagged": true
+    }
+  ]
+}
+```
+
+**`mu_uids`** — one stable string ID per surviving MU (after flagged/duplicate removal), in the same order as `discharge_times`. Format: `g<grid_index>_mu<rank_within_grid>`. Assigned once at first load; preserved through successive saves.
+
+**`history`** — append-only log of all edit actions across all sessions. Carries over when the file is saved and reloaded for further editing.
+
+Action types and their fields:
+
+| `type` | Fields |
+|---|---|
+| `add_spikes` | `mu_uid`, `spikes_added` |
+| `delete_spikes` | `mu_uid`, `spikes_removed` |
+| `delete_dr` | `mu_uid`, `spikes_removed` |
+| `update_filter` | `mu_uid`, `view_start`, `view_end`, `spikes_added`?, `spikes_removed`? |
+| `remove_outliers` | `mu_uid`, `spikes_removed` |
+| `flag_mu` | `mu_uid`, `flagged` |
+
+All spike coordinates are 0-based sample indices (same units as `discharge_times`).
+
 ## Important Path Rule For `bids_root`
 
 Use the dataset root, i.e. the folder that directly contains `sub-<subject>/`.

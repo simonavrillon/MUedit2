@@ -39,12 +39,14 @@ class EditSavePayload(BaseModel):
     fsamp: float | None = None
     grid_names: list[str] | None = None
     mu_grid_index: list[int] | None = None
+    mu_uids: list[str] | None = None
     parameters: dict[str, Any] | None = None
     muscle_names: list[str] | str | None = None
     muscle: list[str] | str | None = None
     bids_root: str | None = None
     file_label: str | None = None
     entity_label: str | None = None
+    edit_history: list[dict[str, Any]] | None = None
 
 
 class EditFilterPayload(BaseModel):

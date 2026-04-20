@@ -1,4 +1,6 @@
 import {
+  appendEditHistoryEntry,
+  clearEditHistoryForMu,
   clearAllEditSelections,
   clearEditDrSelections,
   clearEditPulseSelections,
@@ -18,7 +20,10 @@ import {
   setEditFlaggedArray,
   setEditFsamp,
   setEditGridNames,
+  setEditHistory,
   setEditMuGridIndex,
+  setEditMuUids,
+  popLastEditHistoryEntryForMu,
   setEditOriginalDistimes,
   setEditOriginalPulseTrains,
   setEditParameters,
@@ -38,6 +43,24 @@ import { normalizeEditLoadPayload } from "../contracts/payloads.js";
 import { inferGridCount, normalizeGridNames } from "./grid_names.js";
 
 // --- Private helpers ---
+
+function generateMuUids(muGridIndex) {
+  const counts = {};
+  return (muGridIndex || []).map((gridIdx) => {
+    const count = counts[gridIdx] || 0;
+    counts[gridIdx] = count + 1;
+    return `g${gridIdx}_mu${count}`;
+  });
+}
+
+function spikesDiff(before, after) {
+  const afterSet = new Set(after);
+  const beforeSet = new Set(before);
+  return {
+    added: after.filter((s) => !beforeSet.has(s)),
+    removed: before.filter((s) => !afterSet.has(s)),
+  };
+}
 
 function clampY(py, canvas, getCanvasPlotMetrics) {
   const metrics = getCanvasPlotMetrics(canvas, true);
@@ -105,6 +128,8 @@ export function restoreEditBackup(deps) {
   if (backup.pulseTrain) {
     setEditPulseTrainForMu(state, muIdx, backup.pulseTrain);
   }
+  const muUid = state.edit.muUids?.[muIdx] ?? `mu${muIdx}`;
+  popLastEditHistoryEntryForMu(state, muUid);
   clearAllEditSelections(state);
   recomputeEditDirty();
   renderEditExplorer();
@@ -270,6 +295,7 @@ export async function requestRoiEdit(deps, action, payload) {
     renderEditExplorer,
   } = deps;
 
+  const distimesBefore = [...(state.edit.distimes?.[payload.muIdx] || [])];
   try {
     setEditStatus("Applying ROI...", "muted");
     const data = await apiJson(`${API_BASE}/edit/${action}`, {
@@ -289,6 +315,16 @@ export async function requestRoiEdit(deps, action, payload) {
     setEditDistimesForMu(state, payload.muIdx, data.distimes || []);
     ensureEditFlagged();
     setEditFlagForMu(state, payload.muIdx, false);
+    if (deps.appendEditHistory) {
+      const muUid = state.edit.muUids?.[payload.muIdx] ?? `mu${payload.muIdx}`;
+      const distimesAfter = state.edit.distimes?.[payload.muIdx] || [];
+      const { added, removed } = spikesDiff(distimesBefore, distimesAfter);
+      const typeMap = { "add-spikes": "add_spikes", "delete-spikes": "delete_spikes", "delete-dr": "delete_dr" };
+      const entry = { type: typeMap[action] || action, mu_uid: muUid };
+      if (added.length) entry.spikes_added = added;
+      if (removed.length) entry.spikes_removed = removed;
+      deps.appendEditHistory(entry);
+    }
     if (action === "delete-dr") {
       clearEditDrSelections(state);
       setEditMode(null);
@@ -336,6 +372,7 @@ export async function requestFilterUpdate(deps, mode) {
   const gridIndex =
     state.edit.muGridIndex?.[muIdx] ?? state.edit.currentMuGrid ?? 0;
 
+  const distimesBefore = [...(state.edit.distimes?.[muIdx] || [])];
   try {
     backupEditMu();
     setEditStatus("Updating filter from BIDS EMG...", "muted");
@@ -348,12 +385,6 @@ export async function requestFilterUpdate(deps, mode) {
           bids_root: bidsRoot,
           edit_signal_token: state.edit.editSignalToken || "",
           file_label: state.edit.filename,
-          entity_label: buildEntityLabelFromSession(
-            els.bidsSubject?.value,
-            els.bidsTask?.value,
-            els.bidsSession?.value,
-            els.bidsRun?.value,
-          ),
           grid_index: gridIndex,
           mu_index: muIdx,
           distimes: state.edit.distimes,
@@ -371,6 +402,15 @@ export async function requestFilterUpdate(deps, mode) {
     }
     ensureEditFlagged();
     setEditFlagForMu(state, muIdx, false);
+    if (deps.appendEditHistory) {
+      const muUid = state.edit.muUids?.[muIdx] ?? `mu${muIdx}`;
+      const distimesAfter = state.edit.distimes?.[muIdx] || [];
+      const { added, removed } = spikesDiff(distimesBefore, distimesAfter);
+      const entry = { type: "update_filter", mu_uid: muUid, view_start: start, view_end: end };
+      if (added.length) entry.spikes_added = added;
+      if (removed.length) entry.spikes_removed = removed;
+      deps.appendEditHistory(entry);
+    }
     recomputeEditDirty();
     refreshEditTotals();
     renderEditExplorer();
@@ -545,6 +585,12 @@ export async function removeOutliers(deps) {
     setEditDistimesForMu(state, muIdx, data.distimes || []);
     ensureEditFlagged();
     setEditFlagForMu(state, muIdx, false);
+    if (deps.appendEditHistory && (data.removed_count || 0) > 0) {
+      const muUid = state.edit.muUids?.[muIdx] ?? `mu${muIdx}`;
+      const distimesAfter = state.edit.distimes?.[muIdx] || [];
+      const { removed } = spikesDiff(spikes, distimesAfter);
+      deps.appendEditHistory({ type: "remove_outliers", mu_uid: muUid, spikes_removed: removed });
+    }
     recomputeEditDirty();
     renderEditExplorer();
     if ((data.removed_count || 0) > 0) {
@@ -593,6 +639,10 @@ export async function flagMuForDeletion(deps) {
     }
     ensureEditFlagged();
     setEditFlagForMu(state, muIdx, data.flagged !== false);
+    if (deps.appendEditHistory) {
+      const muUid = state.edit.muUids?.[muIdx] ?? `mu${muIdx}`;
+      deps.appendEditHistory({ type: "flag_mu", mu_uid: muUid, flagged: data.flagged !== false });
+    }
     recomputeEditDirty();
     renderEditExplorer();
     setEditStatus("MU flagged for deletion", "success");
@@ -615,6 +665,8 @@ export function resetCurrentMuEdits(deps) {
   }
   ensureEditFlagged();
   setEditFlagForMu(state, muIdx, false);
+  const muUid = state.edit.muUids?.[muIdx] ?? `mu${muIdx}`;
+  clearEditHistoryForMu(state, muUid);
   clearAllEditSelections(state);
   recomputeEditDirty();
   renderEditExplorer();
@@ -856,6 +908,13 @@ export async function saveEditedFile(deps) {
     state.edit.totalSamples ||
     (state.edit.pulseTrains?.[0]?.length ?? 0) ||
     maxSpike + 1;
+  const originalFilename = state.edit.filename || "decomposition";
+  const originalStem = originalFilename.replace(/\.[^.]+$/, "");
+  const entityLabel = originalStem.includes("_grid-")
+    ? originalStem.split("_grid-")[0]
+    : originalStem.endsWith("_decomp")
+      ? originalStem.slice(0, -"_decomp".length)
+      : originalStem;
   const payload = {
     distimes,
     flagged: state.edit.flagged || [],
@@ -864,8 +923,11 @@ export async function saveEditedFile(deps) {
     fsamp: state.edit.fsamp,
     grid_names: state.edit.gridNames,
     mu_grid_index: state.edit.muGridIndex,
+    mu_uids: state.edit.muUids || [],
     parameters: state.edit.parameters,
     muscle_names: muscleNames,
+    edit_history: state.edit.editHistory || [],
+    entity_label: entityLabel,
     file_label: getSuggestedNpzName(
       state.edit.filename || "decomposition",
       "_edited",
@@ -1006,6 +1068,13 @@ export async function loadDecompositionForEdit(deps, file, filepath = null) {
         state.edit.distimes.map(() => 0),
       );
     }
+    setEditMuUids(
+      state,
+      Array.isArray(data.mu_uids) && data.mu_uids.length === state.edit.distimes.length
+        ? data.mu_uids
+        : generateMuUids(state.edit.muGridIndex),
+    );
+    setEditHistory(state, Array.isArray(data.edit_history) ? data.edit_history : []);
     setEditFsamp(state, data.fsamp);
     setEditParameters(state, data.parameters || {});
     setEditTotalSamples(

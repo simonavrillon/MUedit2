@@ -241,6 +241,30 @@ export function setEditFlaggedArray(state, flagged) {
   state.edit.flagged = Array.isArray(flagged) ? flagged : [];
 }
 
+export function setEditMuUids(state, uids) {
+  state.edit.muUids = Array.isArray(uids) ? uids : [];
+}
+
+export function setEditHistory(state, history) {
+  state.edit.editHistory = Array.isArray(history) ? history : [];
+}
+
+export function appendEditHistoryEntry(state, entry) {
+  if (!Array.isArray(state.edit.editHistory)) state.edit.editHistory = [];
+  state.edit.editHistory.push(entry);
+}
+
+export function popLastEditHistoryEntryForMu(state, muUid) {
+  if (!Array.isArray(state.edit.editHistory)) return;
+  const idx = state.edit.editHistory.findLastIndex((e) => e.mu_uid === muUid);
+  if (idx !== -1) state.edit.editHistory.splice(idx, 1);
+}
+
+export function clearEditHistoryForMu(state, muUid) {
+  if (!Array.isArray(state.edit.editHistory)) return;
+  state.edit.editHistory = state.edit.editHistory.filter((e) => e.mu_uid !== muUid);
+}
+
 export function setEditBackup(state, backup) {
   state.edit.backup = backup || null;
 }
@@ -291,6 +315,8 @@ export function resetEditSlice(state) {
     backup: null,
     bidsRoot: "",
     editSignalToken: "",
+    muUids: [],
+    editHistory: [],
   };
 }
 

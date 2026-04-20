@@ -26,6 +26,7 @@ import {
   bindEditDrCanvas as bindEditDrCanvasFeature,
 } from "../../features/edit.js";
 import {
+  appendEditHistoryEntry,
   setEditBidsRoot,
   setEditCurrentMu,
   setEditCurrentMuGrid,
@@ -76,6 +77,10 @@ export function createEditStageService(deps) {
 
   function recomputeEditDirty() {
     recomputeEditDirtyFeature(state);
+  }
+
+  function appendEditHistory(entry) {
+    appendEditHistoryEntry(state, { ...entry, timestamp: new Date().toISOString() });
   }
 
   function getEditTotalSamples() {
@@ -194,6 +199,7 @@ export function createEditStageService(deps) {
         setEditMode,
         recomputeEditDirty,
         renderEditExplorer,
+        appendEditHistory,
       },
       action,
       payload,
@@ -216,6 +222,7 @@ export function createEditStageService(deps) {
         recomputeEditDirty,
         refreshEditTotals,
         renderEditExplorer,
+        appendEditHistory,
       },
       mode,
     );
@@ -281,6 +288,7 @@ export function createEditStageService(deps) {
       ensureEditFlagged,
       recomputeEditDirty,
       renderEditExplorer,
+      appendEditHistory,
     });
   }
 
@@ -295,6 +303,7 @@ export function createEditStageService(deps) {
       ensureEditFlagged,
       recomputeEditDirty,
       renderEditExplorer,
+      appendEditHistory,
     });
   }
 

@@ -15,7 +15,8 @@ export function buildEntityLabelFromSession(subject, task, session, run) {
 }
 
 export function getSuggestedNpzName(baseName, suffix = "_edited") {
-  const stem = String(baseName || "decomposition").replace(/\.[^.]+$/, "");
+  let stem = String(baseName || "decomposition").replace(/\.[^.]+$/, "");
+  if (suffix && stem.endsWith(suffix)) stem = stem.slice(0, -suffix.length);
   return `${stem}${suffix}.npz`;
 }
 

@@ -23,4 +23,4 @@ dependencies:
     # Pin to the CPU-only wheel for portability; GPU users can swap for their build.
     - torch==2.5.1
     # EMG / EEG file I/O
-    - pyedflib==0.1.36
+    - pyedflib==0.1.42

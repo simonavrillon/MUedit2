@@ -1,5 +1,3 @@
-"""Application services for edit/load/save operations."""
-
 from __future__ import annotations
 
 import csv
@@ -44,7 +42,6 @@ from muedit.utils import format_hdemg_signal
 
 
 def _infer_bids_root_from_decomp_path(filepath: str) -> Path | None:
-    """Infer BIDS root from a selected decomposition path."""
     raw = str(filepath or "")
     if not raw:
         return None
@@ -68,7 +65,6 @@ def _infer_bids_root_from_decomp_path(filepath: str) -> Path | None:
 
 
 def _normalize_bids_meta_value(value: str | None) -> str:
-    """Normalize channel-table metadata values, dropping blanks and 'n/a'."""
     text = str(value or "").strip()
     if not text or text.lower() == "n/a":
         return ""
@@ -76,7 +72,6 @@ def _normalize_bids_meta_value(value: str | None) -> str:
 
 
 def _grid_sort_key(group: str) -> tuple[int, str]:
-    """Sort BIDS grid groups numerically when possible (Grid1, Grid2, ...)."""
     text = str(group or "").strip()
     lower = text.lower()
     if lower.startswith("grid"):
@@ -87,7 +82,6 @@ def _grid_sort_key(group: str) -> tuple[int, str]:
 
 
 def _read_bids_channels_sidecar(channels_path: Path) -> tuple[list[str], list[str], float | None]:
-    """Extract one grid_name/target_muscle per EMG group from channels.tsv."""
     by_group: dict[str, tuple[str, str]] = {}
     fsamp: float | None = None
     with channels_path.open("r", encoding="utf-8") as handle:
@@ -121,7 +115,6 @@ def _read_bids_channels_sidecar(channels_path: Path) -> tuple[list[str], list[st
 
 
 def _expected_grid_count(loaded: dict[str, Any]) -> int:
-    """Estimate how many grids should be represented in Session Info labels."""
     count = 0
     grid_names = loaded.get("grid_names")
     if isinstance(grid_names, list):
@@ -139,7 +132,6 @@ def _expected_grid_count(loaded: dict[str, Any]) -> int:
 
 
 def _pad_grid_names(names: list[str], expected_count: int, fallback: list[str]) -> list[str]:
-    """Ensure grid-name labels exist for each expected grid index."""
     out = [str(x).strip() for x in (names or []) if str(x).strip()]
     if not out:
         out = [str(x).strip() for x in (fallback or []) if str(x).strip()]
@@ -151,7 +143,6 @@ def _pad_grid_names(names: list[str], expected_count: int, fallback: list[str]) 
 
 
 def _normalize_muscle_names(payload: dict[str, Any]) -> list[str]:
-    """Normalize accepted muscle-name input shapes to a clean list[str]."""
     muscle_names_raw = payload.get("muscle_names") or payload.get("muscle") or []
     if isinstance(muscle_names_raw, str):
         return [muscle_names_raw.strip()] if muscle_names_raw.strip() else []
@@ -161,7 +152,6 @@ def _normalize_muscle_names(payload: dict[str, Any]) -> list[str]:
 
 
 def _parse_subject_session_from_entity_label(entity_label: str) -> tuple[str, str | None]:
-    """Extract BIDS subject/session tokens from an entity label stem."""
     subject = "01"
     session: str | None = None
     for part in str(entity_label).split("_"):
@@ -183,7 +173,6 @@ def _save_npz(
     parameters: dict[str, Any],
     total_samples: int,
 ) -> None:
-    """Persist decomposition arrays and metadata in compressed NPZ format."""
     np.savez_compressed(
         out_path,
         pulse_trains=pulse_trains,
@@ -198,8 +187,17 @@ def _save_npz(
     )
 
 
+def _save_editlog(
+    editlog_path: Path,
+    mu_uids: list[str],
+    edit_history: list[dict[str, Any]],
+) -> None:
+    payload = {"mu_uids": mu_uids, "history": edit_history}
+    with editlog_path.open("w", encoding="utf-8") as fh:
+        json.dump(payload, fh, indent=2)
+
+
 async def load_decomposition(file: UploadFile) -> dict[str, Any]:
-    """Load uploaded decomposition and return JSON-safe structure."""
     tmp_path = await save_upload_to_temp(file)
     try:
         loaded = load_decomposition_file(tmp_path)
@@ -216,7 +214,7 @@ async def load_decomposition(file: UploadFile) -> dict[str, Any]:
 
 
 def _encode_edit_load_f32(loaded: dict[str, Any]) -> bytes | None:
-    """Encode edit-load payload as MELD v1 binary when pulse matrix is available."""
+    """Custom MELD v1 binary: JSON metadata header + float32 pulse matrix."""
     pulse_raw = loaded.get("pulse_trains_full")
     if pulse_raw is None:
         return None
@@ -244,7 +242,6 @@ def _encode_edit_load_f32(loaded: dict[str, Any]) -> bytes | None:
 
 
 async def load_decomposition_binary(file: UploadFile) -> Response | dict[str, Any]:
-    """Load decomposition and prefer binary transport for pulse-train matrix."""
     loaded = await load_decomposition(file)
     blob = _encode_edit_load_f32(loaded)
     if blob is None:
@@ -257,7 +254,6 @@ async def load_decomposition_binary(file: UploadFile) -> Response | dict[str, An
 
 
 def load_decomposition_from_path(filepath: str) -> dict[str, Any]:
-    """Load decomposition from path and attach filename label."""
     loaded = load_decomposition_file(filepath)
     signal_ctx = load_decomposition_signal_context(filepath)
     if signal_ctx:
@@ -291,14 +287,24 @@ def load_decomposition_from_path(filepath: str) -> dict[str, Any]:
                 if fsamp and fsamp > 0:
                     loaded["fsamp"] = fsamp
         except (ValueError, OSError, csv.Error, KeyError):
-            # Sidecar enrichment is best-effort; suppress expected I/O and
-            # parse errors while letting unexpected exceptions propagate.
-            pass
+            pass  # best-effort; I/O and parse errors are non-fatal
+
+    editlog_path = Path(filepath).with_suffix(".json")
+    if editlog_path.exists():
+        try:
+            with editlog_path.open("r", encoding="utf-8") as fh:
+                editlog = json.load(fh)
+            if isinstance(editlog.get("mu_uids"), list):
+                loaded["mu_uids"] = editlog["mu_uids"]
+            if isinstance(editlog.get("history"), list):
+                loaded["edit_history"] = editlog["history"]
+        except (OSError, ValueError, KeyError):
+            pass  # best-effort; missing or corrupt editlog is non-fatal
+
     return make_json_safe(loaded)
 
 
 def load_decomposition_binary_from_path(filepath: str) -> Response | dict[str, Any]:
-    """Path-based variant of binary edit-load response."""
     loaded = load_decomposition_from_path(filepath)
     blob = _encode_edit_load_f32(loaded)
     if blob is None:
@@ -311,7 +317,6 @@ def load_decomposition_binary_from_path(filepath: str) -> Response | dict[str, A
 
 
 def _normalize_flagged(raw: Any, nmu: int) -> list[bool]:
-    """Normalize optional per-MU flag list to fixed-length booleans."""
     if not isinstance(raw, (list, tuple)):
         return [False] * nmu
     out = [bool(v) for v in raw[:nmu]]
@@ -320,8 +325,17 @@ def _normalize_flagged(raw: Any, nmu: int) -> list[bool]:
     return out
 
 
+def _generate_mu_uids(mu_grid_index: list[int]) -> list[str]:
+    counts: dict[int, int] = {}
+    uids: list[str] = []
+    for grid_idx in mu_grid_index:
+        count = counts.get(grid_idx, 0)
+        uids.append(f"g{grid_idx}_mu{count}")
+        counts[grid_idx] = count + 1
+    return uids
+
+
 def _normalize_mu_grid_index(raw: Any, nmu: int) -> list[int]:
-    """Normalize MU-to-grid list so it always matches MU count."""
     if not isinstance(raw, (list, tuple)):
         return [0] * nmu
     vals = [int(x) for x in raw[:nmu]]
@@ -331,7 +345,6 @@ def _normalize_mu_grid_index(raw: Any, nmu: int) -> list[int]:
 
 
 def save_edits(payload: dict[str, Any]):
-    """Save edited decomposition to the BIDS source tree."""
     distimes_raw = payload.get("distimes") or payload.get("discharge_times") or []
     distimes = normalize_distimes(distimes_raw)
     pulse_trains_raw = payload.get("pulse_trains")
@@ -368,6 +381,14 @@ def save_edits(payload: dict[str, Any]):
     ):
         pulse_trains = build_pulse_trains_from_distimes(distimes, total_samples)
 
+    mu_uids_raw = payload.get("mu_uids")
+    mu_uids: list[str] = (
+        list(mu_uids_raw)
+        if isinstance(mu_uids_raw, (list, tuple)) and len(mu_uids_raw) == len(distimes)
+        else _generate_mu_uids(mu_grid_index)
+    )
+    edit_history: list[dict[str, Any]] = list(payload.get("edit_history") or [])
+
     remove_flagged = bool(payload.get("remove_flagged", True))
     remove_duplicates = bool(payload.get("remove_duplicates", True))
 
@@ -380,6 +401,7 @@ def save_edits(payload: dict[str, Any]):
         ]
         distimes = [distimes[i] for i in keep_idx]
         mu_grid_index = [mu_grid_index[i] for i in keep_idx]
+        mu_uids = [mu_uids[i] for i in keep_idx]
         pulse_trains = pulse_trains[keep_idx, :] if pulse_trains.size else pulse_trains
 
     if remove_duplicates and len(distimes) > 1 and fsamp and fsamp > 0:
@@ -399,6 +421,7 @@ def save_edits(payload: dict[str, Any]):
             for d in dedup_distimes
         ]
         mu_grid_index = [mu_grid_index[i] for i in kept_idx]
+        mu_uids = [mu_uids[i] for i in kept_idx]
 
     bids_root = payload.get("bids_root")
     if not bids_root:
@@ -423,11 +446,11 @@ def save_edits(payload: dict[str, Any]):
         parameters,
         total_samples,
     )
+    _save_editlog(out_path.with_suffix(".json"), mu_uids, edit_history)
     return make_json_safe({"saved": True, "path": str(out_path)})
 
 
 def update_filter(payload: dict[str, Any]) -> dict[str, Any]:
-    """Recompute MU filter window from cached BIDS EMG for one grid/MU pair."""
     bids_root = payload.get("bids_root")
     edit_signal_token = payload.get("edit_signal_token")
     file_label = payload.get("file_label") or ""

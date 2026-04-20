@@ -64,5 +64,7 @@ export const state = {
     backup: null,
     bidsRoot: "",
     editSignalToken: "",
+    muUids: [],
+    editHistory: [],
   },
 };

@@ -1,16 +1,22 @@
 # MUedit (v2.0.0)
 
-MUedit decomposes high-density EMG signals into motor unit pulse trains.
+Decomposes high-density EMG signals into motor unit pulse trains.
 
 ## Status
 
 This software is currently in **beta** and is intended for testing purposes, not for research projects.
 
-## Acknowledgment
+## Features
 
-This project includes and uses code from `adapt_decomp` (see `python/src/adapt_decomp`) for adaptive decomposition workflows.
-Original author: Irene Mendez Guerra
-Original repository: https://github.com/imendezguerra/adapt_decomp
+- High-density EMG decomposition into motor unit pulse trains
+- Adaptive decomposition workflows (via `adapt_decomp`)
+- Web-based interface with FastAPI backend and JavaScript frontend
+- Cross-platform launchers (macOS/Linux and Windows)
+
+## Requirements
+
+- Python 3.11+
+- Conda (Anaconda or Miniconda)
 
 ## Quick Start
 
@@ -43,32 +49,12 @@ The launcher starts:
 
 The browser opens automatically unless disabled via env var.
 
-## Requirements
-
-- Python 3.11+
-- Conda (Anaconda or Miniconda)
-
-## CLI Entrypoints
-
-After installation, MUedit exposes:
-
-- `muedit-api` (starts the FastAPI backend)
-- `muedit-decompose` (runs decomposition from the terminal)
-
-## Launchers
-
-Canonical launchers:
-- `scripts/run_MUedit.sh`
-- `scripts/run_MUedit.ps1`
-
 Windows first-time setup (if script execution is blocked):
 ```powershell
 Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 ```
 
 ## Configuration
-
-The launcher supports these environment variables:
 
 | Variable | Default | Description |
 |---|---|---|
@@ -82,6 +68,13 @@ Example (macOS/Linux):
 MUEDIT_BACKEND_PORT=9000 MUEDIT_FRONTEND_PORT=9001 MUEDIT_OPEN_BROWSER=0 ./scripts/run_MUedit.sh
 ```
 
+## CLI Entrypoints
+
+After installation, MUedit exposes:
+
+- `muedit-api` — starts the FastAPI backend
+- `muedit-decompose` — runs decomposition from the terminal
+
 ## Verify Installation
 
 With MUedit running:
@@ -94,16 +87,17 @@ curl http://localhost:8000/api/v1/health
 
 ## Troubleshooting
 
-- `python: command not found`:
-  activate the conda env before launching.
-- Port already in use:
-  set `MUEDIT_BACKEND_PORT` / `MUEDIT_FRONTEND_PORT` to free ports.
-- Browser does not open automatically:
-  open `http://localhost:<MUEDIT_FRONTEND_PORT>` manually.
+- `python: command not found` — activate the conda env before launching.
+- Port already in use — set `MUEDIT_BACKEND_PORT` / `MUEDIT_FRONTEND_PORT` to free ports.
+- Browser does not open automatically — open `http://localhost:<MUEDIT_FRONTEND_PORT>` manually.
 
 ## Documentation
 
-- Workflow guide: [docs/WORKFLOWS.md](docs/WORKFLOWS.md)
-- Saved files reference: [docs/SAVED_FILES.md](docs/SAVED_FILES.md)
-- Frontend architecture: [docs/FRONTEND_ARCHITECTURE.md](docs/FRONTEND_ARCHITECTURE.md)
-- Backend architecture: [docs/BACKEND_ARCHITECTURE.md](docs/BACKEND_ARCHITECTURE.md)
+- Workflow guide: [docs/workflows.md](docs/workflows.md)
+- Saved files reference: [docs/saved-files.md](docs/saved-files.md)
+
+## Acknowledgment
+
+This project includes code from `adapt_decomp` (see `python/src/adapt_decomp`) for adaptive decomposition workflows.
+Original author: Irene Mendez Guerra
+Original repository: https://github.com/imendezguerra/adapt_decomp
