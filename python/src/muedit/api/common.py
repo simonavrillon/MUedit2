@@ -207,7 +207,7 @@ async def save_upload_to_temp(file: UploadFile) -> str:
             if not chunk:
                 break
             tmp.write(chunk)
-        return tmp.name
+    return tmp.name
 
 
 def parse_entity_label(file_label: str) -> str:
