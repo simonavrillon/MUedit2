@@ -35,7 +35,7 @@ def _compute_calibration_stats(
         pt = ipts_sq[:, j]
         peaks, _ = find_peaks(pt, distance=dist)
         if len(peaks) > 1:
-            centroids, labels = kmeans2(pt[peaks], 2, iter=10, minit="++", missing="raise", rng=np.random.default_rng(0))
+            centroids, labels = kmeans2(pt[peaks], 2, iter=10, minit="++", missing="raise", seed=0)
             hi = int(np.argmax(centroids))
             spikes_calib[peaks[labels == hi], j] = 1
             spikes_centr[j] = float(centroids[hi])

@@ -122,7 +122,7 @@ def get_spikes(w, x, fsamp):
     if len(spikes) <= 1:
         return icasig, np.asarray(spikes, dtype=int)
 
-    centroids, labels = kmeans2(icasig[spikes], 2, iter=10, minit="++", missing="raise", rng=np.random.default_rng(0))
+    centroids, labels = kmeans2(icasig[spikes], 2, iter=10, minit="++", missing="raise", seed=0)
     idx2 = int(np.argmax(centroids))
     spikes2 = spikes[labels == idx2]
 
@@ -170,7 +170,7 @@ def compute_silhouette(x, w, fsamp):
         return icasig, np.array(spikes, dtype=int), 0.0
 
 
-    centroids, labels = kmeans2(icasig[spikes], 2, iter=10, minit="++", missing="raise", rng=np.random.default_rng(0))
+    centroids, labels = kmeans2(icasig[spikes], 2, iter=10, minit="++", missing="raise", seed=0)
 
     idx2 = int(np.argmax(centroids))
     other_idx = 1 - idx2
@@ -272,7 +272,7 @@ def batch_process_filters(
             spikes, _ = find_peaks(pulse_t[mu_nb, :], distance=distance)
 
             if len(spikes) > 1:
-                centroids, labels = kmeans2(pulse_t[mu_nb, spikes], 2, iter=10, minit="++", missing="raise", rng=np.random.default_rng(0))
+                centroids, labels = kmeans2(pulse_t[mu_nb, spikes], 2, iter=10, minit="++", missing="raise", seed=0)
                 idx = np.argmax(centroids)
                 distime.append(spikes[labels == idx])
             else:
