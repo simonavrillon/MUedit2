@@ -6,7 +6,7 @@ import {
   RAW_SIGNAL_EXTENSIONS,
 } from "../config.js";
 import { els } from "../dom.js";
-import { apiFetch, apiJson } from "../http.js";
+import { apiFetch, apiJson, waitForBackend } from "../http.js";
 import {
   buildBidsAutoInfoModel as buildBidsAutoInfoModelFeature,
   buildBidsMuscleRowsModel as buildBidsMuscleRowsModelFeature,
@@ -445,8 +445,19 @@ function wireEvents() {
   });
 }
 
-export function initializeApp() {
+export async function initializeApp() {
   wireEvents();
   ui.updateStepAvailability();
   ui.updateWorkflowStepper("import");
+
+  if (els.browseSignalBtn) els.browseSignalBtn.disabled = true;
+  ui.setStatus("Connecting to backend…", "muted");
+
+  const ready = await waitForBackend(`${API_BASE}/health`);
+  if (ready) {
+    if (els.browseSignalBtn) els.browseSignalBtn.disabled = false;
+    ui.setStatus("", "muted");
+  } else {
+    ui.setStatus("Backend unreachable — please restart the app", "error");
+  }
 }

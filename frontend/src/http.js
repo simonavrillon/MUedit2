@@ -49,6 +49,20 @@ export async function apiFetch(url, options = {}, timeoutMs = 120000) {
   }
 }
 
+export async function waitForBackend(healthUrl, { intervalMs = 500, timeoutMs = 60000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(healthUrl, { signal: AbortSignal.timeout(2000) });
+      if (res.ok) return true;
+    } catch {
+      // not ready yet
+    }
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+  return false;
+}
+
 export async function apiJson(url, options = {}, timeoutMs = 120000) {
   const res = await apiFetch(url, options, timeoutMs);
   const payload = await res.json();
