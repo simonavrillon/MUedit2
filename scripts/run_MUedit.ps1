@@ -34,8 +34,27 @@ $null = Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action {
 }
 
 if ($env:MUEDIT_OPEN_BROWSER -eq '1') {
-    Start-Sleep -Seconds 2
-    try { Start-Process "http://localhost:$($env:MUEDIT_FRONTEND_PORT)/" }
+    $backendPort  = $env:MUEDIT_PORT
+    $frontendPort = $env:MUEDIT_FRONTEND_PORT
+    $deadline = (Get-Date).AddSeconds(60)
+
+    foreach ($check in @(
+        @{ Url = "http://localhost:$backendPort/api/v1/health"; Label = "backend"  },
+        @{ Url = "http://localhost:$frontendPort/";             Label = "frontend" }
+    )) {
+        while ((Get-Date) -lt $deadline) {
+            try {
+                $r = Invoke-WebRequest -Uri $check.Url -TimeoutSec 2 -UseBasicParsing -ErrorAction Stop
+                if ($r.StatusCode -eq 200) { break }
+            } catch {}
+            Start-Sleep -Milliseconds 500
+        }
+        if ((Get-Date) -ge $deadline) {
+            Write-Warning "Timed out waiting for $($check.Label)"
+        }
+    }
+
+    try { Start-Process "http://localhost:$frontendPort/" }
     catch { Write-Warning "Could not open browser automatically: $_" }
 }
 

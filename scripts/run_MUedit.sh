@@ -29,10 +29,28 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 if [[ "$MUEDIT_OPEN_BROWSER" == "1" ]]; then
-  sleep 2
   python - <<PY
-import webbrowser, os
-webbrowser.open(f"http://localhost:{os.environ['MUEDIT_FRONTEND_PORT']}/")
+import urllib.request, time, sys, os, webbrowser
+
+backend_port  = os.environ.get("MUEDIT_PORT", "8000")
+frontend_port = os.environ.get("MUEDIT_FRONTEND_PORT", "8080")
+deadline = time.time() + 60
+
+def wait_for(url, label):
+    while time.time() < deadline:
+        try:
+            with urllib.request.urlopen(url, timeout=2) as r:
+                if r.status == 200:
+                    return True
+        except Exception:
+            pass
+        time.sleep(0.5)
+    print(f"Timed out waiting for {label}", file=sys.stderr)
+    return False
+
+wait_for(f"http://localhost:{backend_port}/api/v1/health", "backend")
+wait_for(f"http://localhost:{frontend_port}/", "frontend")
+webbrowser.open(f"http://localhost:{frontend_port}/")
 PY
 fi
 
