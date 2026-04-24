@@ -676,6 +676,67 @@ def remove_outliers(payload: dict[str, Any]) -> dict[str, Any]:
     return make_json_safe({"distimes": updated, "removed_count": removed})
 
 
+def remove_duplicates_service(payload: dict[str, Any]) -> dict[str, Any]:
+    """Remove duplicate motor units using lag-aware spike-train overlap."""
+    distimes_raw = payload.get("distimes") or []
+    distimes = normalize_distimes(distimes_raw)
+    if not distimes:
+        return make_json_safe({"kept_indices": [], "distimes": [], "pulse_trains": []})
+
+    fsamp_raw = payload.get("fsamp")
+    fsamp = float(fsamp_raw) if fsamp_raw is not None else None
+    if not fsamp or fsamp <= 0:
+        raise HTTPException(status_code=400, detail="fsamp is required for deduplication")
+
+    total_samples = as_int(payload.get("total_samples"), "total_samples", default=0)
+    parameters = payload.get("parameters") or {}
+    mu_grid_index = _normalize_mu_grid_index(payload.get("mu_grid_index"), len(distimes))
+
+    pulse_trains_raw = payload.get("pulse_trains")
+    pulse_trains: np.ndarray | None = None
+    if pulse_trains_raw is not None:
+        try:
+            pulse_trains = np.array(pulse_trains_raw, dtype=float)
+        except (TypeError, ValueError):
+            pulse_trains = None
+    if (
+        pulse_trains is None
+        or pulse_trains.ndim != 2
+        or pulse_trains.shape[0] != len(distimes)
+    ):
+        if total_samples <= 0:
+            total_samples = max((max(d) for d in distimes if d), default=0) + 1
+        pulse_trains = build_pulse_trains_from_distimes(distimes, total_samples)
+
+    if len(distimes) <= 1:
+        return make_json_safe({
+            "kept_indices": list(range(len(distimes))),
+            "distimes": distimes,
+            "pulse_trains": pulse_trains.tolist(),
+        })
+
+    dup_tol = float(parameters.get("duplicatesthresh", 0.3))
+    dedup_pulses, dedup_distimes, kept_idx = rem_duplicates(
+        np.asarray(pulse_trains, dtype=float),
+        [np.asarray(d, dtype=int) for d in distimes],
+        [np.asarray(d, dtype=int) for d in distimes],
+        round(fsamp / 40),
+        0.00025,
+        dup_tol,
+        fsamp,
+    )
+    dedup_distimes_clean = [
+        sorted({int(v) for v in np.asarray(d, dtype=int).tolist() if int(v) >= 0})
+        for d in dedup_distimes
+    ]
+    return make_json_safe({
+        "kept_indices": kept_idx,
+        "distimes": dedup_distimes_clean,
+        "pulse_trains": dedup_pulses.tolist() if dedup_pulses.size else [],
+        "removed_count": len(distimes) - len(kept_idx),
+    })
+
+
 def flag_mu(payload: dict[str, Any]) -> dict[str, Any]:
     """Validate MU index and return flag status without mutating spike times."""
     distimes = normalize_distimes(payload.get("distimes") or [])

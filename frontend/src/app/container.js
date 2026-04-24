@@ -431,6 +431,8 @@ function wireEvents() {
     updateMuFilter: () => editStage.updateMuFilter(),
     removeOutliers: () => editStage.removeOutliers(),
     flagMuForDeletion: () => editStage.flagMuForDeletion(),
+    duplicateMu: () => editStage.duplicateMu(),
+    removeDuplicateMus: () => editStage.removeDuplicateMus(),
     restoreEditBackup: () => editStage.restoreEditBackup(),
     setEditMode: setEditModeWithStatus,
     refreshEditModeButtons,

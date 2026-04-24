@@ -24,6 +24,8 @@ import {
   resetCurrentMuEdits as resetCurrentMuEditsFeature,
   bindEditCanvas as bindEditCanvasFeature,
   bindEditDrCanvas as bindEditDrCanvasFeature,
+  duplicateMu as duplicateMuFeature,
+  removeDuplicateMus as removeDuplicateMusFeature,
 } from "../../features/edit.js";
 import {
   appendEditHistoryEntry,
@@ -316,6 +318,30 @@ export function createEditStageService(deps) {
     });
   }
 
+  async function removeDuplicateMus() {
+    return removeDuplicateMusFeature({
+      state,
+      API_BASE,
+      apiJson,
+      setEditStatus,
+      ensureEditFlagged,
+      recomputeEditDirty,
+      renderEditExplorer,
+      appendEditHistory,
+    });
+  }
+
+  function duplicateMu() {
+    duplicateMuFeature({
+      state,
+      setEditStatus,
+      ensureEditFlagged,
+      recomputeEditDirty,
+      renderEditExplorer,
+      appendEditHistory,
+    });
+  }
+
   function bindEditCanvas() {
     bindEditCanvasFeature({
       els,
@@ -417,5 +443,7 @@ export function createEditStageService(deps) {
     loadDecompositionForEdit,
     loadDecompositionForEditByPath,
     handleDecompositionFile,
+    duplicateMu,
+    removeDuplicateMus,
   };
 }

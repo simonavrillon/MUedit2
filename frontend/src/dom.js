@@ -60,6 +60,8 @@ export const els = {
   editDeleteSpikeBtn: document.getElementById("editDeleteSpikeBtn"),
   editOutliersBtn: document.getElementById("editOutliersBtn"),
   editFlagBtn: document.getElementById("editFlagBtn"),
+  editDuplicateBtn: document.getElementById("editDuplicateBtn"),
+  editDeduplicateBtn: document.getElementById("editDeduplicateBtn"),
   editUndoBtn: document.getElementById("editUndoBtn"),
   editDrCanvas: document.getElementById("editDrCanvas"),
   auxCanvas: document.getElementById("auxCanvas"),

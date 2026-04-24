@@ -132,6 +132,8 @@ Use the **Grid** and **Motor Unit** dropdowns, or the keyboard shortcuts `<` (pr
 | Update Filter | `Space` | Recompute the MU filter from the BIDS EMG signal over the current view window |
 | Peel-off | — | Toggle peel-off for filter updates (see below) |
 | Flag MU | — | Mark the current MU for deletion — it will be excluded when saving |
+| Duplicate MU | — | Create an identical copy of the current MU in the same grid (same pulse train and discharge times) — intended as a starting point for separating two merged units |
+| Remove Duplicates | — | Run duplicate detection across all grids immediately: pairs whose lag-corrected spike overlap exceeds the **Duplicates thresh** setting are deduplicated, keeping the unit with the lowest inter-spike interval variability |
 | Undo | — | Undo the last edit on the current MU |
 | Reset | — | Revert all edits on the current MU to the original decomposition values |
 | Save | — | Write the edited decomposition to disk |
@@ -161,7 +163,7 @@ Click **Save**. The app writes two files:
 
 The `.npz` contains the corrected pulse trains. The `.json` sidecar contains a full edit history (every add, delete, filter update, and flag action, with timestamps) that is preserved across successive save-reload-edit cycles.
 
-Flagged MUs are removed on save. Duplicate MUs are also removed: pairs whose lag-corrected spike overlap exceeds the **Duplicates thresh** setting (default 0.3) are considered duplicates, and only the one with the lowest inter-spike interval variability is kept.
+Flagged MUs are removed on save. Duplicate MUs are also removed on save: pairs whose lag-corrected spike overlap exceeds the **Duplicates thresh** setting (default 0.3) are considered duplicates, and only the one with the lowest inter-spike interval variability is kept. You can also trigger deduplication at any point during editing using the **Remove Duplicates** button.
 
 ---
 
@@ -199,6 +201,14 @@ Written after decomposition or after saving edits. Core arrays:
 ```
 
 `mu_uids` are stable identifiers (format `g<grid>_mu<rank>`) assigned at first load and preserved through edits. `history` is an append-only log — each reload of the file picks up where the previous session left off.
+
+Additional history action types:
+
+| `type` | Key fields | Description |
+|---|---|---|
+| `duplicate_mu` | `mu_uid`, `source_mu_uid` | A new MU was created as a copy of `source_mu_uid` |
+| `remove_duplicates` | `removed_count`, `removed_mu_uids` | Deduplication was run; lists the UIDs that were removed |
+| `flag_mu` | `mu_uid`, `flagged` | A MU was flagged (`true`) or unflagged (`false`) for deletion |
 
 ---
 

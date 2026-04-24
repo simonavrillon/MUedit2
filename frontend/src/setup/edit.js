@@ -25,6 +25,8 @@ export function setupEditEvents(deps) {
     updateMuFilter,
     removeOutliers,
     flagMuForDeletion,
+    duplicateMu,
+    removeDuplicateMus,
     restoreEditBackup,
     setEditMode,
     refreshEditModeButtons,
@@ -81,6 +83,12 @@ export function setupEditEvents(deps) {
   });
   els.editFlagBtn?.addEventListener("click", () => {
     void runEditAction(els.editFlagBtn, () => flagMuForDeletion());
+  });
+  els.editDuplicateBtn?.addEventListener("click", () => {
+    void runEditAction(els.editDuplicateBtn, () => duplicateMu());
+  });
+  els.editDeduplicateBtn?.addEventListener("click", () => {
+    void runEditAction(els.editDeduplicateBtn, () => removeDuplicateMus());
   });
   els.editUndoBtn?.addEventListener("click", () => {
     void runEditAction(els.editUndoBtn, () => restoreEditBackup());

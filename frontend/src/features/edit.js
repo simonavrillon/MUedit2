@@ -606,6 +606,126 @@ export async function removeOutliers(deps) {
   }
 }
 
+export async function removeDuplicateMus(deps) {
+  const {
+    state,
+    API_BASE,
+    apiJson,
+    setEditStatus,
+    ensureEditFlagged,
+    recomputeEditDirty,
+    renderEditExplorer,
+  } = deps;
+
+  const distimes = state.edit.distimes || [];
+  if (distimes.length < 2) {
+    setEditStatus("Need at least 2 MUs to deduplicate", "muted");
+    return;
+  }
+  try {
+    setEditStatus("Removing duplicates...", "muted");
+    const data = await apiJson(`${API_BASE}/edit/remove-duplicates`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        distimes: state.edit.distimes,
+        pulse_trains: state.edit.pulseTrains || [],
+        fsamp: state.edit.fsamp,
+        total_samples: state.edit.totalSamples || 0,
+        mu_grid_index: state.edit.muGridIndex || [],
+        parameters: state.edit.parameters || {},
+      }),
+    });
+
+    const keptIdx = data.kept_indices || [];
+    if (keptIdx.length === distimes.length) {
+      setEditStatus("No duplicates found", "muted");
+      return;
+    }
+
+    const keptSet = new Set(keptIdx);
+    ensureEditFlagged();
+    setEditDistimes(state, keptIdx.map((i) => data.distimes[keptIdx.indexOf(i)] || distimes[i]));
+    setEditPulseTrains(state, keptIdx.map((i, pos) =>
+      (data.pulse_trains && data.pulse_trains[pos]) ? data.pulse_trains[pos] : (state.edit.pulseTrains?.[i] || [])
+    ));
+    setEditOriginalDistimes(state, (state.edit.originalDistimes || []).filter((_, i) => keptSet.has(i)));
+    setEditOriginalPulseTrains(state, (state.edit.originalPulseTrains || []).filter((_, i) => keptSet.has(i)));
+    setEditMuGridIndex(state, (state.edit.muGridIndex || []).filter((_, i) => keptSet.has(i)));
+    setEditFlaggedArray(state, (state.edit.flagged || []).filter((_, i) => keptSet.has(i)));
+    setEditMuUids(state, (state.edit.muUids || []).filter((_, i) => keptSet.has(i)));
+
+    const removedCount = data.removed_count || (distimes.length - keptIdx.length);
+    if (deps.appendEditHistory) {
+      const removedUids = (state.edit.muUids || []).filter((_, i) => !keptSet.has(i));
+      deps.appendEditHistory({ type: "remove_duplicates", removed_count: removedCount, removed_mu_uids: removedUids });
+    }
+
+    // Keep current MU if it survived, otherwise fall back to first MU
+    const currentMu = state.edit.currentMu ?? 0;
+    const newCurrentMu = keptIdx.includes(currentMu)
+      ? keptIdx.indexOf(currentMu)
+      : 0;
+    setEditCurrentMu(state, newCurrentMu, { resetView: false });
+
+    recomputeEditDirty();
+    renderEditExplorer();
+    setEditStatus(`${removedCount} duplicate${removedCount !== 1 ? "s" : ""} removed`, "success");
+  } catch (err) {
+    console.error(err);
+    setEditStatus(`Deduplication failed: ${err.message}`, "error");
+  }
+}
+
+export function duplicateMu(deps) {
+  const {
+    state,
+    setEditStatus,
+    ensureEditFlagged,
+    recomputeEditDirty,
+    renderEditExplorer,
+  } = deps;
+
+  const muIdx = state.edit.currentMu ?? 0;
+  const pulse = state.edit.pulseTrains?.[muIdx];
+  const distimes = state.edit.distimes?.[muIdx];
+  if (!pulse || !pulse.length) {
+    setEditStatus("No MU loaded", "muted");
+    return;
+  }
+
+  const gridIdx = state.edit.muGridIndex?.[muIdx] ?? 0;
+
+  // Generate a UID for the new MU that doesn't conflict with existing ones
+  const existingUids = state.edit.muUids || [];
+  const prefix = `g${gridIdx}_mu`;
+  const existingCounts = existingUids
+    .filter((uid) => uid.startsWith(prefix))
+    .map((uid) => parseInt(uid.slice(prefix.length), 10))
+    .filter((n) => Number.isFinite(n));
+  const newCount = existingCounts.length > 0 ? Math.max(...existingCounts) + 1 : 0;
+  const newUid = `${prefix}${newCount}`;
+
+  const newIdx = state.edit.distimes.length;
+  state.edit.distimes.push([...(distimes || [])]);
+  state.edit.pulseTrains.push([...(pulse || [])]);
+  state.edit.muGridIndex.push(gridIdx);
+  ensureEditFlagged();
+  state.edit.flagged.push(false);
+  state.edit.muUids.push(newUid);
+
+  if (deps.appendEditHistory) {
+    const sourceUid = state.edit.muUids?.[muIdx] ?? `mu${muIdx}`;
+    deps.appendEditHistory({ type: "duplicate_mu", mu_uid: newUid, source_mu_uid: sourceUid });
+  }
+
+  setEditCurrentMuGrid(state, gridIdx, { resetView: false });
+  setEditCurrentMu(state, newIdx, { resetView: false });
+  recomputeEditDirty();
+  renderEditExplorer();
+  setEditStatus(`MU duplicated — now editing MU ${newIdx + 1}`, "success");
+}
+
 export async function flagMuForDeletion(deps) {
   const {
     state,
@@ -914,9 +1034,7 @@ export async function saveEditedFile(deps) {
   const originalStem = originalFilename.replace(/\.[^.]+$/, "");
   const entityLabel = originalStem.includes("_grid-")
     ? originalStem.split("_grid-")[0]
-    : originalStem.endsWith("_decomp")
-      ? originalStem.slice(0, -"_decomp".length)
-      : originalStem;
+    : originalStem.replace(/(_decomp|_edited)+$/, "");
   const payload = {
     distimes,
     flagged: state.edit.flagged || [],

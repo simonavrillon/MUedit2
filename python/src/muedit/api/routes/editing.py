@@ -15,6 +15,7 @@ from muedit.services.editing_service import (
     load_decomposition_binary,
     load_decomposition_binary_from_path,
     load_decomposition_from_path,
+    remove_duplicates_service,
     remove_outliers,
     save_edits,
     update_filter,
@@ -79,6 +80,12 @@ async def delete_dr_endpoint(payload: EditRoiPayload):
 async def remove_outliers_endpoint(payload: dict):
     """Apply discharge-rate outlier removal for the selected motor unit."""
     return success_payload(remove_outliers(payload))
+
+
+@router.post("/edit/remove-duplicates")
+async def remove_duplicates_endpoint(payload: dict):
+    """Remove duplicate motor units using lag-aware spike-train overlap."""
+    return success_payload(remove_duplicates_service(payload))
 
 
 @router.post("/edit/flag-mu")

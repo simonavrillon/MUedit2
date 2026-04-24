@@ -216,9 +216,10 @@ def parse_entity_label(file_label: str) -> str:
         raise ValueError("file_label is required to locate BIDS EMG")
     stem = Path(file_label).stem
     if "_grid-" in stem:
-        return stem.split("_grid-")[0]
-    if stem.endswith("_decomp"):
-        return stem.rsplit("_decomp", 1)[0]
+        stem = stem.split("_grid-")[0]
+    for suffix in ("_decomp", "_edited"):
+        while stem.endswith(suffix):
+            stem = stem[: -len(suffix)]
     return stem
 
 
