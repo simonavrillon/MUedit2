@@ -44,10 +44,6 @@ def _encode_decompose_preview_f32(preview: dict[str, Any]) -> bytes:
         pulse_full = pulse_full.reshape(1, -1)
     if pulse_all.ndim == 1:
         pulse_all = pulse_all.reshape(1, -1)
-    if pulse_full.ndim == 0:
-        pulse_full = np.zeros((0, 0), dtype=np.float32)
-    if pulse_all.ndim == 0:
-        pulse_all = np.zeros((0, 0), dtype=np.float32)
     if pulse_full.ndim != 2:
         pulse_full = np.zeros((0, 0), dtype=np.float32)
     if pulse_all.ndim != 2:

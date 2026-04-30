@@ -240,18 +240,18 @@ def run_decomposition_cli() -> None:
             bids_metadata = parsed_meta
 
     params = DecompositionParameters(
-        niter=int(args.niter),
-        nwindows=int(args.nwindows),
+        niter=args.niter,
+        nwindows=args.nwindows,
         nbextchan=1000,
-        duplicatesthresh=float(args.duplicatesthresh),
-        sil_thr=(float("-inf") if not args.sil_filter else float(args.sil_thr)),
-        cov_thr=float(args.cov_thr),
+        duplicatesthresh=args.duplicatesthresh,
+        sil_thr=(float("-inf") if not args.sil_filter else args.sil_thr),
+        cov_thr=args.cov_thr,
         covfilter=1 if args.cov_filter else 0,
         contrast_func="skew",
         initialization=0,
         peel_off_enabled=1 if args.peel_off else 0,
-        peel_off_win=float(args.peel_off_window_ms) / 1000.0,
-        use_adaptive=bool(args.use_adaptive),
+        peel_off_win=args.peel_off_window_ms / 1000.0,
+        use_adaptive=args.use_adaptive,
     )
 
     run_decomposition(
@@ -278,12 +278,8 @@ def main() -> None:
 
     if args.command == "api":
         serve_api()
-        return
-    if args.command == "decompose":
+    elif args.command == "decompose":
         run_decomposition_cli()
-        return
-
-    parser.error("Unknown command")
 
 
 if __name__ == "__main__":

@@ -64,7 +64,7 @@ def _build_preview_core(filepath: str) -> dict[str, Any]:
     fsamp = float(signal["fsamp"])
 
     grid_names = signal.get("gridname", ["Default"])
-    coordinates, _, discard_channels, emg_type = format_hdemg_signal(data, grid_names, fsamp)
+    coordinates, _, discard_channels, emg_type = format_hdemg_signal(grid_names)
 
     ch_idx = 0
     for i in range(len(grid_names)):

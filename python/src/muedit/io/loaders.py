@@ -489,8 +489,6 @@ def load_otb_plus(filepath):
 
                     if len(sip_data) > data.shape[1]:
                         sip_data = sip_data[: data.shape[1]]
-                    elif len(sip_data) < data.shape[1]:
-                        pass
 
                     if auxiliary.shape[0] == 0:
                         auxiliary = sip_data.reshape(1, -1)
@@ -504,7 +502,7 @@ def load_otb_plus(filepath):
         date_node = device_meta.get("@Date", "") if isinstance(device_meta, dict) else None
 
         coordinates, ieds, discard_vecs, emg_types = format_hdemg_signal(
-            signal_data, unique_grids, sample_freq
+            unique_grids
         )
 
         valid_hardware_filters = set()
@@ -855,9 +853,6 @@ def load_otb4(filepath):
             emg_gains_list = []
             emg_hpf_list = []
             emg_lpf_list = []
-            aux_gains_list = []
-            aux_hpf_list = []
-            aux_lpf_list = []
 
             offset = 0
             for block in track_list:
@@ -966,7 +961,7 @@ def load_otb4(filepath):
                 refined_grid_names.append(grid_name)
 
         coordinates, ieds, discard_vecs, emg_types = format_hdemg_signal(
-            grid_data, refined_grid_names, float(fs_out)
+            refined_grid_names
         )
 
         metadata = {
@@ -1121,7 +1116,7 @@ def load_bids_signal(filepath: str) -> dict[str, Any]:
     )
 
     coordinates, ieds, discard_vecs, emg_types = format_hdemg_signal(
-        data, grid_type_names, fsamp
+        grid_type_names
     )
 
     metadata: dict[str, Any] = {

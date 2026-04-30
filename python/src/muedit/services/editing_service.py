@@ -511,11 +511,7 @@ def update_filter(payload: dict[str, Any]) -> dict[str, Any]:
         if fsamp_val <= 0:
             raise HTTPException(status_code=400, detail="Missing fsamp in MAT signal context")
         grid_names = ctx.get("grid_names") or ["Grid 1"]
-        coordinates, _, _, _ = format_hdemg_signal(
-            data.copy(),
-            grid_names,
-            fsamp_val,
-        )
+        coordinates, _, _, _ = format_hdemg_signal(grid_names)
         if grid_index < 0 or grid_index >= len(coordinates):
             raise HTTPException(status_code=400, detail="grid_index out of range")
         ch_offset = 0

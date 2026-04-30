@@ -12,14 +12,12 @@ def demean(signal):
     return signal - np.mean(signal, axis=1, keepdims=True)
 
 
-def format_hdemg_signal(signal, grid_names, fsamp, discard_overrides=None):
+def format_hdemg_signal(grid_names, discard_overrides=None):
     """Infer grid geometry and channel masks for HD-EMG recordings."""
     coordinates = []
     ied = []
     discard_channels_vec = []
     emg_type = []
-
-    ch_idx = 0
 
     for i, grid_name in enumerate(grid_names):
         el_channel_map = None
@@ -259,20 +257,16 @@ def format_hdemg_signal(signal, grid_names, fsamp, discard_overrides=None):
         ied.append(current_ied)
         emg_type.append(current_emg_type)
 
-        grid_signal = signal[ch_idx : ch_idx + nbelectrodes, :]
         discard_mask = np.zeros(nbelectrodes, dtype=int)
 
-        override_applied = False
         if discard_overrides and i < len(discard_overrides):
             try:
                 mask_arr = np.array(discard_overrides[i], dtype=int)
                 if mask_arr.size == nbelectrodes:
                     discard_mask = mask_arr
-                    override_applied = True
             except (IndexError, TypeError, ValueError):
-                override_applied = False
+                pass
 
         discard_channels_vec.append(discard_mask)
-        ch_idx += nbelectrodes
 
     return coordinates, ied, discard_channels_vec, emg_type

@@ -48,9 +48,9 @@ def wait_for(url, label):
     print(f"Timed out waiting for {label}", file=sys.stderr)
     return False
 
-wait_for(f"http://localhost:{backend_port}/api/v1/health", "backend")
-wait_for(f"http://localhost:{frontend_port}/", "frontend")
-webbrowser.open(f"http://localhost:{frontend_port}/")
+if wait_for(f"http://localhost:{backend_port}/api/v1/health", "backend") and \
+   wait_for(f"http://localhost:{frontend_port}/", "frontend"):
+    webbrowser.open(f"http://localhost:{frontend_port}/")
 PY
 fi
 

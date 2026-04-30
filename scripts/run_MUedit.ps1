@@ -27,12 +27,6 @@ $FrontendJob = Start-Job -ScriptBlock {
 } -ArgumentList $FrontendDir, $env:MUEDIT_FRONTEND_PORT
 Write-Host "Frontend started (Job $($FrontendJob.Id)) on :$($env:MUEDIT_FRONTEND_PORT)"
 
-$null = Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action {
-    Write-Host "Stopping services..."
-    Stop-Job $BackendJob, $FrontendJob -ErrorAction SilentlyContinue
-    Remove-Job $BackendJob, $FrontendJob -ErrorAction SilentlyContinue
-}
-
 if ($env:MUEDIT_OPEN_BROWSER -eq '1') {
     $backendPort  = $env:MUEDIT_PORT
     $frontendPort = $env:MUEDIT_FRONTEND_PORT

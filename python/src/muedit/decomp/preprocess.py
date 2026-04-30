@@ -263,9 +263,7 @@ def preprocess_step(
     data = np.array(loaded.data, copy=True)
     grid_names = loaded.signal.get("gridname", ["Default"])
     coordinates, ied, discard_channels, emg_type = format_hdemg_signal(
-        data,
         grid_names,
-        loaded.fsamp,
         discard_overrides=discard_overrides,
     )
     _apply_grid_notch_filters(data, loaded.fsamp, grid_names, coordinates)
