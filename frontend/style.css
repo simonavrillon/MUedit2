@@ -1,13 +1,11 @@
 :root {
   --bg: #1f1f1f;
   --panel: #2a2a2a;
-  --panel-solid: #2a2a2a;
   --muted: #b7b7b7;
   --accent: #3776ab;
   --accent-2: #ffd43b;
   --text: #ffffff;
   --border: #3a3a3a;
-  --shadow: none;
   --radius: 8px;
   --font: "IBM Plex Sans", "Segoe UI", sans-serif;
   --fs-sm: 12px;
@@ -18,8 +16,20 @@
   --fw-bold: 700;
   --plot-qc-min: 120px;
   --plot-qc-max: 260px;
-  --plot-edit-min: 200px;
-  --plot-edit-max: 460px;
+  --surface: #303030;
+  --surface-active: #30343a;
+  --danger: #d62728;
+  --success: #2ca02c;
+  --danger-text: #ffb3b3;
+  --danger-bg: rgba(214, 39, 40, 0.18);
+  --danger-surface: #3a2a2a;
+  --danger-border-clr: #6a3a3a;
+  --mu-1: #9dd0ff;
+  --mu-2: #9de9be;
+  --mu-3: #ffd99f;
+  --mu-4: #e7c1ff;
+  --mu-5: #ffb7c3;
+  --mu-4-dim: rgba(231, 193, 255, 0.12);
 }
 
 * {
@@ -47,12 +57,6 @@ body {
 
 .hidden {
   display: none !important;
-}
-
-.sticky {
-  position: sticky;
-  top: 14px;
-  align-self: flex-start;
 }
 
 #app {
@@ -132,13 +136,6 @@ body {
   color: var(--accent);
 }
 
-.file-picker {
-  border: none;
-  border-radius: 0;
-  padding: 6px 0 2px;
-  background: transparent;
-}
-
 .headline {
   font-size: var(--fs-lg);
   margin: 0;
@@ -166,9 +163,9 @@ body {
   margin: 14px auto 0;
   display: inline-block;
   padding: 8px 12px;
-  background: rgba(214, 39, 40, 0.18);
-  border: 1px solid #d62728;
-  color: #ffb3b3;
+  background: var(--danger-bg);
+  border: 1px solid var(--danger);
+  color: var(--danger-text);
   border-radius: 6px;
   font-size: var(--fs-md);
   font-weight: var(--fw-regular);
@@ -190,27 +187,27 @@ body {
 }
 
 .upload-loader span:nth-child(1) {
-  background: #9dd0ff;
+  background: var(--mu-1);
   animation-delay: 0s;
 }
 
 .upload-loader span:nth-child(2) {
-  background: #9de9be;
+  background: var(--mu-2);
   animation-delay: 0.1s;
 }
 
 .upload-loader span:nth-child(3) {
-  background: #ffd99f;
+  background: var(--mu-3);
   animation-delay: 0.2s;
 }
 
 .upload-loader span:nth-child(4) {
-  background: #e7c1ff;
+  background: var(--mu-4);
   animation-delay: 0.3s;
 }
 
 .upload-loader span:nth-child(5) {
-  background: #ffb7c3;
+  background: var(--mu-5);
   animation-delay: 0.4s;
 }
 
@@ -226,7 +223,7 @@ body {
   }
 }
 
-/* ── Workspace ── */
+/* ── Workspace & Layout── */
 
 .workspace {
   padding: 14px;
@@ -319,13 +316,13 @@ body {
 }
 
 .status-pill[data-tone="error"] {
-  color: #d62728;
-  border-color: #d62728;
+  color: var(--danger);
+  border-color: var(--danger);
 }
 
 .status-pill[data-tone="success"] {
-  color: #2ca02c;
-  border-color: #2ca02c;
+  color: var(--success);
+  border-color: var(--success);
 }
 
 /* ── Workflow Stepper ── */
@@ -380,19 +377,19 @@ body {
 }
 
 .step-chip.active[data-step="import"] {
-  color: #9dd0ff;
+  color: var(--mu-1);
 }
 
 .step-chip.active[data-step="qc"] {
-  color: #9de9be;
+  color: var(--mu-2);
 }
 
 .step-chip.active[data-step="run"] {
-  color: #ffd99f;
+  color: var(--mu-3);
 }
 
 .step-chip.active[data-step="edit"] {
-  color: #e7c1ff;
+  color: var(--mu-4);
 }
 
 .step-chip.pending {
@@ -413,8 +410,6 @@ body {
   opacity: 0.85;
   color: var(--text);
 }
-
-/* ── Layout ── */
 
 .layout {
   display: flex;
@@ -456,7 +451,7 @@ body {
   width: min(380px, 90vw);
   height: 100dvh;
   padding: 14px 12px 12px;
-  background: #232323;
+  background: var(--panel);
   border-right: 1px solid var(--border);
   overflow-y: auto;
   transform: translateX(-100%);
@@ -666,7 +661,7 @@ body {
 .form-row input,
 .form-row select {
   width: 100%;
-  background: #303030;
+  background: var(--surface);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -687,7 +682,7 @@ body {
     8px 8px;
   background-repeat: no-repeat;
   padding-right: 28px;
-  background-color: #303030;
+  background-color: var(--surface);
 }
 
 .toggle-row {
@@ -702,7 +697,7 @@ body {
   padding: 9px 12px;
   border-radius: 6px;
   border: 1px solid var(--border);
-  background: #303030;
+  background: var(--surface);
   color: var(--text);
   font-weight: var(--fw-bold);
   font-size: var(--fs-md);
@@ -714,7 +709,7 @@ body {
 }
 
 .pill-toggle.on {
-  background: #30343a;
+  background: var(--surface-active);
   border-color: var(--accent);
   color: var(--text);
 }
@@ -754,7 +749,7 @@ body {
 }
 
 .start-btn.ghost {
-  background: #303030;
+  background: var(--surface);
   color: var(--text);
   border: 1px solid var(--border);
   letter-spacing: 0.04em;
@@ -827,7 +822,7 @@ body {
 .progress-track {
   width: 100%;
   height: 8px;
-  background: #262626;
+  background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 999px;
   overflow: hidden;
@@ -862,10 +857,6 @@ body {
   margin-bottom: 8px;
 }
 
-.chart-title.spaced {
-  margin-top: 12px;
-}
-
 /* ── MU Controls ── */
 
 .mu-controls {
@@ -886,7 +877,7 @@ body {
 }
 
 .mu-controls select {
-  background: #303030;
+  background: var(--surface);
   border: 1px solid var(--border);
   color: var(--text);
   padding: 6px 10px;
@@ -966,8 +957,8 @@ body {
   margin-top: 0;
   padding: 8px 14px;
   border: 1px solid var(--border);
-  background: #303030;
-  color: #ffd99f;
+  background: var(--surface);
+  color: var(--mu-3);
   border-radius: 6px;
   font-weight: var(--fw-bold);
   font-size: var(--fs-md);
@@ -983,7 +974,7 @@ body {
 
 .qc-run-btn:hover {
   opacity: 1;
-  border-color: #ffd99f;
+  border-color: var(--mu-3);
 }
 
 .stage-tabs {
@@ -996,7 +987,7 @@ body {
 .tab-btn {
   flex: 0 0 auto;
   border: 1px solid var(--border);
-  background: #303030;
+  background: var(--surface);
   color: var(--text);
   padding: 8px 14px;
   border-radius: 6px;
@@ -1008,7 +999,7 @@ body {
 
 .tab-btn.active {
   border-color: var(--accent);
-  background: #30343a;
+  background: var(--surface-active);
 }
 
 /* ── Edit Stage ── */
@@ -1034,9 +1025,6 @@ body {
   margin-top: 10px;
 }
 
-.compact-card {
-  max-width: none;
-}
 
 .stage-edit .chart-card {
   padding: 12px;
@@ -1174,9 +1162,9 @@ body {
 .edit-toolbar-row .icon-expand-btn.is-running {
   max-width: 190px;
   gap: 8px;
-  color: #e7c1ff;
-  border-color: #e7c1ff;
-  background: rgba(231, 193, 255, 0.12);
+  color: var(--mu-4);
+  border-color: var(--mu-4);
+  background: var(--mu-4-dim);
 }
 
 .edit-toolbar-row .icon-expand-btn:hover span,
@@ -1187,12 +1175,10 @@ body {
   margin-left: 0;
 }
 
-/* Peel-off toggle collapsed width — wide enough to show "Off" / "On" */
 #editPeelOffToggle {
   max-width: 140px;
 }
 
-/* Peel-off toggle: short label visible when collapsed, swaps with full label on expand */
 .edit-toolbar-row .icon-expand-btn .peeloff-short {
   max-width: 50px;
   opacity: 1;
@@ -1216,9 +1202,9 @@ body {
 }
 
 #editSaveBtn {
-  background: #303030;
+  background: var(--surface);
   border: 1px solid var(--border);
-  color: #e7c1ff;
+  color: var(--mu-4);
 }
 
 .edit-summary {
@@ -1269,12 +1255,6 @@ canvas {
   gap: 6px;
 }
 
-.qc-grid .grid-label {
-  font-weight: var(--fw-bold);
-  color: var(--text);
-  margin-bottom: 4px;
-  font-size: var(--fs-md);
-}
 
 .qc-grid .cells {
   display: grid;
@@ -1301,8 +1281,8 @@ canvas {
 }
 
 .qc-cell.off {
-  background: #3a2a2a;
-  border-color: #6a3a3a;
+  background: var(--danger-surface);
+  border-color: var(--danger-border-clr);
   color: var(--accent-2);
 }
 
@@ -1395,7 +1375,7 @@ canvas {
 .auto-info-box {
   margin-top: 10px;
   padding: 10px;
-  background: #262626;
+  background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 6px;
   font-size: var(--fs-sm);
@@ -1428,11 +1408,11 @@ canvas {
 }
 
 .toast.success {
-  border-color: #2ca02c;
+  border-color: var(--success);
 }
 
 .toast.error {
-  border-color: #d62728;
+  border-color: var(--danger);
 }
 
 /* ── Responsive ── */

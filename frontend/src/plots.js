@@ -103,16 +103,16 @@ export function drawSeries(
         : plotHeight;
       const rectTop = padding.top + Math.min(yMin, yMax);
       const rectHeight = Math.max(1, Math.abs(yMax - yMin));
-      ctx.fillStyle = "rgba(195, 155, 242, 0.08)";
+      ctx.fillStyle = COLORS.selectionFill;
       ctx.fillRect(startX, rectTop, width, rectHeight);
-      ctx.strokeStyle = "rgba(195, 155, 242, 0.6)";
+      ctx.strokeStyle = COLORS.selectionStroke;
       ctx.lineWidth = 1;
       ctx.strokeRect(startX, rectTop, width, rectHeight);
     });
   }
 
   if (showAxes) {
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.15)";
+    ctx.strokeStyle = COLORS.gridAxis;
     ctx.lineWidth = 1;
     ctx.beginPath();
     if (!hideYAxis) {
@@ -131,7 +131,7 @@ export function drawSeries(
       for (let i = 0; i <= yTicks; i++) {
         const t = i / yTicks;
         const y = padding.top + plotHeight - t * plotHeight;
-        ctx.strokeStyle = "rgba(255, 255, 255, 0.08)";
+        ctx.strokeStyle = COLORS.gridLineDim;
         ctx.beginPath();
         ctx.moveTo(padding.left, y);
         ctx.lineTo(padding.left + plotWidth, y);
@@ -158,7 +158,7 @@ export function drawSeries(
       for (let t = first; t <= tEnd; t += step) {
         const frac = (t - tStart) / duration;
         const x = padding.left + frac * plotWidth;
-        ctx.strokeStyle = "rgba(255, 255, 255, 0.08)";
+        ctx.strokeStyle = COLORS.gridLineDim;
         ctx.beginPath();
         ctx.moveTo(x, padding.top);
         ctx.lineTo(x, padding.top + plotHeight);
@@ -212,14 +212,14 @@ export function drawSeries(
         : plotHeight;
       const rectTop = padding.top + Math.min(yMin, yMax);
       const rectHeight = Math.max(1, Math.abs(yMax - yMin));
-      ctx.fillStyle = "rgba(195, 155, 242, 0.08)";
+      ctx.fillStyle = COLORS.selectionFill;
       ctx.fillRect(
         Math.min(startX, endX),
         rectTop,
         Math.abs(endX - startX),
         rectHeight,
       );
-      ctx.strokeStyle = "rgba(195, 155, 242, 0.6)";
+      ctx.strokeStyle = COLORS.selectionStroke;
       ctx.lineWidth = 1;
       ctx.strokeRect(
         Math.min(startX, endX),
@@ -280,14 +280,14 @@ export function drawGridOverlay(
     selections.forEach((sel) => {
       const startX = (sel.start / totalSamples) * canvasEl.width;
       const endX = (sel.end / totalSamples) * canvasEl.width;
-      ctx.fillStyle = "rgba(242, 167, 185, 0.08)";
+      ctx.fillStyle = COLORS.roiFill;
       ctx.fillRect(
         Math.min(startX, endX),
         0,
         Math.abs(endX - startX),
         canvasEl.height,
       );
-      ctx.strokeStyle = "rgba(242, 167, 185, 0.6)";
+      ctx.strokeStyle = COLORS.roiStroke;
       ctx.lineWidth = 1;
       ctx.strokeRect(
         Math.min(startX, endX),
@@ -322,7 +322,7 @@ export function drawMiniSeries(canvas, series, off = false) {
   canvas.height = canvas.clientHeight || 28;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   if (!series || (!series.length && !(series.min && series.max))) {
-    ctx.fillStyle = "#555";
+    ctx.fillStyle = COLORS.gridEmpty;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     return;
   }

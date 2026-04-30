@@ -37,7 +37,7 @@ import {
   setGridNames,
   setMuscle,
 } from "../state/actions.js";
-import { UNIFORM_PULSE_COLOR } from "../config.js";
+import { COLORS, UNIFORM_PULSE_COLOR } from "../config.js";
 import { decodeEditLoadPayload } from "../api/binary_payloads.js";
 import { normalizeEditLoadPayload } from "../contracts/payloads.js";
 import { inferGridCount, normalizeGridNames } from "./grid_names.js";
@@ -217,7 +217,7 @@ export function renderEditExplorer(deps) {
       showAxes: true,
       hideYAxis: false,
       fsamp: state.edit.fsamp,
-      markerColor: "#e7c1ff",
+      markerColor: COLORS.muPurple,
     },
   );
   renderInstantaneousDr();
@@ -276,7 +276,7 @@ export function renderInstantaneousDr(deps) {
       showAxes: true,
       hideYAxis: false,
       fsamp: state.edit.fsamp,
-      markerColor: "#e7c1ff",
+      markerColor: COLORS.muPurple,
     },
   );
 }
@@ -506,7 +506,6 @@ export function deleteDrInSelection(deps, sel) {
     state,
     els,
     backupEditMu,
-    getEditTotalSamples,
     getCanvasPlotMetrics,
     getRawPulse,
     requestRoiEditFn,
@@ -516,7 +515,6 @@ export function deleteDrInSelection(deps, sel) {
   const spikes = state.edit.distimes?.[muIdx] || [];
   if (spikes.length < 2) return;
   backupEditMu();
-  getEditTotalSamples();
   const canvas = els.editDrCanvas;
   const metrics = canvas
     ? getCanvasPlotMetrics(canvas, true)
@@ -533,8 +531,7 @@ export function deleteDrInSelection(deps, sel) {
     const dr = fs / isi;
     if (dr > maxDr) maxDr = dr;
   }
-  const maxVal = maxDr || 1;
-  const span = maxVal || 1;
+  const span = maxDr || 1;
 
   const yMin = 0 + (1 - Math.max(yMinPx, yMaxPx) / height) * span;
   requestRoiEditFn("delete-dr", {

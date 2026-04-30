@@ -270,7 +270,6 @@ export function createEditStageService(deps) {
         state,
         els,
         backupEditMu,
-        getEditTotalSamples,
         getCanvasPlotMetrics,
         getRawPulse,
         requestRoiEditFn: requestRoiEdit,

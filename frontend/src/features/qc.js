@@ -75,14 +75,14 @@ export function renderAuxiliaryChannels(els, state) {
     selections.forEach((sel) => {
       const startX = (sel.start / state.seriesLength) * canvas.width;
       const endX = (sel.end / state.seriesLength) * canvas.width;
-      ctx.fillStyle = "rgba(242, 167, 185, 0.08)";
+      ctx.fillStyle = COLORS.roiFill;
       ctx.fillRect(
         Math.min(startX, endX),
         0,
         Math.abs(endX - startX),
         canvas.height,
       );
-      ctx.strokeStyle = "rgba(242, 167, 185, 0.6)";
+      ctx.strokeStyle = COLORS.roiStroke;
       ctx.lineWidth = 1;
       ctx.strokeRect(
         Math.min(startX, endX),

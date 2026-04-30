@@ -2,21 +2,6 @@ export function getCurrentGrid(state) {
   return state.currentGrid || 0;
 }
 
-export function getRunCurrentMuGrid(state) {
-  return state.currentMuGrid || 0;
-}
-
-export function getRunCurrentMu(state) {
-  return Number.isFinite(state.currentMu) ? state.currentMu : 0;
-}
-
-export function getEditCurrentMuGrid(state) {
-  return state.edit.currentMuGrid || 0;
-}
-
-export function getEditCurrentMu(state) {
-  return Number.isFinite(state.edit.currentMu) ? state.edit.currentMu : 0;
-}
 
 export function getRunMuIndicesForGrid(state, gridIdx) {
   if (!state.muPulseTrains || !state.muPulseTrains.length) return [];

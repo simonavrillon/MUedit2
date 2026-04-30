@@ -1,3 +1,5 @@
+import { GRID_COLORS } from "./config.js";
+
 export const state = {
   file: null,
   uploadToken: null,
@@ -7,15 +9,7 @@ export const state = {
   previewSeries: [],
   gridNames: [],
   gridSeries: [],
-  gridColors: [
-    "#ffffff",
-    "#f5f5f5",
-    "#e8e8e8",
-    "#dcdcdc",
-    "#3776ab",
-    "#ffd43b",
-    "#2ca02c",
-  ],
+  gridColors: GRID_COLORS,
   parameters: null,
   channelMeans: [],
   coordinates: [],

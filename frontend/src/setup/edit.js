@@ -45,12 +45,14 @@ export function setupEditEvents(deps) {
     const idx = Number(e.target.value) || 0;
     setEditCurrentMuGrid(state, idx, { resetView: true });
     renderEditExplorer();
+    e.target.blur();
   });
 
   els.editMuSelect?.addEventListener("change", (e) => {
     const idx = Number(e.target.value);
     setEditCurrentMu(state, idx, { resetView: true });
     renderEditExplorer();
+    e.target.blur();
   });
 
   els.editSaveBtn?.addEventListener("click", () => {

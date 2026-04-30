@@ -28,10 +28,11 @@ export function setupRunEvents(deps) {
   enableRoiSelection("emgCanvas");
 
   if (els.nwindows) {
-    els.nwindows.addEventListener("change", () => {
+    els.nwindows.addEventListener("change", (e) => {
       const nwin = Number(els.nwindows.value) ?? 1;
       syncRois(nwin);
       refreshVisuals();
+      e.target.blur();
     });
   }
 
@@ -45,17 +46,22 @@ export function setupRunEvents(deps) {
   );
   updateStartAvailability();
 
-  els.auxSelector?.addEventListener("change", () => renderAuxiliaryChannels());
+  els.auxSelector?.addEventListener("change", (e) => {
+    renderAuxiliaryChannels();
+    e.target.blur();
+  });
 
   els.muGridSelect?.addEventListener("change", (e) => {
     const idx = Number(e.target.value) || 0;
     setRunCurrentMuGrid(state, idx, { resetView: true });
     renderMuExplorer();
+    e.target.blur();
   });
 
   els.muSelect?.addEventListener("change", (e) => {
     const idx = Number(e.target.value);
     setRunCurrentMu(state, idx, { resetView: true });
     renderMuExplorer();
+    e.target.blur();
   });
 }
