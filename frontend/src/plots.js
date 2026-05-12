@@ -77,8 +77,11 @@ export function drawSeries(
   const sliced = series.slice(clampedStart, clampedEnd);
   const viewSpan = clampedEnd - clampedStart;
 
-  const max = Math.max(...sliced);
-  const min = Math.min(...sliced);
+  let max = -Infinity, min = Infinity;
+  for (let i = 0; i < sliced.length; i++) {
+    if (sliced[i] > max) max = sliced[i];
+    if (sliced[i] < min) min = sliced[i];
+  }
   const span = max - min || 1;
   const stepX = plotWidth / Math.max(1, sliced.length - 1);
 
