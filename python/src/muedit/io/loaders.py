@@ -32,7 +32,23 @@ def _parse_text(value: Any) -> str:
         if value.dtype.kind in {"S", "U"}:
             return "".join(str(x) for x in value.flatten().tolist()).strip()
         if np.issubdtype(value.dtype, np.integer):
-            return "".join(chr(int(c)) for c in value.flatten().tolist() if int(c) != 0).strip()
+            flat = value.flatten()
+            try:
+                if flat.size > 0 and np.max(flat) < 256:
+                    return "".join(chr(int(c)) for c in flat if int(c) != 0).strip()
+            except Exception:
+                pass
+            try:
+                if value.dtype == np.uint16:
+                    return flat.tobytes().decode("utf-16-le", errors="ignore").strip("\x00").strip()
+            except Exception:
+                pass
+            try:
+                if value.dtype == np.uint32:
+                    return flat.tobytes().decode("utf-32-le", errors="ignore").strip("\x00").strip()
+            except Exception:
+                pass
+            return ""
     return str(value).strip()
 
 
