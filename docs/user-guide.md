@@ -127,6 +127,7 @@ Use the **Grid** and **Motor Unit** dropdowns, or the keyboard shortcuts `<` (pr
 | Button | Shortcut | Description |
 |---|---|---|
 | Add Spike | `A` | Activate add mode, then drag a box on the pulse train to add spikes within the selection |
+| Add Artifact | `X` | Activate artifact mode, then drag a box to mark a peak as an artifact (see below) |
 | Delete Spike | `D` | Activate delete mode, then drag a box (or click) to remove spikes |
 | Remove Outliers | `R` | Automatically remove spikes with abnormally high discharge rates |
 | Update Filter | `Space` | Recompute the MU filter from the BIDS EMG signal over the current view window |
@@ -139,6 +140,8 @@ Use the **Grid** and **Motor Unit** dropdowns, or the keyboard shortcuts `<` (pr
 | Save | — | Write the edited decomposition to disk |
 
 **Peel-off during filter update:** when the Peel-off toggle is **On**, Update Filter subtracts the waveform contributions of all other motor units on the same grid from the whitened signal before recomputing the filter. This can improve separation in crowded windows where spike trains overlap, but may also overcorrect if the other units are not well estimated. It is off by default. Toggle it on or off as needed before pressing Update Filter or `Space`.
+
+**Add Artifact workflow:** use this when a high-amplitude peak in the pulse train is clearly a noise artifact rather than a real discharge. Press `X` or click **Add Artifact** to enter artifact mode (button highlights), then drag a box around the peak. The peak is marked with an orange dot and recorded as an artifact for the current MU. Artifacts are **not** added to the spike train — they are excluded from it. The next time you press **Update Filter**, the signal around each artifact peak is subtracted from the whitened EMG (peel-off style, 25 ms window) before the filter is recomputed, preventing the artifact from corrupting the new filter. Artifact markers are preserved when you save and reload the file. **Undo** removes the most recently added artifact; **Reset** clears all artifacts for the current MU.
 
 **Add / Delete workflow:** press the shortcut or click the button to enter the mode (button highlights), then drag a rectangular region on the pulse train canvas. The action applies to all spikes within the box. Press the shortcut again or click elsewhere to exit the mode.
 
@@ -200,12 +203,13 @@ Written after decomposition or after saving edits. Core arrays:
 }
 ```
 
-`mu_uids` are stable identifiers (format `g<grid>_mu<rank>`) assigned at first load and preserved through edits. `history` is an append-only log — each reload of the file picks up where the previous session left off.
+`mu_uids` are stable identifiers (format `g<grid>_mu<rank>`) assigned at first load and preserved through edits. `history` is an append-only log — each reload of the file picks up where the previous session left off. `artifact_times` (when present) is a list of lists — one entry per MU — containing the sample indices of all peaks marked as artifacts; it is restored automatically on reload.
 
 Additional history action types:
 
 | `type` | Key fields | Description |
 |---|---|---|
+| `add_artifact` | `mu_uid`, `artifacts_added` | One or more peaks were marked as artifacts; `artifacts_added` lists the sample indices |
 | `duplicate_mu` | `mu_uid`, `source_mu_uid` | A new MU was created as a copy of `source_mu_uid` |
 | `remove_duplicates` | `removed_count`, `removed_mu_uids` | Deduplication was run; lists the UIDs that were removed |
 | `flag_mu` | `mu_uid`, `flagged` | A MU was flagged (`true`) or unflagged (`false`) for deletion |

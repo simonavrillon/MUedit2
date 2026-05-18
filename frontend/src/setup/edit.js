@@ -98,6 +98,9 @@ export function setupEditEvents(deps) {
   els.editAddBtn?.addEventListener("click", () => {
     setEditMode("add", "Drag a box on pulse train to add spikes");
   });
+  els.editAddArtifactBtn?.addEventListener("click", () => {
+    setEditMode("add_artifact", "Drag a box on pulse train to mark an artifact");
+  });
   els.editDeleteSpikeBtn?.addEventListener("click", () => {
     setEditMode("delete_spikes", "Drag a box on pulse train to delete spikes");
   });

@@ -7,6 +7,7 @@ from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from muedit.api.contracts import success_payload
 from muedit.api.schemas import EditFilterPayload, EditRoiPayload, EditSavePayload, PathPayload
 from muedit.services.editing_service import (
+    add_artifact,
     add_spikes,
     delete_dr,
     delete_spikes,
@@ -62,6 +63,12 @@ async def update_filter_endpoint(payload: EditFilterPayload):
 async def add_spikes_endpoint(payload: EditRoiPayload):
     """Add spikes inside the selected ROI using pulse-train thresholds."""
     return success_payload(add_spikes(payload.model_dump(exclude_none=True)))
+
+
+@router.post("/edit/add-artifact")
+async def add_artifact_endpoint(payload: dict):
+    """Mark a peak in the ROI as an artifact; it will be excluded from filter updates."""
+    return success_payload(add_artifact(payload))
 
 
 @router.post("/edit/delete-spikes")

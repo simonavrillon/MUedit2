@@ -165,6 +165,14 @@ export function setEditDistimesForMu(state, muIdx, distimes) {
   state.edit.distimes[muIdx] = clean;
 }
 
+export function setEditArtifactTimesForMu(state, muIdx, times) {
+  if (!state.edit.artifactTimes) state.edit.artifactTimes = [];
+  const clean = (times || [])
+    .map((v) => Number(v))
+    .filter((v) => Number.isFinite(v));
+  state.edit.artifactTimes[muIdx] = clean;
+}
+
 export function setEditPulseTrainForMu(state, muIdx, pulseTrain) {
   const clean = Array.isArray(pulseTrain)
     ? pulseTrain.map((v) => Number(v))
@@ -249,6 +257,10 @@ export function setEditHistory(state, history) {
   state.edit.editHistory = Array.isArray(history) ? history : [];
 }
 
+export function setEditArtifactTimes(state, artifactTimes) {
+  state.edit.artifactTimes = Array.isArray(artifactTimes) ? artifactTimes : [];
+}
+
 export function appendEditHistoryEntry(state, entry) {
   if (!Array.isArray(state.edit.editHistory)) state.edit.editHistory = [];
   state.edit.editHistory.push(entry);
@@ -297,6 +309,7 @@ export function resetEditSlice(state) {
     originalPulseTrains: [],
     distimes: [],
     originalDistimes: [],
+    artifactTimes: [],
     gridNames: [],
     muGridIndex: [],
     fsamp: null,

@@ -65,6 +65,7 @@ class EditFilterPayload(BaseModel):
     view_end: int = 0
     nbextchan: int = 1000
     peel_off_win: float = 0.025
+    artifact_times: list[int] | None = None
 
 
 class EditRoiPayload(BaseModel):

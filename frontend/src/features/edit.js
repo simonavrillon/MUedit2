@@ -11,6 +11,8 @@ import {
   setEditCurrentMuGrid,
   setEditDirty,
   setEditDistimes,
+  setEditArtifactTimes,
+  setEditArtifactTimesForMu,
   setEditDistimesForMu,
   setEditDrDraftSelection,
   setEditDrSelection,
@@ -103,6 +105,7 @@ export function backupEditMu(state) {
     pulseTrain: state.edit.pulseTrains?.[muIdx]
       ? [...state.edit.pulseTrains[muIdx]]
       : null,
+    artifactTimes: [...(state.edit.artifactTimes?.[muIdx] || [])],
   });
 }
 
@@ -123,6 +126,7 @@ export function restoreEditBackup(deps) {
   const { muIdx, distimes, flagged } = backup;
   if (!state.edit.distimes?.length) return;
   setEditDistimesForMu(state, muIdx, distimes);
+  setEditArtifactTimesForMu(state, muIdx, backup.artifactTimes || []);
   ensureFlaggedFn();
   setEditFlagForMu(state, muIdx, flagged);
   if (backup.pulseTrain) {
@@ -202,6 +206,8 @@ export function renderEditExplorer(deps) {
   if (state.edit.draftSelectionPulse)
     overlays.push(state.edit.draftSelectionPulse);
   const markerVals = spikes.map((s) => pulse?.[s] ?? 0);
+  const artifacts = state.edit.artifactTimes?.[muIdx] || [];
+  const artifactVals = artifacts.map((s) => pulse?.[s] ?? 0);
   const pulseCanvas = els?.editPulseCanvas || "editPulseCanvas";
   drawSeries(
     pulseCanvas,
@@ -218,6 +224,9 @@ export function renderEditExplorer(deps) {
       hideYAxis: false,
       fsamp: state.edit.fsamp,
       markerColor: COLORS.muPurple,
+      extraMarkers: artifacts.length
+        ? [{ positions: artifacts, values: artifactVals, color: COLORS.artifactMarker }]
+        : [],
     },
   );
   renderInstantaneousDr();
@@ -296,6 +305,10 @@ export async function requestRoiEdit(deps, action, payload) {
   } = deps;
 
   const distimesBefore = [...(state.edit.distimes?.[payload.muIdx] || [])];
+  const isArtifact = action === "add-artifact";
+  const artifactsBefore = isArtifact
+    ? [...(state.edit.artifactTimes?.[payload.muIdx] || [])]
+    : null;
   try {
     setEditStatus("Applying ROI...", "muted");
     const data = await apiJson(`${API_BASE}/edit/${action}`, {
@@ -310,19 +323,32 @@ export async function requestRoiEdit(deps, action, payload) {
         x_end: payload.xEnd,
         y_min: payload.yMin,
         y_max: payload.yMax,
+        artifact_times: isArtifact
+          ? (state.edit.artifactTimes?.[payload.muIdx] || [])
+          : undefined,
       }),
     });
-    setEditDistimesForMu(state, payload.muIdx, data.distimes || []);
+    if (isArtifact) {
+      setEditArtifactTimesForMu(state, payload.muIdx, data.artifact_times || []);
+    } else {
+      setEditDistimesForMu(state, payload.muIdx, data.distimes || []);
+    }
     ensureEditFlagged();
     setEditFlagForMu(state, payload.muIdx, false);
     if (deps.appendEditHistory) {
       const muUid = state.edit.muUids?.[payload.muIdx] ?? `mu${payload.muIdx}`;
-      const distimesAfter = state.edit.distimes?.[payload.muIdx] || [];
-      const { added, removed } = spikesDiff(distimesBefore, distimesAfter);
-      const typeMap = { "add-spikes": "add_spikes", "delete-spikes": "delete_spikes", "delete-dr": "delete_dr" };
+      const typeMap = { "add-spikes": "add_spikes", "delete-spikes": "delete_spikes", "delete-dr": "delete_dr", "add-artifact": "add_artifact" };
       const entry = { type: typeMap[action] || action, mu_uid: muUid };
-      if (added.length) entry.spikes_added = added;
-      if (removed.length) entry.spikes_removed = removed;
+      if (isArtifact) {
+        const artifactsAfter = state.edit.artifactTimes?.[payload.muIdx] || [];
+        const { added: artifactsAdded } = spikesDiff(artifactsBefore, artifactsAfter);
+        if (artifactsAdded.length) entry.artifacts_added = artifactsAdded;
+      } else {
+        const distimesAfter = state.edit.distimes?.[payload.muIdx] || [];
+        const { added, removed } = spikesDiff(distimesBefore, distimesAfter);
+        if (added.length) entry.spikes_added = added;
+        if (removed.length) entry.spikes_removed = removed;
+      }
       deps.appendEditHistory(entry);
     }
     if (action === "delete-dr") {
@@ -393,6 +419,7 @@ export async function requestFilterUpdate(deps, mode) {
           view_start: start,
           view_end: end,
           use_peeloff: els.editPeelOffToggle?.dataset.state === "on",
+          artifact_times: state.edit.artifactTimes?.[muIdx] || [],
         }),
       },
       120000,
@@ -452,6 +479,44 @@ export function addSpikesInSelection(deps, sel) {
   const minHeight = minVal + (1 - yLowPx / height) * span;
 
   requestRoiEditFn("add-spikes", {
+    muIdx,
+    pulse,
+    xStart: start,
+    xEnd: end,
+    yMin: minHeight,
+    fs: state.edit.fsamp || 0,
+  });
+}
+
+export function addArtifactInSelection(deps, sel) {
+  const {
+    state,
+    els,
+    getRawPulse,
+    backupEditMu,
+    getPulseViewMeta,
+    getCanvasPlotMetrics,
+    requestRoiEditFn,
+  } = deps;
+
+  const muIdx = state.edit.currentMu ?? 0;
+  const pulse = getRawPulse(muIdx);
+  if (!pulse.length) return;
+  backupEditMu();
+  const { s, e, minVal, span } = getPulseViewMeta();
+  const start = Math.max(s, Math.min(e, sel.start ?? sel[0]));
+  const end = Math.max(start + 1, Math.min(e, sel.end ?? sel[1]));
+  const canvas = els.editPulseCanvas;
+  const metrics = canvas
+    ? getCanvasPlotMetrics(canvas, true)
+    : { plotHeight: 1 };
+  const height = metrics.plotHeight || 1;
+  const y1 = Math.max(0, Math.min(height, sel.yMin ?? 0));
+  const y2 = Math.max(0, Math.min(height, sel.yMax ?? height));
+  const yLowPx = Math.max(y1, y2);
+  const minHeight = minVal + (1 - yLowPx / height) * span;
+
+  requestRoiEditFn("add-artifact", {
     muIdx,
     pulse,
     xStart: start,
@@ -651,6 +716,7 @@ export async function removeDuplicateMus(deps) {
     setEditMuGridIndex(state, (state.edit.muGridIndex || []).filter((_, i) => keptSet.has(i)));
     setEditFlaggedArray(state, (state.edit.flagged || []).filter((_, i) => keptSet.has(i)));
     setEditMuUids(state, (state.edit.muUids || []).filter((_, i) => keptSet.has(i)));
+    setEditArtifactTimes(state, (state.edit.artifactTimes || []).filter((_, i) => keptSet.has(i)));
 
     const removedCount = data.removed_count || (distimes.length - keptIdx.length);
     if (deps.appendEditHistory) {
@@ -706,10 +772,16 @@ export function duplicateMu(deps) {
   const newIdx = state.edit.distimes.length;
   state.edit.distimes.push([...(distimes || [])]);
   state.edit.pulseTrains.push([...(pulse || [])]);
+  if (!state.edit.originalDistimes) state.edit.originalDistimes = [];
+  state.edit.originalDistimes.push([...(distimes || [])]);
+  if (!state.edit.originalPulseTrains) state.edit.originalPulseTrains = [];
+  state.edit.originalPulseTrains.push([...(pulse || [])]);
   state.edit.muGridIndex.push(gridIdx);
   ensureEditFlagged();
   state.edit.flagged.push(false);
   state.edit.muUids.push(newUid);
+  if (!state.edit.artifactTimes) state.edit.artifactTimes = [];
+  state.edit.artifactTimes.push([]);
 
   if (deps.appendEditHistory) {
     const sourceUid = state.edit.muUids?.[muIdx] ?? `mu${muIdx}`;
@@ -779,6 +851,7 @@ export function resetCurrentMuEdits(deps) {
   const baseline = state.edit.originalDistimes?.[muIdx];
   if (!baseline) return;
   setEditDistimesForMu(state, muIdx, baseline);
+  setEditArtifactTimesForMu(state, muIdx, []);
   if (state.edit.originalPulseTrains?.[muIdx]) {
     setEditPulseTrainForMu(state, muIdx, state.edit.originalPulseTrains[muIdx]);
   }
@@ -802,6 +875,7 @@ export function bindEditCanvas(deps) {
     renderEditExplorer,
     setEditStatus,
     addSpikesInSelection,
+    addArtifactInSelection,
     deleteSpikesInSelection,
     setEditMode,
   } = deps;
@@ -872,6 +946,10 @@ export function bindEditCanvas(deps) {
         setEditStatus("Drag a box to add spikes", "muted");
         return;
       }
+      if (state.edit.mode === "add_artifact") {
+        setEditStatus("Drag a box to mark an artifact", "muted");
+        return;
+      }
       if (state.edit.mode === "delete_spikes") {
         const windowSel = {
           ...sel,
@@ -885,6 +963,12 @@ export function bindEditCanvas(deps) {
 
     if (state.edit.mode === "add") {
       addSpikesInSelection(sel);
+      setEditMode(null);
+      setEditPulseDraftSelection(state, null);
+      return;
+    }
+    if (state.edit.mode === "add_artifact") {
+      addArtifactInSelection?.(sel);
       setEditMode(null);
       setEditPulseDraftSelection(state, null);
       return;
@@ -1044,6 +1128,7 @@ export async function saveEditedFile(deps) {
     parameters: state.edit.parameters,
     muscle_names: muscleNames,
     edit_history: state.edit.editHistory || [],
+    artifact_times: state.edit.artifactTimes || [],
     entity_label: entityLabel,
     file_label: getSuggestedNpzName(
       state.edit.filename || "decomposition",
@@ -1192,6 +1277,7 @@ export async function loadDecompositionForEdit(deps, file, filepath = null) {
         : generateMuUids(state.edit.muGridIndex),
     );
     setEditHistory(state, Array.isArray(data.edit_history) ? data.edit_history : []);
+    setEditArtifactTimes(state, Array.isArray(data.artifact_times) ? data.artifact_times : []);
     setEditFsamp(state, data.fsamp);
     setEditParameters(state, data.parameters || {});
     setEditTotalSamples(

@@ -204,6 +204,29 @@ export function drawSeries(
     });
   }
 
+  if (options.extraMarkers && options.extraMarkers.length) {
+    options.extraMarkers.forEach(({ positions, values, color }) => {
+      if (!positions || !positions.length) return;
+      ctx.fillStyle = color || COLORS.secondary;
+      positions.forEach((m, idx) => {
+        if (m < clampedStart || m >= clampedEnd) return;
+        const relIdx = m - clampedStart;
+        const x = Math.min(
+          padding.left + plotWidth,
+          padding.left + (relIdx / Math.max(1, sliced.length - 1)) * plotWidth,
+        );
+        const val = values && values.length ? values[idx] : sliced[relIdx];
+        const y = toCanvasY(val);
+        ctx.beginPath();
+        ctx.arc(x, y, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = "rgba(0,0,0,0.4)";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      });
+    });
+  }
+
   if (selections && selections.length && totalSamples && !viewRange) {
     selections.forEach((sel) => {
       const startX = padding.left + (sel.start / totalSamples) * plotWidth;

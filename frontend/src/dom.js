@@ -57,6 +57,7 @@ export const els = {
   editUpdateBtn: document.getElementById("editUpdateBtn"),
   editPeelOffToggle: document.getElementById("editPeelOffToggle"),
   editAddBtn: document.getElementById("editAddBtn"),
+  editAddArtifactBtn: document.getElementById("editAddArtifactBtn"),
   editDeleteSpikeBtn: document.getElementById("editDeleteSpikeBtn"),
   editOutliersBtn: document.getElementById("editOutliersBtn"),
   editFlagBtn: document.getElementById("editFlagBtn"),

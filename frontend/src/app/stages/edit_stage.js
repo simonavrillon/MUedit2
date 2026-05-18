@@ -17,6 +17,7 @@ import {
   requestRoiEdit as requestRoiEditFeature,
   requestFilterUpdate as requestFilterUpdateFeature,
   addSpikesInSelection as addSpikesInSelectionFeature,
+  addArtifactInSelection as addArtifactInSelectionFeature,
   deleteSpikesInSelection as deleteSpikesInSelectionFeature,
   deleteDrInSelection as deleteDrInSelectionFeature,
   removeOutliers as removeOutliersFeature,
@@ -249,6 +250,21 @@ export function createEditStageService(deps) {
     );
   }
 
+  function addArtifactInSelection(sel) {
+    return addArtifactInSelectionFeature(
+      {
+        state,
+        els,
+        getRawPulse,
+        backupEditMu,
+        getPulseViewMeta,
+        getCanvasPlotMetrics,
+        requestRoiEditFn: requestRoiEdit,
+      },
+      sel,
+    );
+  }
+
   function deleteSpikesInSelection(sel) {
     return deleteSpikesInSelectionFeature(
       {
@@ -350,6 +366,7 @@ export function createEditStageService(deps) {
       renderEditExplorer,
       setEditStatus,
       addSpikesInSelection,
+      addArtifactInSelection,
       deleteSpikesInSelection,
       setEditMode,
     });
@@ -433,6 +450,7 @@ export function createEditStageService(deps) {
     requestFilterUpdate,
     updateMuFilter,
     addSpikesInSelection,
+    addArtifactInSelection,
     deleteSpikesInSelection,
     deleteDrInSelection,
     removeOutliers,

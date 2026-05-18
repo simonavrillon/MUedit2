@@ -32,6 +32,7 @@ from muedit.decomp.signal_io import (
 )
 from muedit.decomp.algorithm import rem_duplicates
 from muedit.editing import (
+    add_artifact_in_roi,
     add_spikes_in_roi,
     delete_high_discharge_rate_spikes_in_roi,
     delete_spikes_in_roi,
@@ -191,8 +192,11 @@ def _save_editlog(
     editlog_path: Path,
     mu_uids: list[str],
     edit_history: list[dict[str, Any]],
+    artifact_times: list[list[int]] | None = None,
 ) -> None:
-    payload = {"mu_uids": mu_uids, "history": edit_history}
+    payload: dict[str, Any] = {"mu_uids": mu_uids, "history": edit_history}
+    if artifact_times:
+        payload["artifact_times"] = artifact_times
     with editlog_path.open("w", encoding="utf-8") as fh:
         json.dump(payload, fh, indent=2)
 
@@ -298,6 +302,8 @@ def load_decomposition_from_path(filepath: str) -> dict[str, Any]:
                 loaded["mu_uids"] = editlog["mu_uids"]
             if isinstance(editlog.get("history"), list):
                 loaded["edit_history"] = editlog["history"]
+            if isinstance(editlog.get("artifact_times"), list):
+                loaded["artifact_times"] = editlog["artifact_times"]
         except (OSError, ValueError, KeyError):
             pass  # best-effort; missing or corrupt editlog is non-fatal
 
@@ -388,6 +394,12 @@ def save_edits(payload: dict[str, Any]):
         else _generate_mu_uids(mu_grid_index)
     )
     edit_history: list[dict[str, Any]] = list(payload.get("edit_history") or [])
+    artifact_times_raw = payload.get("artifact_times") or []
+    artifact_times_all: list[list[int]] = [
+        [int(x) for x in row if isinstance(x, (int, float))]
+        for row in artifact_times_raw
+        if isinstance(row, (list, tuple))
+    ]
 
     remove_flagged = bool(payload.get("remove_flagged", True))
     remove_duplicates = bool(payload.get("remove_duplicates", True))
@@ -446,7 +458,7 @@ def save_edits(payload: dict[str, Any]):
         parameters,
         total_samples,
     )
-    _save_editlog(out_path.with_suffix(".json"), mu_uids, edit_history)
+    _save_editlog(out_path.with_suffix(".json"), mu_uids, edit_history, artifact_times_all or None)
     return make_json_safe({"saved": True, "path": str(out_path)})
 
 
@@ -540,6 +552,9 @@ def update_filter(payload: dict[str, Any]) -> dict[str, Any]:
                 elif cell_arr.size == n_ch:
                     emg_mask = np.asarray(cell_arr != 0, dtype=int)
 
+    artifact_times_raw = payload.get("artifact_times") or []
+    artifact_times = [int(x) for x in artifact_times_raw if isinstance(x, (int, float))]
+
     bids_emg_offset = view_start if bids_root and emg is not None else 0
     pt, updated = update_motor_unit_filter_window(
         emg,
@@ -557,6 +572,7 @@ def update_filter(payload: dict[str, Any]) -> dict[str, Any]:
         peeloff_win=peeloff_win,
         emg_offset=bids_emg_offset,
         use_peeloff=use_peeloff,
+        artifact_times=artifact_times or None,
     )
 
     pulse_train = payload.get("pulse_train")
@@ -606,6 +622,30 @@ def add_spikes(payload: dict[str, Any]) -> dict[str, Any]:
     pulse = np.array(pulse_train, dtype=float)
     updated = add_spikes_in_roi(pulse, distimes[mu_index], fsamp, x_start, x_end, y_min)
     return make_json_safe({"distimes": updated})
+
+
+def add_artifact(payload: dict[str, Any]) -> dict[str, Any]:
+    """Mark a peak in the ROI as an artifact for the selected motor unit.
+
+    The artifact peak is excluded from filter recomputation; its signal is
+    subtracted (peel-off style) when update_filter is subsequently called.
+    """
+    pulse_train = payload.get("pulse_train")
+    if pulse_train is None:
+        raise HTTPException(status_code=400, detail="pulse_train is required")
+    fsamp = as_float(payload.get("fsamp"), "fsamp", default=0.0)
+    if fsamp <= 0:
+        raise HTTPException(status_code=400, detail="fsamp is required")
+    x_start = as_int(payload.get("x_start"), "x_start", default=0)
+    x_end = as_int(payload.get("x_end"), "x_end", default=0)
+    y_min = as_float(payload.get("y_min"), "y_min", default=0.0)
+
+    artifact_times_raw = payload.get("artifact_times") or []
+    artifact_times = [int(x) for x in artifact_times_raw if isinstance(x, (int, float))]
+
+    pulse = np.array(pulse_train, dtype=float)
+    updated = add_artifact_in_roi(pulse, artifact_times, fsamp, x_start, x_end, y_min)
+    return make_json_safe({"artifact_times": updated})
 
 
 def delete_spikes(payload: dict[str, Any]) -> dict[str, Any]:

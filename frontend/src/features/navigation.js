@@ -154,6 +154,10 @@ export function handleKeyboardNavigation(deps, e) {
       );
       e.preventDefault();
       return;
+    } else if (key === "x") {
+      setEditMode("add_artifact", "Drag a box on pulse train to mark an artifact");
+      e.preventDefault();
+      return;
     } else if (e.key === "<") {
       goToMuFn("prev", "edit");
       e.preventDefault();

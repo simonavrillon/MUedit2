@@ -15,6 +15,7 @@ export const COLORS = {
   warning: "#ffd43b",
   muted: "#b7b7b7",
   muPurple: "#e7c1ff",
+  artifactMarker: "#ff8c66",
   gridEmpty: "#555",
   roiFill: "rgba(242, 167, 185, 0.08)",
   roiStroke: "rgba(242, 167, 185, 0.6)",

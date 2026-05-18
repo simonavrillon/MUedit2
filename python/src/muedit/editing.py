@@ -57,6 +57,7 @@ def _recompute_spikes_in_window(
     peeloff_win: float = 0.025,
     emg_offset: int = 0,
     use_peeloff: bool = False,
+    artifact_times: SpikeTimes | None = None,
 ) -> FilterUpdateResult:
     """Recompute motor-unit pulse train and spikes within a visible time window."""
     if emg.size == 0 or start >= end:
@@ -90,6 +91,14 @@ def _recompute_spikes_in_window(
             ]
             if local_spikes.size > 0:
                 w_sig = subtract_mu_waveforms(w_sig, local_spikes, fsamp, peeloff_win)
+
+    if artifact_times:
+        local_artifacts = np.asarray(artifact_times, dtype=int) - start
+        local_artifacts = local_artifacts[
+            (local_artifacts >= edge) & (local_artifacts < (win_len - edge))
+        ]
+        if local_artifacts.size > 0:
+            w_sig = subtract_mu_waveforms(w_sig, local_artifacts, fsamp, peeloff_win)
 
     mu_filters = np.sum(w_sig[:, spikes2], axis=1)
     norm = float(np.linalg.norm(mu_filters))
@@ -133,6 +142,7 @@ def update_motor_unit_filter_window(
     peeloff_win: float = 0.025,
     emg_offset: int = 0,
     use_peeloff: bool = False,
+    artifact_times: SpikeTimes | None = None,
 ) -> FilterUpdateResult:
     """Update a motor-unit pulse train and spikes inside a time window.
 
@@ -165,6 +175,7 @@ def update_motor_unit_filter_window(
         peeloff_win=peeloff_win,
         emg_offset=emg_offset,
         use_peeloff=use_peeloff,
+        artifact_times=artifact_times,
     )
     return pt, updated
 
@@ -186,6 +197,30 @@ def add_spikes_in_roi(
     if peaks.size == 0:
         return sorted({int(x) for x in spike_times})
     updated = list(spike_times) + peaks.astype(int).tolist()
+    return sorted({int(x) for x in updated})
+
+
+def add_artifact_in_roi(
+    pulse: np.ndarray,
+    artifact_times: SpikeTimes,
+    fsamp: float,
+    x_start: int,
+    x_end: int,
+    y_min: float,
+) -> SpikeTimes:
+    """Add an artifact peak inside a rectangular ROI.
+
+    The selected peak will be excluded from filter recomputation; its signal
+    will be subtracted (peel-off style) when updating the MU filter.
+    """
+    temp = pulse.copy()
+    mask = (np.arange(len(temp)) >= x_start) & (np.arange(len(temp)) <= x_end)
+    temp[~mask] = 0
+    distance = int(round(fsamp * 0.005))
+    peaks, _ = find_peaks(temp, height=y_min, distance=distance)
+    if peaks.size == 0:
+        return sorted({int(x) for x in artifact_times})
+    updated = list(artifact_times) + peaks.astype(int).tolist()
     return sorted({int(x) for x in updated})
 
 
