@@ -92,7 +92,7 @@ def decompose_step(
             x = w_sig.copy()
 
             for j in range(params.niter):
-                if j == 0 and params.initialization == 0:
+                if params.initialization == 0:
                     act_ind = np.sum(x, axis=0) ** 2
                     w = x[:, int(np.argmax(act_ind))]
                 else:
