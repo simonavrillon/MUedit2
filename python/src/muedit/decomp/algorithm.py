@@ -95,7 +95,7 @@ def fixed_point_alg(w, x, basis, maxiter, contrast_func):
         w = w / w_norm
 
         k += 1
-        delta[k] = abs(np.dot(w.flatten(), w_last.flatten()) - 1)
+        delta[k] = abs(abs(np.dot(w.flatten(), w_last.flatten())) - 1)
 
     return w
 
