@@ -263,12 +263,21 @@ def _load_mat73_decomp(filepath: str) -> DecompositionLoadTuple:
         if not isinstance(preview_block, dict):
             preview_block = {}
 
-        pulse_trains = _get_case_insensitive(signal, "Pulsetrain")
-        if pulse_trains is None:
-            pulse_trains = np.array([])
-        pulse_trains = _normalize_pulse_matrix(pulse_trains)
-
-        distime_raw = _get_case_insensitive(signal, "Dischargetimes")
+        # Check for edited spike trains in top-level "edition" variable
+        edition = read_root("edition")
+        if isinstance(edition, dict):
+            pulse_trains = _get_case_insensitive(edition, "Pulsetrain")
+            if pulse_trains is None:
+                pulse_trains = np.array([])
+            pulse_trains = _normalize_pulse_matrix(pulse_trains)
+            distime_raw = _get_case_insensitive(edition, "Dischargetimes")
+        else:
+            # Fall back to original decomposition
+            pulse_trains = _get_case_insensitive(signal, "Pulsetrain")
+            if pulse_trains is None:
+                pulse_trains = np.array([])
+            pulse_trains = _normalize_pulse_matrix(pulse_trains)
+            distime_raw = _get_case_insensitive(signal, "Dischargetimes")
 
         fsamp_val = _get_case_insensitive(signal, "fsamp")
         fsamp = float(fsamp_val) if fsamp_val is not None else None
@@ -388,12 +397,21 @@ def _load_mat_decomp(filepath: str) -> DecompositionLoadTuple:
     if not isinstance(preview_block, dict):
         preview_block = {}
 
-    pulse_trains = _get_case_insensitive(signal, "Pulsetrain")
-    if pulse_trains is None:
-        pulse_trains = np.array([])
-    pulse_trains = _normalize_pulse_matrix(pulse_trains)
-
-    distime_raw = _get_case_insensitive(signal, "Dischargetimes")
+    # Check for edited spike trains in "edition" variable
+    edition = mat.get("edition")
+    if isinstance(edition, dict):
+        pulse_trains = _get_case_insensitive(edition, "Pulsetrain")
+        if pulse_trains is None:
+            pulse_trains = np.array([])
+        pulse_trains = _normalize_pulse_matrix(pulse_trains)
+        distime_raw = _get_case_insensitive(edition, "Dischargetimes")
+    else:
+        # Fall back to original decomposition
+        pulse_trains = _get_case_insensitive(signal, "Pulsetrain")
+        if pulse_trains is None:
+            pulse_trains = np.array([])
+        pulse_trains = _normalize_pulse_matrix(pulse_trains)
+        distime_raw = _get_case_insensitive(signal, "Dischargetimes")
 
     fsamp_val = _get_case_insensitive(signal, "fsamp")
     fsamp = float(fsamp_val) if fsamp_val is not None else None
