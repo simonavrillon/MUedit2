@@ -18,7 +18,7 @@ from muedit.decomp.algorithm import (
     whiten_extended_signal,
 )
 from muedit.decomp.types import DecomposeStepOutput, DecompositionParameters, PreprocessStepOutput
-from muedit.utils import demean
+from muedit.signal.filters import demean
 
 logger = logging.getLogger(__name__)
 

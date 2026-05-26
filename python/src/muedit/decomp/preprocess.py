@@ -10,11 +10,11 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 
-from muedit.decomp.signal_io import clone_signal, load_signal
+from muedit.decomp.io import clone_signal, load_signal
 from muedit.decomp.types import DecompositionParameters, LoadStepOutput, PreprocessStepOutput
-from muedit.export.bids import export_bids_emg
+from muedit.io.bids import export_bids_emg
 from muedit.signal.filters import bandpass_signals, notch_signals
-from muedit.utils import format_hdemg_signal
+from muedit.signal.grid import format_hdemg_signal
 
 logger = logging.getLogger(__name__)
 

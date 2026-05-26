@@ -2,6 +2,18 @@
 
 This guide explains how to add a new raw-signal loader in MUedit.
 
+## File layout
+
+```
+python/src/muedit/io/
+  factory.py        ← registry + LoaderFactory facade (entry point for all loading)
+  loaders.py        ← thin re-exports only; do NOT add parsing logic here
+  _mat.py           ← MAT v5/v7.3 loader
+  _otb.py           ← OTB+ and OTB4 loaders
+  _bids_reader.py   ← BIDS (EDF/BDF) loader + grid-read helpers
+  bids.py           ← BIDS export + re-exports of read helpers
+```
+
 ## Current Pattern
 
 Loader dispatch is registry-based in `python/src/muedit/io/factory.py`:
@@ -13,23 +25,30 @@ Loader dispatch is registry-based in `python/src/muedit/io/factory.py`:
 
 ## Add A New Loader
 
-1. Add a parser in `python/src/muedit/io/loaders.py`.
+1. Create `python/src/muedit/io/_yourformat.py`.
    - Input: `filepath: str`
    - Return: `dict` compatible with `SignalImport.from_mapping(...)` or `SignalImport`
 
-2. Register the extension in `python/src/muedit/io/factory.py` default registry.
-   - Example: `".newfmt": load_newfmt`
+2. Re-export the loader from `python/src/muedit/io/loaders.py`:
+   ```python
+   from muedit.io._yourformat import load_yourformat
+   ```
 
-3. If needed, register dynamically:
+3. Register the extension in the default registry in `python/src/muedit/io/factory.py`:
+   ```python
+   ".newfmt": load_newfmt,
+   ```
+
+4. If needed, register dynamically instead:
 
 ```python
 from muedit.io.factory import register_loader
-from muedit.io.loaders import load_newfmt
+from muedit.io._yourformat import load_yourformat
 
-register_loader(".newfmt", load_newfmt)
+register_loader(".newfmt", load_yourformat)
 ```
 
-4. If the format should appear in the file picker, update accepted extensions in:
+5. If the format should appear in the file picker, update accepted extensions in:
    - `python/src/muedit/api/routes/dialog.py`
 
 ## Loader Output Contract

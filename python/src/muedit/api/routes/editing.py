@@ -6,7 +6,7 @@ from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 
 from muedit.api.contracts import success_payload
 from muedit.api.schemas import EditFilterPayload, EditRoiPayload, EditSavePayload, PathPayload
-from muedit.services.editing_service import (
+from muedit.api.services.editing_service import (
     add_artifact,
     add_spikes,
     delete_dr,

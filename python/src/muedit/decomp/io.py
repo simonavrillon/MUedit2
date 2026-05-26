@@ -1,4 +1,4 @@
-"""Decomposition I/O normalization helpers and serialization utilities."""
+"""Decomposition artifact I/O: loading .npz/.mat files and signal normalization."""
 
 from __future__ import annotations
 

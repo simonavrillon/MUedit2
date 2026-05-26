@@ -8,7 +8,7 @@ from fastapi import APIRouter, File, HTTPException, UploadFile
 
 from muedit.api.contracts import success_payload
 from muedit.api.schemas import PathPayload, QcWindowPayload
-from muedit.services.preview_service import build_preview, build_preview_from_path, get_qc_window
+from muedit.api.services.preview_service import build_preview, build_preview_from_path, get_qc_window
 
 router = APIRouter(prefix="/api/v1")
 

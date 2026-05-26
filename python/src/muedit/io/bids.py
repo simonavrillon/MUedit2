@@ -1,4 +1,4 @@
-"""BIDS EMG export helpers for writing dataset-compliant sidecar files."""
+"""BIDS EMG export utilities and re-exports of read helpers."""
 
 import json
 import math
@@ -8,20 +8,27 @@ from typing import Any
 
 import numpy as np
 
+from muedit.io._bids_reader import (
+    BidsGridSelection,
+    _ensure_pyedflib,
+    load_bids_emg_grid,
+    resolve_bids_channels_tsv,
+    resolve_bids_emg_path,
+    select_grid_channels,
+)
 
-def _ensure_pyedflib():
-    """Import and return ``pyedflib`` with a clear install hint on failure."""
-    try:
-        import pyedflib
-    except ImportError as exc:
-        raise ImportError(
-            "pyedflib is required for BIDS EMG (EDF/BDF). "
-            "Install it with `pip install pyedflib`."
-        ) from exc
-    return pyedflib
+__all__ = [
+    "export_bids_emg",
+    "build_entities",
+    "BidsGridSelection",
+    "load_bids_emg_grid",
+    "resolve_bids_channels_tsv",
+    "resolve_bids_emg_path",
+    "select_grid_channels",
+]
 
 
-def _build_entities(
+def build_entities(
     subject: str,
     task: str,
     run: str | None = None,
@@ -118,7 +125,7 @@ def export_bids_emg(
     digital_min = -8388608 if use_bdf else -32768
     digital_max = 8388607 if use_bdf else 32767
 
-    entities = _build_entities(subject, task, run, session, acquisition, recording)
+    entities = build_entities(subject, task, run, session, acquisition, recording)
     base_dir = bids_root / f"sub-{subject}"
     if session:
         base_dir = base_dir / f"ses-{session}"
@@ -412,3 +419,4 @@ def export_bids_emg(
         "electrodes_tsv": electrodes_tsv,
         "coordsystem_json": coordsys_json,
     }
+

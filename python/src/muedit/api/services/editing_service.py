@@ -24,14 +24,14 @@ from muedit.api.common import (
     safe_unlink,
     save_upload_to_temp,
 )
-from muedit.decomp.signal_io import (
+from muedit.decomp.io import (
     build_pulse_trains_from_distimes,
     load_decomposition_file,
     load_decomposition_signal_context,
     normalize_distimes,
 )
 from muedit.decomp.algorithm import rem_duplicates
-from muedit.editing import (
+from muedit.editing.operations import (
     add_artifact_in_roi,
     add_spikes_in_roi,
     delete_high_discharge_rate_spikes_in_roi,
@@ -39,7 +39,7 @@ from muedit.editing import (
     remove_discharge_rate_outliers,
     update_motor_unit_filter_window,
 )
-from muedit.utils import format_hdemg_signal
+from muedit.signal.grid import format_hdemg_signal
 
 
 def _infer_bids_root_from_decomp_path(filepath: str) -> Path | None:

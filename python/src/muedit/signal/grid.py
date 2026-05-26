@@ -1,15 +1,10 @@
-"""General-purpose numerical helpers shared across decomposition modules."""
+"""Grid layout inference and basic signal helpers."""
 
 import logging
 
 import numpy as np
 
 logger = logging.getLogger(__name__)
-
-
-def demean(signal):
-    """Remove per-channel DC offset from a 2D signal array."""
-    return signal - np.mean(signal, axis=1, keepdims=True)
 
 
 def format_hdemg_signal(grid_names, discard_overrides=None):

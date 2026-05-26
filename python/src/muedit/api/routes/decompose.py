@@ -7,7 +7,7 @@ from fastapi.responses import StreamingResponse
 
 from muedit.api.common import parse_discard_channels
 from muedit.api.contracts import success_payload
-from muedit.services.decompose_service import (
+from muedit.api.services.decompose_service import (
     cleanup_temp_file,
     decomposition_event_stream,
     fetch_decompose_preview_binary,

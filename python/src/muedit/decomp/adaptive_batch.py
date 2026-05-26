@@ -280,7 +280,7 @@ def adaptive_batch_process(
         )
         return pulse_t, fallback_distime, {}
 
-    from muedit.utils import demean
+    from muedit.signal.filters import demean
 
     total_mus = sum(f.shape[1] for f in mu_filters_by_window.values() if f.size > 0)
     if total_mus == 0:

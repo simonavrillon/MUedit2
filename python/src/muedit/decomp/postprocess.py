@@ -19,7 +19,7 @@ from muedit.decomp.types import (
     PostprocessStepOutput,
     PreprocessStepOutput,
 )
-from muedit.export.bids import _build_entities
+from muedit.io.bids import build_entities
 from muedit.models import DecompositionExport, DecompositionSignalExport
 
 logger = logging.getLogger(__name__)
@@ -271,7 +271,7 @@ def postprocess_step(
     if bids_root and pulse_t.size > 0:
         subj = (bids_entities or {}).get("subject", "01")
         sess = (bids_entities or {}).get("session")
-        entity_label = _build_entities(
+        entity_label = build_entities(
             subject=subj,
             task=(bids_entities or {}).get("task", "task"),
             run=(bids_entities or {}).get("run"),

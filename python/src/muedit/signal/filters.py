@@ -1,14 +1,8 @@
 """Signal filtering utilities for HD-EMG preprocessing.
 
-Two filters are provided:
-
-* :func:`bandpass_signals` — 2nd-order Butterworth bandpass filter applied
-  with zero-phase ``filtfilt``.  Two frequency bands are supported depending on
-  the electrode type (surface vs. intramuscular).
-
-* :func:`notch_signals` — FFT-based notch filter that identifies and removes
-  narrow-band power-line interference without requiring knowledge of the exact
-  line frequency.
+* :func:`demean` — subtract per-channel DC offset.
+* :func:`bandpass_signals` — zero-phase Butterworth bandpass (surface or intramuscular bands).
+* :func:`notch_signals` — FFT-based notch that suppresses mains harmonics automatically.
 """
 
 from __future__ import annotations
@@ -17,19 +11,13 @@ import numpy as np
 from scipy.signal import butter, filtfilt
 
 
+def demean(signal: np.ndarray) -> np.ndarray:
+    """Remove per-channel DC offset from a 2D signal array."""
+    return signal - np.mean(signal, axis=1, keepdims=True)
+
+
 def bandpass_signals(signal: np.ndarray, fsamp: float, emg_type: int = 1) -> np.ndarray:
-    """Apply a zero-phase Butterworth bandpass filter to multi-channel EMG.
-
-    Args:
-        signal: Array of shape ``(n_channels, n_samples)``.
-        fsamp: Sampling frequency in Hz.
-        emg_type: Electrode type selector.
-            ``1`` (default) → surface EMG, 20–500 Hz, 2nd-order.
-            ``2`` → intramuscular / fine-wire EMG, 100–4400 Hz, 3rd-order.
-
-    Returns:
-        Filtered signal array, same shape as *signal*.
-    """
+    """Zero-phase Butterworth bandpass: emg_type=1 → 20–500 Hz (surface), 2 → 100–4400 Hz (intramuscular)."""
     if emg_type == 1:
         b, a = butter(2, [20, 500], btype="bandpass", fs=fsamp)
     else:
@@ -39,24 +27,7 @@ def bandpass_signals(signal: np.ndarray, fsamp: float, emg_type: int = 1) -> np.
 
 
 def notch_signals(signal: np.ndarray, fsamp: float) -> np.ndarray:
-    """Remove narrow-band power-line interference using an FFT-based notch.
-
-    The algorithm scans the frequency spectrum in 1-second windows and flags
-    frequency bins whose amplitude exceeds ``median + 5 * std`` within that
-    window.  Flagged bins (± half a 4 Hz bandwidth) are zeroed in the complex
-    spectrum before transforming back to the time domain.  This approach
-    automatically suppresses the fundamental and all harmonics of mains hum
-    without needing to specify the line frequency explicitly.
-
-    Args:
-        signal: Array of shape ``(n_channels, n_samples)``.  An empty array
-            is returned unchanged.
-        fsamp: Sampling frequency in Hz; used to compute the per-window width
-            and the frequency resolution of flagged bins.
-
-    Returns:
-        Filtered signal array, same shape as *signal*.
-    """
+    """FFT-based notch: flags bins exceeding median+5·std in 1-second windows and zeros them, suppressing mains harmonics without knowing the line frequency."""
     if signal.size == 0:
         return signal
 

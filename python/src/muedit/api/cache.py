@@ -10,7 +10,7 @@ from typing import Any
 
 import numpy as np
 
-from muedit.export.io import load_bids_emg_grid
+from muedit.io.bids import load_bids_emg_grid
 from muedit.models import SignalImport
 
 UPLOAD_CHUNK_SIZE = 1024 * 1024

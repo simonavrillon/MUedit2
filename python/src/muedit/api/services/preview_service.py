@@ -20,9 +20,9 @@ from muedit.api.cache import (
 )
 from muedit.api.common import as_float, as_int, make_json_safe, safe_unlink, save_upload_to_temp
 from muedit.decomp.postprocess import downsample_vector
-from muedit.decomp.signal_io import clone_signal, load_signal
+from muedit.decomp.io import clone_signal, load_signal
 from muedit.signal.filters import bandpass_signals
-from muedit.utils import format_hdemg_signal
+from muedit.signal.grid import format_hdemg_signal
 
 
 def _encode_qc_raw_f32(
