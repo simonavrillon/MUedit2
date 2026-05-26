@@ -117,7 +117,9 @@ def _recompute_spikes_in_window(
 
     if peaks.size <= 2:
         return None, spike_times
-    centroids, labels = kmeans2(pt[peaks], 2, iter=10, minit="++", missing="raise", seed=0)
+    centroids, labels = kmeans2(pt[peaks], 2, iter=10, minit="++", missing="warn", seed=0)
+    if len(np.unique(labels)) < 2:
+        return None, spike_times
     idx2 = int(np.argmax(centroids))
     spikes_new = peaks[labels == idx2]
     spikes_new = _remove_high_amplitude_outliers(pt, spikes_new)

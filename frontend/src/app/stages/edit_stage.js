@@ -76,6 +76,7 @@ export function createEditStageService(deps) {
 
   function backupEditMu() {
     backupEditMuFeature(state);
+    refreshEditModeButtons();
   }
 
   function recomputeEditDirty() {

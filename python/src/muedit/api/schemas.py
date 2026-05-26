@@ -69,7 +69,7 @@ class EditFilterPayload(BaseModel):
 
 
 class EditRoiPayload(BaseModel):
-    """Typed request body for ROI edit actions (add/delete spikes, delete-dr)."""
+    """Typed request body for ROI edit actions (add/delete spikes, delete-dr, add-artifact)."""
 
     distimes: list[list[int]]
     mu_index: int = 0
@@ -79,3 +79,31 @@ class EditRoiPayload(BaseModel):
     x_end: int = 0
     y_min: float | None = None
     y_max: float | None = None
+    artifact_times: list[int] | None = None
+
+
+class EditOutliersPayload(BaseModel):
+    """Typed request body for discharge-rate outlier removal."""
+
+    distimes: list[list[int]]
+    mu_index: int = 0
+    pulse_train: list[float] | None = None
+    fsamp: float | None = None
+
+
+class EditDeduplicatePayload(BaseModel):
+    """Typed request body for duplicate motor-unit removal."""
+
+    distimes: list[list[int]]
+    fsamp: float | None = None
+    total_samples: int = 0
+    parameters: dict[str, Any] | None = None
+    mu_grid_index: list[int] | None = None
+    pulse_trains: list[list[float]] | None = None
+
+
+class EditFlagPayload(BaseModel):
+    """Typed request body for flagging a motor unit for deletion."""
+
+    distimes: list[list[int]]
+    mu_index: int = 0

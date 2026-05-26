@@ -362,8 +362,11 @@ def save_edits(payload: dict[str, Any]):
 
     fsamp_raw = payload.get("fsamp")
     fsamp = float(fsamp_raw) if fsamp_raw is not None else None
-    grid_names = payload.get("grid_names") or ["Grid 1"]
     mu_grid_index = _normalize_mu_grid_index(payload.get("mu_grid_index"), len(distimes))
+    expected_grid_count = (max(mu_grid_index) + 1) if mu_grid_index else 1
+    grid_names = _pad_grid_names(
+        payload.get("grid_names") or [], expected_grid_count, []
+    )
     parameters = payload.get("parameters") or {}
     muscle_names = _normalize_muscle_names(payload)
 

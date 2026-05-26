@@ -134,6 +134,7 @@ export function restoreEditBackup(deps) {
   }
   const muUid = state.edit.muUids?.[muIdx] ?? `mu${muIdx}`;
   popLastEditHistoryEntryForMu(state, muUid);
+  setEditBackup(state, null);
   clearAllEditSelections(state);
   recomputeEditDirty();
   renderEditExplorer();
@@ -825,9 +826,6 @@ export async function flagMuForDeletion(deps) {
         mu_index: muIdx,
       }),
     });
-    if (Array.isArray(data.distimes)) {
-      setEditDistimesForMu(state, muIdx, data.distimes);
-    }
     ensureEditFlagged();
     setEditFlagForMu(state, muIdx, data.flagged !== false);
     if (deps.appendEditHistory) {
@@ -859,6 +857,7 @@ export function resetCurrentMuEdits(deps) {
   setEditFlagForMu(state, muIdx, false);
   const muUid = state.edit.muUids?.[muIdx] ?? `mu${muIdx}`;
   clearEditHistoryForMu(state, muUid);
+  setEditBackup(state, null);
   clearAllEditSelections(state);
   recomputeEditDirty();
   renderEditExplorer();

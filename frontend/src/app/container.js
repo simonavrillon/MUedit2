@@ -237,6 +237,7 @@ function refreshEditModeButtons() {
   ui.setEditActionBusy(els.editAddBtn, state.edit.mode === "add");
   ui.setEditActionBusy(els.editAddArtifactBtn, state.edit.mode === "add_artifact");
   ui.setEditActionBusy(els.editDeleteSpikeBtn, state.edit.mode === "delete_spikes");
+  if (els.editUndoBtn) els.editUndoBtn.disabled = !state.edit.backup;
 }
 
 function setEditModeWithStatus(mode, message) {

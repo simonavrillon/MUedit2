@@ -5,7 +5,15 @@ from __future__ import annotations
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 
 from muedit.api.contracts import success_payload
-from muedit.api.schemas import EditFilterPayload, EditRoiPayload, EditSavePayload, PathPayload
+from muedit.api.schemas import (
+    EditDeduplicatePayload,
+    EditFilterPayload,
+    EditFlagPayload,
+    EditOutliersPayload,
+    EditRoiPayload,
+    EditSavePayload,
+    PathPayload,
+)
 from muedit.api.services.editing_service import (
     add_artifact,
     add_spikes,
@@ -35,7 +43,7 @@ async def load_decomposition_endpoint(request: Request, file: UploadFile = File(
 
 
 @router.post("/edit/load-by-path")
-def load_decomposition_by_path_endpoint(request: Request, payload: PathPayload):
+async def load_decomposition_by_path_endpoint(request: Request, payload: PathPayload):
     """Load a decomposition from an absolute/local path for edit mode."""
     path = payload.path
     if not path:
@@ -66,9 +74,9 @@ async def add_spikes_endpoint(payload: EditRoiPayload):
 
 
 @router.post("/edit/add-artifact")
-async def add_artifact_endpoint(payload: dict):
+async def add_artifact_endpoint(payload: EditRoiPayload):
     """Mark a peak in the ROI as an artifact; it will be excluded from filter updates."""
-    return success_payload(add_artifact(payload))
+    return success_payload(add_artifact(payload.model_dump(exclude_none=True)))
 
 
 @router.post("/edit/delete-spikes")
@@ -84,18 +92,18 @@ async def delete_dr_endpoint(payload: EditRoiPayload):
 
 
 @router.post("/edit/remove-outliers")
-async def remove_outliers_endpoint(payload: dict):
+async def remove_outliers_endpoint(payload: EditOutliersPayload):
     """Apply discharge-rate outlier removal for the selected motor unit."""
-    return success_payload(remove_outliers(payload))
+    return success_payload(remove_outliers(payload.model_dump(exclude_none=True)))
 
 
 @router.post("/edit/remove-duplicates")
-async def remove_duplicates_endpoint(payload: dict):
+async def remove_duplicates_endpoint(payload: EditDeduplicatePayload):
     """Remove duplicate motor units using lag-aware spike-train overlap."""
-    return success_payload(remove_duplicates_service(payload))
+    return success_payload(remove_duplicates_service(payload.model_dump(exclude_none=True)))
 
 
 @router.post("/edit/flag-mu")
-async def flag_mu_endpoint(payload: dict):
+async def flag_mu_endpoint(payload: EditFlagPayload):
     """Flag or unflag a motor unit for deletion/review in edit workflow."""
-    return success_payload(flag_mu(payload))
+    return success_payload(flag_mu(payload.model_dump(exclude_none=True)))
