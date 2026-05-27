@@ -322,6 +322,8 @@ def update_filter(payload: dict[str, Any]) -> dict[str, Any]:
     if peeloff_win <= 0:
         peeloff_win = 0.025
     use_peeloff = bool(payload.get("use_peeloff", False))
+    flagged_raw = payload.get("flagged") or []
+    flagged = [bool(f) for f in flagged_raw] if flagged_raw else []
 
     view_start = as_int(payload.get("view_start"), "view_start", default=0)
     view_end = as_int(payload.get("view_end"), "view_end", default=0)
@@ -405,7 +407,9 @@ def update_filter(payload: dict[str, Any]) -> dict[str, Any]:
         peeloff_spike_times=[
             distimes[i]
             for i in range(len(distimes))
-            if i != mu_index and mu_grid_index[i] == grid_index
+            if i != mu_index
+            and mu_grid_index[i] == grid_index
+            and not (i < len(flagged) and flagged[i])
         ],
         peeloff_win=peeloff_win,
         emg_offset=bids_emg_offset,

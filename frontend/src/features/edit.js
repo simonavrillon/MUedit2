@@ -420,6 +420,7 @@ export async function requestFilterUpdate(deps, mode) {
           view_start: start,
           view_end: end,
           use_peeloff: els.editPeelOffToggle?.dataset.state === "on",
+          flagged: state.edit.flagged || [],
           artifact_times: state.edit.artifactTimes?.[muIdx] || [],
         }),
       },
