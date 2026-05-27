@@ -5,10 +5,9 @@ from __future__ import annotations
 from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import StreamingResponse
 
-from muedit.api.common import parse_discard_channels
+from muedit.api.common import parse_discard_channels, safe_unlink
 from muedit.api.contracts import success_payload
 from muedit.api.services.decompose_service import (
-    cleanup_temp_file,
     decomposition_event_stream,
     fetch_decompose_preview_binary,
     parse_stream_options,
@@ -48,7 +47,8 @@ async def decompose(
             )
         )
     finally:
-        cleanup_temp_file(tmp_path)
+        if tmp_path:
+            safe_unlink(tmp_path)
 
 
 @router.post("/decompose_stream")
@@ -98,7 +98,7 @@ async def decompose_stream(
         file_label=file_label,
         include_full_preview=full_preview,
         preloaded_signal=preloaded_signal,
-        cleanup=cleanup_temp_file,
+        cleanup=safe_unlink,
         binary_preview=wants_binary_preview,
     )
     return StreamingResponse(generator, media_type="application/x-ndjson")

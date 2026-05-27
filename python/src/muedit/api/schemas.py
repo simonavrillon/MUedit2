@@ -47,6 +47,7 @@ class EditSavePayload(BaseModel):
     file_label: str | None = None
     entity_label: str | None = None
     edit_history: list[dict[str, Any]] | None = None
+    artifact_times: list[list[int]] | None = None
 
 
 class EditFilterPayload(BaseModel):
@@ -65,6 +66,7 @@ class EditFilterPayload(BaseModel):
     view_end: int = 0
     nbextchan: int = 1000
     peel_off_win: float = 0.025
+    use_peeloff: bool = False
     artifact_times: list[int] | None = None
 
 

@@ -122,18 +122,37 @@ def _build_preview_core(filepath: str) -> dict[str, Any]:
     )
 
 
+def _decomp_artifact_error(field: str, exc: Exception) -> HTTPException:
+    return HTTPException(
+        status_code=400,
+        detail={
+            "field": field,
+            "reason": "This MAT file is a decomposition artifact; load it in edit mode.",
+        },
+    )
+
+
 async def build_preview(file: UploadFile) -> dict[str, Any]:
     """Build preview payload from uploaded file contents."""
     tmp_path = await save_upload_to_temp(file)
     try:
         return _build_preview_core(tmp_path)
+    except (OSError, ValueError) as exc:
+        if "contains decomposition fields" in str(exc):
+            raise _decomp_artifact_error("file", exc) from exc
+        raise
     finally:
         safe_unlink(tmp_path)
 
 
 def build_preview_from_path(filepath: str) -> dict[str, Any]:
     """Build preview payload from a file path already available on disk."""
-    return _build_preview_core(filepath)
+    try:
+        return _build_preview_core(filepath)
+    except (OSError, ValueError) as exc:
+        if "contains decomposition fields" in str(exc):
+            raise _decomp_artifact_error("path", exc) from exc
+        raise
 
 
 def get_qc_window(payload: dict[str, Any]) -> Any:

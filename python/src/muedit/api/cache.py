@@ -10,7 +10,6 @@ from typing import Any
 
 import numpy as np
 
-from muedit.io.bids import load_bids_emg_grid
 from muedit.models import SignalImport
 
 UPLOAD_CHUNK_SIZE = 1024 * 1024
@@ -186,20 +185,6 @@ def _moving_average_ms(series: np.ndarray, fsamp: float, window_ms: float) -> np
     return np.convolve(x, kernel, mode="same").astype(np.float32)
 
 
-def _load_bids_grid(
-    bids_root: Path,
-    entity_label: str,
-    grid_index: int,
-    view_start: int = 0,
-    view_end: int | None = None,
-) -> tuple[np.ndarray, float, np.ndarray]:
-    """Load BIDS EMG grid for a specific sample window to avoid reading the full recording."""
-    read_n = (view_end - view_start) if view_end is not None and view_end > view_start else None
-    emg, fsamp, emg_mask = load_bids_emg_grid(
-        bids_root, entity_label, grid_index, read_start=view_start, read_n=read_n
-    )
-    return emg.copy(), float(fsamp), np.asarray(emg_mask, dtype=int).copy()
-
 
 def _store_decomp_preview_binary(payload: bytes) -> str:
     """Store binary decompose-preview payload and return short-lived token."""
@@ -281,4 +266,10 @@ def _get_edit_signal_context_by_label(file_label: str | None) -> dict[str, Any] 
     # that function acquires _CACHE_LOCK itself, so holding it here would
     # deadlock. The token may be evicted between the two calls, which is safe
     # because _get_edit_signal_context returns None for a missing entry.
-    return _get_edit_signal_context(token)
+    result = _get_edit_signal_context(token)
+    if result is None and token is not None:
+        # Token was capacity-evicted without cleaning the label index; prune it now.
+        with _CACHE_LOCK:
+            if _EDIT_SIGNAL_LABEL_INDEX.get(label) == token:
+                _EDIT_SIGNAL_LABEL_INDEX.pop(label, None)
+    return result

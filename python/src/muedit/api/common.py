@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import struct
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -198,6 +199,21 @@ def make_json_safe(value: Any) -> Any:
 json_default = make_json_safe
 
 
+def _pack_json_f32_payload(magic: bytes, meta: dict[str, Any], *arrays: np.ndarray) -> bytes:
+    """Pack versioned binary payload: magic(4) + v1 + JSON-meta + float32 arrays.
+
+    Layout: magic | version<I> | meta_len<I> | (rows<I> cols<I>)* | meta_bytes | arrays*
+    """
+    meta_bytes = json.dumps(make_json_safe(meta), separators=(",", ":")).encode("utf-8")
+    parts: list[bytes] = [magic, struct.pack("<I", 1), struct.pack("<I", len(meta_bytes))]
+    for arr in arrays:
+        parts += [struct.pack("<I", arr.shape[0]), struct.pack("<I", arr.shape[1])]
+    parts.append(meta_bytes)
+    for arr in arrays:
+        parts.append(arr.astype("<f4", copy=False).tobytes(order="C"))
+    return b"".join(parts)
+
+
 async def save_upload_to_temp(file: UploadFile) -> str:
     """Persist uploaded file to a temporary path and return that path."""
     extension = os.path.splitext(file.filename or "")[1]
@@ -208,6 +224,7 @@ async def save_upload_to_temp(file: UploadFile) -> str:
                 break
             tmp.write(chunk)
     return tmp.name
+
 
 
 def parse_entity_label(file_label: str) -> str:

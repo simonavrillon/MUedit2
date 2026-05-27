@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, UploadFile
 
 from muedit.api.contracts import success_payload
 from muedit.api.schemas import PathPayload, QcWindowPayload
@@ -22,35 +22,13 @@ def health() -> dict[str, Any]:
 @router.post("/preview")
 async def preview(file: UploadFile = File(...)):
     """Build downsampled preview/QC metadata from an uploaded signal file."""
-    try:
-        return success_payload(await build_preview(file))
-    except (OSError, ValueError) as exc:
-        if "contains decomposition fields" in str(exc):
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "field": "file",
-                    "reason": "This MAT file is a decomposition artifact; load it in edit mode.",
-                },
-            ) from exc
-        raise
+    return success_payload(await build_preview(file))
 
 
 @router.post("/preview-by-path")
 def preview_by_path(payload: PathPayload):
     """Build preview data from an existing file path on disk."""
-    try:
-        return success_payload(build_preview_from_path(payload.path))
-    except (OSError, ValueError) as exc:
-        if "contains decomposition fields" in str(exc):
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "field": "path",
-                    "reason": "This MAT file is a decomposition artifact; load it in edit mode.",
-                },
-            ) from exc
-        raise
+    return success_payload(build_preview_from_path(payload.path))
 
 
 @router.post("/qc/window")
