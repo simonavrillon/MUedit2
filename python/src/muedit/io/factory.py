@@ -155,10 +155,22 @@ class LoaderFactory:
         return _as_signal_import(loader_fn(str(filepath)))
 
 
+def load_signal(filepath: str) -> dict[str, Any]:
+    """Load a raw signal file and normalize it to the internal mapping shape."""
+    return LoaderFactory.load_signal(filepath).to_dict()
+
+
+def clone_signal(signal: dict[str, Any]) -> dict[str, Any]:
+    """Deep-copy a signal mapping through validated model serialization."""
+    return SignalImport.from_mapping(signal).clone().to_dict()
+
+
 __all__ = [
     "LoaderFactory",
     "LoaderFn",
+    "clone_signal",
     "get_loader",
+    "load_signal",
     "register_loader",
     "supported_extensions",
 ]

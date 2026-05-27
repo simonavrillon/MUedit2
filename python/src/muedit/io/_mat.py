@@ -1,5 +1,7 @@
 """MAT file loaders (.mat v5 and v7.3 HDF5) for MUedit."""
 
+from __future__ import annotations
+
 from typing import Any
 
 import h5py

@@ -12,6 +12,7 @@ import numpy as np
 
 from muedit.decomp.adaptive_batch import adaptive_batch_process
 from muedit.decomp.algorithm import batch_process_filters, rem_duplicates
+from muedit.decomp.preview import build_preview_payload
 from muedit.decomp.types import (
     DecomposeStepOutput,
     DecompositionParameters,
@@ -23,48 +24,6 @@ from muedit.io.bids import build_entities
 from muedit.models import DecompositionExport, DecompositionSignalExport
 
 logger = logging.getLogger(__name__)
-
-
-def downsample_vector(
-    vector: np.ndarray, source_fs: float, target_fs: float = 1000.0
-) -> list[float]:
-    """Decimate a 1-D array from source_fs to target_fs by integer slicing."""
-    if vector.size == 0:
-        return []
-    if source_fs <= 0 or target_fs <= 0:
-        return vector.astype(float).tolist()
-
-    step = max(1, int(np.round(source_fs / target_fs)))
-    return vector[::step].astype(float).tolist()
-
-
-def _save_npz_with_app_schema(
-    out_path: str | Path,
-    pulse_trains: np.ndarray,
-    distimes: list[np.ndarray],
-    fsamp: float,
-    grid_names: list[str],
-    mu_grid_index: list[int],
-    muscles: list[str],
-    parameters: dict[str, Any],
-    total_samples: int,
-    extras: dict[str, Any] | None = None,
-) -> None:
-    """Save NPZ using the same core key schema as web-app edit saves."""
-    payload: dict[str, Any] = {
-        "pulse_trains": pulse_trains,
-        "discharge_times": np.array(distimes, dtype=object),
-        "fsamp": fsamp,
-        "grid_names": np.array(grid_names, dtype=object),
-        "mu_grid_index": np.array(mu_grid_index, dtype=int),
-        "muscle_names": np.array(muscles, dtype=object),
-        "muscle": np.array(muscles, dtype=object),
-        "parameters": np.array([parameters], dtype=object),
-        "total_samples": total_samples,
-    }
-    if extras:
-        payload.update(extras)
-    np.savez_compressed(out_path, **payload)
 
 
 def _remove_duplicates_by_grid(
@@ -108,7 +67,7 @@ def _remove_duplicates_by_grid(
         filtered_distime.extend(dist_subset)
         filtered_grid_index.extend([g_idx] * pulses_subset.shape[0])
 
-    if params.duplicatesbgrids == 1 and filtered_pulses:
+    if params.duplicatesbgrids and filtered_pulses:
         combined_pulses = np.vstack(filtered_pulses)
         combined_distime = filtered_distime
         combined_pulses, combined_distime, kept_idx = rem_duplicates(
@@ -126,90 +85,35 @@ def _remove_duplicates_by_grid(
     return pulse_t_out, filtered_distime, filtered_grid_index
 
 
-def _build_preview_payload(
-    signal: dict[str, Any],
-    data: np.ndarray,
+def _save_npz_with_app_schema(
+    out_path: str | Path,
+    pulse_trains: np.ndarray,
+    distimes: list[np.ndarray],
     fsamp: float,
-    pulse_t: np.ndarray,
-    distime: list[np.ndarray],
     grid_names: list[str],
-    roi_list: list[tuple[int, int]],
-    discard_channels: list[np.ndarray],
-    coordinates: list[np.ndarray],
     mu_grid_index: list[int],
-    loader_meta: dict[str, Any],
     muscles: list[str],
-    include_full_preview: bool,
-) -> dict[str, Any]:
-    """Build the preview payload dict sent to the frontend after decomposition.
-
-    Downsamples pulse trains for display, computes per-grid mean absolute EMG,
-    and optionally includes full-resolution pulse trains when include_full_preview
-    is True.
-    """
-    preview_signal = np.mean(np.abs(data), axis=0)
-    pulse_preview: list[list[float]] = []
-    pulse_preview_all: list[list[float]] = []
-    pulse_full_all: list[list[float]] = []
-    distime_lists: list[list[int]] = []
-
-    if pulse_t.size > 0:
-        for i in range(pulse_t.shape[0]):
-            ds = downsample_vector(pulse_t[i, :], fsamp)
-            pulse_preview_all.append(ds)
-            if i < 3:
-                pulse_preview.append(ds)
-            if include_full_preview:
-                pulse_full_all.append(pulse_t[i, :].astype(float).tolist())
-            distime_lists.append([int(x) for x in distime[i]])
-
-    preview = {
-        "mean_abs": downsample_vector(preview_signal, fsamp),
-        "pulse_trains": pulse_preview,
+    parameters: dict[str, Any],
+    total_samples: int,
+    extras: dict[str, Any] | None = None,
+) -> None:
+    """Save NPZ using the same core key schema as web-app edit saves."""
+    payload: dict[str, Any] = {
+        "pulse_trains": pulse_trains,
+        "discharge_times": np.array(distimes, dtype=object),
         "fsamp": fsamp,
-        "distime": distime_lists,
-        "distime_all": distime_lists,
-        "total_samples": data.shape[1],
-        "grid_names": grid_names,
-        "grid_mean_abs": [],
-        "rois": roi_list,
-        "pulse_trains_all": pulse_preview_all,
-        "pulse_trains_full": pulse_full_all,
-        "mu_grid_index": mu_grid_index,
-        "metadata": loader_meta,
-        "muscle": muscles,
-        "auxiliary": (
-            [
-                downsample_vector(signal["auxiliary"][i, :], fsamp)
-                for i in range(signal["auxiliary"].shape[0])
-            ]
-            if signal.get("auxiliary") is not None and signal["auxiliary"].size > 0
-            else []
-        ),
-        "auxiliaryname": signal.get("auxiliaryname"),
+        "grid_names": np.array(grid_names, dtype=object),
+        "mu_grid_index": np.array(mu_grid_index, dtype=int),
+        "muscle_names": np.array(muscles, dtype=object),
+        "muscle": np.array(muscles, dtype=object),
+        "parameters": np.array([parameters], dtype=object),
+        "total_samples": total_samples,
     }
+    if extras:
+        payload.update(extras)
+    np.savez_compressed(out_path, **payload)
 
-    ch_idx_tmp = 0
-    grid_means: list[list[float]] = []
-    channel_means: list[list[float]] = []
-    for i in range(len(grid_names)):
-        mask = np.array(discard_channels[i]).astype(int)
-        n_channels_grid = mask.size
-        keep_idx = np.where(mask == 0)[0]
-        start_idx, end_idx = roi_list[0]
-        grid_block = data[ch_idx_tmp : ch_idx_tmp + n_channels_grid, start_idx:end_idx]
-        grid_data = grid_block[keep_idx, :]
-        grid_mean_abs = np.mean(np.abs(grid_data), axis=0)
-        grid_means.append(downsample_vector(grid_mean_abs, fsamp))
-        channel_means.append(np.mean(np.abs(grid_block), axis=1).tolist())
-        ch_idx_tmp += n_channels_grid
-
-    preview["grid_mean_abs"] = grid_means
-    preview["channel_means"] = channel_means
-    preview["coordinates"] = coordinates
-    return preview
-
-
+    
 def postprocess_step(
     prep: PreprocessStepOutput,
     decomposed: DecomposeStepOutput,
@@ -223,6 +127,7 @@ def postprocess_step(
     if progress_cb:
         progress_cb("progress", {"message": "Batch processing filters", "pct": 92})
 
+    nwindows = len(prep.roi_list)
     adaptive_losses: dict[str, Any] = {}
     if params.use_adaptive:
         grid_data: dict[int, np.ndarray] = {}
@@ -236,27 +141,27 @@ def postprocess_step(
             ch_idx_g += n_ch_g
 
         pulse_t, distime, adaptive_losses = adaptive_batch_process(
-            decomposed.signal_process["mu_filters"],
-            decomposed.signal_process["w_sig"],
-            decomposed.signal_process["win_data"],
-            decomposed.signal_process["whiten_mat"],
+            decomposed.mu_filters,
+            decomposed.w_sig,
+            decomposed.win_data,
+            decomposed.whiten_mat,
             grid_data,
-            decomposed.signal_process["coordinates_plateau"],
+            decomposed.coordinates_plateau,
             prep.data.shape[1],
             prep.fsamp,
-            params.nwindows,
+            nwindows,
             batch_ms=params.adapt_batch_ms,
             adapt_wh=params.adapt_wh,
             adapt_sv=params.adapt_sv,
         )
     else:
         pulse_t, distime = batch_process_filters(
-            decomposed.signal_process["mu_filters"],
-            decomposed.signal_process["w_sig"],
-            decomposed.signal_process["coordinates_plateau"],
+            decomposed.mu_filters,
+            decomposed.w_sig,
+            decomposed.coordinates_plateau,
             prep.data.shape[1],
             prep.fsamp,
-            params.nwindows,
+            nwindows,
         )
 
     pulse_t, distime, mu_grid_index = _remove_duplicates_by_grid(
@@ -333,7 +238,7 @@ def export_step(
             Path(loaded.full_path).with_name(Path(loaded.full_path).stem + "_decomp.npz")
         )
 
-    preview = _build_preview_payload(
+    preview = build_preview_payload(
         signal=prep.signal,
         data=prep.data,
         fsamp=prep.fsamp,

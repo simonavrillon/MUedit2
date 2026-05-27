@@ -1,5 +1,7 @@
 """Core decomposition math primitives (whitening, fixed-point ICA, spike ops)."""
 
+from __future__ import annotations
+
 import numpy as np
 from scipy.cluster.vq import kmeans2
 from scipy.linalg import eigh, inv
@@ -8,8 +10,7 @@ from scipy.signal import convolve, find_peaks
 _FIXED_POINT_TOL = 1e-4
 
 
-
-def extend_signal(signal, exfactor):
+def extend_signal(signal: np.ndarray, exfactor: int) -> np.ndarray:
     """Create delayed channel extension used by convolutive source separation."""
     rows, cols = signal.shape
     extended_rows = rows * exfactor
@@ -22,7 +23,7 @@ def extend_signal(signal, exfactor):
     return esample
 
 
-def pca_extended_signal(signal):
+def pca_extended_signal(signal: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Estimate PCA basis/eigenvalues for extended signal whitening."""
     cov_matrix = np.cov(signal, bias=True)
     eigenvalues, eigenvectors = eigh(cov_matrix)
@@ -51,7 +52,11 @@ def pca_extended_signal(signal):
     return eigenvectors_selected, eigenvalues_diag
 
 
-def whiten_extended_signal(signal, eigenvectors, eigenvalues_diag):
+def whiten_extended_signal(
+    signal: np.ndarray,
+    eigenvectors: np.ndarray,
+    eigenvalues_diag: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Whiten extended signal and return whitening/dewhitening matrices."""
     sqrt_d = np.sqrt(eigenvalues_diag)
     inv_sqrt_d = inv(sqrt_d)
@@ -63,7 +68,13 @@ def whiten_extended_signal(signal, eigenvectors, eigenvalues_diag):
     return whiten_signals, whitening_matrix, dewhitening_matrix
 
 
-def fixed_point_alg(w, x, basis, maxiter, contrast_func):
+def fixed_point_alg(
+    w: np.ndarray,
+    x: np.ndarray,
+    basis: np.ndarray,
+    maxiter: int,
+    contrast_func: str,
+) -> np.ndarray:
     """Run one-unit FastICA fixed-point iterations with orthogonalization."""
     k = 0
     delta = np.ones(maxiter)
@@ -100,24 +111,27 @@ def fixed_point_alg(w, x, basis, maxiter, contrast_func):
     return w
 
 
-def _pulse_train(w, x):
+def _pulse_train(w: np.ndarray, x: np.ndarray) -> np.ndarray:
     """Project source and apply signed-squared nonlinearity."""
     wtx = w.T @ x
     return (wtx * np.abs(wtx)).flatten()
 
 
-def _detect_peaks(icasig, fsamp):
+def _detect_peaks(icasig: np.ndarray, fsamp: float) -> np.ndarray:
     """Detect candidate spikes with refractory-distance peak picking."""
     distance = int(np.round(fsamp * 0.02))
     spikes, _ = find_peaks(icasig, distance=distance)
+    return spikes
 
-    return icasig, spikes
 
-
-def get_spikes(w, x, fsamp):
+def get_spikes(
+    w: np.ndarray,
+    x: np.ndarray,
+    fsamp: float,
+) -> tuple[np.ndarray, np.ndarray]:
     """Estimate spike times from one source using k-means amplitude split."""
     icasig = _pulse_train(w, x)
-    icasig, spikes = _detect_peaks(icasig, fsamp)
+    spikes = _detect_peaks(icasig, fsamp)
 
     if len(spikes) <= 1:
         return icasig, np.asarray(spikes, dtype=int)
@@ -133,7 +147,12 @@ def get_spikes(w, x, fsamp):
     return icasig, spikes2
 
 
-def minimize_isi_covariance(w, x, cov, fsamp):
+def minimize_isi_covariance(
+    w: np.ndarray,
+    x: np.ndarray,
+    cov: float,
+    fsamp: float,
+) -> tuple[np.ndarray, np.ndarray, float]:
     """Refine separating vector by minimizing ISI coefficient of variation."""
     cov_last = cov + 0.1
     spikes = np.array([1])
@@ -161,10 +180,14 @@ def minimize_isi_covariance(w, x, cov, fsamp):
     return w_last, spikes_last, cov_last
 
 
-def compute_silhouette(x, w, fsamp):
+def compute_silhouette(
+    x: np.ndarray,
+    w: np.ndarray,
+    fsamp: float,
+) -> tuple[np.ndarray, np.ndarray, float]:
     """Compute silhouette-like separability score for detected spikes."""
     icasig = _pulse_train(w, x)
-    icasig, spikes = _detect_peaks(icasig, fsamp)
+    spikes = _detect_peaks(icasig, fsamp)
 
     if len(spikes) <= 1:
         return icasig, np.array(spikes, dtype=int), 0.0
@@ -177,11 +200,7 @@ def compute_silhouette(x, w, fsamp):
     spikes2 = spikes[labels == idx2]
 
     spike_cluster_vals = icasig[spikes][labels == idx2]
-
-
     within = float(np.sum((spike_cluster_vals - centroids[idx2]) ** 2))
-
-
     between = float(np.sum((spike_cluster_vals - centroids[other_idx]) ** 2))
 
     denom = max(within, between)
@@ -190,7 +209,11 @@ def compute_silhouette(x, w, fsamp):
     return icasig, spikes2, sil
 
 
-def extract_muap_segments(mu_pulses, length_radius, y):
+def extract_muap_segments(
+    mu_pulses: np.ndarray,
+    length_radius: int,
+    y: np.ndarray,
+) -> np.ndarray:
     """Extract waveform snippets around pulse indices."""
     pulses = np.asarray(mu_pulses, dtype=int).reshape(-1)
     window_size = 2 * length_radius + 1
@@ -207,7 +230,12 @@ def extract_muap_segments(mu_pulses, length_radius, y):
     return np.asarray(y, dtype=float)[idx]
 
 
-def subtract_mu_waveforms(x, spikes, fsamp, win):
+def subtract_mu_waveforms(
+    x: np.ndarray,
+    spikes: np.ndarray,
+    fsamp: float,
+    win: float,
+) -> np.ndarray:
     """Subtract averaged MU waveform estimate from multichannel signal."""
     window_l = int(np.round(win * fsamp))
     firings = np.zeros(x.shape[1])
@@ -225,13 +253,13 @@ def subtract_mu_waveforms(x, spikes, fsamp, win):
 
 
 def batch_process_filters(
-    mu_filters_by_window,
-    whitened_windows,
-    coordinates,
-    ltime,
-    fsamp,
-    nwindows_per_grid,
-):
+    mu_filters_by_window: dict[int, np.ndarray],
+    whitened_windows: dict[int, np.ndarray],
+    coordinates: list[int],
+    ltime: int,
+    fsamp: float,
+    nwindows_per_grid: int,
+) -> tuple[np.ndarray, list[np.ndarray]]:
     """Apply MU filters across windows and reconstruct pulse trains/spike times."""
     total_mus = 0
     for nwin in mu_filters_by_window:
@@ -283,7 +311,15 @@ def batch_process_filters(
     return pulse_t, distime
 
 
-def rem_duplicates(pulse_t, distime, distime_ref, maxlag, jitter, tol, fsamp):
+def rem_duplicates(
+    pulse_t: np.ndarray,
+    distime: list[np.ndarray],
+    distime_ref: list[np.ndarray] | None,
+    maxlag: int,
+    jitter: float,
+    tol: float,
+    fsamp: float,
+) -> tuple[np.ndarray, list[np.ndarray], list[int]]:
     """Remove duplicated motor units based on lag-aware spike-train overlap."""
 
     if distime_ref is None:

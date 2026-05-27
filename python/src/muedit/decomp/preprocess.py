@@ -10,7 +10,7 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 
-from muedit.decomp.io import clone_signal, load_signal
+from muedit.io.factory import clone_signal, load_signal
 from muedit.decomp.types import DecompositionParameters, LoadStepOutput, PreprocessStepOutput
 from muedit.io.bids import export_bids_emg
 from muedit.signal.filters import bandpass_signals, notch_signals
@@ -74,46 +74,6 @@ def select_roi_interactively(data: np.ndarray, fsamp: float) -> tuple[int, int]:
     return idx_start, idx_end
 
 
-def _apply_grid_notch_filters(
-    data: np.ndarray,
-    fsamp: float,
-    grid_names: list[str],
-    coordinates: list[np.ndarray],
-) -> None:
-    """Apply notch filtering in-place to each grid's channels."""
-    ch_idx = 0
-    for i in range(len(grid_names)):
-        n_channels_grid = coordinates[i].shape[0]
-        grid_data = data[ch_idx : ch_idx + n_channels_grid, :]
-        logger.info("Applying notch filter to Grid %d...", i + 1)
-        data[ch_idx : ch_idx + n_channels_grid, :] = notch_signals(grid_data, fsamp)
-        ch_idx += n_channels_grid
-
-
-def _apply_grid_bandpass_filters(
-    data: np.ndarray,
-    fsamp: float,
-    grid_names: list[str],
-    coordinates: list[np.ndarray],
-    emg_type: list[int],
-) -> None:
-    """Apply bandpass filtering in-place to each grid's channels using the grid's EMG type."""
-    ch_idx = 0
-    for i in range(len(grid_names)):
-        n_channels_grid = coordinates[i].shape[0]
-        grid_data = data[ch_idx : ch_idx + n_channels_grid, :]
-        current_type = emg_type[i] if i < len(emg_type) else 1
-        logger.info(
-            "Applying bandpass filter to Grid %d (Type %d)...",
-            i + 1,
-            current_type,
-        )
-        data[ch_idx : ch_idx + n_channels_grid, :] = bandpass_signals(
-            grid_data, fsamp, emg_type=current_type
-        )
-        ch_idx += n_channels_grid
-
-
 def _resolve_roi_list(
     data: np.ndarray,
     fsamp: float,
@@ -160,6 +120,46 @@ def _build_coordinates_plateau(ngrid: int, roi_list: list[tuple[int, int]]) -> l
     return coordinates_plateau
 
 
+def _apply_grid_notch_filters(
+    data: np.ndarray,
+    fsamp: float,
+    grid_names: list[str],
+    coordinates: list[np.ndarray],
+) -> None:
+    """Apply notch filtering in-place to each grid's channels."""
+    ch_idx = 0
+    for i in range(len(grid_names)):
+        n_channels_grid = coordinates[i].shape[0]
+        grid_data = data[ch_idx : ch_idx + n_channels_grid, :]
+        logger.info("Applying notch filter to Grid %d...", i + 1)
+        data[ch_idx : ch_idx + n_channels_grid, :] = notch_signals(grid_data, fsamp)
+        ch_idx += n_channels_grid
+
+
+def _apply_grid_bandpass_filters(
+    data: np.ndarray,
+    fsamp: float,
+    grid_names: list[str],
+    coordinates: list[np.ndarray],
+    emg_type: list[int],
+) -> None:
+    """Apply bandpass filtering in-place to each grid's channels using the grid's EMG type."""
+    ch_idx = 0
+    for i in range(len(grid_names)):
+        n_channels_grid = coordinates[i].shape[0]
+        grid_data = data[ch_idx : ch_idx + n_channels_grid, :]
+        current_type = emg_type[i] if i < len(emg_type) else 1
+        logger.info(
+            "Applying bandpass filter to Grid %d (Type %d)...",
+            i + 1,
+            current_type,
+        )
+        data[ch_idx : ch_idx + n_channels_grid, :] = bandpass_signals(
+            grid_data, fsamp, emg_type=current_type
+        )
+        ch_idx += n_channels_grid
+
+        
 def _export_raw_emg_bids(
     bids_root: str | None,
     bids_entities: dict[str, Any] | None,
@@ -299,14 +299,6 @@ def preprocess_step(
 
     roi_list = _resolve_roi_list(data, loaded.fsamp, duration, manual_roi, roi, rois)
     ngrid = len(grid_names)
-    signal_process: dict[str, Any] = {
-        "mu_filters": {},
-        "w_sig": {},
-        "win_data": {},
-        "whiten_mat": {},
-        "coordinates_plateau": _build_coordinates_plateau(ngrid, roi_list),
-        "ex_factor": 0,
-    }
     return PreprocessStepOutput(
         signal=loaded.signal,
         data=data,
@@ -319,5 +311,5 @@ def preprocess_step(
         loader_meta=loader_meta,
         roi_list=roi_list,
         ngrid=ngrid,
-        signal_process=signal_process,
+        coordinates_plateau=_build_coordinates_plateau(ngrid, roi_list),
     )

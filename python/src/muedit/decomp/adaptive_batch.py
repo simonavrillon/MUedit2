@@ -47,9 +47,6 @@ def _compute_calibration_stats(
     return ipts_calib, spikes_calib, base_centr, spikes_centr
 
 
-
-
-
 def _to_numpy_array(value: Any) -> np.ndarray:
     """Coerce a value (tensor, list, or None) to a NumPy array."""
     if value is None:
@@ -129,10 +126,6 @@ def _run_one_pass(
         _to_numpy_array(outputs_map.get("spikes")),
         metrics,
     )
-
-
-
-
 
 
 def _merge_metrics(
@@ -244,10 +237,6 @@ def _run_adapt_decomp_bidirectional(
         np.concatenate([spikes_bwd, spikes_fwd], axis=0),
         _merge_metrics(metrics_bwd, metrics_fwd),
     )
-
-
-
-
 
 
 def adaptive_batch_process(

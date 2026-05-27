@@ -17,11 +17,11 @@ class DecompositionParameters:
 
     niter: int = 150
     nwindows: int = 1
-    initialization: int = 0
+    initialization: bool = False
     random_seed: int = 0
-    peel_off_enabled: int = 0
-    covfilter: int = 0
-    duplicatesbgrids: int = 0
+    peel_off_enabled: bool = False
+    covfilter: bool = False
+    duplicatesbgrids: bool = False
     nbextchan: int = 1000
     edges_sec: float = 0.2
     contrast_func: str = "skew"
@@ -61,14 +61,18 @@ class PreprocessStepOutput:
     loader_meta: dict[str, Any]
     roi_list: list[tuple[int, int]]
     ngrid: int
-    signal_process: dict[str, Any]
+    coordinates_plateau: list[int]
 
 
 @dataclass
 class DecomposeStepOutput:
     """ICA filters and per-window SIL scores produced by the decompose step."""
 
-    signal_process: dict[str, Any]
+    mu_filters: dict[int, np.ndarray]
+    w_sig: dict[int, np.ndarray]
+    win_data: dict[int, np.ndarray]
+    whiten_mat: dict[int, np.ndarray]
+    coordinates_plateau: list[int]
     sil_by_window: dict[int, list[float]]
     mu_grid_index: list[int]
 

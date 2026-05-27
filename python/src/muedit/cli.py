@@ -246,10 +246,10 @@ def run_decomposition_cli() -> None:
         duplicatesthresh=args.duplicatesthresh,
         sil_thr=(float("-inf") if not args.sil_filter else args.sil_thr),
         cov_thr=args.cov_thr,
-        covfilter=1 if args.cov_filter else 0,
+        covfilter=args.cov_filter,
         contrast_func="skew",
-        initialization=0,
-        peel_off_enabled=1 if args.peel_off else 0,
+        initialization=False,
+        peel_off_enabled=args.peel_off,
         peel_off_win=args.peel_off_window_ms / 1000.0,
         use_adaptive=args.use_adaptive,
     )

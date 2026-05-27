@@ -30,8 +30,14 @@ def decompose_step(
     progress_cb: Callable[[str, dict[str, object]], None] | None,
 ) -> DecomposeStepOutput:
     """Run decomposition iterations over every grid and ROI window."""
-    params.nwindows = len(prep.roi_list)
-    total_windows = max(1, prep.ngrid * params.nwindows)
+    nwindows = len(prep.roi_list)
+    total_windows = max(1, prep.ngrid * nwindows)
+
+    coordinates_plateau = list(prep.coordinates_plateau)
+    mu_filters: dict[int, np.ndarray] = {}
+    w_sig: dict[int, np.ndarray] = {}
+    win_data: dict[int, np.ndarray] = {}
+    whiten_mat: dict[int, np.ndarray] = {}
 
     ch_idx = 0
     sil_by_window: dict[int, list[float]] = {}
@@ -49,8 +55,8 @@ def decompose_step(
             n_channels_grid,
         )
 
-        for nwin in range(params.nwindows):
-            win_global = i * params.nwindows + nwin
+        for nwin in range(nwindows):
+            win_global = i * nwindows + nwin
             logger.info(
                 "Processing Grid %d (%s), Window %d",
                 i + 1,
@@ -58,41 +64,40 @@ def decompose_step(
                 nwin + 1,
             )
 
-            start = prep.signal_process["coordinates_plateau"][win_global * 2]
-            end = prep.signal_process["coordinates_plateau"][win_global * 2 + 1]
+            start = coordinates_plateau[win_global * 2]
+            end = coordinates_plateau[win_global * 2 + 1]
             grid_block = prep.data[ch_idx : ch_idx + n_channels_grid, start:end]
-            win_data = grid_block[keep_idx, :]
+            win_data_arr = grid_block[keep_idx, :]
 
-            ex_factor = int(round(params.nbextchan / max(1, win_data.shape[0])))
-            prep.signal_process["ex_factor"] = ex_factor
-            e_sig = demean(extend_signal(win_data, ex_factor))
+            ex_factor = int(round(params.nbextchan / max(1, win_data_arr.shape[0])))
+            e_sig = demean(extend_signal(win_data_arr, ex_factor))
 
             edge_samples = int(round(prep.fsamp * params.edges_sec))
             if e_sig.shape[1] > 2 * edge_samples:
                 e_sig = e_sig[:, edge_samples:-edge_samples]
-                prep.signal_process["coordinates_plateau"][win_global * 2] += edge_samples
-                prep.signal_process["coordinates_plateau"][win_global * 2 + 1] -= edge_samples
+                coordinates_plateau[win_global * 2] += edge_samples
+                coordinates_plateau[win_global * 2 + 1] -= edge_samples
 
             eigenvectors, eigenvalues_diag = pca_extended_signal(e_sig)
-            w_sig, whiten_mat, _ = whiten_extended_signal(
+            w_sig_win, whiten_mat_win, _ = whiten_extended_signal(
                 e_sig, eigenvectors, eigenvalues_diag
             )
-            prep.signal_process["w_sig"][win_global] = w_sig
-            prep.signal_process["win_data"][win_global] = (
-                win_data[:, edge_samples:-edge_samples]
-                if win_data.shape[1] > 2 * edge_samples
-                else win_data
+            w_sig[win_global] = w_sig_win
+            win_data[win_global] = (
+                win_data_arr[:, edge_samples:-edge_samples]
+                if win_data_arr.shape[1] > 2 * edge_samples
+                else win_data_arr
             )
-            prep.signal_process["whiten_mat"][win_global] = whiten_mat
+            whiten_mat[win_global] = whiten_mat_win
 
-            basis = np.zeros((w_sig.shape[0], params.niter))
-            mu_filters = np.zeros((w_sig.shape[0], params.niter))
+            basis = np.zeros((w_sig_win.shape[0], params.niter))
+            filter_matrix = np.zeros((w_sig_win.shape[0], params.niter))
             sil_scores = np.zeros(params.niter)
             cov_scores = np.zeros(params.niter)
-            x = w_sig.copy()
+            x = w_sig_win.copy()
 
             for j in range(params.niter):
-                if params.initialization == 0:
+                if not params.initialization:
                     act_ind = np.sum(x, axis=0) ** 2
                     w = x[:, int(np.argmax(act_ind))]
                 else:
@@ -115,12 +120,12 @@ def decompose_step(
                     w_final_norm = np.sqrt(np.sum(w_final**2))
                     if w_final_norm > 0:
                         w_final = w_final / w_final_norm
-                    mu_filters[:, j] = w_final
+                    filter_matrix[:, j] = w_final
                     basis[:, j] = w_final
                     cov_scores[j] = cov_final
                     _, _, sil_val = compute_silhouette(x, w_final, prep.fsamp)
                     sil_scores[j] = sil_val
-                    if params.peel_off_enabled == 1 and sil_val > params.sil_thr:
+                    if params.peel_off_enabled and sil_val > params.sil_thr:
                         x = subtract_mu_waveforms(
                             x, spikes_final, prep.fsamp, params.peel_off_win
                         )
@@ -135,7 +140,7 @@ def decompose_step(
                         {
                             "message": (
                                 f"Grid {i + 1}/{prep.ngrid} • "
-                                f"Window {nwin + 1}/{params.nwindows} • "
+                                f"Window {nwin + 1}/{nwindows} • "
                                 f"Iter {j + 1}/{params.niter}"
                             ),
                             "pct": min(90, int(pct_iter)),
@@ -143,9 +148,9 @@ def decompose_step(
                     )
 
             good_indices = sil_scores >= params.sil_thr
-            if params.covfilter == 1:
+            if params.covfilter:
                 good_indices = good_indices & (cov_scores <= params.cov_thr)
-            prep.signal_process["mu_filters"][win_global] = mu_filters[:, good_indices]
+            mu_filters[win_global] = filter_matrix[:, good_indices]
             sil_by_window[win_global] = sil_scores[good_indices].tolist()
             mu_grid_index.extend([i] * int(np.sum(good_indices)))
 
@@ -157,7 +162,7 @@ def decompose_step(
                     {
                         "message": (
                             f"Grid {i + 1}/{prep.ngrid} • "
-                            f"Window {nwin + 1}/{params.nwindows} completed"
+                            f"Window {nwin + 1}/{nwindows} completed"
                         ),
                         "pct": pct,
                         "sil": sil_by_window[win_global],
@@ -166,7 +171,11 @@ def decompose_step(
         ch_idx += n_channels_grid
 
     return DecomposeStepOutput(
-        signal_process=prep.signal_process,
+        mu_filters=mu_filters,
+        w_sig=w_sig,
+        win_data=win_data,
+        whiten_mat=whiten_mat,
+        coordinates_plateau=coordinates_plateau,
         sil_by_window=sil_by_window,
         mu_grid_index=mu_grid_index,
     )
