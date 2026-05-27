@@ -11,7 +11,7 @@ from typing import Any
 import numpy as np
 
 from muedit.decomp.adaptive_batch import adaptive_batch_process
-from muedit.decomp.algorithm import batch_process_filters, rem_duplicates
+from muedit.decomp.algorithm import DEDUP_JITTER, DEDUP_MAXLAG_RATIO, batch_process_filters, rem_duplicates
 from muedit.decomp.preview import build_preview_payload
 from muedit.decomp.types import (
     DecomposeStepOutput,
@@ -56,8 +56,8 @@ def _remove_duplicates_by_grid(
             pulses_subset,
             dist_subset,
             dist_subset,
-            round(fsamp / 40),
-            0.00025,
+            round(fsamp / DEDUP_MAXLAG_RATIO),
+            DEDUP_JITTER,
             params.duplicatesthresh,
             fsamp,
         )
@@ -74,8 +74,8 @@ def _remove_duplicates_by_grid(
             combined_pulses,
             combined_distime,
             combined_distime,
-            round(fsamp / 40),
-            0.00025,
+            round(fsamp / DEDUP_MAXLAG_RATIO),
+            DEDUP_JITTER,
             params.duplicatesthresh,
             fsamp,
         )

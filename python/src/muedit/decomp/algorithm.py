@@ -8,6 +8,11 @@ from scipy.linalg import eigh, inv
 from scipy.signal import convolve, find_peaks
 
 _FIXED_POINT_TOL = 1e-4
+_FIXED_POINT_MAXITER = 500
+_MIN_ISI_SEC = 0.02
+_KMEANS_ITER = 10
+DEDUP_MAXLAG_RATIO: int = 40
+DEDUP_JITTER: float = 0.00025
 
 
 def extend_signal(signal: np.ndarray, exfactor: int) -> np.ndarray:
@@ -119,7 +124,7 @@ def _pulse_train(w: np.ndarray, x: np.ndarray) -> np.ndarray:
 
 def _detect_peaks(icasig: np.ndarray, fsamp: float) -> np.ndarray:
     """Detect candidate spikes with refractory-distance peak picking."""
-    distance = int(np.round(fsamp * 0.02))
+    distance = int(np.round(fsamp * _MIN_ISI_SEC))
     spikes, _ = find_peaks(icasig, distance=distance)
     return spikes
 
@@ -136,7 +141,7 @@ def get_spikes(
     if len(spikes) <= 1:
         return icasig, np.asarray(spikes, dtype=int)
 
-    centroids, labels = kmeans2(icasig[spikes], 2, iter=10, minit="++", missing="raise", seed=0)
+    centroids, labels = kmeans2(icasig[spikes], 2, iter=_KMEANS_ITER, minit="++", missing="raise", seed=0)
     idx2 = int(np.argmax(centroids))
     spikes2 = spikes[labels == idx2]
 
@@ -193,7 +198,7 @@ def compute_silhouette(
         return icasig, np.array(spikes, dtype=int), 0.0
 
 
-    centroids, labels = kmeans2(icasig[spikes], 2, iter=10, minit="++", missing="raise", seed=0)
+    centroids, labels = kmeans2(icasig[spikes], 2, iter=_KMEANS_ITER, minit="++", missing="raise", seed=0)
 
     idx2 = int(np.argmax(centroids))
     other_idx = 1 - idx2
@@ -296,7 +301,7 @@ def batch_process_filters(
                     pulse_t[mu_nb, start:ltime] = pt_segment[:valid_len]
 
             pulse_t[mu_nb, :] = pulse_t[mu_nb, :] * np.abs(pulse_t[mu_nb, :])
-            distance = int(np.round(fsamp * 0.02))
+            distance = int(np.round(fsamp * _MIN_ISI_SEC))
             spikes, _ = find_peaks(pulse_t[mu_nb, :], distance=distance)
 
             if len(spikes) > 1:

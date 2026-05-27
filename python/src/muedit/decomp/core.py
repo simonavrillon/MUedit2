@@ -8,6 +8,7 @@ from collections.abc import Callable
 import numpy as np
 
 from muedit.decomp.algorithm import (
+    _FIXED_POINT_MAXITER,
     compute_silhouette,
     extend_signal,
     fixed_point_alg,
@@ -105,7 +106,7 @@ def decompose_step(
 
                 w = w - basis @ (basis.T @ w)
                 w = w / np.linalg.norm(w)
-                w = fixed_point_alg(w, x, basis, 500, params.contrast_func)
+                w = fixed_point_alg(w, x, basis, _FIXED_POINT_MAXITER, params.contrast_func)
                 _, spikes = get_spikes(w, x, prep.fsamp)
 
                 if len(spikes) > 10:

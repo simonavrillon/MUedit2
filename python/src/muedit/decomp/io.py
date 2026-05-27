@@ -166,11 +166,7 @@ def _extract_decomp_fields(
     data_block = _get_case_insensitive(signal, "data")
     total_samples = _infer_total_samples_from_pulse(pulse_trains)
     if total_samples is None and isinstance(data_block, np.ndarray):
-        data_norm = (
-            data_block.T
-            if data_block.ndim == 2 and data_block.shape[0] > data_block.shape[1]
-            else data_block
-        )
+        data_norm = _normalize_pulse_matrix(data_block)
         total_samples = int(data_norm.shape[1]) if data_norm.ndim == 2 else None
 
     rois_raw = _get_case_insensitive(preview_block, "rois")

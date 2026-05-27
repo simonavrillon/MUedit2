@@ -12,7 +12,8 @@ import uvicorn
 
 from muedit.api.app_factory import create_app
 from muedit.api.routes import include_routers
-from muedit.decomp.pipeline import DecompositionParameters, run_decomposition
+from muedit.decomp.pipeline import run_decomposition
+from muedit.decomp.types import DecompositionParameters
 
 
 def _parse_roi(value: str) -> tuple[int, int]:
@@ -107,7 +108,7 @@ def run_decomposition_cli() -> None:
     parser.add_argument(
         "--sil-thr",
         type=float,
-        default=0.9,
+        default=0.88,
         help="SIL threshold (app setting: SIL threshold).",
     )
     parser.add_argument(

@@ -30,7 +30,7 @@ from muedit.decomp.io import (
     load_decomposition_signal_context,
     normalize_distimes,
 )
-from muedit.decomp.algorithm import rem_duplicates
+from muedit.decomp.algorithm import DEDUP_JITTER, DEDUP_MAXLAG_RATIO, rem_duplicates
 from muedit.editing.operations import (
     add_artifact_in_roi,
     add_spikes_in_roi,
@@ -322,6 +322,23 @@ def load_decomposition_binary_from_path(filepath: str) -> Response | dict[str, A
     )
 
 
+def _dedup(
+    pulse_trains: np.ndarray,
+    distimes: list,
+    dup_tol: float,
+    fsamp: float,
+) -> tuple[np.ndarray, list, list[int]]:
+    return rem_duplicates(
+        np.asarray(pulse_trains, dtype=float),
+        [np.asarray(d, dtype=int) for d in distimes],
+        [np.asarray(d, dtype=int) for d in distimes],
+        round(fsamp / DEDUP_MAXLAG_RATIO),
+        DEDUP_JITTER,
+        dup_tol,
+        fsamp,
+    )
+
+
 def _normalize_flagged(raw: Any, nmu: int) -> list[bool]:
     if not isinstance(raw, (list, tuple)):
         return [False] * nmu
@@ -421,15 +438,7 @@ def save_edits(payload: dict[str, Any]):
 
     if remove_duplicates and len(distimes) > 1 and fsamp and fsamp > 0:
         dup_tol = float(parameters.get("duplicatesthresh", 0.3))
-        dedup_pulses, dedup_distimes, kept_idx = rem_duplicates(
-            np.asarray(pulse_trains, dtype=float),
-            [np.asarray(d, dtype=int) for d in distimes],
-            [np.asarray(d, dtype=int) for d in distimes],
-            round(fsamp / 40),
-            0.00025,
-            dup_tol,
-            fsamp,
-        )
+        dedup_pulses, dedup_distimes, kept_idx = _dedup(pulse_trains, distimes, dup_tol, fsamp)
         pulse_trains = dedup_pulses if dedup_pulses.size else np.zeros((0, total_samples))
         distimes = [
             sorted({int(v) for v in np.asarray(d, dtype=int).tolist() if int(v) >= 0})
@@ -755,15 +764,7 @@ def remove_duplicates_service(payload: dict[str, Any]) -> dict[str, Any]:
         })
 
     dup_tol = float(parameters.get("duplicatesthresh", 0.3))
-    dedup_pulses, dedup_distimes, kept_idx = rem_duplicates(
-        np.asarray(pulse_trains, dtype=float),
-        [np.asarray(d, dtype=int) for d in distimes],
-        [np.asarray(d, dtype=int) for d in distimes],
-        round(fsamp / 40),
-        0.00025,
-        dup_tol,
-        fsamp,
-    )
+    dedup_pulses, dedup_distimes, kept_idx = _dedup(pulse_trains, distimes, dup_tol, fsamp)
     dedup_distimes_clean = [
         sorted({int(v) for v in np.asarray(d, dtype=int).tolist() if int(v) >= 0})
         for d in dedup_distimes

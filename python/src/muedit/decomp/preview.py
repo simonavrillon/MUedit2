@@ -99,5 +99,5 @@ def build_preview_payload(
 
     preview["grid_mean_abs"] = grid_means
     preview["channel_means"] = channel_means
-    preview["coordinates"] = coordinates
+    preview["coordinates"] = [c.tolist() if hasattr(c, "tolist") else c for c in coordinates]
     return preview
