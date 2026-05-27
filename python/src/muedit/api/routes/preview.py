@@ -36,7 +36,7 @@ def preview_by_path(payload: PathPayload) -> dict[str, Any]:
     return success_payload(build_preview_from_path(payload.path))
 
 
-@router.post("/qc/window")
+@router.post("/qc/window", response_model=None)
 async def qc_window(payload: QcWindowPayload) -> dict[str, Any] | Response:
     """Return QC channel window data in JSON or raw-binary transport format."""
     result = get_qc_window(payload.model_dump(exclude_none=True))

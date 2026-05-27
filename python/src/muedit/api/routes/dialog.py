@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from typing import Any
+
 from fastapi import APIRouter, HTTPException
 
 from muedit.api.contracts import success_payload
@@ -88,7 +90,7 @@ def _open_dialog_tkinter() -> str | None:
 
 
 @router.get("/open-file")
-def open_file_dialog() -> dict[str, str | None]:
+def open_file_dialog() -> dict[str, Any]:
     """Return the selected file path and basename from a native open dialog."""
     try:
         if sys.platform == "darwin":

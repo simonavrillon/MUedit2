@@ -36,7 +36,7 @@ from muedit.api.services.editing_service import (
 router = APIRouter(prefix="/api/v1")
 
 
-@router.post("/edit/load")
+@router.post("/edit/load", response_model=None)
 async def load_decomposition_endpoint(request: Request, file: UploadFile = File(...)) -> dict[str, Any] | Response:
     """Load a decomposition upload for interactive edit mode."""
     wants_binary = request.headers.get("x-muedit-binary", "0") == "1"
@@ -45,7 +45,7 @@ async def load_decomposition_endpoint(request: Request, file: UploadFile = File(
     return success_payload(await load_decomposition(file))
 
 
-@router.post("/edit/load-by-path")
+@router.post("/edit/load-by-path", response_model=None)
 async def load_decomposition_by_path_endpoint(request: Request, payload: PathPayload) -> dict[str, Any] | Response:
     """Load a decomposition from an absolute/local path for edit mode."""
     path = payload.path
