@@ -1,5 +1,7 @@
 """Grid layout inference and basic signal helpers."""
 
+from __future__ import annotations
+
 import logging
 
 import numpy as np
@@ -7,7 +9,10 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 
-def format_hdemg_signal(grid_names, discard_overrides=None):
+def format_hdemg_signal(
+    grid_names: list[str],
+    discard_overrides: list[list[int]] | None = None,
+) -> tuple[list[np.ndarray], list[float], list[np.ndarray], list[int]]:
     """Infer grid geometry and channel masks for HD-EMG recordings."""
     coordinates = []
     ied = []

@@ -9,7 +9,7 @@ import h5py
 import numpy as np
 import scipy.io
 
-from muedit.io._mat import _mat73_read, _parse_text, _parse_text_list
+from muedit.io._mat import _mat73_read, _parse_text_list
 from muedit.models import LoadedDecomposition
 
 DecompositionLoadTuple = tuple[
@@ -407,7 +407,6 @@ def _top_level_cell_items(raw: Any) -> list[Any]:
                 return [squeezed.item()]
             if squeezed.ndim == 1:
                 return squeezed.tolist()
-            # Fallback: keep first axis grouping.
             return [row for row in squeezed]
         return [squeezed]
     if isinstance(raw, (list, tuple)):
@@ -441,7 +440,6 @@ def _unpack_gridwise_decomposition(
     if distime_blocks:
         flat_distimes: list[list[int]] = []
         if pulse_blocks:
-            # Align discharge-time ordering to pulse-train MU ordering per grid.
             for g_idx, pblock in enumerate(pulse_blocks):
                 expected_mu = int(pblock.shape[0])
                 mu_lists = distime_blocks[g_idx] if g_idx < len(distime_blocks) else []

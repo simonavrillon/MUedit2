@@ -5,7 +5,6 @@ from __future__ import annotations
 import threading
 import time
 import uuid
-from pathlib import Path
 from typing import Any
 
 import numpy as np

@@ -59,3 +59,11 @@ include = ["muedit*", "adapt_decomp*"]
 [project.urls]
 Repository = "https://github.com/simonavrillon/MUedit2"
 "Bug Tracker" = "https://github.com/simonavrillon/MUedit2/issues"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["I", "UP", "FA", "ANN", "F"]
+ignore = ["ANN401"]

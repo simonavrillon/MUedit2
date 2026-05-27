@@ -5,10 +5,15 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, File, UploadFile
+from fastapi.responses import Response
 
 from muedit.api.contracts import success_payload
 from muedit.api.schemas import PathPayload, QcWindowPayload
-from muedit.api.services.preview_service import build_preview, build_preview_from_path, get_qc_window
+from muedit.api.services.preview_service import (
+    build_preview,
+    build_preview_from_path,
+    get_qc_window,
+)
 
 router = APIRouter(prefix="/api/v1")
 
@@ -20,21 +25,21 @@ def health() -> dict[str, Any]:
 
 
 @router.post("/preview")
-async def preview(file: UploadFile = File(...)):
+async def preview(file: UploadFile = File(...)) -> dict[str, Any]:
     """Build downsampled preview/QC metadata from an uploaded signal file."""
     return success_payload(await build_preview(file))
 
 
 @router.post("/preview-by-path")
-def preview_by_path(payload: PathPayload):
+def preview_by_path(payload: PathPayload) -> dict[str, Any]:
     """Build preview data from an existing file path on disk."""
     return success_payload(build_preview_from_path(payload.path))
 
 
 @router.post("/qc/window")
-async def qc_window(payload: QcWindowPayload):
+async def qc_window(payload: QcWindowPayload) -> dict[str, Any] | Response:
     """Return QC channel window data in JSON or raw-binary transport format."""
     result = get_qc_window(payload.model_dump(exclude_none=True))
-    if isinstance(result, dict):
-        return success_payload(result)
-    return result
+    if isinstance(result, Response):
+        return result
+    return success_payload(result)

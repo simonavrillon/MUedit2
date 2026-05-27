@@ -2,10 +2,14 @@
 .DS_Store
 Thumbs.db
 
-# IDE configs
+# ── IDE configs ─────────────────────────────────────────────────────────────
 .vscode/
 .idea/
 *.iml
+
+# ── Claude Code ─────────────────────────────────────────────────────────────
+.claude/
+CLAUDE.md
 
 # ── Python ─────────────────────────────────────────────────────────────────
 __pycache__/
@@ -18,18 +22,16 @@ dist/
 build/
 .eggs/
 
-# Virtual environments
+# ── Virtual environments ────────────────────────────────────────────────────
 .venv/
 venv/
 env/
 .env
 
-# Type-checking caches
+# ── Type-checking & test caches ─────────────────────────────────────────────
 .mypy_cache/
 .pytype/
 .ruff_cache/
-
-# Test caches
 .pytest_cache/
 .coverage
 htmlcov/

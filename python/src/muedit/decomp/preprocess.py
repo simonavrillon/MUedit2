@@ -10,9 +10,9 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 
-from muedit.io.factory import clone_signal, load_signal
 from muedit.decomp.types import DecompositionParameters, LoadStepOutput, PreprocessStepOutput
 from muedit.io.bids import export_bids_emg
+from muedit.io.factory import clone_signal, load_signal
 from muedit.signal.filters import bandpass_signals, notch_signals
 from muedit.signal.grid import format_hdemg_signal
 
@@ -82,11 +82,7 @@ def _resolve_roi_list(
     roi: tuple[int, int] | None,
     rois: list[tuple[int, int]] | None,
 ) -> list[tuple[int, int]]:
-    """Resolve the analysis ROI from the various supported input methods.
-
-    Priority: explicit rois list > single roi > interactive > duration > full signal.
-    All sample indices are clamped to valid bounds.
-    """
+    """Resolve the analysis ROI from the various supported input methods."""
     total_len = data.shape[1]
     if total_len == 0:
         raise ValueError("Input signal contains zero samples; cannot define ROI.")

@@ -1,5 +1,7 @@
 """BIDS EMG export utilities and re-exports of read helpers."""
 
+from __future__ import annotations
+
 import json
 import math
 from collections.abc import Iterable

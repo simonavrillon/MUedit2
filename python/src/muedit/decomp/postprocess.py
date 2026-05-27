@@ -11,7 +11,12 @@ from typing import Any
 import numpy as np
 
 from muedit.decomp.adaptive_batch import adaptive_batch_process
-from muedit.decomp.algorithm import DEDUP_JITTER, DEDUP_MAXLAG_RATIO, batch_process_filters, rem_duplicates
+from muedit.decomp.algorithm import (
+    DEDUP_JITTER,
+    DEDUP_MAXLAG_RATIO,
+    batch_process_filters,
+    rem_duplicates,
+)
 from muedit.decomp.preview import build_preview_payload
 from muedit.decomp.types import (
     DecomposeStepOutput,
@@ -34,10 +39,7 @@ def _remove_duplicates_by_grid(
     params: DecompositionParameters,
     fsamp: float,
 ) -> tuple[np.ndarray, list[np.ndarray], list[int]]:
-    """Remove duplicate motor units within each grid and optionally across grids.
-
-    Returns the filtered (pulse_t, distime, mu_grid_index) after deduplication.
-    """
+    """Remove duplicate motor units within each grid and optionally across grids."""
     if len(distime) == 0:
         return np.array([]), [], []
 

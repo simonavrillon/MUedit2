@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from typing import Any
 
 import numpy as np
 
@@ -28,7 +29,7 @@ def decompose_step(
     prep: PreprocessStepOutput,
     params: DecompositionParameters,
     rng: np.random.Generator,
-    progress_cb: Callable[[str, dict[str, object]], None] | None,
+    progress_cb: Callable[[str, dict[str, Any]], None] | None,
 ) -> DecomposeStepOutput:
     """Run decomposition iterations over every grid and ROI window."""
     nwindows = len(prep.roi_list)

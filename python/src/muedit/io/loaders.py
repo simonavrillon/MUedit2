@@ -1,5 +1,7 @@
 """Signal file loaders for .mat/.otb formats used by MUedit."""
 
+from __future__ import annotations
+
 from muedit.io._bids_reader import load_bids_signal
 from muedit.io._mat import load_mat
 from muedit.io._otb import load_otb4, load_otb_plus

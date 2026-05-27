@@ -14,6 +14,15 @@ from muedit.api.cache import (
     _get_edit_signal_context_by_label,
     _store_edit_signal_context,
 )
+from muedit.api.common import (
+    _pack_json_f32_payload,
+    as_float,
+    as_int,
+    make_json_safe,
+    parse_entity_label,
+    safe_unlink,
+    save_upload_to_temp,
+)
 from muedit.api.services.bids_helpers import (
     _infer_bids_root_from_decomp_path,
     _load_bids_grid,
@@ -28,15 +37,7 @@ from muedit.api.services.edit_helpers import (
     _normalize_muscle_names,
     _pad_grid_names,
 )
-from muedit.api.common import (
-    _pack_json_f32_payload,
-    as_float,
-    as_int,
-    make_json_safe,
-    parse_entity_label,
-    safe_unlink,
-    save_upload_to_temp,
-)
+from muedit.decomp.algorithm import DEDUP_JITTER, DEDUP_MAXLAG_RATIO, rem_duplicates
 from muedit.decomp.io import (
     build_pulse_trains_from_distimes,
     load_decomposition_file,
@@ -44,7 +45,6 @@ from muedit.decomp.io import (
     normalize_distimes,
 )
 from muedit.decomp.postprocess import _save_npz_with_app_schema
-from muedit.decomp.algorithm import DEDUP_JITTER, DEDUP_MAXLAG_RATIO, rem_duplicates
 from muedit.editing.operations import (
     add_artifact_in_roi,
     add_spikes_in_roi,
@@ -54,9 +54,6 @@ from muedit.editing.operations import (
     update_motor_unit_filter_window,
 )
 from muedit.signal.grid import format_hdemg_signal
-
-
-
 
 
 def _save_editlog(
@@ -193,7 +190,7 @@ def _dedup(
 
 
 
-def save_edits(payload: dict[str, Any]):
+def save_edits(payload: dict[str, Any]) -> dict[str, Any]:
     distimes_raw = payload.get("distimes") or payload.get("discharge_times") or []
     distimes = normalize_distimes(distimes_raw)
     pulse_trains_raw = payload.get("pulse_trains")
@@ -467,11 +464,7 @@ def add_spikes(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def add_artifact(payload: dict[str, Any]) -> dict[str, Any]:
-    """Mark a peak in the ROI as an artifact for the selected motor unit.
-
-    The artifact peak is excluded from filter recomputation; its signal is
-    subtracted (peel-off style) when update_filter is subsequently called.
-    """
+    """Mark a peak in the ROI as an artifact for the selected motor unit."""
     pulse_train = payload.get("pulse_train")
     if pulse_train is None:
         raise HTTPException(status_code=400, detail="pulse_train is required")
@@ -568,7 +561,6 @@ def remove_duplicates_service(payload: dict[str, Any]) -> dict[str, Any]:
 
     total_samples = as_int(payload.get("total_samples"), "total_samples", default=0)
     parameters = payload.get("parameters") or {}
-    mu_grid_index = _normalize_mu_grid_index(payload.get("mu_grid_index"), len(distimes))
 
     pulse_trains_raw = payload.get("pulse_trains")
     pulse_trains: np.ndarray | None = None

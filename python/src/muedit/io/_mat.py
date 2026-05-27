@@ -179,7 +179,7 @@ def _load_mat73_signal(path: str) -> dict[str, Any]:
         }
 
 
-def load_mat(filepath):
+def load_mat(filepath: str) -> dict[str, Any]:
     """Load legacy MATLAB signal struct into MUedit signal dictionary format."""
     try:
         mat = scipy.io.loadmat(filepath, struct_as_record=False, squeeze_me=True)
@@ -191,7 +191,7 @@ def load_mat(filepath):
                 field_names = set(getattr(signal_struct, "_fieldnames") or [])
             _raise_if_decomposition_signal_fields(field_names)
 
-            def get_attr(obj, name, default=None):
+            def get_attr(obj: Any, name: str, default: Any = None) -> Any:
                 if hasattr(obj, name):
                     return getattr(obj, name)
                 return default

@@ -6,7 +6,7 @@ import json
 import queue
 import threading
 import traceback
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from typing import Any
 
 import numpy as np
@@ -26,7 +26,6 @@ from muedit.api.common import (
     parse_discard_channels,
     parse_json_object,
     parse_rois,
-    safe_unlink,
     save_upload_to_temp,
     serialize_preview,
     summarize_result,
@@ -116,12 +115,12 @@ def decomposition_event_stream(
     preloaded_signal: dict[str, Any] | None = None,
     cleanup: Callable[[str], None] | None = None,
     binary_preview: bool = False,
-):
+) -> Iterator[str]:
     """Yield NDJSON progress events while decomposition executes in background thread."""
     q: queue.Queue[dict[str, Any] | None] = queue.Queue()
     terminal_emitted = False
 
-    def progress(stage: str, payload: dict[str, Any]):
+    def progress(stage: str, payload: dict[str, Any]) -> None:
         """Normalize and queue progress callback payload from pipeline."""
         nonlocal terminal_emitted
         event = {"stage": stage}

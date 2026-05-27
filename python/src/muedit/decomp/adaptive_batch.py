@@ -15,11 +15,7 @@ def _compute_calibration_stats(
     mu_filters: np.ndarray,
     fsamp: float,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Project the whitened calibration signal through MU filters and derive spike statistics.
-
-    Returns (ipts_calib, spikes_calib, base_centr, spikes_centr) used to
-    initialise the AdaptDecomp model for subsequent batches.
-    """
+    """Project the whitened calibration signal through MU filters and derive spike statistics."""
     from scipy.cluster.vq import kmeans2
 
     n_mu = mu_filters.shape[1]
@@ -79,7 +75,6 @@ def _run_one_pass(
 ) -> tuple[np.ndarray, np.ndarray, dict[str, np.ndarray]]:
     """Run AdaptDecomp on a single EMG segment and return ipts, spikes, and optional metrics."""
     import torch
-
     from adapt_decomp.adaptation import AdaptDecomp
     from adapt_decomp.config import Config
 
@@ -158,11 +153,7 @@ def _run_adapt_decomp_bidirectional(
     adapt_sv: bool,
     calib_start: int,
 ) -> tuple[np.ndarray, np.ndarray, dict[str, np.ndarray]]:
-    """Run adaptive decomposition forward from calib_start and, if needed, backward over the pre-calibration segment.
-
-    Concatenates both passes to cover the full recording and returns
-    (ipts, spikes, metrics).
-    """
+    """Run adaptive decomposition forward from calib_start and, if needed, backward over the pre-calibration segment."""
     from muedit.decomp.algorithm import extend_signal
 
     ipts_calib, spikes_calib, base_centr, spikes_centr = _compute_calibration_stats(
@@ -253,11 +244,7 @@ def adaptive_batch_process(
     adapt_wh: bool = True,
     adapt_sv: bool = True,
 ) -> tuple[np.ndarray, list[np.ndarray], dict[str, Any]]:
-    """Apply adaptive post-processing across all decomposition windows and grids.
-
-    Falls back to the standard batch_process_filters if torch or adapt_decomp
-    is not installed. Returns (pulse_t, distime, adaptive_losses).
-    """
+    """Apply adaptive post-processing across all decomposition windows and grids."""
     if (
         importlib.util.find_spec("torch") is None
         or importlib.util.find_spec("adapt_decomp.adaptation") is None

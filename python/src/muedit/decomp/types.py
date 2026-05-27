@@ -10,10 +10,7 @@ import numpy as np
 
 @dataclass
 class DecompositionParameters:
-    """Algorithm hyper-parameters for a single decomposition run.
-
-    All fields have sensible defaults; override only what you need.
-    """
+    """Algorithm hyper-parameters for a single decomposition run."""
 
     niter: int = 150
     nwindows: int = 1

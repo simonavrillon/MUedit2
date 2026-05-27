@@ -200,10 +200,7 @@ json_default = make_json_safe
 
 
 def _pack_json_f32_payload(magic: bytes, meta: dict[str, Any], *arrays: np.ndarray) -> bytes:
-    """Pack versioned binary payload: magic(4) + v1 + JSON-meta + float32 arrays.
-
-    Layout: magic | version<I> | meta_len<I> | (rows<I> cols<I>)* | meta_bytes | arrays*
-    """
+    """Pack versioned binary payload: magic(4) + v1 + JSON-meta + float32 arrays."""
     meta_bytes = json.dumps(make_json_safe(meta), separators=(",", ":")).encode("utf-8")
     parts: list[bytes] = [magic, struct.pack("<I", 1), struct.pack("<I", len(meta_bytes))]
     for arr in arrays:

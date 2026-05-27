@@ -35,12 +35,7 @@ def build_preview_payload(
     muscles: list[str],
     include_full_preview: bool,
 ) -> dict[str, Any]:
-    """Build the preview payload dict sent to the frontend after decomposition.
-
-    Downsamples pulse trains for display, computes per-grid mean absolute EMG,
-    and optionally includes full-resolution pulse trains when include_full_preview
-    is True.
-    """
+    """Build the preview payload dict sent to the frontend after decomposition."""
     preview_signal = np.mean(np.abs(data), axis=0)
     pulse_preview: list[list[float]] = []
     pulse_preview_all: list[list[float]] = []

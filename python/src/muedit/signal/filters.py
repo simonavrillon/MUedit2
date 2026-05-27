@@ -1,9 +1,4 @@
-"""Signal filtering utilities for HD-EMG preprocessing.
-
-* :func:`demean` — subtract per-channel DC offset.
-* :func:`bandpass_signals` — zero-phase Butterworth bandpass (surface or intramuscular bands).
-* :func:`notch_signals` — FFT-based notch that suppresses mains harmonics automatically.
-"""
+"""Signal filtering utilities for HD-EMG preprocessing."""
 
 from __future__ import annotations
 

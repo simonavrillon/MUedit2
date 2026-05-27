@@ -1,5 +1,7 @@
 """OT Bioelettronica OTB+ and OTB4 file loaders for MUedit."""
 
+from __future__ import annotations
+
 import os
 import re
 import shutil
@@ -16,15 +18,11 @@ import xmltodict
 from muedit.signal.grid import format_hdemg_signal
 
 
-# ---------------------------------------------------------------------------
-# Shared low-level helpers (were nested closures inside load_otb4)
-# ---------------------------------------------------------------------------
-
 def _ensure_list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else [value]
 
 
-def _safe_gain(gain_value) -> float:
+def _safe_gain(gain_value: Any) -> float:
     try:
         g_val = float(gain_value)
     except (TypeError, ValueError):
@@ -32,7 +30,7 @@ def _safe_gain(gain_value) -> float:
     return g_val if g_val != 0 else 1.0
 
 
-def _sanitize_array(arr) -> np.ndarray:
+def _sanitize_array(arr: Any) -> np.ndarray:
     arr64 = np.asarray(arr, dtype=np.float64)
     finfo = np.finfo(np.float64)
     arr64 = np.where(np.isnan(arr64), 0.0, arr64)
@@ -41,7 +39,7 @@ def _sanitize_array(arr) -> np.ndarray:
     return arr64
 
 
-def _parse_filter_string(filter_str, fsamp=None):
+def _parse_filter_string(filter_str: str, fsamp: float | None = None) -> str | float:
     if not filter_str or filter_str == "n/a":
         return "n/a"
     filter_str = str(filter_str).strip()
@@ -145,9 +143,6 @@ def _concat_segments(
     return np.concatenate(cropped, axis=0)
 
 
-# ---------------------------------------------------------------------------
-# OTB+ device-specific ADC→mV scaling
-# ---------------------------------------------------------------------------
 
 def _apply_otb_plus_scaling(
     data: np.ndarray,
@@ -210,9 +205,6 @@ def _apply_otb_plus_scaling(
             data[ch_idx] *= 4.8 / (2**24) * 1000 / gain_val
 
 
-# ---------------------------------------------------------------------------
-# OTB4 per-device channel parsers
-# ---------------------------------------------------------------------------
 
 @dataclass
 class _OTB4Channels:
@@ -418,11 +410,8 @@ def _parse_otb4_generic(tmpdir: str, track_list: list[dict[str, Any]]) -> _OTB4C
     )
 
 
-# ---------------------------------------------------------------------------
-# Public loaders
-# ---------------------------------------------------------------------------
 
-def load_otb_plus(filepath):
+def load_otb_plus(filepath: str) -> dict[str, Any]:
     """Load OTB+ archive (.otb+/.zip) and normalize channels/metadata."""
     with tempfile.TemporaryDirectory() as tmpdir:
         if filepath.endswith(".zip"):
@@ -461,7 +450,6 @@ def load_otb_plus(filepath):
         if not isinstance(adapters, list):
             adapters = [adapters]
 
-        # First pass: count channels and collect per-position gains/filters.
         n_channels = 0
         gains: list[float] = []
         adapter_filters = {}
@@ -503,7 +491,6 @@ def load_otb_plus(filepath):
         adapter_types = []
         grid_ids = []
 
-        # Second pass: classify channels and apply per-device ADC scaling.
         for adapter in adapters:
             adapter_id = adapter.get("@ID", "")
 
@@ -727,7 +714,7 @@ def load_otb_plus(filepath):
         }
 
 
-def load_otb4(filepath):
+def load_otb4(filepath: str) -> dict[str, Any]:
     """Load OTB4 archives and normalize EMG/aux channels into MUedit format."""
     with tempfile.TemporaryDirectory() as tmpdir:
         if zipfile.is_zipfile(filepath):

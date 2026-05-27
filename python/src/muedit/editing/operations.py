@@ -1,18 +1,12 @@
-"""Motor-unit editing utilities used by API routes and interactive tooling.
-
-The functions in this module operate on a single motor unit pulse train and its
-spike-time indices. They are intentionally stateless to simplify route handlers
-and make behavior predictable.
-"""
+"""Motor-unit editing utilities used by API routes and interactive tooling."""
 
 from __future__ import annotations
 
 from typing import TypeAlias
 
 import numpy as np
-from scipy.signal import find_peaks
-
 from scipy.cluster.vq import kmeans2
+from scipy.signal import find_peaks
 
 from muedit.decomp.algorithm import (
     extend_signal,
@@ -29,15 +23,7 @@ FilterUpdateResult: TypeAlias = tuple[np.ndarray | None, SpikeTimes]
 def _remove_high_amplitude_outliers(
     pulse_train: np.ndarray, spike_indices: np.ndarray
 ) -> np.ndarray:
-    """Drop candidate spikes with unusually large amplitudes.
-
-    Args:
-        pulse_train: Pulse-train vector.
-        spike_indices: Candidate spike indices.
-
-    Returns:
-        Filtered spike indices.
-    """
+    """Drop candidate spikes with unusually large amplitudes."""
     if spike_indices.size == 0:
         return spike_indices
     threshold = np.mean(pulse_train[spike_indices]) + 3 * np.std(
@@ -146,25 +132,7 @@ def update_motor_unit_filter_window(
     use_peeloff: bool = False,
     artifact_times: SpikeTimes | None = None,
 ) -> FilterUpdateResult:
-    """Update a motor-unit pulse train and spikes inside a time window.
-
-    Args:
-        emg: EMG matrix with shape ``(n_channels, n_samples)``. May cover only
-            the view window when loaded via partial reads; in that case pass
-            ``emg_offset=view_start`` so sample indices are mapped correctly.
-        emg_mask: Per-channel mask where ``1`` indicates a discarded channel.
-        spike_times: Existing discharge times for one motor unit.
-        fsamp: Sampling frequency in Hz.
-        start: Window start sample (inclusive), in absolute recording coordinates.
-        end: Window end sample (exclusive), in absolute recording coordinates.
-        nbextchan: Number of extended channels target for decomposition filtering.
-        emg_offset: First sample index represented by ``emg[:,0]``. Zero when
-            the full recording is passed; equal to ``view_start`` for partial reads.
-
-    Returns:
-        Tuple ``(pulse_train_segment, updated_spike_times)`` where
-        ``pulse_train_segment`` may be ``None`` when no update is possible.
-    """
+    """Update a motor-unit pulse train and spikes inside a time window."""
     emg_sel = emg[emg_mask == 0, :] if emg_mask.size else emg
     pt, updated = _recompute_spikes_in_window(
         emg_sel,
@@ -210,11 +178,7 @@ def add_artifact_in_roi(
     x_end: int,
     y_min: float,
 ) -> SpikeTimes:
-    """Add an artifact peak inside a rectangular ROI.
-
-    The selected peak will be excluded from filter recomputation; its signal
-    will be subtracted (peel-off style) when updating the MU filter.
-    """
+    """Add an artifact peak inside a rectangular ROI."""
     temp = pulse.copy()
     mask = (np.arange(len(temp)) >= x_start) & (np.arange(len(temp)) <= x_end)
     temp[~mask] = 0
@@ -259,11 +223,7 @@ def delete_high_discharge_rate_spikes_in_roi(
     x_end: int,
     y_min: float,
 ) -> SpikeTimes:
-    """Delete one spike from high-rate pairs within an ROI.
-
-    For each pair with discharge rate above ``y_min`` within the selected window,
-    the lower-amplitude spike of the pair is removed.
-    """
+    """Delete one spike from high-rate pairs within an ROI."""
     ordered = sorted(spike_times)
     if len(ordered) < 2:
         return sorted({int(x) for x in ordered})
@@ -301,11 +261,7 @@ def remove_discharge_rate_outliers(
     fsamp: float,
     z_factor: float = 3.0,
 ) -> SpikeTimes:
-    """Remove spikes belonging to discharge-rate outlier pairs.
-
-    Outlier pairs are detected using ``mean + z_factor * std`` over discharge
-    rates. For each outlier pair, the lower-amplitude spike is removed.
-    """
+    """Remove spikes belonging to discharge-rate outlier pairs."""
     ordered = sorted({int(x) for x in spike_times})
     if len(ordered) < 3:
         return ordered

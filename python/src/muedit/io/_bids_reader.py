@@ -1,5 +1,7 @@
 """BIDS EMG signal loader and targeted single-grid read helpers."""
 
+from __future__ import annotations
+
 import csv
 import json
 from dataclasses import dataclass
@@ -11,7 +13,7 @@ import numpy as np
 from muedit.signal.grid import format_hdemg_signal
 
 
-def _ensure_pyedflib():
+def _ensure_pyedflib() -> Any:
     """Import and return ``pyedflib`` with a clear install hint on failure."""
     try:
         import pyedflib
@@ -23,9 +25,6 @@ def _ensure_pyedflib():
     return pyedflib
 
 
-# ---------------------------------------------------------------------------
-# Targeted single-grid read helpers (low-level, used by decomposition pipeline)
-# ---------------------------------------------------------------------------
 
 @dataclass
 class BidsGridSelection:
@@ -122,17 +121,9 @@ def load_bids_emg_grid(
     return data, fsamp, selection.bad_mask
 
 
-# ---------------------------------------------------------------------------
-# Full-recording loader (used by LoaderFactory for .bdf / .edf files)
-# ---------------------------------------------------------------------------
 
 def load_bids_signal(filepath: str) -> dict[str, Any]:
-    """Load a BIDS EMG recording (BDF/EDF + sidecars) into MUedit signal dict format.
-
-    Accepts either a path to the ``*_emg.bdf/.edf`` file or to the ``emg/``
-    directory that contains it.  All grids and auxiliary channels defined in
-    the accompanying ``*_emg_channels.tsv`` are loaded and stacked.
-    """
+    """Load a BIDS EMG recording (BDF/EDF + sidecars) into MUedit signal dict format."""
     emg_path = Path(filepath)
 
     if emg_path.is_dir():
@@ -145,7 +136,7 @@ def load_bids_signal(filepath: str) -> dict[str, Any]:
             )
         emg_path = candidates[0]
 
-    stem = emg_path.stem  # e.g. "sub-01_ses-01_task-trapezoid_run-01_emg"
+    stem = emg_path.stem
     entity_label = stem[:-4] if stem.endswith("_emg") else stem
 
     channels_tsv = emg_path.parent / f"{entity_label}_emg_channels.tsv"

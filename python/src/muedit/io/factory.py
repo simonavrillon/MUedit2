@@ -1,30 +1,10 @@
-"""Registry-backed signal loader dispatch for EMG file formats.
-
-Supported formats
------------------
-``.mat``
-    MATLAB workspace files (v5 and v7.3) exported from the OT Biolab+ or
-    custom recording scripts.
-``.otb+``
-    OT Biolab+ archive format (tar/zip containing XML metadata and ``.sig``
-    binary files).
-``.otb4``
-    OT Biolab4 proprietary binary format with embedded XML metadata.
-
-Usage
------
->>> from muedit.io.factory import LoaderFactory, register_loader
->>> signal = LoaderFactory.load_signal("recording.otb4")
->>> print(signal.fsamp, signal.data.shape)
->>>
->>> # Add support for a new extension:
->>> # register_loader(".myfmt", load_myfmt)
-"""
+"""Registry-backed signal loader dispatch for EMG file formats."""
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from muedit.io.loaders import load_bids_signal, load_mat, load_otb4, load_otb_plus
 from muedit.models import SignalImport
@@ -63,13 +43,7 @@ _LOADERS: dict[str, LoaderFn] = {
 
 
 def register_loader(ext: str, loader: LoaderFn, *, overwrite: bool = False) -> None:
-    """Register a loader function for a file extension.
-
-    Args:
-        ext: File extension such as ``.mat`` or ``otb4``.
-        loader: Callable receiving ``filepath`` and returning ``dict`` or ``SignalImport``.
-        overwrite: When ``False`` (default), raises if extension is already registered.
-    """
+    """Register a loader function for a file extension."""
     key = _normalize_extension(ext)
     if key in _LOADERS and not overwrite:
         raise ValueError(
@@ -84,12 +58,7 @@ def supported_extensions() -> tuple[str, ...]:
 
 
 def get_loader(filepath: str | Path) -> LoaderFn:
-    """Return loader function for a file path based on extension.
-
-    When *filepath* is a directory, it is checked for a BIDS EMG recording
-    (a single ``*_emg.bdf`` or ``*_emg.edf`` file) and the BIDS loader is
-    returned if found.
-    """
+    """Return loader function for filepath extension; accepts a BIDS EMG directory."""
     path = Path(filepath)
     if path.is_dir():
         candidates = sorted(path.glob("*_emg.bdf")) + sorted(path.glob("*_emg.edf"))
@@ -120,16 +89,7 @@ class _RegisteredSignalLoader:
 
 
 class LoaderFactory:
-    """Compatibility facade over the registry-based loader dispatch.
-
-    Examples:
-        >>> loader = LoaderFactory.create_loader("data/rec.otb4")
-        >>> signal = loader.load("data/rec.otb4")
-
-        Or more concisely:
-
-        >>> signal = LoaderFactory.load_signal("data/rec.otb4")
-    """
+    """Compatibility facade over the registry-based loader dispatch."""
 
     @classmethod
     def register_loader(

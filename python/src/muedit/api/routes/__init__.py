@@ -1,11 +1,15 @@
 """Router registration for MUedit API."""
 
+from __future__ import annotations
+
 from fastapi import FastAPI
 
 from muedit.api.routes.decompose import router as decompose_router
 from muedit.api.routes.dialog import router as dialog_router
 from muedit.api.routes.editing import router as editing_router
 from muedit.api.routes.preview import router as preview_router
+
+__all__ = ["include_routers"]
 
 
 def include_routers(app: FastAPI) -> None:
