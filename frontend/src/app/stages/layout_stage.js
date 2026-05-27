@@ -28,8 +28,17 @@ export function setupLayoutEvents(deps) {
   const sectionHeaders =
     els.settingsPanel?.querySelectorAll(".section-header") || [];
   sectionHeaders.forEach((head) => {
-    head.addEventListener("click", () => {
-      head.parentElement.classList.toggle("collapsed");
+    head.setAttribute("tabindex", "0");
+    const toggle = () => {
+      const isCollapsed = head.parentElement.classList.toggle("collapsed");
+      head.setAttribute("aria-expanded", isCollapsed ? "false" : "true");
+    };
+    head.addEventListener("click", toggle);
+    head.addEventListener("keydown", (e) => {
+      if (e.key === " " || e.key === "Enter") {
+        e.preventDefault();
+        toggle();
+      }
     });
   });
 

@@ -110,7 +110,6 @@
               id="uploadFormatError"
               class="upload-format-error hidden"
               role="alert"
-              aria-live="polite"
             ></div>
           </div>
         </section>
@@ -124,7 +123,7 @@
           <aside class="control-panel glass settings-panel" id="settingsPanel">
             <!-- Session Info -->
             <section class="panel-section collapsed" id="recordingSection">
-              <div class="section-header">
+              <div class="section-header" role="button" aria-expanded="false">
                 <span class="section-header-main">
                   <svg
                     xmlns="http://www.w3.org/2000/svg"
@@ -149,7 +148,7 @@
                   <span class="file-display" id="fileName">None</span>
                 </div>
                 <div class="form-row">
-                  <label>Fs (Hz)</label>
+                  <label for="fsamp">Fs (Hz)</label>
                   <input
                     type="number"
                     id="fsamp"
@@ -159,7 +158,7 @@
                   />
                 </div>
                 <div class="form-row">
-                  <label>BIDS root path</label>
+                  <label for="editBidsRoot">BIDS root path</label>
                   <input
                     type="text"
                     id="editBidsRoot"
@@ -167,11 +166,11 @@
                   />
                 </div>
                 <div class="form-row">
-                  <label>Subject</label>
+                  <label for="bidsSubject">Subject</label>
                   <input type="text" id="bidsSubject" value="01" />
                 </div>
                 <div class="form-row">
-                  <label>Task</label>
+                  <label for="bidsTask">Task</label>
                   <input
                     type="text"
                     id="bidsTask"
@@ -188,16 +187,16 @@
                   </datalist>
                 </div>
                 <div class="form-row">
-                  <label>Session</label>
+                  <label for="bidsSession">Session</label>
                   <input type="number" id="bidsSession" value="01" min="1" />
                 </div>
                 <div class="form-row">
-                  <label>Run</label>
+                  <label for="bidsRun">Run</label>
                   <input type="number" id="bidsRun" value="01" min="1" />
                 </div>
                 <div id="bidsMuscleContainer">
                   <div class="form-row">
-                    <label>Muscle</label>
+                    <label for="bidsMuscle_0">Muscle</label>
                     <input
                       type="text"
                       id="bidsMuscle_0"
@@ -216,7 +215,7 @@
 
             <!-- Decomposition Settings -->
             <section class="panel-section collapsed" id="decompSettingsSection">
-              <div class="section-header">
+              <div class="section-header" role="button" aria-expanded="false">
                 <span class="section-header-main">
                   <svg
                     xmlns="http://www.w3.org/2000/svg"
@@ -242,15 +241,15 @@
               </div>
               <div class="section-content">
                 <div class="form-row">
-                  <label>Iterations</label>
+                  <label for="niter">Iterations</label>
                   <input type="number" id="niter" value="150" min="1" />
                 </div>
                 <div class="form-row">
-                  <label>Analysis windows (count)</label>
+                  <label for="nwindows">Analysis windows (count)</label>
                   <input type="number" id="nwindows" value="1" min="1" />
                 </div>
                 <div class="form-row">
-                  <label>Duplicates thresh</label>
+                  <label for="duplicatesthresh">Duplicates thresh</label>
                   <input
                     type="number"
                     step="0.01"
@@ -266,12 +265,13 @@
                     id="peelOffToggle"
                     data-state="off"
                     type="button"
+                    aria-pressed="false"
                   >
                     Peeloff: Off
                   </button>
                 </div>
                 <div class="form-row conditional hidden" id="peelOffSettings">
-                  <label>Window (ms)</label>
+                  <label for="peelOffWindow">Window (ms)</label>
                   <input type="number" id="peelOffWindow" value="25" min="1" />
                 </div>
                 <div class="toggle-row">
@@ -280,6 +280,7 @@
                     id="useAdaptiveToggle"
                     data-state="off"
                     type="button"
+                    aria-pressed="false"
                   >
                     Use adaptive: Off
                   </button>
@@ -289,7 +290,7 @@
 
             <!-- Quality Filters -->
             <section class="panel-section collapsed" id="filterSettingsSection">
-              <div class="section-header">
+              <div class="section-header" role="button" aria-expanded="false">
                 <span class="section-header-main">
                   <svg
                     xmlns="http://www.w3.org/2000/svg"
@@ -310,21 +311,21 @@
               </div>
               <div class="section-content">
                 <div class="toggle-row">
-                  <button class="pill-toggle on" id="silToggle" data-state="on" type="button">
+                  <button class="pill-toggle on" id="silToggle" data-state="on" type="button" aria-pressed="true">
                     SIL filter: On
                   </button>
                 </div>
                 <div class="form-row" id="silSettings">
-                  <label>SIL threshold</label>
+                  <label for="silValue">SIL threshold</label>
                   <input type="number" step="0.01" id="silValue" value="0.9" />
                 </div>
                 <div class="toggle-row">
-                  <button class="pill-toggle" id="covToggle" data-state="off" type="button">
+                  <button class="pill-toggle" id="covToggle" data-state="off" type="button" aria-pressed="false">
                     COV tool: Off
                   </button>
                 </div>
                 <div class="form-row conditional hidden" id="covSettings">
-                  <label>COV threshold</label>
+                  <label for="covValue">COV threshold</label>
                   <input type="number" step="0.01" id="covValue" value="0.5" />
                 </div>
               </div>
@@ -332,7 +333,7 @@
           </aside>
 
           <div class="layout workspace-grid">
-            <main class="visual-panel">
+            <div class="visual-panel">
               <!-- Quality Check Stage -->
               <div class="stage stage-qc active" id="stageQc">
                 <div class="qc-tabs-row">
@@ -726,7 +727,7 @@
                   ></canvas>
                 </div>
               </div>
-            </main>
+            </div>
           </div>
         </section>
       </main>
