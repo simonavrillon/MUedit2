@@ -1,9 +1,117 @@
 import {
+  setCurrentStage,
   setEditCurrentMu,
   setEditView,
   setRunCurrentMu,
   setRunView,
-} from "../state/actions.js";
+} from "../../state/actions.js";
+
+export function setStatus(els, text, tone = "muted") {
+  if (!els.status) return;
+  els.status.textContent = text;
+  els.status.dataset.tone = tone;
+}
+
+export function updateWorkflowStepper(deps, targetStage) {
+  const { els, state } = deps;
+  const steps = [
+    { key: "import", el: els.stepImport, complete: !!state.file },
+    { key: "qc", el: els.stepQc, complete: !!state.previewSeries?.length },
+    { key: "run", el: els.stepRun, complete: !!state.muDistimes?.length },
+    { key: "edit", el: els.stepEdit, complete: !!state.edit.distimes?.length },
+  ];
+  const activeKeyByStage = {
+    import: "import",
+    qc: "qc",
+    run: "run",
+    edit: "edit",
+  };
+  const activeKey = activeKeyByStage[targetStage] || "qc";
+  steps.forEach((step) => {
+    if (!step.el) return;
+    step.el.classList.remove("active", "complete", "pending");
+    if (step.key === activeKey) {
+      step.el.classList.add("active");
+    } else if (step.complete) {
+      step.el.classList.add("complete");
+    } else {
+      step.el.classList.add("pending");
+    }
+  });
+}
+
+export function showWorkspace(deps, options = {}) {
+  const { els, state, setSettingsOpen, switchStage, populateGridTabs } = deps;
+  const { keepLandingVisible = false } = options;
+  if (els.landing && !keepLandingVisible) els.landing.classList.add("hidden");
+  if (els.workspace) els.workspace.classList.remove("hidden");
+  setSettingsOpen(false);
+  switchStage(state.currentStage || "qc");
+  populateGridTabs();
+}
+
+export function updateStepAvailability(deps) {
+  const { els, state } = deps;
+  const hasFile = !!state.file;
+  const hasPreview = !!state.previewSeries?.length;
+  const hasRunResults = !!state.muDistimes?.length;
+  const hasEditData = !!state.edit.distimes?.length;
+
+  if (els.stepRun) {
+    // Run becomes available once a preview exists, independent of active stage.
+    els.stepRun.disabled = !hasFile || !hasPreview;
+  }
+  if (els.stepEdit) {
+    // Edit is available after a run result exists, or when edit data is loaded.
+    els.stepEdit.disabled = !hasFile || (!hasRunResults && !hasEditData);
+  }
+}
+
+export function switchStage(deps, target) {
+  const {
+    state,
+    els,
+    setSettingsOpen,
+    setStatus,
+    updateStepAvailability,
+    updateWorkflowStepper,
+    scheduleLayoutRerender,
+  } = deps;
+  if (!state.file && target !== "edit") {
+    return;
+  }
+  setSettingsOpen(false);
+  if (target === "run" && !state.previewSeries?.length) {
+    setStatus("Run step is locked until preview is loaded", "muted");
+    return;
+  }
+  if (target === "edit" && !state.edit.distimes?.length) {
+    setStatus("Load a decomposition file to edit", "muted");
+  }
+  setCurrentStage(state, target);
+  const qcStage = els.stageQc;
+  const runStage = els.stageRun;
+  const editStage = els.stageEdit;
+  if (qcStage) qcStage.classList.toggle("active", target === "qc");
+  if (runStage) runStage.classList.toggle("active", target === "run");
+  if (editStage) editStage.classList.toggle("active", target === "edit");
+  updateStepAvailability();
+  updateWorkflowStepper(target);
+  scheduleLayoutRerender(0);
+}
+
+export function populateGridTabs(deps) {
+  const { els, state, setSelectedGrid } = deps;
+  if (!els.qcGridTabs) return;
+  els.qcGridTabs.innerHTML = "";
+  (state.gridNames || []).forEach((name, idx) => {
+    const btn = document.createElement("button");
+    btn.className = `tab-btn ${idx === state.currentGrid ? "active" : ""}`;
+    btn.textContent = `Grid ${idx + 1}${name ? ` • ${name}` : ""}`;
+    btn.onclick = () => setSelectedGrid(idx);
+    els.qcGridTabs.appendChild(btn);
+  });
+}
 
 export function getViewForStage(state, stage) {
   if (stage === "edit") {
@@ -127,15 +235,7 @@ export function handleKeyboardNavigation(deps, e) {
   let action = null;
   if (stage === "edit") {
     const key = e.key.toLowerCase();
-    if (e.key === "ArrowLeft") {
-      action = "scroll_left";
-    } else if (e.key === "ArrowRight") {
-      action = "scroll_right";
-    } else if (e.key === "ArrowUp") {
-      action = "zoom_in";
-    } else if (e.key === "ArrowDown") {
-      action = "zoom_out";
-    } else if (key === "a") {
+    if (key === "a") {
       setEditMode("add", "Drag a box on pulse train to add spikes");
       e.preventDefault();
       return;

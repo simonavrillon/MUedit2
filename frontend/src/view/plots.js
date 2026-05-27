@@ -1,4 +1,4 @@
-import { COLORS } from "./config.js";
+import { COLORS } from "../config.js";
 
 export function getAxisPadding(showAxes) {
   return showAxes
@@ -77,7 +77,8 @@ export function drawSeries(
   const sliced = series.slice(clampedStart, clampedEnd);
   const viewSpan = clampedEnd - clampedStart;
 
-  let max = -Infinity, min = Infinity;
+  let max = -Infinity;
+  let min = Infinity;
   for (let i = 0; i < sliced.length; i++) {
     if (sliced[i] > max) max = sliced[i];
     if (sliced[i] < min) min = sliced[i];
@@ -358,9 +359,14 @@ export function drawMiniSeries(canvas, series, off = false) {
     Array.isArray(series.max);
   const valuesMin = hasEnvelope ? series.min : series;
   const valuesMax = hasEnvelope ? series.max : series;
-  let max = -Infinity, min = Infinity;
-  for (let i = 0; i < valuesMax.length; i++) { if (valuesMax[i] > max) max = valuesMax[i]; }
-  for (let i = 0; i < valuesMin.length; i++) { if (valuesMin[i] < min) min = valuesMin[i]; }
+  let max = -Infinity;
+  let min = Infinity;
+  for (let i = 0; i < valuesMax.length; i++) {
+    if (valuesMax[i] > max) max = valuesMax[i];
+  }
+  for (let i = 0; i < valuesMin.length; i++) {
+    if (valuesMin[i] < min) min = valuesMin[i];
+  }
   const span = max - min || 1;
   const count = Math.max(valuesMin.length, valuesMax.length);
   const stepX = canvas.width / Math.max(1, count - 1);

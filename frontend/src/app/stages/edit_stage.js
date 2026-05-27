@@ -1,7 +1,4 @@
 import {
-  saveEditedFile as saveEditedFileFeature,
-  loadDecompositionForEdit as loadDecompositionForEditFeature,
-  handleDecompositionFile as handleDecompositionFileFeature,
   ensureEditFlagged as ensureEditFlaggedFeature,
   getRawPulse as getRawPulseFeature,
   getDisplayPulse as getDisplayPulseFeature,
@@ -12,22 +9,29 @@ import {
   getPulseViewMeta as getPulseViewMetaFeature,
   refreshEditTotals as refreshEditTotalsFeature,
   resetEditState as resetEditStateFeature,
-  renderEditExplorer as renderEditExplorerFeature,
-  renderInstantaneousDr as renderInstantaneousDrFeature,
-  requestRoiEdit as requestRoiEditFeature,
-  requestFilterUpdate as requestFilterUpdateFeature,
   addSpikesInSelection as addSpikesInSelectionFeature,
   addArtifactInSelection as addArtifactInSelectionFeature,
   deleteSpikesInSelection as deleteSpikesInSelectionFeature,
   deleteDrInSelection as deleteDrInSelectionFeature,
-  removeOutliers as removeOutliersFeature,
-  flagMuForDeletion as flagMuForDeletionFeature,
   resetCurrentMuEdits as resetCurrentMuEditsFeature,
+  duplicateMu as duplicateMuFeature,
+} from "../../editing/operations.js";
+import {
+  renderEditExplorer as renderEditExplorerFeature,
+  renderInstantaneousDr as renderInstantaneousDrFeature,
   bindEditCanvas as bindEditCanvasFeature,
   bindEditDrCanvas as bindEditDrCanvasFeature,
-  duplicateMu as duplicateMuFeature,
+} from "../../view/edit_canvas.js";
+import {
+  saveEditedFile as saveEditedFileFeature,
+  loadDecompositionForEdit as loadDecompositionForEditFeature,
+  handleDecompositionFile as handleDecompositionFileFeature,
+  requestRoiEdit as requestRoiEditFeature,
+  requestFilterUpdate as requestFilterUpdateFeature,
+  removeOutliers as removeOutliersFeature,
+  flagMuForDeletion as flagMuForDeletionFeature,
   removeDuplicateMus as removeDuplicateMusFeature,
-} from "../../features/edit.js";
+} from "../services/editing_service.js";
 import {
   appendEditHistoryEntry,
   setEditBidsRoot,
@@ -183,7 +187,6 @@ export function createEditStageService(deps) {
 
   function restoreEditBackup() {
     restoreEditBackupFeature({
-      els,
       state,
       setEditStatus,
       renderEditExplorer,
@@ -245,7 +248,7 @@ export function createEditStageService(deps) {
         backupEditMu,
         getPulseViewMeta,
         getCanvasPlotMetrics,
-        requestRoiEditFn: requestRoiEdit,
+        requestRoiEdit,
       },
       sel,
     );
@@ -260,7 +263,7 @@ export function createEditStageService(deps) {
         backupEditMu,
         getPulseViewMeta,
         getCanvasPlotMetrics,
-        requestRoiEditFn: requestRoiEdit,
+        requestRoiEdit,
       },
       sel,
     );
@@ -275,7 +278,7 @@ export function createEditStageService(deps) {
         backupEditMu,
         getPulseViewMeta,
         getCanvasPlotMetrics,
-        requestRoiEditFn: requestRoiEdit,
+        requestRoiEdit,
       },
       sel,
     );
@@ -289,7 +292,7 @@ export function createEditStageService(deps) {
         backupEditMu,
         getCanvasPlotMetrics,
         getRawPulse,
-        requestRoiEditFn: requestRoiEdit,
+        requestRoiEdit,
       },
       sel,
     );
@@ -464,4 +467,113 @@ export function createEditStageService(deps) {
     duplicateMu,
     removeDuplicateMus,
   };
+}
+
+/**
+ * @typedef {import('../deps.js').EditSetupDeps} EditSetupDeps
+ */
+
+/**
+ * @param {EditSetupDeps} deps
+ */
+export function setupEditEvents(deps) {
+  const {
+    els,
+    state,
+    DEFAULT_BIDS_ROOT,
+    bindEditCanvas,
+    bindEditDrCanvas,
+    renderEditExplorer,
+    runEditAction,
+    saveEditedFile,
+    resetCurrentMuEdits,
+    updateMuFilter,
+    removeOutliers,
+    flagMuForDeletion,
+    duplicateMu,
+    removeDuplicateMus,
+    restoreEditBackup,
+    setEditMode,
+    refreshEditModeButtons,
+    handleKeyboardNavigation,
+  } = deps;
+
+  bindEditCanvas();
+  bindEditDrCanvas();
+
+  if (els.editBidsRoot && !els.editBidsRoot.value.trim()) {
+    els.editBidsRoot.value = DEFAULT_BIDS_ROOT;
+    setEditBidsRoot(state, DEFAULT_BIDS_ROOT);
+  }
+
+  els.editMuGridSelect?.addEventListener("change", (e) => {
+    const idx = Number(e.target.value) || 0;
+    setEditCurrentMuGrid(state, idx, { resetView: true });
+    renderEditExplorer();
+    e.target.blur();
+  });
+
+  els.editMuSelect?.addEventListener("change", (e) => {
+    const idx = Number(e.target.value);
+    setEditCurrentMu(state, idx, { resetView: true });
+    renderEditExplorer();
+    e.target.blur();
+  });
+
+  els.editSaveBtn?.addEventListener("click", () => {
+    void runEditAction(els.editSaveBtn, saveEditedFile);
+  });
+  els.editResetBtn?.addEventListener("click", () => {
+    void runEditAction(els.editResetBtn, () => resetCurrentMuEdits());
+  });
+  els.editUpdateBtn?.addEventListener("click", () => {
+    void runEditAction(els.editUpdateBtn, updateMuFilter);
+  });
+  if (els.editPeelOffToggle) {
+    const applyPeelOff = (btn, on) => {
+      btn.dataset.state = on ? "on" : "off";
+      btn.setAttribute("aria-pressed", on ? "true" : "false");
+      btn.classList.toggle("on", on);
+      const label = on ? "On" : "Off";
+      const shortEl = btn.querySelector(".peeloff-short");
+      const fullEl = btn.querySelector(".peeloff-full");
+      if (shortEl) shortEl.textContent = label;
+      if (fullEl) fullEl.textContent = `Peel-off: ${label}`;
+    };
+    applyPeelOff(els.editPeelOffToggle, false);
+    els.editPeelOffToggle.addEventListener("click", () => {
+      applyPeelOff(els.editPeelOffToggle, els.editPeelOffToggle.dataset.state !== "on");
+    });
+  }
+  els.editOutliersBtn?.addEventListener("click", () => {
+    void runEditAction(els.editOutliersBtn, () => removeOutliers());
+  });
+  els.editFlagBtn?.addEventListener("click", () => {
+    void runEditAction(els.editFlagBtn, () => flagMuForDeletion());
+  });
+  els.editDuplicateBtn?.addEventListener("click", () => {
+    void runEditAction(els.editDuplicateBtn, () => duplicateMu());
+  });
+  els.editDeduplicateBtn?.addEventListener("click", () => {
+    void runEditAction(els.editDeduplicateBtn, () => removeDuplicateMus());
+  });
+  els.editUndoBtn?.addEventListener("click", () => {
+    void runEditAction(els.editUndoBtn, () => restoreEditBackup());
+  });
+  els.editAddBtn?.addEventListener("click", () => {
+    setEditMode("add", "Drag a box on pulse train to add spikes");
+  });
+  els.editAddArtifactBtn?.addEventListener("click", () => {
+    setEditMode("add_artifact", "Drag a box on pulse train to mark an artifact");
+  });
+  els.editDeleteSpikeBtn?.addEventListener("click", () => {
+    setEditMode("delete_spikes", "Drag a box on pulse train to delete spikes");
+  });
+
+  els.editBidsRoot?.addEventListener("input", (e) => {
+    setEditBidsRoot(state, e.target.value);
+  });
+
+  refreshEditModeButtons();
+  window.addEventListener("keydown", handleKeyboardNavigation);
 }

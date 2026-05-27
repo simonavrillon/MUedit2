@@ -1,4 +1,4 @@
-import { GRID_COLORS } from "./config.js";
+import { GRID_COLORS } from "../config.js";
 
 export const state = {
   file: null,
@@ -40,6 +40,7 @@ export const state = {
     originalPulseTrains: [],
     distimes: [],
     originalDistimes: [],
+    artifactTimes: [],
     gridNames: [],
     muGridIndex: [],
     fsamp: null,

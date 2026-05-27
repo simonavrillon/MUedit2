@@ -1,18 +1,7 @@
-export function syncRois(state, nwin) {
-  if (!state.rois) state.rois = [];
-  if (state.rois.length > nwin) state.rois = state.rois.slice(0, nwin);
-  while (state.rois.length < nwin) {
-    state.rois.push({ start: 0, end: state.seriesLength || 0 });
-  }
-}
+import { COLORS } from "../config.js";
 
-export function refreshVisuals({
-  state,
-  els,
-  drawGridOverlay,
-  renderAuxiliaryChannels,
-  renderMuExplorer,
-}) {
+export function refreshVisuals(deps) {
+  const { state, els, drawGridOverlay, renderAuxiliaryChannels, renderMuExplorer } = deps;
   const selections = state.roiDraft
     ? [...(state.rois || []), state.roiDraft]
     : state.rois;
@@ -28,17 +17,15 @@ export function refreshVisuals({
   renderMuExplorer();
 }
 
-export function enableRoiSelection(
-  {
+export function enableRoiSelection(deps, canvasId) {
+  const {
     state,
     els,
-    syncRoisFn,
+    syncRois,
     refreshVisualsFn,
-    requestQcGridWindowFn,
-    updateProgressFn,
-  },
-  canvasId,
-) {
+    requestQcGridWindow,
+    updateProgress,
+  } = deps;
   const canvas = els?.[canvasId] || document.getElementById(canvasId);
   if (!canvas || canvas.dataset.roiBound === "1") return;
   canvas.dataset.roiBound = "1";
@@ -60,7 +47,7 @@ export function enableRoiSelection(
     if (!state.seriesLength) return;
     const { startSample, endSample } = toSamples(startX, endX);
     const nwin = Number(els.nwindows?.value) ?? 1;
-    syncRoisFn(nwin);
+    syncRois(nwin);
     let idx = 0;
     let best = Number.MAX_SAFE_INTEGER;
     state.rois.forEach((r, i) => {
@@ -77,12 +64,12 @@ export function enableRoiSelection(
     state.roiDraft = null;
     state.channelTraces = [];
     refreshVisualsFn();
-    requestQcGridWindowFn(
+    requestQcGridWindow(
       state.currentGrid,
       state.rois[0]?.start || 0,
       state.rois[0]?.end || state.seriesLength,
     );
-    updateProgressFn(
+    updateProgress(
       undefined,
       `ROI updated (${state.rois.length} window${state.rois.length > 1 ? "s" : ""})`,
     );
@@ -124,8 +111,8 @@ export function enableRoiSelection(
   });
 }
 
-export function renderChannelQC(
-  {
+export function renderChannelQC(deps, waitForMiniPlots = false) {
+  const {
     state,
     els,
     nextFrame,
@@ -133,9 +120,7 @@ export function renderChannelQC(
     requestQcGridWindow,
     getCurrentGrid,
     ensureDiscardMasks,
-  },
-  waitForMiniPlots = false,
-) {
+  } = deps;
   const section = els.qcSection;
   if (!section) return waitForMiniPlots ? Promise.resolve() : undefined;
   section.innerHTML = "";
@@ -202,18 +187,7 @@ export function renderChannelQC(
     cell.addEventListener("click", () => {
       mask[chIdx] = off ? 0 : 1;
       state.discardMasks[gridIdx] = mask;
-      renderChannelQC(
-        {
-          state,
-          els,
-          nextFrame,
-          drawMiniSeries,
-          requestQcGridWindow,
-          getCurrentGrid,
-          ensureDiscardMasks,
-        },
-        false,
-      );
+      renderChannelQC(deps, false);
     });
     miniDrawJobs.push(() =>
       drawMiniSeries(mini, traces[chIdx], mask[chIdx] === 1),
@@ -234,4 +208,99 @@ export function renderChannelQC(
   }
   setTimeout(runMiniDraw, 0);
   return undefined;
+}
+
+export function populateAuxSelector(els, state) {
+  const sel = els.auxSelector;
+  if (!sel) return;
+  sel.innerHTML = '<option value="-1">All channels</option>';
+  if (state.auxNames && state.auxNames.length) {
+    state.auxNames.forEach((name, idx) => {
+      const opt = document.createElement("option");
+      opt.value = idx;
+      opt.textContent = name || `Aux ${idx + 1}`;
+      sel.appendChild(opt);
+    });
+  }
+}
+
+export function renderAuxiliaryChannels(els, state) {
+  const canvas = els.auxCanvas;
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  const w = canvas.clientWidth || canvas.width || 1;
+  const h = canvas.clientHeight || canvas.height || 120;
+  canvas.width = w;
+  canvas.height = h;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  if (!state.auxSeries || !state.auxSeries.length) {
+    ctx.fillStyle = COLORS.muted;
+    ctx.font = "12px sans-serif";
+    ctx.fillText("No auxiliary data", 12, 24);
+    return;
+  }
+
+  const selectedIdx = parseInt(els.auxSelector?.value ?? "-1", 10);
+  let globalMin = Infinity;
+  let globalMax = -Infinity;
+  state.auxSeries.forEach((s, idx) => {
+    if (!Array.isArray(s)) return;
+    if (selectedIdx !== -1 && selectedIdx !== idx) return;
+    s.forEach((v) => {
+      if (v < globalMin) globalMin = v;
+      if (v > globalMax) globalMax = v;
+    });
+  });
+
+  if (globalMin === Infinity) return;
+  const span = globalMax - globalMin || 1;
+
+  const selections = state.roiDraft
+    ? [...(state.rois || []), state.roiDraft]
+    : state.rois;
+  if (selections && selections.length && state.seriesLength) {
+    selections.forEach((sel) => {
+      const startX = (sel.start / state.seriesLength) * canvas.width;
+      const endX = (sel.end / state.seriesLength) * canvas.width;
+      ctx.fillStyle = COLORS.roiFill;
+      ctx.fillRect(
+        Math.min(startX, endX),
+        0,
+        Math.abs(endX - startX),
+        canvas.height,
+      );
+      ctx.strokeStyle = COLORS.roiStroke;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(
+        Math.min(startX, endX),
+        0,
+        Math.abs(endX - startX),
+        canvas.height,
+      );
+    });
+  }
+
+  let labelCount = 0;
+  state.auxSeries.forEach((s, idx) => {
+    if (!s || !s.length) return;
+    if (selectedIdx !== -1 && selectedIdx !== idx) return;
+    const stepX = canvas.width / Math.max(1, s.length - 1);
+    ctx.strokeStyle = state.gridColors[idx % state.gridColors.length];
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    s.forEach((v, i) => {
+      const x = i * stepX;
+      const y = canvas.height - ((v - globalMin) / span) * canvas.height;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+
+    ctx.fillStyle = ctx.strokeStyle;
+    ctx.font = "10px sans-serif";
+    const name = state.auxNames[idx] || `Aux ${idx + 1}`;
+    ctx.fillText(name, 5, 12 + labelCount * 12);
+    labelCount++;
+  });
 }

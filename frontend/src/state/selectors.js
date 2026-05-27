@@ -2,7 +2,6 @@ export function getCurrentGrid(state) {
   return state.currentGrid || 0;
 }
 
-
 export function getRunMuIndicesForGrid(state, gridIdx) {
   if (!state.muPulseTrains || !state.muPulseTrains.length) return [];
   const mapping = state.muGridIndex || [];

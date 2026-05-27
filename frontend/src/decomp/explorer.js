@@ -1,16 +1,17 @@
 import { UNIFORM_PULSE_COLOR } from "../config.js";
 
-export function buildRunMuDropdownModel({ state, getMuIndicesForGridFn }) {
+export function buildRunMuDropdownModel(deps) {
+  const { state, getMuIndicesForGrid } = deps;
   const gridOptions = (state.gridNames || []).map((name, idx) => ({
     value: idx,
     label: `Grid ${idx + 1}${name ? ` • ${name}` : ""}`,
   }));
 
   let targetGrid = state.currentMuGrid || 0;
-  let mus = getMuIndicesForGridFn(targetGrid);
+  let mus = getMuIndicesForGrid(targetGrid);
   if (!mus.length && state.gridNames?.length) {
     for (let g = 0; g < state.gridNames.length; g++) {
-      const list = getMuIndicesForGridFn(g);
+      const list = getMuIndicesForGrid(g);
       if (list.length) {
         targetGrid = g;
         mus = list;
@@ -33,7 +34,8 @@ export function buildRunMuDropdownModel({ state, getMuIndicesForGridFn }) {
   };
 }
 
-export function buildRunMuExplorerModel({ state, fsamp = null }) {
+export function buildRunMuExplorerModel(deps) {
+  const { state, fsamp = null } = deps;
   const allPulses = Array.isArray(state.muPulseTrains) ? state.muPulseTrains : [];
   const currentMu = Number(state.currentMu);
   let muIdx =

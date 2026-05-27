@@ -1,4 +1,3 @@
-import { COLORS } from "../config.js";
 import {
   setAuxData,
   setChannelMeans,
@@ -22,99 +21,12 @@ import {
   rollbackRawPreviewTransition,
 } from "../state/transitions.js";
 
-export function populateAuxSelector(els, state) {
-  const sel = els.auxSelector;
-  if (!sel) return;
-  sel.innerHTML = '<option value="-1">All channels</option>';
-  if (state.auxNames && state.auxNames.length) {
-    state.auxNames.forEach((name, idx) => {
-      const opt = document.createElement("option");
-      opt.value = idx;
-      opt.textContent = name || `Aux ${idx + 1}`;
-      sel.appendChild(opt);
-    });
+export function syncRois(state, nwin) {
+  if (!state.rois) state.rois = [];
+  if (state.rois.length > nwin) state.rois = state.rois.slice(0, nwin);
+  while (state.rois.length < nwin) {
+    state.rois.push({ start: 0, end: state.seriesLength || 0 });
   }
-}
-
-export function renderAuxiliaryChannels(els, state) {
-  const canvas = els.auxCanvas;
-  if (!canvas) return;
-  const ctx = canvas.getContext("2d");
-  const w = canvas.clientWidth || canvas.width || 1;
-  const h = canvas.clientHeight || canvas.height || 120;
-  canvas.width = w;
-  canvas.height = h;
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-  if (!state.auxSeries || !state.auxSeries.length) {
-    ctx.fillStyle = COLORS.muted;
-    ctx.font = "12px sans-serif";
-    ctx.fillText("No auxiliary data", 12, 24);
-    return;
-  }
-
-  const selectedIdx = parseInt(els.auxSelector?.value ?? "-1", 10);
-  let globalMin = Infinity;
-  let globalMax = -Infinity;
-  state.auxSeries.forEach((s, idx) => {
-    if (!Array.isArray(s)) return;
-    if (selectedIdx !== -1 && selectedIdx !== idx) return;
-    s.forEach((v) => {
-      if (v < globalMin) globalMin = v;
-      if (v > globalMax) globalMax = v;
-    });
-  });
-
-  if (globalMin === Infinity) return;
-  const span = globalMax - globalMin || 1;
-
-  const selections = state.roiDraft
-    ? [...(state.rois || []), state.roiDraft]
-    : state.rois;
-  if (selections && selections.length && state.seriesLength) {
-    selections.forEach((sel) => {
-      const startX = (sel.start / state.seriesLength) * canvas.width;
-      const endX = (sel.end / state.seriesLength) * canvas.width;
-      ctx.fillStyle = COLORS.roiFill;
-      ctx.fillRect(
-        Math.min(startX, endX),
-        0,
-        Math.abs(endX - startX),
-        canvas.height,
-      );
-      ctx.strokeStyle = COLORS.roiStroke;
-      ctx.lineWidth = 1;
-      ctx.strokeRect(
-        Math.min(startX, endX),
-        0,
-        Math.abs(endX - startX),
-        canvas.height,
-      );
-    });
-  }
-
-  let labelCount = 0;
-  state.auxSeries.forEach((s, idx) => {
-    if (!s || !s.length) return;
-    if (selectedIdx !== -1 && selectedIdx !== idx) return;
-    const stepX = canvas.width / Math.max(1, s.length - 1);
-    ctx.strokeStyle = state.gridColors[idx % state.gridColors.length];
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    s.forEach((v, i) => {
-      const x = i * stepX;
-      const y = canvas.height - ((v - globalMin) / span) * canvas.height;
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    });
-    ctx.stroke();
-
-    ctx.fillStyle = ctx.strokeStyle;
-    ctx.font = "10px sans-serif";
-    const name = state.auxNames[idx] || `Aux ${idx + 1}`;
-    ctx.fillText(name, 5, 12 + labelCount * 12);
-    labelCount++;
-  });
 }
 
 export async function requestQcGridWindow(
@@ -284,11 +196,11 @@ export async function requestPreview(deps, options = {}) {
     apiJson,
     API_BASE,
     setUploadLoading,
-    updateProgressFn,
-    populateAuxSelectorFn,
+    updateProgress,
+    populateAuxSelector,
     ensureDiscardMasks,
     populateGridTabs,
-    requestQcGridWindowFn,
+    requestQcGridWindow,
     getCurrentGrid,
     enableRoiSelection,
     renderBidsAutoInfo,
@@ -303,7 +215,7 @@ export async function requestPreview(deps, options = {}) {
 
   if (!state.file && !filepath) return;
   setUploadLoading(true);
-  updateProgressFn(0, "Fetching preview...");
+  updateProgress(0, "Fetching preview...");
 
   try {
     let data;
@@ -342,7 +254,7 @@ export async function requestPreview(deps, options = {}) {
       els.fsamp.value = Number.isFinite(fs) && fs > 0 ? String(Math.round(fs)) : "";
     }
     setPreviewSeries(state, data.mean_abs || []);
-    populateAuxSelectorFn();
+    populateAuxSelector();
     ensureDiscardMasks();
     populateGridTabs();
     const nwin = Number(els.nwindows?.value) ?? 1;
@@ -353,7 +265,7 @@ export async function requestPreview(deps, options = {}) {
     }
     setRois(state, rois);
     const roiPreview = state.rois?.[0];
-    await requestQcGridWindowFn(
+    await requestQcGridWindow(
       getCurrentGrid(),
       Number.isFinite(roiPreview?.start) ? roiPreview.start : 0,
       Number.isFinite(roiPreview?.end) ? roiPreview.end : state.seriesLength,
@@ -365,7 +277,7 @@ export async function requestPreview(deps, options = {}) {
     setCurrentStage(state, "qc");
     renderBidsAutoInfo();
     renderBidsMuscleFields();
-    updateProgressFn(0, "Preview ready - drag to select ROI");
+    updateProgress(0, "Preview ready - drag to select ROI");
     setStatus("Preview ready", "success");
     showWorkspace({ keepLandingVisible: true });
     await nextFrame();
@@ -376,7 +288,7 @@ export async function requestPreview(deps, options = {}) {
   } catch (err) {
     console.error(err);
     setUploadToken(state, null);
-    updateProgressFn(0, "Preview failed");
+    updateProgress(0, "Preview failed");
     if (!silentFailure) {
       setStatus("Preview failed", "error");
     }
@@ -388,7 +300,7 @@ export async function requestPreview(deps, options = {}) {
 
 export async function handleRawFile(deps, file, options = {}) {
   const { silentPreviewFailure = false } = options;
-  const { state, els, requestPreviewFn, setStatus, updateStartAvailability } =
+  const { state, els, requestPreview, setStatus, updateStartAvailability } =
     deps;
 
   if (!file) return;
@@ -399,7 +311,7 @@ export async function handleRawFile(deps, file, options = {}) {
   }
   setStatus("File ready");
   updateStartAvailability();
-  const ok = await requestPreviewFn({ silentFailure: silentPreviewFailure });
+  const ok = await requestPreview({ silentFailure: silentPreviewFailure });
   if (!ok) {
     rollbackRawPreviewTransition(state);
     updateStartAvailability();
@@ -414,8 +326,8 @@ export async function handleLandingFile(deps, file) {
     clearUploadFormatError,
     isSupportedSignalFile,
     detectLandingFileType,
-    handleRawFileFn,
-    handleDecompositionFileFn,
+    handleRawFile,
+    handleDecompositionFile,
   } = deps;
 
   if (!file) return;
@@ -427,17 +339,17 @@ export async function handleLandingFile(deps, file) {
   clearUploadFormatError();
   const kind = detectLandingFileType(file);
   if (kind === "raw") {
-    await handleRawFileFn(file);
+    await handleRawFile(file);
     return;
   }
   if (kind === "decomposition") {
-    await handleDecompositionFileFn(file);
+    await handleDecompositionFile(file);
     return;
   }
   if (kind === "ambiguous_mat") {
-    const rawOk = await handleRawFileFn(file, { silentPreviewFailure: true });
+    const rawOk = await handleRawFile(file, { silentPreviewFailure: true });
     if (!rawOk) {
-      await handleDecompositionFileFn(file);
+      await handleDecompositionFile(file);
     }
     return;
   }

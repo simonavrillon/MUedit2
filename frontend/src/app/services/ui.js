@@ -5,7 +5,7 @@ import {
   populateGridTabs as populateGridTabsController,
   updateStepAvailability as updateStepAvailabilityController,
   updateWorkflowStepper as updateWorkflowStepperController,
-} from "../../controllers/workflow.js";
+} from "./navigation.js";
 import {
   ensureSettingsToggleIcon as ensureSettingsToggleIconController,
   initLayoutResizePolicy as initLayoutResizePolicyController,
@@ -13,11 +13,7 @@ import {
   scheduleLayoutRerender as scheduleLayoutRerenderController,
   setSettingsOpen as setSettingsOpenController,
   toggleSettingsOpen as toggleSettingsOpenController,
-} from "../../controllers/layout.js";
-import {
-  setRunPhase as setRunPhaseFeature,
-  updateProgress as updateProgressFeature,
-} from "../../features/events.js";
+} from "./layout.js";
 
 export function createUiService(deps) {
   const {
@@ -48,16 +44,42 @@ export function createUiService(deps) {
   }
 
   function setRunPhase(pct, message = "", stage = "") {
-    setRunPhaseFeature(els, pct, message, stage);
+    if (!els.runPhase) return;
+    const stageText = typeof stage === "string" ? stage.trim().toLowerCase() : "";
+    const messageText = typeof message === "string" ? message.trim() : "";
+    const msgLower = messageText.toLowerCase();
+    let phase = "Idle";
+    if (stageText === "error" || messageText.toLowerCase().includes("error")) {
+      phase = "Failed";
+    } else if (stageText === "done") {
+      phase = "Complete";
+    } else if (msgLower.includes("loading")) {
+      phase = "Loading";
+    } else if (msgLower.includes("preprocess")) {
+      phase = "Preprocessing";
+    } else if (msgLower.includes("finalizing")) {
+      phase = "Finalizing";
+    } else if (msgLower.includes("grid")) {
+      phase = "Decomposing";
+    } else if (stageText) {
+      phase = stageText.charAt(0).toUpperCase() + stageText.slice(1);
+    } else if (typeof pct === "number" && pct > 0) {
+      phase = "Running";
+    }
+    els.runPhase.textContent = phase;
   }
 
   function updateProgress(pct, message = "", stage = "") {
-    updateProgressFeature(
-      { els, setRunPhaseFn: setRunPhase },
-      pct,
-      message,
-      stage,
-    );
+    if (els.progressBar && pct !== undefined) {
+      const clamped = Math.max(0, Math.min(100, pct));
+      els.progressBar.style.width = `${clamped}%`;
+      setRunPhase(clamped, message, stage);
+    } else {
+      setRunPhase(pct, message, stage);
+    }
+    if (els.progressText) {
+      els.progressText.textContent = message || "";
+    }
   }
 
   function rerenderPlotsForLayout() {

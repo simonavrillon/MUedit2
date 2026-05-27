@@ -2,7 +2,8 @@ let layoutRerenderTimer = null;
 let layoutSettleTimer = null;
 let layoutResizePolicyInitialized = false;
 
-export function setSettingsOpen({ els, scheduleLayoutRerender }, open) {
+export function setSettingsOpen(deps, open) {
+  const { els, scheduleLayoutRerender } = deps;
   if (!els.workspace) return;
   const next = !!open;
   els.workspace.classList.toggle("settings-open", next);
@@ -15,7 +16,8 @@ export function setSettingsOpen({ els, scheduleLayoutRerender }, open) {
   scheduleLayoutRerender(0);
 }
 
-export function toggleSettingsOpen({ els, setSettingsOpen }) {
+export function toggleSettingsOpen(deps) {
+  const { els, setSettingsOpen } = deps;
   if (!els.workspace) return;
   setSettingsOpen(!els.workspace.classList.contains("settings-open"));
 }
@@ -43,12 +45,8 @@ export function ensureSettingsToggleIcon(els) {
   els.settingsToggleBtn.appendChild(svg);
 }
 
-export function rerenderPlotsForLayout({
-  state,
-  renderChannelQC,
-  refreshVisuals,
-  renderEditExplorer,
-}) {
+export function rerenderPlotsForLayout(deps) {
+  const { state, renderChannelQC, refreshVisuals, renderEditExplorer } = deps;
   renderChannelQC();
   refreshVisuals();
   if (state.edit.distimes?.length) {
@@ -56,7 +54,8 @@ export function rerenderPlotsForLayout({
   }
 }
 
-export function scheduleLayoutRerender({ rerenderPlotsForLayout }, delay = 90) {
+export function scheduleLayoutRerender(deps, delay = 90) {
+  const { rerenderPlotsForLayout } = deps;
   if (layoutRerenderTimer) {
     clearTimeout(layoutRerenderTimer);
   }
@@ -82,7 +81,8 @@ export function scheduleLayoutRerender({ rerenderPlotsForLayout }, delay = 90) {
   );
 }
 
-export function initLayoutResizePolicy({ els, scheduleLayoutRerender }) {
+export function initLayoutResizePolicy(deps) {
+  const { els, scheduleLayoutRerender } = deps;
   if (layoutResizePolicyInitialized) return;
   layoutResizePolicyInitialized = true;
 

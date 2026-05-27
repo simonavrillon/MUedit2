@@ -31,7 +31,8 @@ export function renderMuDropdowns(els, model) {
   muSel.value = String(model.selectedMu ?? model.muOptions[0].value);
 }
 
-export function renderMuExplorer({ els, drawSeries }, model) {
+export function renderMuExplorer(deps, model) {
+  const { els, drawSeries } = deps;
   if (!model) return;
   if (els.muMeta) {
     els.muMeta.textContent = model.metaText || "";

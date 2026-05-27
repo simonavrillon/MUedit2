@@ -1,16 +1,16 @@
 import {
   autoDownloadRunDecomposition as autoDownloadRunDecompositionFeature,
   runDecomposition as runDecompositionFeature,
-} from "../../features/run.js";
+  handleStreamMessage as handleStreamMessageFeature,
+} from "../../decomp/run.js";
 import {
   buildRunMuDropdownModel as buildRunMuDropdownModelFeature,
   buildRunMuExplorerModel as buildRunMuExplorerModelFeature,
-} from "../../features/run_explorer.js";
-import { handleStreamMessage as handleStreamMessageFeature } from "../../features/events.js";
+} from "../../decomp/explorer.js";
 import {
   renderMuDropdowns as renderMuDropdownsController,
   renderMuExplorer as renderMuExplorerController,
-} from "../../controllers/mu_explorer.js";
+} from "../../view/explorer.js";
 import {
   setRunCurrentMu,
   setRunCurrentMuGrid,
@@ -55,7 +55,7 @@ export function createRunStageService(deps) {
   function renderMuDropdowns() {
     const model = buildRunMuDropdownModelFeature({
       state,
-      getMuIndicesForGridFn: getMuIndicesForGrid,
+      getMuIndicesForGrid,
     });
     const selectedGrid = model.selectedGrid ?? state.currentMuGrid ?? 0;
     setRunCurrentMuGrid(state, selectedGrid, {
@@ -105,7 +105,7 @@ export function createRunStageService(deps) {
         apiFetch,
         API_BASE,
         setStatus,
-        updateProgressFn: updateProgress,
+        updateProgress,
         ensureDiscardMasks,
         renderChannelQC,
         getCurrentGrid,
@@ -136,7 +136,7 @@ export function createRunStageService(deps) {
       updateStartAvailability,
       switchStage,
       setStatus,
-      updateProgressFn: updateProgress,
+      updateProgress,
       handleStreamMessageFn: handleStreamMessage,
     });
   }
@@ -149,4 +149,70 @@ export function createRunStageService(deps) {
     handleStreamMessage,
     runDecomposition,
   };
+}
+
+/**
+ * @typedef {import('../deps.js').RunSetupDeps} RunSetupDeps
+ */
+
+/**
+ * @param {RunSetupDeps} deps
+ */
+export function setupRunEvents(deps) {
+  const {
+    els,
+    state,
+    runDecomposition,
+    enableRoiSelection,
+    syncRois,
+    refreshVisuals,
+    setupToggle,
+    setupLockedOnToggle,
+    toggleConditional,
+    updateStartAvailability,
+    renderAuxiliaryChannels,
+    renderMuExplorer,
+  } = deps;
+
+  els.start?.addEventListener("click", runDecomposition);
+
+  enableRoiSelection("emgCanvas");
+
+  if (els.nwindows) {
+    els.nwindows.addEventListener("change", (e) => {
+      const nwin = Number(els.nwindows.value) ?? 1;
+      syncRois(nwin);
+      refreshVisuals();
+      e.target.blur();
+    });
+  }
+
+  setupToggle(els.peelOffToggle, (on) =>
+    toggleConditional("peelOffSettings", on),
+  );
+  setupToggle(els.useAdaptiveToggle);
+  setupToggle(els.covToggle, (on) => toggleConditional("covSettings", on));
+  setupLockedOnToggle(els.silToggle, (on) =>
+    toggleConditional("silSettings", on),
+  );
+  updateStartAvailability();
+
+  els.auxSelector?.addEventListener("change", (e) => {
+    renderAuxiliaryChannels();
+    e.target.blur();
+  });
+
+  els.muGridSelect?.addEventListener("change", (e) => {
+    const idx = Number(e.target.value) || 0;
+    setRunCurrentMuGrid(state, idx, { resetView: true });
+    renderMuExplorer();
+    e.target.blur();
+  });
+
+  els.muSelect?.addEventListener("change", (e) => {
+    const idx = Number(e.target.value);
+    setRunCurrentMu(state, idx, { resetView: true });
+    renderMuExplorer();
+    e.target.blur();
+  });
 }

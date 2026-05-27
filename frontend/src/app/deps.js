@@ -44,6 +44,8 @@
  * @property {Function} updateMuFilter
  * @property {Function} removeOutliers
  * @property {Function} flagMuForDeletion
+ * @property {Function} duplicateMu
+ * @property {Function} removeDuplicateMus
  * @property {Function} restoreEditBackup
  * @property {Function} setEditMode
  * @property {Function} refreshEditModeButtons
@@ -121,15 +123,30 @@ export {};
 
 /**
  * @typedef {Object} EditStageService
+ * @property {Function} getEditMuIndices
  * @property {Function} ensureEditFlagged
+ * @property {Function} getRawPulse
+ * @property {Function} getDisplayPulse
+ * @property {Function} backupEditMu
+ * @property {Function} recomputeEditDirty
+ * @property {Function} refreshEditTotals
  * @property {Function} restoreEditBackup
  * @property {Function} renderEditExplorer
+ * @property {Function} renderInstantaneousDr
  * @property {Function} bindEditCanvas
  * @property {Function} bindEditDrCanvas
+ * @property {Function} requestRoiEdit
+ * @property {Function} requestFilterUpdate
  * @property {Function} updateMuFilter
+ * @property {Function} addSpikesInSelection
+ * @property {Function} addArtifactInSelection
+ * @property {Function} deleteSpikesInSelection
+ * @property {Function} deleteDrInSelection
  * @property {Function} removeOutliers
  * @property {Function} flagMuForDeletion
  * @property {Function} resetCurrentMuEdits
+ * @property {Function} duplicateMu
+ * @property {Function} removeDuplicateMus
  * @property {Function} saveEditedFile
  * @property {Function} loadDecompositionForEdit
  * @property {Function} loadDecompositionForEditByPath

@@ -5,42 +5,42 @@ import {
   DEFAULT_BIDS_ROOT,
   RAW_SIGNAL_EXTENSIONS,
 } from "../config.js";
-import { els } from "../dom.js";
-import { apiFetch, apiJson, waitForBackend } from "../http.js";
+import { els } from "./dom.js";
+import { apiFetch, apiJson, waitForBackend } from "./http.js";
 import {
   buildBidsAutoInfoModel as buildBidsAutoInfoModelFeature,
   buildBidsMuscleRowsModel as buildBidsMuscleRowsModelFeature,
   buildSessionInfoFromDecomposition as buildSessionInfoFromDecompositionFeature,
-} from "../features/bids_ui.js";
+} from "../io/bids.js";
 import {
   applySessionInfoToDom as applySessionInfoToDomController,
   renderBidsAutoInfo as renderBidsAutoInfoController,
   renderBidsMuscleFields as renderBidsMuscleFieldsController,
-} from "../controllers/bids_form.js";
+} from "../view/bids_renderer.js";
 import {
   adjustView as adjustViewFeature,
   getViewForStage as getViewForStageFeature,
   goToMu as goToMuFeature,
   handleKeyboardNavigation as handleKeyboardNavigationFeature,
   setViewForStage as setViewForStageFeature,
-} from "../features/navigation.js";
-import { setupImportEvents } from "../setup/import.js";
-import { setupRunEvents } from "../setup/run.js";
-import { setupEditEvents } from "../setup/edit.js";
-import { setupLayoutEvents } from "../setup/layout.js";
+} from "./services/navigation.js";
+import { setupImportEvents } from "./stages/import_stage.js";
+import { setupRunEvents } from "./stages/run_stage.js";
+import { setupEditEvents } from "./stages/edit_stage.js";
+import { setupLayoutEvents } from "./stages/layout_stage.js";
 import {
   drawGridOverlay,
   drawMiniSeries,
   drawSeries,
   getCanvasPlotMetrics,
-} from "../plots.js";
+} from "../view/plots.js";
 import {
   buildEntityLabelFromSession,
   getSuggestedNpzName,
   listifyMuscles,
   parseBidsEntitiesFromLabel,
-} from "../session.js";
-import { state } from "../state.js";
+} from "../io/bids.js";
+import { state } from "./state.js";
 import {
   ensureDiscardMasks as ensureDiscardMasksAction,
   setCurrentGrid,

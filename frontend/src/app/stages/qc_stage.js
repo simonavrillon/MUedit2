@@ -1,17 +1,17 @@
 import {
-  populateAuxSelector as populateAuxSelectorFeature,
-  renderAuxiliaryChannels as renderAuxiliaryChannelsFeature,
+  syncRois as syncRoisController,
   requestQcGridWindow as requestQcGridWindowFeature,
   requestPreview as requestPreviewFeature,
   handleRawFile as handleRawFileFeature,
   handleLandingFile as handleLandingFileFeature,
-} from "../../features/qc.js";
+} from "../../signal/qc.js";
 import {
-  syncRois as syncRoisController,
+  populateAuxSelector as populateAuxSelectorFeature,
+  renderAuxiliaryChannels as renderAuxiliaryChannelsFeature,
   refreshVisuals as refreshVisualsController,
   enableRoiSelection as enableRoiSelectionController,
   renderChannelQC as renderChannelQCController,
-} from "../../controllers/qc_canvas.js";
+} from "../../view/qc_renderer.js";
 import {
   beginRawPreviewTransition,
   rollbackRawPreviewTransition,
@@ -74,11 +74,11 @@ export function createQcStageService(deps) {
         apiJson,
         API_BASE,
         setUploadLoading,
-        updateProgressFn: updateProgress,
-        populateAuxSelectorFn: populateAuxSelector,
+        updateProgress,
+        populateAuxSelector,
         ensureDiscardMasks,
         populateGridTabs,
-        requestQcGridWindowFn: requestQcGridWindow,
+        requestQcGridWindow,
         getCurrentGrid,
         enableRoiSelection,
         renderBidsAutoInfo,
@@ -99,7 +99,7 @@ export function createQcStageService(deps) {
       {
         state,
         els,
-        requestPreviewFn: requestPreview,
+        requestPreview,
         setStatus,
         updateStartAvailability,
       },
@@ -117,8 +117,8 @@ export function createQcStageService(deps) {
         isSupportedSignalFile: (input) =>
           isSupportedSignalFile(input, rawAndDecompositionExtensions),
         detectLandingFileType,
-        handleRawFileFn: handleRawFile,
-        handleDecompositionFileFn: handleDecompositionFile,
+        handleRawFile,
+        handleDecompositionFile,
       },
       file,
     );
@@ -164,10 +164,10 @@ export function createQcStageService(deps) {
       {
         state,
         els,
-        syncRoisFn: syncRois,
+        syncRois,
         refreshVisualsFn: refreshVisuals,
-        requestQcGridWindowFn: requestQcGridWindow,
-        updateProgressFn: updateProgress,
+        requestQcGridWindow,
+        updateProgress,
       },
       canvasId,
     );
