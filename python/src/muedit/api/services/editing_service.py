@@ -258,6 +258,7 @@ def save_edits(payload: dict[str, Any]) -> dict[str, Any]:
         mu_grid_index = [mu_grid_index[i] for i in keep_idx]
         mu_uids = [mu_uids[i] for i in keep_idx]
         pulse_trains = pulse_trains[keep_idx, :] if pulse_trains.size else pulse_trains
+        artifact_times_all = [artifact_times_all[i] for i in keep_idx if i < len(artifact_times_all)]
 
     if remove_duplicates and len(distimes) > 1 and fsamp and fsamp > 0:
         dup_tol = float(parameters.get("duplicatesthresh", 0.3))
@@ -269,6 +270,7 @@ def save_edits(payload: dict[str, Any]) -> dict[str, Any]:
         ]
         mu_grid_index = [mu_grid_index[i] for i in kept_idx]
         mu_uids = [mu_uids[i] for i in kept_idx]
+        artifact_times_all = [artifact_times_all[i] for i in kept_idx if i < len(artifact_times_all)]
 
     bids_root = payload.get("bids_root")
     if not bids_root:

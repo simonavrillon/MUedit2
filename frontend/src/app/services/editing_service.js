@@ -425,7 +425,10 @@ export async function saveEditedFile(deps) {
     parameters: state.edit.parameters,
     muscle_names: muscleNames,
     edit_history: state.edit.editHistory || [],
-    artifact_times: state.edit.artifactTimes || [],
+    artifact_times: distimes.map((_, i) => {
+      const times = state.edit.artifactTimes?.[i];
+      return Array.isArray(times) ? times : [];
+    }),
     entity_label: entityLabel,
     file_label: getSuggestedNpzName(
       state.edit.filename || "decomposition",
