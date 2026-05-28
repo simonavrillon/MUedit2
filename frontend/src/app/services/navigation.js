@@ -266,6 +266,34 @@ export function handleKeyboardNavigation(deps, e) {
       goToMuFn("next", "edit");
       e.preventDefault();
       return;
+    } else if (key === "p") {
+      if (els.editPeelOffToggle) {
+        const isOn = els.editPeelOffToggle.dataset.state === "on";
+        els.editPeelOffToggle.dataset.state = isOn ? "off" : "on";
+        els.editPeelOffToggle.setAttribute("aria-pressed", isOn ? "false" : "true");
+        els.editPeelOffToggle.classList.toggle("on", !isOn);
+        const label = isOn ? "Off" : "On";
+        const shortEl = els.editPeelOffToggle.querySelector(".peeloff-short");
+        const fullEl = els.editPeelOffToggle.querySelector(".peeloff-full");
+        if (shortEl) shortEl.textContent = label;
+        if (fullEl) fullEl.textContent = `Peel-off: ${label}`;
+      }
+      e.preventDefault();
+      return;
+    } else if (key === "l") {
+      if (els.editLockSpikesToggle) {
+        const isOn = els.editLockSpikesToggle.dataset.state === "on";
+        els.editLockSpikesToggle.dataset.state = isOn ? "off" : "on";
+        els.editLockSpikesToggle.setAttribute("aria-pressed", isOn ? "false" : "true");
+        els.editLockSpikesToggle.classList.toggle("on", !isOn);
+        const label = isOn ? "Off" : "On";
+        const shortEl = els.editLockSpikesToggle.querySelector(".lockspikes-short");
+        const fullEl = els.editLockSpikesToggle.querySelector(".lockspikes-full");
+        if (shortEl) shortEl.textContent = label;
+        if (fullEl) fullEl.textContent = `Lock: ${label}`;
+      }
+      e.preventDefault();
+      return;
     }
   }
 

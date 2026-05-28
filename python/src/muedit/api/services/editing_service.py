@@ -393,6 +393,7 @@ def update_filter(payload: dict[str, Any]) -> dict[str, Any]:
     artifact_times = [int(x) for x in artifact_times_raw if isinstance(x, (int, float))]
 
     bids_emg_offset = view_start if bids_root and emg is not None else 0
+    lock_spikes = bool(payload.get("lock_spikes", False))
     pt, updated = update_motor_unit_filter_window(
         emg,
         emg_mask,
@@ -412,6 +413,7 @@ def update_filter(payload: dict[str, Any]) -> dict[str, Any]:
         emg_offset=bids_emg_offset,
         use_peeloff=use_peeloff,
         artifact_times=artifact_times or None,
+        lock_spikes=lock_spikes,
     )
 
     pulse_train = payload.get("pulse_train")
@@ -552,7 +554,7 @@ def remove_duplicates_service(payload: dict[str, Any]) -> dict[str, Any]:
     distimes_raw = payload.get("distimes") or []
     distimes = normalize_distimes(distimes_raw)
     if not distimes:
-        return make_json_safe({"kept_indices": [], "distimes": [], "pulse_trains": []})
+        return make_json_safe({"kept_indices": [], "distimes": []})
 
     fsamp_raw = payload.get("fsamp")
     fsamp = float(fsamp_raw) if fsamp_raw is not None else None
@@ -560,33 +562,20 @@ def remove_duplicates_service(payload: dict[str, Any]) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="fsamp is required for deduplication")
 
     total_samples = as_int(payload.get("total_samples"), "total_samples", default=0)
+    if total_samples <= 0:
+        total_samples = max((max(d) for d in distimes if d), default=0) + 1
     parameters = payload.get("parameters") or {}
 
-    pulse_trains_raw = payload.get("pulse_trains")
-    pulse_trains: np.ndarray | None = None
-    if pulse_trains_raw is not None:
-        try:
-            pulse_trains = np.array(pulse_trains_raw, dtype=float)
-        except (TypeError, ValueError):
-            pulse_trains = None
-    if (
-        pulse_trains is None
-        or pulse_trains.ndim != 2
-        or pulse_trains.shape[0] != len(distimes)
-    ):
-        if total_samples <= 0:
-            total_samples = max((max(d) for d in distimes if d), default=0) + 1
-        pulse_trains = build_pulse_trains_from_distimes(distimes, total_samples)
+    pulse_trains = build_pulse_trains_from_distimes(distimes, total_samples)
 
     if len(distimes) <= 1:
         return make_json_safe({
             "kept_indices": list(range(len(distimes))),
             "distimes": distimes,
-            "pulse_trains": pulse_trains.tolist(),
         })
 
     dup_tol = float(parameters.get("duplicatesthresh", 0.3))
-    dedup_pulses, dedup_distimes, kept_idx = _dedup(pulse_trains, distimes, dup_tol, fsamp)
+    _, dedup_distimes, kept_idx = _dedup(pulse_trains, distimes, dup_tol, fsamp)
     dedup_distimes_clean = [
         sorted({int(v) for v in np.asarray(d, dtype=int).tolist() if int(v) >= 0})
         for d in dedup_distimes
@@ -594,7 +583,6 @@ def remove_duplicates_service(payload: dict[str, Any]) -> dict[str, Any]:
     return make_json_safe({
         "kept_indices": kept_idx,
         "distimes": dedup_distimes_clean,
-        "pulse_trains": dedup_pulses.tolist() if dedup_pulses.size else [],
         "removed_count": len(distimes) - len(kept_idx),
     })
 

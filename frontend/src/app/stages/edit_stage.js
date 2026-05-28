@@ -545,6 +545,22 @@ export function setupEditEvents(deps) {
       applyPeelOff(els.editPeelOffToggle, els.editPeelOffToggle.dataset.state !== "on");
     });
   }
+  if (els.editLockSpikesToggle) {
+    const applyLockSpikes = (btn, on) => {
+      btn.dataset.state = on ? "on" : "off";
+      btn.setAttribute("aria-pressed", on ? "true" : "false");
+      btn.classList.toggle("on", on);
+      const label = on ? "On" : "Off";
+      const shortEl = btn.querySelector(".lockspikes-short");
+      const fullEl = btn.querySelector(".lockspikes-full");
+      if (shortEl) shortEl.textContent = label;
+      if (fullEl) fullEl.textContent = `Lock: ${label}`;
+    };
+    applyLockSpikes(els.editLockSpikesToggle, false);
+    els.editLockSpikesToggle.addEventListener("click", () => {
+      applyLockSpikes(els.editLockSpikesToggle, els.editLockSpikesToggle.dataset.state !== "on");
+    });
+  }
   els.editOutliersBtn?.addEventListener("click", () => {
     void runEditAction(els.editOutliersBtn, () => removeOutliers());
   });

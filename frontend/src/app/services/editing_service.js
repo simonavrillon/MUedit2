@@ -179,6 +179,7 @@ export async function requestFilterUpdate(deps, mode) {
           view_start: start,
           view_end: end,
           use_peeloff: els.editPeelOffToggle?.dataset.state === "on",
+          lock_spikes: els.editLockSpikesToggle?.dataset.state === "on",
           flagged: state.edit.flagged || [],
           artifact_times: state.edit.artifactTimes?.[muIdx] || [],
         }),
@@ -196,7 +197,8 @@ export async function requestFilterUpdate(deps, mode) {
       const distimesAfter = state.edit.distimes?.[muIdx] || [];
       const { added, removed } = spikesDiff(distimesBefore, distimesAfter);
       const peeloff = els.editPeelOffToggle?.dataset.state === "on";
-      const entry = { type: "update_filter", mu_uid: muUid, view_start: start, view_end: end, use_peeloff: peeloff };
+      const lockSpikes = els.editLockSpikesToggle?.dataset.state === "on";
+      const entry = { type: "update_filter", mu_uid: muUid, view_start: start, view_end: end, use_peeloff: peeloff, lock_spikes: lockSpikes };
       if (added.length) entry.spikes_added = added;
       if (removed.length) entry.spikes_removed = removed;
       deps.appendEditHistory(entry);
@@ -291,7 +293,6 @@ export async function removeDuplicateMus(deps) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         distimes: state.edit.distimes,
-        pulse_trains: state.edit.pulseTrains || [],
         fsamp: state.edit.fsamp,
         total_samples: state.edit.totalSamples || 0,
         mu_grid_index: state.edit.muGridIndex || [],
@@ -308,9 +309,7 @@ export async function removeDuplicateMus(deps) {
     const keptSet = new Set(keptIdx);
     ensureEditFlagged();
     setEditDistimes(state, keptIdx.map((i) => data.distimes[keptIdx.indexOf(i)] || distimes[i]));
-    setEditPulseTrains(state, keptIdx.map((i, pos) =>
-      (data.pulse_trains && data.pulse_trains[pos]) ? data.pulse_trains[pos] : (state.edit.pulseTrains?.[i] || [])
-    ));
+    setEditPulseTrains(state, keptIdx.map((i) => state.edit.pulseTrains?.[i] || []));
     setEditOriginalDistimes(state, (state.edit.originalDistimes || []).filter((_, i) => keptSet.has(i)));
     setEditOriginalPulseTrains(state, (state.edit.originalPulseTrains || []).filter((_, i) => keptSet.has(i)));
     setEditMuGridIndex(state, (state.edit.muGridIndex || []).filter((_, i) => keptSet.has(i)));

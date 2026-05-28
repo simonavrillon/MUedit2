@@ -1174,11 +1174,13 @@ body {
   margin-left: 0;
 }
 
-#editPeelOffToggle {
+#editPeelOffToggle,
+#editLockSpikesToggle {
   max-width: 140px;
 }
 
-.edit-toolbar-row .icon-expand-btn .peeloff-short {
+.edit-toolbar-row .icon-expand-btn .peeloff-short,
+.edit-toolbar-row .icon-expand-btn .lockspikes-short {
   max-width: 50px;
   opacity: 1;
   overflow: hidden;
@@ -1186,16 +1188,21 @@ body {
   transition: max-width 0.2s ease, opacity 0.15s ease;
 }
 .edit-toolbar-row .icon-expand-btn:hover .peeloff-short,
-.edit-toolbar-row .icon-expand-btn:focus-visible .peeloff-short {
+.edit-toolbar-row .icon-expand-btn:hover .lockspikes-short,
+.edit-toolbar-row .icon-expand-btn:focus-visible .peeloff-short,
+.edit-toolbar-row .icon-expand-btn:focus-visible .lockspikes-short {
   max-width: 0;
   opacity: 0;
 }
-.edit-toolbar-row .icon-expand-btn .peeloff-full {
+.edit-toolbar-row .icon-expand-btn .peeloff-full,
+.edit-toolbar-row .icon-expand-btn .lockspikes-full {
   max-width: 0;
   opacity: 0;
 }
 .edit-toolbar-row .icon-expand-btn:hover .peeloff-full,
-.edit-toolbar-row .icon-expand-btn:focus-visible .peeloff-full {
+.edit-toolbar-row .icon-expand-btn:hover .lockspikes-full,
+.edit-toolbar-row .icon-expand-btn:focus-visible .peeloff-full,
+.edit-toolbar-row .icon-expand-btn:focus-visible .lockspikes-full {
   max-width: 140px;
   opacity: 1;
 }

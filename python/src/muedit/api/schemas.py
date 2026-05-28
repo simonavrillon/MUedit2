@@ -67,6 +67,7 @@ class EditFilterPayload(BaseModel):
     nbextchan: int = 1000
     peel_off_win: float = 0.025
     use_peeloff: bool = False
+    lock_spikes: bool = False
     flagged: list[bool] | None = None
     artifact_times: list[int] | None = None
 

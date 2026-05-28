@@ -44,6 +44,7 @@ def _recompute_spikes_in_window(
     emg_offset: int = 0,
     use_peeloff: bool = False,
     artifact_times: SpikeTimes | None = None,
+    lock_spikes: bool = False,
 ) -> FilterUpdateResult:
     """Recompute motor-unit pulse train and spikes within a visible time window."""
     if emg.size == 0 or start >= end:
@@ -111,6 +112,24 @@ def _recompute_spikes_in_window(
     spikes_new = _remove_high_amplitude_outliers(pt, spikes_new)
 
     spikes_new = spikes_new.astype(int)
+    
+    if lock_spikes and spikes1.size > 0:
+        # Realign original spikes to their exact peak positions within ±10 samples
+        realigned_spikes = []
+        for orig_spike in spikes1:
+            local_pos = int(orig_spike - start)
+            search_start = max(0, local_pos - 10)
+            search_end = min(len(pt), local_pos + 11)
+            local_peaks_in_range = peaks[(peaks >= search_start) & (peaks < search_end)]
+            if local_peaks_in_range.size > 0:
+                nearest_peak = local_peaks_in_range[np.argmin(np.abs(local_peaks_in_range - local_pos))]
+                realigned_spikes.append(int(nearest_peak))
+            else:
+                realigned_spikes.append(local_pos)
+        # Merge realigned original spikes with newly detected spikes
+        merged_spikes = sorted(set(realigned_spikes) | set(spikes_new.tolist()))
+        spikes_new = np.array(merged_spikes, dtype=int)
+    
     updated = [s for s in spike_times if s < start + edge or s > end - edge]
     updated.extend((spikes_new + start).tolist())
     updated = sorted({int(x) for x in updated if x >= 0})
@@ -131,6 +150,7 @@ def update_motor_unit_filter_window(
     emg_offset: int = 0,
     use_peeloff: bool = False,
     artifact_times: SpikeTimes | None = None,
+    lock_spikes: bool = False,
 ) -> FilterUpdateResult:
     """Update a motor-unit pulse train and spikes inside a time window."""
     emg_sel = emg[emg_mask == 0, :] if emg_mask.size else emg
@@ -146,6 +166,7 @@ def update_motor_unit_filter_window(
         emg_offset=emg_offset,
         use_peeloff=use_peeloff,
         artifact_times=artifact_times,
+        lock_spikes=lock_spikes,
     )
     return pt, updated
 
