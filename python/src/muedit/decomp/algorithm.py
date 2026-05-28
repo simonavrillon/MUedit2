@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 from scipy.cluster.vq import kmeans2
 from scipy.linalg import eigh, inv
-from scipy.signal import convolve, find_peaks
+from scipy.signal import find_peaks
 
 _FIXED_POINT_TOL = 1e-4
 _FIXED_POINT_MAXITER = 500
@@ -243,16 +243,24 @@ def subtract_mu_waveforms(
 ) -> np.ndarray:
     """Subtract averaged MU waveform estimate from multichannel signal."""
     window_l = int(np.round(win * fsamp))
-    firings = np.zeros(x.shape[1])
-    firings[spikes] = 1
+    n_rows, n_cols = x.shape
 
+    spikes = np.asarray(spikes, dtype=int)
+    valid_spikes = spikes[(spikes >= window_l) & (spikes < n_cols - window_l)]
+    if valid_spikes.size == 0:
+        return x
+
+    # Extract all segments at once: (n_rows, n_spikes, window_size)
+    offsets = np.arange(-window_l, window_l + 1, dtype=int)
+    idx = valid_spikes[:, None] + offsets[None, :]  # (n_spikes, window_size)
+    waveforms = x[:, idx].mean(axis=1)              # (n_rows, window_size)
+
+    # Scatter-add: stamp mean waveform at each spike position.
+    # Loop is over n_spikes (~80), not n_rows (~1024) — each iteration is a
+    # vectorised add across all rows, exploiting sparse firing patterns.
     emg_temp = np.zeros_like(x)
-
-    for ch in range(x.shape[0]):
-        temp = extract_muap_segments(spikes, window_l, x[ch, :])
-        if len(temp) > 0:
-            waveform = np.mean(temp, axis=0)
-            emg_temp[ch, :] = convolve(firings, waveform, mode="same")
+    for s in valid_spikes:
+        emg_temp[:, s - window_l : s + window_l + 1] += waveforms
 
     return x - emg_temp
 
