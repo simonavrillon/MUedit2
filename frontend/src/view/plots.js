@@ -135,11 +135,15 @@ export function drawSeries(
       for (let i = 0; i <= yTicks; i++) {
         const t = i / yTicks;
         const y = padding.top + plotHeight - t * plotHeight;
+        const value = min + t * span;
         ctx.strokeStyle = COLORS.gridLineDim;
         ctx.beginPath();
         ctx.moveTo(padding.left, y);
         ctx.lineTo(padding.left + plotWidth, y);
         ctx.stroke();
+        ctx.fillStyle = COLORS.muted;
+        ctx.textAlign = "right";
+        ctx.fillText(`${value.toFixed(1)}`, padding.left - 8, y + 3);
       }
     }
 
