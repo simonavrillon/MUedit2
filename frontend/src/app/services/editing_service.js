@@ -66,10 +66,8 @@ export async function requestRoiEdit(deps, action, payload) {
   } = deps;
 
   const distimesBefore = [...(state.edit.distimes?.[payload.muIdx] || [])];
+  const artifactsBefore = [...(state.edit.artifactTimes?.[payload.muIdx] || [])];
   const isArtifact = action === "add-artifact";
-  const artifactsBefore = isArtifact
-    ? [...(state.edit.artifactTimes?.[payload.muIdx] || [])]
-    : null;
   try {
     setEditStatus("Applying ROI...", "muted");
     const data = await apiJson(`${API_BASE}/edit/${action}`, {
@@ -84,33 +82,61 @@ export async function requestRoiEdit(deps, action, payload) {
         x_end: payload.xEnd,
         y_min: payload.yMin,
         y_max: payload.yMax,
-        artifact_times: isArtifact
-          ? (state.edit.artifactTimes?.[payload.muIdx] || [])
-          : undefined,
+        artifact_times: payload.artifact_times !== undefined
+          ? payload.artifact_times
+          : isArtifact
+            ? (state.edit.artifactTimes?.[payload.muIdx] || [])
+            : undefined,
       }),
     });
-    if (isArtifact) {
-      setEditArtifactTimesForMu(state, payload.muIdx, data.artifact_times || []);
-    } else {
+    if (data.distimes !== undefined) {
       setEditDistimesForMu(state, payload.muIdx, data.distimes || []);
+    }
+    if (data.artifact_times !== undefined) {
+      setEditArtifactTimesForMu(state, payload.muIdx, data.artifact_times || []);
     }
     ensureEditFlagged();
     setEditFlagForMu(state, payload.muIdx, false);
     if (deps.appendEditHistory) {
       const muUid = state.edit.muUids?.[payload.muIdx] ?? `mu${payload.muIdx}`;
-      const typeMap = { "add-spikes": "add_spikes", "delete-spikes": "delete_spikes", "delete-dr": "delete_dr", "add-artifact": "add_artifact" };
-      const entry = { type: typeMap[action] || action, mu_uid: muUid };
-      if (isArtifact) {
-        const artifactsAfter = state.edit.artifactTimes?.[payload.muIdx] || [];
-        const { added: artifactsAdded } = spikesDiff(artifactsBefore, artifactsAfter);
-        if (artifactsAdded.length) entry.artifacts_added = artifactsAdded;
-      } else {
+
+      if (action === "delete-spikes") {
+        // Create separate log entries for spikes and artifacts
         const distimesAfter = state.edit.distimes?.[payload.muIdx] || [];
-        const { added, removed } = spikesDiff(distimesBefore, distimesAfter);
-        if (added.length) entry.spikes_added = added;
-        if (removed.length) entry.spikes_removed = removed;
+        const { removed: spikesRemoved } = spikesDiff(distimesBefore, distimesAfter);
+        if (spikesRemoved.length) {
+          deps.appendEditHistory({
+            type: "delete_spikes",
+            mu_uid: muUid,
+            spikes_removed: spikesRemoved,
+          });
+        }
+
+        const artifactsAfter = state.edit.artifactTimes?.[payload.muIdx] || [];
+        const { removed: artifactsRemoved } = spikesDiff(artifactsBefore, artifactsAfter);
+        if (artifactsRemoved.length) {
+          deps.appendEditHistory({
+            type: "delete_artifact",
+            mu_uid: muUid,
+            artifacts_removed: artifactsRemoved,
+          });
+        }
+      } else {
+        // Keep existing behavior for other actions
+        const typeMap = { "add-spikes": "add_spikes", "delete-dr": "delete_dr", "add-artifact": "add_artifact" };
+        const entry = { type: typeMap[action] || action, mu_uid: muUid };
+        if (isArtifact) {
+          const artifactsAfter = state.edit.artifactTimes?.[payload.muIdx] || [];
+          const { added: artifactsAdded } = spikesDiff(artifactsBefore, artifactsAfter);
+          if (artifactsAdded.length) entry.artifacts_added = artifactsAdded;
+        } else {
+          const distimesAfter = state.edit.distimes?.[payload.muIdx] || [];
+          const { added, removed } = spikesDiff(distimesBefore, distimesAfter);
+          if (added.length) entry.spikes_added = added;
+          if (removed.length) entry.spikes_removed = removed;
+        }
+        deps.appendEditHistory(entry);
       }
-      deps.appendEditHistory(entry);
     }
     if (action === "delete-dr") {
       clearEditDrSelections(state);

@@ -241,6 +241,7 @@ export function deleteSpikesInSelection(deps, sel) {
     xEnd: end,
     yMin: low,
     yMax: high,
+    artifact_times: state.edit.artifactTimes?.[muIdx] || [],
   });
 }
 

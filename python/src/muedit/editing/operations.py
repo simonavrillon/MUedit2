@@ -236,6 +236,31 @@ def delete_spikes_in_roi(
     return sorted({int(x) for x in updated})
 
 
+def delete_artifacts_in_roi(
+    pulse: np.ndarray,
+    artifact_times: SpikeTimes,
+    x_start: int,
+    x_end: int,
+    y_min: float,
+    y_max: float,
+) -> SpikeTimes:
+    """Delete artifacts inside ROI when amplitude is within the selected range."""
+    updated = []
+    ordered = sorted(artifact_times)
+    low = min(y_min, y_max)
+    high = max(y_min, y_max)
+    for t in ordered:
+        if t < x_start or t > x_end:
+            updated.append(int(t))
+            continue
+        val = pulse[t] if 0 <= t < len(pulse) else 0
+        in_box = low <= val <= high
+        if in_box:
+            continue
+        updated.append(int(t))
+    return sorted({int(x) for x in updated if x >= 0})
+
+
 def delete_high_discharge_rate_spikes_in_roi(
     pulse: np.ndarray,
     spike_times: SpikeTimes,

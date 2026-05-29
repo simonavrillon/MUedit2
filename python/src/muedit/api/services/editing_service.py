@@ -48,6 +48,7 @@ from muedit.decomp.postprocess import _save_npz_with_app_schema
 from muedit.editing.operations import (
     add_artifact_in_roi,
     add_spikes_in_roi,
+    delete_artifacts_in_roi,
     delete_high_discharge_rate_spikes_in_roi,
     delete_spikes_in_roi,
     remove_discharge_rate_outliers,
@@ -488,7 +489,7 @@ def add_artifact(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def delete_spikes(payload: dict[str, Any]) -> dict[str, Any]:
-    """Delete spikes in ROI for selected motor unit."""
+    """Delete spikes and artifacts in ROI for selected motor unit."""
     pulse_train = payload.get("pulse_train")
     if pulse_train is None:
         raise HTTPException(status_code=400, detail="pulse_train is required")
@@ -502,10 +503,24 @@ def delete_spikes(payload: dict[str, Any]) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="mu_index out of range")
 
     pulse = np.array(pulse_train, dtype=float)
-    updated = delete_spikes_in_roi(
+    updated_distimes = delete_spikes_in_roi(
         pulse, distimes[mu_index], x_start, x_end, y_min, y_max
     )
-    return make_json_safe({"distimes": updated})
+
+    # Also delete artifacts in the same ROI
+    updated_artifact_times = None
+    artifact_times_raw = payload.get("artifact_times")
+    if artifact_times_raw:
+        artifact_times = [int(x) for x in artifact_times_raw if isinstance(x, (int, float))]
+        if artifact_times:
+            updated_artifact_times = delete_artifacts_in_roi(
+                pulse, artifact_times, x_start, x_end, y_min, y_max
+            )
+
+    result = {"distimes": updated_distimes}
+    if updated_artifact_times is not None:
+        result["artifact_times"] = updated_artifact_times
+    return make_json_safe(result)
 
 
 def delete_dr(payload: dict[str, Any]) -> dict[str, Any]:
