@@ -1159,7 +1159,7 @@ body {
 .edit-toolbar-row .icon-expand-btn:hover,
 .edit-toolbar-row .icon-expand-btn:focus-visible,
 .edit-toolbar-row .icon-expand-btn.is-running {
-  max-width: 190px;
+  max-width: 220px;
   gap: 8px;
   color: var(--mu-4);
   border-color: var(--mu-4);
@@ -1169,7 +1169,7 @@ body {
 .edit-toolbar-row .icon-expand-btn:hover span,
 .edit-toolbar-row .icon-expand-btn:focus-visible span,
 .edit-toolbar-row .icon-expand-btn.is-running span {
-  max-width: 140px;
+  max-width: 200px;
   opacity: 1;
   margin-left: 0;
 }

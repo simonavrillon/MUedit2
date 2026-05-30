@@ -39,7 +39,7 @@ router = APIRouter(prefix="/api/v1")
 @router.post("/edit/load", response_model=None)
 async def load_decomposition_endpoint(request: Request, file: UploadFile = File(...)) -> dict[str, Any] | Response:
     """Load a decomposition upload for interactive edit mode."""
-    wants_binary = request.headers.get("x-muedit-binary", "0") == "1"
+    wants_binary = request.headers.get("x-muedit-binary", "1") != "0"
     if wants_binary:
         return await load_decomposition_binary(file)
     return success_payload(await load_decomposition(file))
@@ -51,7 +51,7 @@ async def load_decomposition_by_path_endpoint(request: Request, payload: PathPay
     path = payload.path
     if not path:
         raise HTTPException(status_code=400, detail="path is required")
-    wants_binary = request.headers.get("x-muedit-binary", "0") == "1"
+    wants_binary = request.headers.get("x-muedit-binary", "1") != "0"
     if wants_binary:
         return load_decomposition_binary_from_path(path)
     return success_payload(load_decomposition_from_path(path))

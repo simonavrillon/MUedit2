@@ -513,7 +513,6 @@ export async function loadDecompositionForEdit(deps, file, filepath = null) {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "x-muedit-binary": "1",
           },
           body: JSON.stringify({ path: filepath }),
         },
@@ -530,7 +529,7 @@ export async function loadDecompositionForEdit(deps, file, filepath = null) {
         `${API_BASE}/edit/load`,
         {
           method: "POST",
-          headers: { "x-muedit-binary": "1" },
+          headers: {},
           body: formData,
         },
         120000,

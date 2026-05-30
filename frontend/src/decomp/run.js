@@ -165,7 +165,7 @@ export async function runDecomposition(deps) {
         `${API_BASE}/decompose_stream`,
         {
           method: "POST",
-          headers: { "x-muedit-binary": "1" },
+          headers: {},
           body: buildRunFormData(true),
         },
         15 * 60 * 1000,
@@ -180,7 +180,7 @@ export async function runDecomposition(deps) {
           `${API_BASE}/decompose_stream`,
           {
             method: "POST",
-            headers: { "x-muedit-binary": "1" },
+            headers: {},
             body: buildRunFormData(false),
           },
           15 * 60 * 1000,

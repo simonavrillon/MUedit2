@@ -6,7 +6,7 @@
     <title>MUedit</title>
     <link rel="icon" href="data:," />
     <link rel="shortcut icon" href="data:," />
-    <link rel="stylesheet" href="style.css?v=54" />
+    <link rel="stylesheet" href="style.css?v=55" />
   </head>
 
   <body>
@@ -549,27 +549,6 @@
                             </button>
                             <button
                               class="pill-toggle icon-expand-btn"
-                              id="editDeleteSpikeBtn"
-                              type="button"
-                            >
-                              <svg
-                                xmlns="http://www.w3.org/2000/svg"
-                                fill="none"
-                                viewBox="0 0 24 24"
-                                stroke-width="1.5"
-                                stroke="currentColor"
-                                aria-hidden="true"
-                              >
-                                <path
-                                  stroke-linecap="round"
-                                  stroke-linejoin="round"
-                                  d="M15 12H9m12 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
-                                />
-                              </svg>
-                              <span>Delete Spike</span>
-                            </button>
-                            <button
-                              class="pill-toggle icon-expand-btn"
                               id="editAddArtifactBtn"
                               type="button"
                               title="Mark a peak as an artifact — it will be subtracted when updating the filter"
@@ -589,6 +568,27 @@
                                 />
                               </svg>
                               <span>Add Artifact</span>
+                            </button>
+                            <button
+                              class="pill-toggle icon-expand-btn"
+                              id="editDeleteSpikeBtn"
+                              type="button"
+                            >
+                              <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke-width="1.5"
+                                stroke="currentColor"
+                                aria-hidden="true"
+                              >
+                                <path
+                                  stroke-linecap="round"
+                                  stroke-linejoin="round"
+                                  d="M15 12H9m12 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
+                                />
+                              </svg>
+                              <span>Delete Spike/Artifact</span>
                             </button>
                           </div>
                           <div class="edit-toolbar-group">
@@ -711,7 +711,7 @@
                     </div>
                     <p class="hint muted">
                       Shortcuts: `<`/`>` previous-next MU, `R` remove outliers,
-                      `A` add spikes, `D` delete spikes, `X` add artifact, `Space` update filter,
+                      `A` add spikes, `X` add artifact, `D` delete spikes/artifacts, `Space` update filter,
                       `P` toggle peel-off, `L` toggle lock spikes,
                       `←`/`→` scroll, `↑`/`↓` zoom.
                     </p>

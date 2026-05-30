@@ -84,7 +84,7 @@ async def decompose_stream(
         bids_metadata=bids_metadata,
     )
 
-    wants_binary_preview = request.headers.get("x-muedit-binary", "0") == "1"
+    wants_binary_preview = request.headers.get("x-muedit-binary", "1") != "0"
     generator = decomposition_event_stream(
         tmp_path=tmp_path,
         run_path=run_path,
