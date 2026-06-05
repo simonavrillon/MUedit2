@@ -66,6 +66,7 @@ export const els = {
   editDeduplicateBtn: document.getElementById("editDeduplicateBtn"),
   editUndoBtn: document.getElementById("editUndoBtn"),
   editDrCanvas: document.getElementById("editDrCanvas"),
+  editTimelineCanvas: document.getElementById("editTimelineCanvas"),
   auxCanvas: document.getElementById("auxCanvas"),
   auxSelector: document.getElementById("auxSelector"),
   duplicatesthresh: document.getElementById("duplicatesthresh"),

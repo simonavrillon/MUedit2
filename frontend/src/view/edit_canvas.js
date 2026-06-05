@@ -260,6 +260,136 @@ export function bindEditCanvas(deps) {
   });
 }
 
+export function renderEditTimeline(deps) {
+  const { els, state, COLORS, getDisplayPulse } = deps;
+  const canvas = els?.editTimelineCanvas;
+  if (!canvas) return;
+
+  const ctx = canvas.getContext("2d");
+  const w = canvas.clientWidth || canvas.width || 1;
+  canvas.width = w;
+  canvas.height = 20;
+  ctx.clearRect(0, 0, w, 20);
+
+  const muIdx = state.edit.currentMu ?? 0;
+  const pulse = getDisplayPulse(muIdx);
+  const total = pulse?.length || 0;
+  if (!total) return;
+
+  // Match horizontal padding of editPulseCanvas (showAxes: true, y-axis visible)
+  const padL = 38;
+  const padR = 8;
+  const bw = Math.max(1, w - padL - padR);
+  const barTop = 4;
+  const barH = 12;
+
+  ctx.fillStyle = "rgba(255,255,255,0.07)";
+  ctx.fillRect(padL, barTop, bw, barH);
+
+  // Last edit action for this MU: green = added, red = removed
+  const muUid = state.edit.muUids?.[muIdx];
+  if (muUid && Array.isArray(state.edit.editHistory)) {
+    const lastEntry = [...state.edit.editHistory].reverse().find((e) => e.mu_uid === muUid);
+    if (lastEntry) {
+      const added = [...(lastEntry.spikes_added || []), ...(lastEntry.artifacts_added || [])];
+      const removed = [...(lastEntry.spikes_removed || []), ...(lastEntry.artifacts_removed || [])];
+      ctx.fillStyle = "rgba(74,222,128,0.85)";
+      added.forEach((s) => {
+        ctx.fillRect(padL + Math.round((s / total) * bw), barTop, 1, barH);
+      });
+      ctx.fillStyle = "rgba(248,113,113,0.85)";
+      removed.forEach((s) => {
+        ctx.fillRect(padL + Math.round((s / total) * bw), barTop, 1, barH);
+      });
+    }
+  }
+
+  // Current spike positions (faint purple, drawn on top of history)
+  const spikes = state.edit.distimes?.[muIdx] || [];
+  ctx.fillStyle = "rgba(231,193,255,0.35)";
+  spikes.forEach((s) => {
+    const x = padL + Math.round((s / total) * bw);
+    ctx.fillRect(x, barTop, 1, barH);
+  });
+
+  // View window
+  const view = state.edit.view || { start: 0, end: total };
+  const x1 = padL + (Math.max(0, view.start) / total) * bw;
+  const x2 = padL + (Math.min(total, view.end) / total) * bw;
+  const ww = Math.max(4, x2 - x1);
+  ctx.fillStyle = "rgba(195,155,242,0.28)";
+  ctx.fillRect(x1, barTop - 2, ww, barH + 4);
+  ctx.strokeStyle = "rgba(195,155,242,0.75)";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x1 + 0.5, barTop - 1.5, Math.max(3, ww - 1), barH + 3);
+}
+
+export function bindEditTimeline(deps) {
+  const { els, state, getDisplayPulse, renderEditExplorer } = deps;
+  const canvas = els?.editTimelineCanvas;
+  if (!canvas) return;
+
+  const PAD_L = 38;
+  const PAD_R = 8;
+
+  let dragging = false;
+  let startClientX = 0;
+  let dragViewStart = 0;
+  let didMove = false;
+
+  const getTotal = () => (getDisplayPulse(state.edit.currentMu ?? 0) || []).length;
+
+  const fracFromClientX = (clientX) => {
+    const rect = canvas.getBoundingClientRect();
+    const bw = Math.max(1, rect.width - PAD_L - PAD_R);
+    return Math.max(0, Math.min(1, (clientX - rect.left - PAD_L) / bw));
+  };
+
+  canvas.addEventListener("mousedown", (e) => {
+    dragging = true;
+    didMove = false;
+    startClientX = e.clientX;
+    const total = getTotal();
+    dragViewStart = (state.edit.view || { start: 0, end: total }).start;
+  });
+
+  window.addEventListener("mousemove", (e) => {
+    if (!dragging) return;
+    if (Math.abs(e.clientX - startClientX) > 3) didMove = true;
+    if (!didMove) return;
+    const total = getTotal();
+    if (!total) return;
+    const rect = canvas.getBoundingClientRect();
+    const bw = Math.max(1, rect.width - PAD_L - PAD_R);
+    const delta = Math.round(((e.clientX - startClientX) / bw) * total);
+    const view = state.edit.view || { start: 0, end: total };
+    const span = view.end - view.start;
+    let s = dragViewStart + delta;
+    let e2 = s + span;
+    if (s < 0) { e2 -= s; s = 0; }
+    if (e2 > total) { s = Math.max(0, s - (e2 - total)); e2 = total; }
+    setEditView(state, { start: s, end: e2 });
+    renderEditExplorer();
+  });
+
+  window.addEventListener("mouseup", (e) => {
+    if (!dragging) return;
+    dragging = false;
+    if (didMove) return;
+    const total = getTotal();
+    if (!total) return;
+    const view = state.edit.view || { start: 0, end: total };
+    const span = view.end - view.start;
+    const frac = fracFromClientX(e.clientX);
+    let s = Math.round(frac * total - span / 2);
+    let e2 = s + span;
+    if (s < 0) { e2 -= s; s = 0; }
+    if (e2 > total) { s = Math.max(0, s - (e2 - total)); e2 = total; }
+    setEditView(state, { start: s, end: e2 });
+    renderEditExplorer();
+  });
+}
+
 export function bindEditDrCanvas(deps) {
   const {
     els,

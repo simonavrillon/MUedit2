@@ -426,6 +426,7 @@ function wireEvents() {
     DEFAULT_BIDS_ROOT,
     bindEditCanvas: () => editStage.bindEditCanvas(),
     bindEditDrCanvas: () => editStage.bindEditDrCanvas(),
+    bindEditTimeline: () => editStage.bindEditTimeline(),
     renderEditExplorer: () => editStage.renderEditExplorer(),
     runEditAction: ui.runEditAction,
     saveEditedFile: () => editStage.saveEditedFile(),

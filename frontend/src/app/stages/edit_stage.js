@@ -19,8 +19,10 @@ import {
 import {
   renderEditExplorer as renderEditExplorerFeature,
   renderInstantaneousDr as renderInstantaneousDrFeature,
+  renderEditTimeline as renderEditTimelineFeature,
   bindEditCanvas as bindEditCanvasFeature,
   bindEditDrCanvas as bindEditDrCanvasFeature,
+  bindEditTimeline as bindEditTimelineFeature,
 } from "../../view/edit_canvas.js";
 import {
   saveEditedFile as saveEditedFileFeature,
@@ -183,6 +185,7 @@ export function createEditStageService(deps) {
       getDisplayPulse,
       renderInstantaneousDr,
     });
+    renderEditTimelineFeature({ els, state, COLORS, getDisplayPulse });
   }
 
   function restoreEditBackup() {
@@ -387,6 +390,15 @@ export function createEditStageService(deps) {
     });
   }
 
+  function bindEditTimeline() {
+    bindEditTimelineFeature({
+      els,
+      state,
+      getDisplayPulse,
+      renderEditExplorer,
+    });
+  }
+
   function saveEditedFile() {
     return saveEditedFileFeature({
       state,
@@ -450,6 +462,7 @@ export function createEditStageService(deps) {
     renderInstantaneousDr,
     bindEditCanvas,
     bindEditDrCanvas,
+    bindEditTimeline,
     requestRoiEdit,
     requestFilterUpdate,
     updateMuFilter,
@@ -483,6 +496,7 @@ export function setupEditEvents(deps) {
     DEFAULT_BIDS_ROOT,
     bindEditCanvas,
     bindEditDrCanvas,
+    bindEditTimeline,
     renderEditExplorer,
     runEditAction,
     saveEditedFile,
@@ -500,6 +514,7 @@ export function setupEditEvents(deps) {
 
   bindEditCanvas();
   bindEditDrCanvas();
+  bindEditTimeline();
 
   if (els.editBidsRoot && !els.editBidsRoot.value.trim()) {
     els.editBidsRoot.value = DEFAULT_BIDS_ROOT;

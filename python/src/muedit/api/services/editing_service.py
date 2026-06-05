@@ -262,7 +262,10 @@ def save_edits(payload: dict[str, Any]) -> dict[str, Any]:
         artifact_times_all = [artifact_times_all[i] for i in keep_idx if i < len(artifact_times_all)]
 
     if remove_duplicates and len(distimes) > 1 and fsamp and fsamp > 0:
-        dup_tol = float(parameters.get("duplicatesthresh", 0.3))
+        dup_tol_raw = parameters.get("duplicatesthresh", 0.3)
+        while isinstance(dup_tol_raw, (list, tuple, np.ndarray)):
+            dup_tol_raw = dup_tol_raw[0] if len(dup_tol_raw) > 0 else 0.3
+        dup_tol = float(dup_tol_raw)
         dedup_pulses, dedup_distimes, kept_idx = _dedup(pulse_trains, distimes, dup_tol, fsamp)
         pulse_trains = dedup_pulses if dedup_pulses.size else np.zeros((0, total_samples))
         distimes = [
@@ -334,12 +337,14 @@ def update_filter(payload: dict[str, Any]) -> dict[str, Any]:
     emg: np.ndarray | None = None
     fsamp: float | None = None
     emg_mask: np.ndarray | None = None
+    emg_is_presliced = False  # True only when BIDS loaded a view-length slice
 
     if bids_root:
         try:
             emg, fsamp, emg_mask = _load_bids_grid(
                 Path(bids_root), str(entity_label), grid_index, view_start, view_end
             )
+            emg_is_presliced = True
         except (ValueError, FileNotFoundError):
             emg, fsamp, emg_mask = None, None, None
 
@@ -395,7 +400,7 @@ def update_filter(payload: dict[str, Any]) -> dict[str, Any]:
     artifact_times_raw = payload.get("artifact_times") or []
     artifact_times = [int(x) for x in artifact_times_raw if isinstance(x, (int, float))]
 
-    bids_emg_offset = view_start if bids_root and emg is not None else 0
+    bids_emg_offset = view_start if emg_is_presliced else 0
     lock_spikes = bool(payload.get("lock_spikes", False))
     pt, updated = update_motor_unit_filter_window(
         emg,

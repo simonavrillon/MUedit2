@@ -612,9 +612,40 @@ export async function loadDecompositionForEdit(deps, file, filepath = null) {
       state.edit.distimes.map(() => false),
     );
     setEditBackup(state, null);
-    setEditCurrentMuGrid(state, 0, { resetView: false });
-    setEditCurrentMu(state, 0, { resetView: false });
-    setEditView(state, { start: 0, end: state.edit.totalSamples || 0 });
+
+    // Restore last session from the most recent history entry that names a MU
+    const total = state.edit.totalSamples || 0;
+    const lastEntry = [...(state.edit.editHistory || [])].reverse().find((e) => e.mu_uid);
+    let targetMu = 0;
+    let targetView = { start: 0, end: total };
+    if (lastEntry) {
+      const idx = (state.edit.muUids || []).indexOf(lastEntry.mu_uid);
+      if (idx !== -1) {
+        targetMu = idx;
+        if (Number.isFinite(lastEntry.view_start) && Number.isFinite(lastEntry.view_end)) {
+          targetView = { start: lastEntry.view_start, end: lastEntry.view_end };
+        } else {
+          const positions = [
+            ...(lastEntry.spikes_added || []),
+            ...(lastEntry.spikes_removed || []),
+            ...(lastEntry.artifacts_added || []),
+            ...(lastEntry.artifacts_removed || []),
+          ];
+          if (positions.length) {
+            const mean = Math.round(positions.reduce((a, b) => a + b, 0) / positions.length);
+            const halfSpan = Math.min(Math.round(total * 0.1), (state.edit.fsamp || 2048) * 2);
+            targetView = {
+              start: Math.max(0, mean - halfSpan),
+              end: Math.min(total, mean + halfSpan),
+            };
+          }
+        }
+      }
+    }
+    const targetGrid = (state.edit.muGridIndex || [])[targetMu] ?? 0;
+    setEditCurrentMuGrid(state, targetGrid, { resetView: false });
+    setEditCurrentMu(state, targetMu, { resetView: false });
+    setEditView(state, targetView);
     clearAllEditSelections(state);
     recomputeEditDirty();
     if (els.editSaveBtn) els.editSaveBtn.disabled = false;

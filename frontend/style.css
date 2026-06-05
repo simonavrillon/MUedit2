@@ -1367,6 +1367,15 @@ canvas {
 .stage-edit .edit-full {
   flex: 1 1 0;
   min-height: 0;
+  overflow: hidden;
+}
+
+#editDrCard {
+  flex-grow: 1;
+}
+
+#editPulseCard {
+  flex-grow: 2;
 }
 
 #editDrCanvas,
@@ -1375,6 +1384,19 @@ canvas {
   min-height: 0;
   height: 100%;
   min-height: 240px;
+}
+
+.edit-timeline-canvas {
+  width: 100%;
+  height: 20px;
+  flex: 0 0 20px;
+  display: block;
+  cursor: grab;
+  border-radius: 3px;
+}
+
+.edit-timeline-canvas:active {
+  cursor: grabbing;
 }
 
 /* ── Misc ── */

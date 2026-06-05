@@ -6,7 +6,7 @@
     <title>MUedit</title>
     <link rel="icon" href="data:," />
     <link rel="shortcut icon" href="data:," />
-    <link rel="stylesheet" href="style.css?v=55" />
+    <link rel="stylesheet" href="style.css?v=56" />
   </head>
 
   <body>
@@ -722,7 +722,7 @@
                     ></span>
                   </div>
                 </div>
-                <div class="chart-card glass edit-full">
+                <div class="chart-card glass edit-full" id="editDrCard">
                   <div class="chart-title">Firing Rate (Hz)</div>
                   <canvas
                     id="editDrCanvas"
@@ -730,14 +730,19 @@
                     class="mu-canvas muted-bg"
                   ></canvas>
                 </div>
-                <div class="chart-card glass edit-full">
-                  <div class="chart-title">Pulse Train (Interactive)</div>
+                <div class="chart-card glass edit-full" id="editPulseCard">
+                  <div class="chart-title">Pulse Train</div>
                   <canvas
                     id="editPulseCanvas"
-                    height="300"
+                    height="280"
                     class="mu-canvas"
                   ></canvas>
                 </div>
+                <canvas
+                  id="editTimelineCanvas"
+                  class="edit-timeline-canvas"
+                  aria-label="Navigation timeline"
+                ></canvas>
               </div>
             </div>
           </div>
