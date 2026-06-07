@@ -30,11 +30,11 @@ dependencies = [
   "pydantic>=2.10",
   "PyYAML>=6.0",
   "h5py>=3.12",
+  "tk",
   "fastapi>=0.115",
   "uvicorn>=0.32",
   "python-multipart>=0.0.12",
   "pyedflib>=0.1.36",
-  "torch>=2.5",
 ]
 
 [project.optional-dependencies]

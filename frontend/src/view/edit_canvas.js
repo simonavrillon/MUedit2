@@ -9,6 +9,32 @@ import {
   setEditView,
 } from "../state/actions.js";
 
+function renderBookmark(canvas, state, muIdx, view, getCanvasPlotMetrics) {
+  const bookmark = state.edit.bookmarkPosition;
+  if (!bookmark || bookmark.muIdx !== muIdx) return;
+  if (!state.edit.showBookmark) return;
+
+  const ctx = canvas.getContext("2d");
+  const metrics = getCanvasPlotMetrics(canvas, true, { hideYAxis: false });
+
+  const bookmarkPos = Math.max(view.start, Math.min(view.end - 1, bookmark.position));
+  const frac = (bookmarkPos - view.start) / Math.max(1, view.end - view.start);
+  const x = metrics.padding.left + frac * metrics.plotWidth;
+
+  ctx.strokeStyle = "#22c55e";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(x, metrics.padding.top);
+  ctx.lineTo(x, metrics.padding.top + metrics.plotHeight);
+  ctx.stroke();
+
+  ctx.fillStyle = "#22c55e";
+  ctx.font = "12px sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText("You stopped here", x, metrics.padding.top + 15);
+  ctx.textAlign = "start";
+}
+
 function clampY(py, canvas, getCanvasPlotMetrics) {
   const metrics = getCanvasPlotMetrics(canvas, true);
   const clamped = Math.max(
@@ -26,6 +52,7 @@ export function renderEditExplorer(deps) {
     renderEditDropdowns,
     getDisplayPulse,
     renderInstantaneousDr,
+    getCanvasPlotMetrics,
   } = deps;
 
   renderEditDropdowns();
@@ -44,6 +71,7 @@ export function renderEditExplorer(deps) {
   const artifactVals = artifacts.map((s) => pulse?.[s] ?? 0);
   const { COLORS } = deps;
   const pulseCanvas = els?.editPulseCanvas || "editPulseCanvas";
+  const canvasEl = typeof pulseCanvas === "string" ? document.getElementById(pulseCanvas) : pulseCanvas;
   drawSeries(
     pulseCanvas,
     pulse,
@@ -64,6 +92,9 @@ export function renderEditExplorer(deps) {
         : [],
     },
   );
+  if (canvasEl) {
+    renderBookmark(canvasEl, state, muIdx, state.edit.view, getCanvasPlotMetrics);
+  }
   renderInstantaneousDr();
 }
 
@@ -137,6 +168,7 @@ export function bindEditCanvas(deps) {
     addArtifactInSelection,
     deleteSpikesInSelection,
     setEditMode,
+    setShowBookmark,
   } = deps;
 
   const canvas = els.editPulseCanvas;
@@ -256,6 +288,9 @@ export function bindEditCanvas(deps) {
     if (!pulse.length) return;
     setEditView(state, { start: 0, end: pulse.length });
     clearEditPulseSelections(state);
+    if (setShowBookmark) {
+      setShowBookmark(state, true);
+    }
     renderEditExplorer();
   });
 }
@@ -295,11 +330,11 @@ export function renderEditTimeline(deps) {
       const removed = [...(lastEntry.spikes_removed || []), ...(lastEntry.artifacts_removed || [])];
       ctx.fillStyle = "rgba(74,222,128,0.85)";
       added.forEach((s) => {
-        ctx.fillRect(padL + Math.round((s / total) * bw), barTop, 1, barH);
+        ctx.fillRect(padL + Math.round((s / total) * bw), barTop, 2, barH);
       });
       ctx.fillStyle = "rgba(248,113,113,0.85)";
       removed.forEach((s) => {
-        ctx.fillRect(padL + Math.round((s / total) * bw), barTop, 1, barH);
+        ctx.fillRect(padL + Math.round((s / total) * bw), barTop, 2, barH);
       });
     }
   }
@@ -309,7 +344,7 @@ export function renderEditTimeline(deps) {
   ctx.fillStyle = "rgba(231,193,255,0.35)";
   spikes.forEach((s) => {
     const x = padL + Math.round((s / total) * bw);
-    ctx.fillRect(x, barTop, 1, barH);
+    ctx.fillRect(x, barTop, 2, barH);
   });
 
   // View window

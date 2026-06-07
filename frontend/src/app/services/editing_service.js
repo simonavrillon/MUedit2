@@ -10,6 +10,8 @@ import {
   setEditArtifactTimesForMu,
   setEditBackup,
   setEditBidsRoot,
+  setEditBookmark,
+  setShowBookmark,
   setEditCurrentMu,
   setEditCurrentMuGrid,
   setEditDistimes,
@@ -61,6 +63,8 @@ export async function requestRoiEdit(deps, action, payload) {
     setEditStatus,
     ensureEditFlagged,
     setEditMode,
+    setEditBookmark,
+    setShowBookmark,
     recomputeEditDirty,
     renderEditExplorer,
   } = deps;
@@ -138,6 +142,10 @@ export async function requestRoiEdit(deps, action, payload) {
         deps.appendEditHistory(entry);
       }
     }
+    const bookmarkPos = Math.round((payload.xStart + (payload.xEnd ?? payload.xStart)) / 2);
+    setEditBookmark(state, { muIdx: payload.muIdx, position: bookmarkPos });
+    setShowBookmark(state, false);
+
     if (action === "delete-dr") {
       clearEditDrSelections(state);
       setEditMode(null);
@@ -165,6 +173,8 @@ export async function requestFilterUpdate(deps, mode) {
     backupEditMu,
     buildEntityLabelFromSession,
     ensureEditFlagged,
+    setEditBookmark,
+    setShowBookmark,
     recomputeEditDirty,
     refreshEditTotals,
     renderEditExplorer,
@@ -229,6 +239,9 @@ export async function requestFilterUpdate(deps, mode) {
       if (removed.length) entry.spikes_removed = removed;
       deps.appendEditHistory(entry);
     }
+    const centerPos = Math.round((start + end) / 2);
+    setEditBookmark(state, { muIdx, position: centerPos });
+    setShowBookmark(state, false);
     recomputeEditDirty();
     refreshEditTotals();
     renderEditExplorer();
@@ -247,6 +260,8 @@ export async function removeOutliers(deps) {
     getRawPulse,
     backupEditMu,
     ensureEditFlagged,
+    setEditBookmark,
+    setShowBookmark,
     recomputeEditDirty,
     renderEditExplorer,
   } = deps;
@@ -284,6 +299,10 @@ export async function removeOutliers(deps) {
       const { removed } = spikesDiff(spikes, distimesAfter);
       deps.appendEditHistory({ type: "remove_outliers", mu_uid: muUid, spikes_removed: removed });
     }
+    const distimesAfter = state.edit.distimes?.[muIdx] || [];
+    const centerPos = distimesAfter.length ? Math.round((distimesAfter[0] + distimesAfter.at(-1)) / 2) : Math.round(pulse.length / 2);
+    setEditBookmark(state, { muIdx, position: centerPos });
+    setShowBookmark(state, false);
     recomputeEditDirty();
     renderEditExplorer();
     if ((data.removed_count || 0) > 0) {
@@ -303,6 +322,8 @@ export async function removeDuplicateMus(deps) {
     apiJson,
     setEditStatus,
     ensureEditFlagged,
+    setEditBookmark,
+    setShowBookmark,
     recomputeEditDirty,
     renderEditExplorer,
   } = deps;
@@ -354,6 +375,7 @@ export async function removeDuplicateMus(deps) {
       ? keptIdx.indexOf(currentMu)
       : 0;
     setEditCurrentMu(state, newCurrentMu, { resetView: false });
+    setShowBookmark(state, false);
 
     recomputeEditDirty();
     renderEditExplorer();
@@ -372,6 +394,8 @@ export async function flagMuForDeletion(deps) {
     getRawPulse,
     backupEditMu,
     ensureEditFlagged,
+    setEditBookmark,
+    setShowBookmark,
     recomputeEditDirty,
     renderEditExplorer,
   } = deps;
@@ -399,6 +423,7 @@ export async function flagMuForDeletion(deps) {
       const muUid = state.edit.muUids?.[muIdx] ?? `mu${muIdx}`;
       deps.appendEditHistory({ type: "flag_mu", mu_uid: muUid, flagged: data.flagged !== false });
     }
+    setShowBookmark(state, false);
     recomputeEditDirty();
     renderEditExplorer();
     setEditStatus("MU flagged for deletion", "success");
@@ -618,6 +643,7 @@ export async function loadDecompositionForEdit(deps, file, filepath = null) {
     const lastEntry = [...(state.edit.editHistory || [])].reverse().find((e) => e.mu_uid);
     let targetMu = 0;
     let targetView = { start: 0, end: total };
+    let targetBookmark = null;
     if (lastEntry) {
       const idx = (state.edit.muUids || []).indexOf(lastEntry.mu_uid);
       if (idx !== -1) {
@@ -638,7 +664,12 @@ export async function loadDecompositionForEdit(deps, file, filepath = null) {
               start: Math.max(0, mean - halfSpan),
               end: Math.min(total, mean + halfSpan),
             };
+            targetBookmark = { muIdx: idx, position: Math.round((targetView.start + targetView.end) / 2) };
           }
+        }
+        if (Number.isFinite(lastEntry.view_start) && Number.isFinite(lastEntry.view_end) && !targetBookmark) {
+          const centerPos = Math.round((lastEntry.view_start + lastEntry.view_end) / 2);
+          targetBookmark = { muIdx: idx, position: centerPos };
         }
       }
     }
@@ -646,10 +677,14 @@ export async function loadDecompositionForEdit(deps, file, filepath = null) {
     setEditCurrentMuGrid(state, targetGrid, { resetView: false });
     setEditCurrentMu(state, targetMu, { resetView: false });
     setEditView(state, targetView);
+    if (targetBookmark) {
+      setEditBookmark(state, targetBookmark);
+      setShowBookmark(state, true);
+    }
     clearAllEditSelections(state);
     recomputeEditDirty();
     if (els.editSaveBtn) els.editSaveBtn.disabled = false;
-    setEditStatus("Loaded. Click the spike train to edit.", "success");
+    setEditStatus("Loaded. You can start interacting with the pulse train.", "success");
     showWorkspace({ keepLandingVisible: true });
     switchStage("edit");
     if (typeof renderBidsMuscleFields === "function") {

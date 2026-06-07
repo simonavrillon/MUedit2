@@ -281,6 +281,14 @@ export function setEditBackup(state, backup) {
   state.edit.backup = backup || null;
 }
 
+export function setEditBookmark(state, position) {
+  state.edit.bookmarkPosition = position || null;
+}
+
+export function setShowBookmark(state, show) {
+  state.edit.showBookmark = !!show;
+}
+
 export function setEditDirty(state, dirty) {
   state.edit.dirty = !!dirty;
 }
@@ -330,6 +338,8 @@ export function resetEditSlice(state) {
     editSignalToken: "",
     muUids: [],
     editHistory: [],
+    bookmarkPosition: null,
+    showBookmark: false,
   };
 }
 

@@ -116,7 +116,7 @@ export {};
  * @property {Function} getMuIndicesForGrid
  * @property {Function} renderMuDropdowns
  * @property {Function} renderMuExplorer
- * @property {Function} autoDownloadRunDecomposition
+ * @property {Function} autoSaveRunDecomposition
  * @property {Function} handleStreamMessage
  * @property {Function} runDecomposition
  */

@@ -61,5 +61,7 @@ export const state = {
     editSignalToken: "",
     muUids: [],
     editHistory: [],
+    bookmarkPosition: null,
+    showBookmark: false,
   },
 };

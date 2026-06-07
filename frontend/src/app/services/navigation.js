@@ -224,6 +224,7 @@ export function handleKeyboardNavigation(deps, e) {
     getViewForStageFn,
     adjustViewFn,
     setViewForStageFn,
+    setShowBookmark,
   } = deps;
 
   const active = document.activeElement;
@@ -302,6 +303,10 @@ export function handleKeyboardNavigation(deps, e) {
   if (e.key === "ArrowLeft") action = "scroll_left";
   if (e.key === "ArrowRight") action = "scroll_right";
   if (!action) return;
+
+  if (stage === "edit" && action === "zoom_out" && setShowBookmark) {
+    setShowBookmark(state, true);
+  }
 
   const { view, total } = getViewForStageFn(stage);
   if (!view || !total) return;

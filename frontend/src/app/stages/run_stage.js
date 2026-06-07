@@ -1,5 +1,5 @@
 import {
-  autoDownloadRunDecomposition as autoDownloadRunDecompositionFeature,
+  autoSaveRunDecomposition as autoSaveRunDecompositionFeature,
   runDecomposition as runDecompositionFeature,
   handleStreamMessage as handleStreamMessageFeature,
 } from "../../decomp/run.js";
@@ -46,6 +46,7 @@ export function createRunStageService(deps) {
     populateAuxSelector,
     renderAuxiliaryChannels,
     enableRoiSelection,
+    loadDecompositionForEditByPath,
   } = deps;
 
   function getMuIndicesForGrid(gridIdx) {
@@ -86,14 +87,15 @@ export function createRunStageService(deps) {
     renderMuExplorerController({ els, drawSeries }, model);
   }
 
-  function autoDownloadRunDecomposition() {
-    return autoDownloadRunDecompositionFeature({
+  function autoSaveRunDecomposition() {
+    return autoSaveRunDecompositionFeature({
       state,
       els,
       getSuggestedNpzName,
       persistNpzBySaveTarget,
       getBidsMuscleNames,
       setStatus,
+      onSaved: loadDecompositionForEditByPath || null,
     });
   }
 
@@ -118,7 +120,7 @@ export function createRunStageService(deps) {
         populateAuxSelector,
         renderAuxiliaryChannels,
         enableRoiSelection,
-        autoDownloadRunDecomposition,
+        autoSaveRunDecomposition,
       },
       msg,
     );
@@ -145,7 +147,7 @@ export function createRunStageService(deps) {
     getMuIndicesForGrid,
     renderMuDropdowns,
     renderMuExplorer,
-    autoDownloadRunDecomposition,
+    autoSaveRunDecomposition,
     handleStreamMessage,
     runDecomposition,
   };

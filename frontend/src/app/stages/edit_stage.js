@@ -39,6 +39,8 @@ import {
   setEditBidsRoot,
   setEditCurrentMu,
   setEditCurrentMuGrid,
+  setEditBookmark,
+  setShowBookmark,
 } from "../../state/actions.js";
 import { getEditMuIndicesForGrid } from "../../state/selectors.js";
 
@@ -184,6 +186,7 @@ export function createEditStageService(deps) {
       renderEditDropdowns,
       getDisplayPulse,
       renderInstantaneousDr,
+      getCanvasPlotMetrics,
     });
     renderEditTimelineFeature({ els, state, COLORS, getDisplayPulse });
   }
@@ -207,6 +210,8 @@ export function createEditStageService(deps) {
         setEditStatus,
         ensureEditFlagged,
         setEditMode,
+        setEditBookmark,
+        setShowBookmark,
         recomputeEditDirty,
         renderEditExplorer,
         appendEditHistory,
@@ -229,6 +234,8 @@ export function createEditStageService(deps) {
         backupEditMu,
         buildEntityLabelFromSession,
         ensureEditFlagged,
+        setEditBookmark,
+        setShowBookmark,
         recomputeEditDirty,
         refreshEditTotals,
         renderEditExplorer,
@@ -310,6 +317,8 @@ export function createEditStageService(deps) {
       getRawPulse,
       backupEditMu,
       ensureEditFlagged,
+      setEditBookmark,
+      setShowBookmark,
       recomputeEditDirty,
       renderEditExplorer,
       appendEditHistory,
@@ -325,6 +334,8 @@ export function createEditStageService(deps) {
       getRawPulse,
       backupEditMu,
       ensureEditFlagged,
+      setEditBookmark,
+      setShowBookmark,
       recomputeEditDirty,
       renderEditExplorer,
       appendEditHistory,
@@ -347,6 +358,8 @@ export function createEditStageService(deps) {
       apiJson,
       setEditStatus,
       ensureEditFlagged,
+      setEditBookmark,
+      setShowBookmark,
       recomputeEditDirty,
       renderEditExplorer,
       appendEditHistory,
@@ -376,6 +389,7 @@ export function createEditStageService(deps) {
       addArtifactInSelection,
       deleteSpikesInSelection,
       setEditMode,
+      setShowBookmark,
     });
   }
 

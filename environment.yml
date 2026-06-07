@@ -20,8 +20,5 @@ dependencies:
   - uvicorn=0.32.0
   - python-multipart=0.0.12
   - pip:
-    # PyTorch installed via pip because the conda package pulls CUDA by default.
-    # Pin to the CPU-only wheel for portability; GPU users can swap for their build.
-    - torch==2.5.1
     # EMG / EEG file I/O
     - pyedflib==0.1.42

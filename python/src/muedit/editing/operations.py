@@ -223,7 +223,7 @@ def delete_spikes_in_roi(
     updated = []
     ordered = sorted(spike_times)
     low = min(y_min, y_max)
-    high = max(y_min, y_max)
+    high = max(y_min, y_max) + 1
     for t in ordered:
         if t < x_start or t > x_end:
             updated.append(int(t))
@@ -248,7 +248,7 @@ def delete_artifacts_in_roi(
     updated = []
     ordered = sorted(artifact_times)
     low = min(y_min, y_max)
-    high = max(y_min, y_max)
+    high = max(y_min, y_max) + 1
     for t in ordered:
         if t < x_start or t > x_end:
             updated.append(int(t))

@@ -20,7 +20,7 @@ import {
 import { decodeDecomposePreviewPayload } from "../api/binary_payloads.js";
 import { normalizePreviewPayload } from "../api/payloads.js";
 
-export async function autoDownloadRunDecomposition(deps) {
+export async function autoSaveRunDecomposition(deps) {
   const {
     state,
     els,
@@ -28,6 +28,7 @@ export async function autoDownloadRunDecomposition(deps) {
     persistNpzBySaveTarget,
     getBidsMuscleNames,
     setStatus,
+    onSaved,
   } = deps;
 
   if (state.runDownloadInFlight) return;
@@ -69,6 +70,9 @@ export async function autoDownloadRunDecomposition(deps) {
         : "Decomposition saved",
       "success",
     );
+    if (onSaved && saved?.path) {
+      onSaved(saved.path);
+    }
   } catch (err) {
     console.error(err);
     setStatus(`Save failed: ${err.message}`, "error");
@@ -419,6 +423,7 @@ export function handleStreamMessage(deps, msg) {
     populateAuxSelector,
     renderAuxiliaryChannels,
     enableRoiSelection,
+    autoSaveRunDecomposition,
   } = deps;
 
   if (msg.stage === "error") {
@@ -525,9 +530,8 @@ export function handleStreamMessage(deps, msg) {
 
   if (msg.stage === "done") {
     if (Array.isArray(state.muPulseTrains) && state.muPulseTrains.length) {
-      // Finalize explorer selection/render after stream completion so the first
-      // detected MU is shown immediately when at least one MU exists.
       renderMuExplorer();
+      void autoSaveRunDecomposition?.();
     }
     setStatus("Complete", "success");
   }

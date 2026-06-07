@@ -24,7 +24,7 @@ def _compute_calibration_stats(
     base_centr   = np.zeros(n_mu, dtype=np.float32)
     spikes_centr = np.ones(n_mu, dtype=np.float32)
 
-    dist = int(round(fsamp * 0.02))
+    dist = int(round(fsamp * 0.005))
     for j in range(n_mu):
         pt = ipts_sq[:, j]
         peaks, _ = find_peaks(pt, distance=dist)
