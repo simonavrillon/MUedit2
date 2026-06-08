@@ -54,3 +54,6 @@ frontend/node_modules/
 bids_out/
 bids_export/
 data/datasamples/
+
+# ── Local test scripts and outputs ─────────────────────────────────────────
+tests/

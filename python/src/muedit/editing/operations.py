@@ -20,17 +20,6 @@ SpikeTimes: TypeAlias = list[int]
 FilterUpdateResult: TypeAlias = tuple[np.ndarray | None, SpikeTimes]
 
 
-def _remove_high_amplitude_outliers(
-    pulse_train: np.ndarray, spike_indices: np.ndarray
-) -> np.ndarray:
-    """Drop candidate spikes with unusually large amplitudes."""
-    if spike_indices.size == 0:
-        return spike_indices
-    threshold = np.mean(pulse_train[spike_indices]) + 3 * np.std(
-        pulse_train[spike_indices]
-    )
-    return spike_indices[pulse_train[spike_indices] <= threshold]
-
 
 def _recompute_spikes_in_window(
     emg: np.ndarray,
@@ -109,7 +98,7 @@ def _recompute_spikes_in_window(
         return None, spike_times
     idx2 = int(np.argmax(centroids))
     spikes_new = peaks[labels == idx2]
-    spikes_new = _remove_high_amplitude_outliers(pt, spikes_new)
+    spikes_new = spikes_new[pt[spikes_new] <= 3 * centroids[idx2]]
 
     spikes_new = spikes_new.astype(int)
     

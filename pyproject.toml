@@ -43,6 +43,7 @@ dev = [
   "twine>=5.1",
   "pytest>=8.3",
   "ruff>=0.8",
+  "optuna>=4.3",
 ]
 
 [project.scripts]

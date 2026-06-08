@@ -23,6 +23,9 @@ class Config:
 
     cov_alpha: float = 0.1
 
+    compute_loss: bool = False
+
+    spike_height_mult: int = 3
     spike_prev_weight: int = 5
     spike_dist_ms: int = 5
     spike_dist: int = field(init=False)

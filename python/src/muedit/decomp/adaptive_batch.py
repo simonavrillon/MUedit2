@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 from scipy.signal import find_peaks
@@ -51,8 +51,15 @@ def _run_one_pass(
     batch_ms: int,
     adapt_wh: bool,
     adapt_sv: bool,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Run adaptive decomposition on a single EMG segment and return ipts and spikes."""
+    adapt_sd: bool = True,
+    wh_learning_rate: float = 7e-3,
+    sv_learning_rate: float = 3e-3,
+    cov_alpha: float = 0.1,
+    spike_prev_weight: int = 5,
+    contrast_func: Literal["logcosh", "cube"] = "logcosh",
+    compute_loss: bool = False,
+) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
+    """Run adaptive decomposition on a single EMG segment and return ipts, spikes, and losses."""
     from muedit.adapt_decomp.adaptation import run_adaptive_decomposition
     from muedit.adapt_decomp.config import Config
 
@@ -62,8 +69,15 @@ def _run_one_pass(
         batch_ms=batch_ms,
         adapt_wh=adapt_wh,
         adapt_sv=adapt_sv,
+        adapt_sd=adapt_sd,
+        wh_learning_rate=wh_learning_rate,
+        sv_learning_rate=sv_learning_rate,
+        cov_alpha=cov_alpha,
+        spike_prev_weight=spike_prev_weight,
+        contrast_func=contrast_func,
+        compute_loss=compute_loss,
     )
-    ipts, spikes = run_adaptive_decomposition(
+    ipts, spikes, losses = run_adaptive_decomposition(
         emg=emg_seg.astype(np.float32),
         whitening=whiten_mat.astype(np.float32),
         sep_vectors=mu_filters.T.astype(np.float32),
@@ -72,7 +86,7 @@ def _run_one_pass(
         emg_calib=emg_calib.astype(np.float32),
         config=config,
     )
-    return ipts.astype(np.float64), spikes
+    return ipts.astype(np.float64), spikes, losses
 
 
 def _run_adapt_decomp_bidirectional(
@@ -86,7 +100,14 @@ def _run_adapt_decomp_bidirectional(
     adapt_wh: bool,
     adapt_sv: bool,
     calib_start: int,
-) -> tuple[np.ndarray, np.ndarray]:
+    adapt_sd: bool = True,
+    wh_learning_rate: float = 7e-3,
+    sv_learning_rate: float = 3e-3,
+    cov_alpha: float = 0.1,
+    spike_prev_weight: int = 5,
+    contrast_func: Literal["logcosh", "cube"] = "logcosh",
+    compute_loss: bool = False,
+) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
     """Run adaptive decomposition forward from calib_start and, if needed, backward over the pre-calibration segment."""
     from muedit.decomp.algorithm import extend_signal
 
@@ -97,30 +118,41 @@ def _run_adapt_decomp_bidirectional(
     ex_factor = w_sig.shape[0] // win_data_g.shape[0]
     bs = int(batch_ms * fsamp / 1000)
 
+    shared = dict(
+        whiten_mat=whiten_mat,
+        mu_filters=mu_filters,
+        base_centr=base_centr,
+        spikes_centr=spikes_centr,
+        fsamp=fsamp,
+        batch_ms=batch_ms,
+        adapt_wh=adapt_wh,
+        adapt_sv=adapt_sv,
+        adapt_sd=adapt_sd,
+        wh_learning_rate=wh_learning_rate,
+        sv_learning_rate=sv_learning_rate,
+        cov_alpha=cov_alpha,
+        spike_prev_weight=spike_prev_weight,
+        contrast_func=contrast_func,
+        compute_loss=compute_loss,
+    )
+
     emg_calib_raw = win_data_g.T.astype(np.float32)
     n_calib = win_data_g.shape[1]
     emg_calib_ext = extend_signal(win_data_g, ex_factor).T[:n_calib].astype(np.float32)
 
     fwd_start = max(0, calib_start - bs)
     emg_fwd = np.ascontiguousarray(grid_data_g[:, fwd_start:].T.astype(np.float32))
-    ipts_fwd_full, spikes_fwd_full = _run_one_pass(
+    ipts_fwd_full, spikes_fwd_full, losses_fwd = _run_one_pass(
         emg_seg=emg_fwd,
         emg_calib=emg_calib_raw,
-        whiten_mat=whiten_mat,
-        mu_filters=mu_filters,
-        base_centr=base_centr,
-        spikes_centr=spikes_centr,
-        fsamp=fsamp,
         ex_factor=ex_factor,
-        batch_ms=batch_ms,
-        adapt_wh=adapt_wh,
-        adapt_sv=adapt_sv,
+        **shared,
     )
     ipts_fwd   = ipts_fwd_full[calib_start - fwd_start:]
     spikes_fwd = spikes_fwd_full[calib_start - fwd_start:]
 
     if calib_start == 0:
-        return ipts_fwd, spikes_fwd
+        return ipts_fwd, spikes_fwd, losses_fwd
 
     # `extend_signal` adds (ex_factor - 1) trailing padded samples; keep only
     # the original pre-calibration duration to avoid forward/backward offset.
@@ -130,18 +162,11 @@ def _run_adapt_decomp_bidirectional(
     blocks = np.split(e_pre, split_pts, axis=0)
     emg_bwd = np.ascontiguousarray(np.concatenate(blocks[::-1], axis=0).astype(np.float32))
 
-    ipts_bwd_rev, spikes_bwd_rev = _run_one_pass(
+    ipts_bwd_rev, spikes_bwd_rev, losses_bwd_rev = _run_one_pass(
         emg_seg=emg_bwd,
         emg_calib=emg_calib_ext,
-        whiten_mat=whiten_mat,
-        mu_filters=mu_filters,
-        base_centr=base_centr,
-        spikes_centr=spikes_centr,
-        fsamp=fsamp,
         ex_factor=1,
-        batch_ms=batch_ms,
-        adapt_wh=adapt_wh,
-        adapt_sv=adapt_sv,
+        **shared,
     )
 
     out_ipts   = np.split(ipts_bwd_rev,   split_pts, axis=0)
@@ -149,9 +174,29 @@ def _run_adapt_decomp_bidirectional(
     ipts_bwd   = np.concatenate(out_ipts[::-1],   axis=0)
     spikes_bwd = np.concatenate(out_spikes[::-1], axis=0)
 
+    losses: dict[str, Any] = {}
+    if compute_loss and losses_fwd:
+        n_bwd = losses_bwd_rev.get("wh_loss", np.array([])).shape[0]
+        bwd_idx = list(range(n_bwd - 1, -1, -1))
+        losses = {
+            "wh_loss": np.concatenate([
+                losses_bwd_rev["wh_loss"][bwd_idx],
+                losses_fwd["wh_loss"],
+            ]),
+            "sv_loss": np.concatenate([
+                losses_bwd_rev["sv_loss"][bwd_idx],
+                losses_fwd["sv_loss"],
+            ], axis=0),
+            "total_loss": np.concatenate([
+                losses_bwd_rev["total_loss"][bwd_idx],
+                losses_fwd["total_loss"],
+            ]),
+        }
+
     return (
         np.concatenate([ipts_bwd, ipts_fwd], axis=0),
         np.concatenate([spikes_bwd, spikes_fwd], axis=0),
+        losses,
     )
 
 
@@ -168,6 +213,13 @@ def adaptive_batch_process(
     batch_ms: int = 100,
     adapt_wh: bool = True,
     adapt_sv: bool = True,
+    adapt_sd: bool = True,
+    wh_learning_rate: float = 7e-3,
+    sv_learning_rate: float = 3e-3,
+    cov_alpha: float = 0.1,
+    spike_prev_weight: int = 5,
+    contrast_func: Literal["logcosh", "cube"] = "logcosh",
+    compute_loss: bool = False,
 ) -> tuple[np.ndarray, list[np.ndarray], dict[str, Any]]:
     """Apply adaptive post-processing across all decomposition windows and grids."""
     from muedit.signal.filters import demean
@@ -179,6 +231,7 @@ def adaptive_batch_process(
     pulse_t = np.zeros((total_mus, ltime), dtype=np.float64)
     distime: list[np.ndarray] = []
     mu_nb = 0
+    all_losses: dict[int, dict[str, Any]] = {}
 
     grid_data_demeaned = {i: demean(g) for i, g in grid_data.items()}
 
@@ -190,7 +243,7 @@ def adaptive_batch_process(
         grid_idx    = nwin // max(1, nwindows_per_grid)
         calib_start = coordinates[nwin * 2]
 
-        ipts_out, spikes_out = _run_adapt_decomp_bidirectional(
+        ipts_out, spikes_out, win_losses = _run_adapt_decomp_bidirectional(
             grid_data_g=grid_data_demeaned[grid_idx],
             win_data_g=demean(win_data[nwin]),
             whiten_mat=whiten_mats[nwin],
@@ -201,7 +254,17 @@ def adaptive_batch_process(
             adapt_wh=adapt_wh,
             adapt_sv=adapt_sv,
             calib_start=calib_start,
+            adapt_sd=adapt_sd,
+            wh_learning_rate=wh_learning_rate,
+            sv_learning_rate=sv_learning_rate,
+            cov_alpha=cov_alpha,
+            spike_prev_weight=spike_prev_weight,
+            contrast_func=contrast_func,
+            compute_loss=compute_loss,
         )
+
+        if compute_loss and win_losses:
+            all_losses[nwin] = win_losses
 
         for j in range(filters.shape[1]):
             pt = ipts_out[:, j] * np.abs(ipts_out[:, j])
@@ -209,4 +272,4 @@ def adaptive_batch_process(
             distime.append(np.where(spikes_out[:ltime, j] > 0)[0].astype(int))
             mu_nb += 1
 
-    return pulse_t, distime, {}
+    return pulse_t, distime, all_losses

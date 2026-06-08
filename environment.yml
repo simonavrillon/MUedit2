@@ -22,3 +22,5 @@ dependencies:
   - pip:
     # EMG / EEG file I/O
     - pyedflib==0.1.42
+    # Hyperparameter optimisation
+    - optuna==4.3.0
