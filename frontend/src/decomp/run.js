@@ -87,7 +87,7 @@ export async function runDecomposition(deps) {
     els,
     API_BASE,
     apiFetch,
-    getBidsRoot,
+    getBidsProject,
     getBidsMuscleNames,
     buildParams,
     updateStartAvailability,
@@ -133,12 +133,12 @@ export async function runDecomposition(deps) {
       formData.append("rois", JSON.stringify(state.rois));
     }
 
-    const bidsRoot =
-      typeof getBidsRoot === "function"
-        ? String(getBidsRoot() || "").trim()
+    const project =
+      typeof getBidsProject === "function"
+        ? String(getBidsProject() || "").trim()
         : "";
-    if (bidsRoot) {
-      formData.append("bids_root", bidsRoot);
+    if (project) {
+      formData.append("project", project);
     }
     const bidsEntities = {};
     const subject = String(els.bidsSubject?.value || "").trim();

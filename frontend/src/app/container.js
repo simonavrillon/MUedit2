@@ -2,7 +2,6 @@ import {
   API_BASE,
   COLORS,
   DECOMPOSITION_EXTENSIONS,
-  DEFAULT_BIDS_ROOT,
   RAW_SIGNAL_EXTENSIONS,
 } from "../config.js";
 import { els } from "./dom.js";
@@ -44,7 +43,7 @@ import { state } from "./state.js";
 import {
   ensureDiscardMasks as ensureDiscardMasksAction,
   setCurrentGrid,
-  setEditBidsRoot,
+  setEditProject,
   setEditMode,
   setMuscle as setMuscleAction,
   setShowBookmark,
@@ -128,13 +127,12 @@ function renderBidsMuscleFields() {
 
 async function persistNpzBySaveTarget(payload, fallbackName, fileSession, ui) {
   const entityLabel =
-    payload.entity_label ||
     buildEntityLabelFromSession(
       els.bidsSubject?.value,
       els.bidsTask?.value,
       els.bidsSession?.value,
       els.bidsRun?.value,
-    );
+    ) || payload.entity_label;
   const data = await apiJson(
     `${API_BASE}/edit/save`,
     {
@@ -144,7 +142,7 @@ async function persistNpzBySaveTarget(payload, fallbackName, fileSession, ui) {
         ...payload,
         file_label: payload.file_label || fallbackName || "decomposition.npz",
         entity_label: entityLabel,
-        bids_root: fileSession.getBidsRoot(),
+        project: fileSession.getBidsProject(),
       }),
     },
     120000,
@@ -281,7 +279,6 @@ editStage = createEditStageService({
   persistNpzBySaveTarget: (payload, fallbackName) =>
     persistNpzBySaveTarget(payload, fallbackName, fileSession, ui),
   getBidsMuscleNames: fileSession.getBidsMuscleNames,
-  getBidsRoot: fileSession.getBidsRoot,
   buildEntityLabelFromSession,
   applySessionInfoFromDecomposition,
   showWorkspace: ui.showWorkspace,
@@ -290,7 +287,6 @@ editStage = createEditStageService({
   setEditStatus: ui.setEditStatus,
   setEditMode: setEditModeWithStatus,
   refreshEditModeButtons,
-  inferBidsRootFromSelectedPath: fileSession.inferBidsRootFromSelectedPath,
   renderBidsMuscleFields,
 });
 
@@ -305,7 +301,7 @@ runStage = createRunStageService({
   getSuggestedNpzName,
   persistNpzBySaveTarget: (payload, fallbackName) =>
     persistNpzBySaveTarget(payload, fallbackName, fileSession, ui),
-  getBidsRoot: fileSession.getBidsRoot,
+  getBidsProject: fileSession.getBidsProject,
   getBidsMuscleNames: fileSession.getBidsMuscleNames,
   buildParams: () => buildParams(ui.isToggleOn),
   updateStartAvailability,
@@ -364,19 +360,18 @@ const importStage = createImportStageService({
   setUploadLoading: fileSession.setUploadLoading,
   showUnsupportedUploadFormatError: fileSession.showUnsupportedUploadFormatError,
   detectLandingFileType: fileSession.detectLandingFileType,
-  inferBidsRootFromSelectedPath: fileSession.inferBidsRootFromSelectedPath,
   handleRawFilePath: (...args) => qcStage.handleRawFilePath(...args),
   loadDecompositionForEditByPath: (...args) =>
     editStage.loadDecompositionForEditByPath(...args),
-  setEditBidsRootInput: (bidsRoot) => {
-    if (els.editBidsRoot) els.editBidsRoot.value = bidsRoot;
-    setEditBidsRoot(state, bidsRoot);
-  },
   setBidsEntitiesInput: (entities) => {
     if (els.bidsSubject && entities.subject) els.bidsSubject.value = entities.subject;
     if (els.bidsTask && entities.task) els.bidsTask.value = entities.task;
-    if (els.bidsSession) els.bidsSession.value = entities.session || "";
+    if (els.bidsSession && entities.session) els.bidsSession.value = entities.session;
     if (els.bidsRun && entities.run) els.bidsRun.value = entities.run;
+    if (els.bidsProject && entities.project) {
+      els.bidsProject.value = entities.project;
+      setEditProject(state, entities.project);
+    }
   },
 });
 
@@ -427,7 +422,6 @@ function wireEvents() {
   setupEditEvents({
     els,
     state,
-    DEFAULT_BIDS_ROOT,
     bindEditCanvas: () => editStage.bindEditCanvas(),
     bindEditDrCanvas: () => editStage.bindEditDrCanvas(),
     bindEditTimeline: () => editStage.bindEditTimeline(),

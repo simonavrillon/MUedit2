@@ -16,6 +16,7 @@ export function beginRawPreviewTransition(state, fileLike) {
   setUploadToken(state, null);
   setChannelTraces(state, []);
   setQcWindowLoading(state, {});
+  state.discardMasks = [];
 }
 
 export function rollbackRawPreviewTransition(state) {

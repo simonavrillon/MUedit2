@@ -158,16 +158,16 @@
                   />
                 </div>
                 <div class="form-row">
-                  <label for="editBidsRoot">BIDS root path</label>
+                  <label for="bidsProject">Project</label>
                   <input
                     type="text"
-                    id="editBidsRoot"
-                    placeholder="/path/to/bids_root"
+                    id="bidsProject"
+                    placeholder="e.g. study1 (leave empty for muedit_out)"
                   />
                 </div>
                 <div class="form-row">
                   <label for="bidsSubject">Subject</label>
-                  <input type="text" id="bidsSubject" value="01" />
+                  <input type="number" id="bidsSubject" value="1" min="1" />
                 </div>
                 <div class="form-row">
                   <label for="bidsTask">Task</label>
@@ -188,11 +188,11 @@
                 </div>
                 <div class="form-row">
                   <label for="bidsSession">Session</label>
-                  <input type="number" id="bidsSession" value="01" min="1" />
+                  <input type="number" id="bidsSession" value="1" min="1" />
                 </div>
                 <div class="form-row">
                   <label for="bidsRun">Run</label>
-                  <input type="number" id="bidsRun" value="01" min="1" />
+                  <input type="number" id="bidsRun" value="1" min="1" />
                 </div>
                 <div id="bidsMuscleContainer">
                   <div class="form-row">

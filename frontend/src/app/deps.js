@@ -34,7 +34,6 @@
  * @typedef {Object} EditSetupDeps
  * @property {Object} els
  * @property {Object} state
- * @property {string} DEFAULT_BIDS_ROOT
  * @property {Function} bindEditCanvas
  * @property {Function} bindEditDrCanvas
  * @property {Function} renderEditExplorer
@@ -86,13 +85,12 @@ export {};
 
 /**
  * @typedef {Object} FileSessionService
- * @property {Function} getBidsRoot
+ * @property {Function} getBidsProject
  * @property {Function} getBidsMuscleNames
  * @property {Function} clearUploadFormatError
  * @property {Function} showUnsupportedUploadFormatError
  * @property {Function} isSupportedSignalFile
  * @property {Function} detectLandingFileType
- * @property {Function} inferBidsRootFromSelectedPath
  * @property {Function} setUploadLoading
  */
 

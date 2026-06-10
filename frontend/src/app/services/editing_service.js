@@ -9,7 +9,7 @@ import {
   setEditArtifactTimes,
   setEditArtifactTimesForMu,
   setEditBackup,
-  setEditBidsRoot,
+  setEditProject,
   setEditBookmark,
   setShowBookmark,
   setEditCurrentMu,
@@ -168,7 +168,6 @@ export async function requestFilterUpdate(deps, mode) {
     API_BASE,
     apiJson,
     setEditStatus,
-    getBidsRoot,
     getRawPulse,
     backupEditMu,
     buildEntityLabelFromSession,
@@ -179,8 +178,6 @@ export async function requestFilterUpdate(deps, mode) {
     refreshEditTotals,
     renderEditExplorer,
   } = deps;
-
-  const bidsRoot = state.edit.bidsRoot || getBidsRoot();
   if (!state.edit.distimes?.length) return;
   const muIdx = state.edit.currentMu ?? 0;
   const pulse = getRawPulse(muIdx);
@@ -204,7 +201,7 @@ export async function requestFilterUpdate(deps, mode) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          bids_root: bidsRoot,
+          project: state.edit.project || "",
           edit_signal_token: state.edit.editSignalToken || "",
           file_label: state.edit.filename,
           grid_index: gridIndex,
@@ -485,6 +482,7 @@ export async function saveEditedFile(deps) {
       state.edit.filename || "decomposition",
       "_edited",
     ),
+    edit_signal_token: state.edit.editSignalToken || "",
   };
   try {
     setEditStatus("Saving edited file...", "muted");
@@ -583,11 +581,9 @@ export async function loadDecompositionForEdit(deps, file, filepath = null) {
     setGridNames(state, resolvedGridNames);
     setEditGridNames(state, resolvedGridNames);
     applySessionInfoFromDecomposition(file, data);
-    const loadedBidsRoot = String(data?.bids_root || "").trim();
-    if (loadedBidsRoot) {
-      if (els.editBidsRoot) els.editBidsRoot.value = loadedBidsRoot;
-      setEditBidsRoot(state, loadedBidsRoot);
-    }
+    const loadedProject = String(data?.project || "").trim();
+    if (els.bidsProject) els.bidsProject.value = loadedProject;
+    setEditProject(state, loadedProject);
     setEditSignalToken(state, data.edit_signal_token || "");
     setEditFile(state, file);
     setEditFilename(state, file.name || data.file_label || "decomposition");

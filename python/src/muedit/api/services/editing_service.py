@@ -23,12 +23,15 @@ from muedit.api.common import (
     safe_unlink,
     save_upload_to_temp,
 )
+from muedit.api.config import resolve_bids_root
 from muedit.api.services.bids_helpers import (
     _infer_bids_root_from_decomp_path,
     _load_bids_grid,
+    _parse_all_bids_entities,
     _parse_subject_session_from_entity_label,
     _read_bids_channels_sidecar,
 )
+from muedit.io.bids import export_bids_emg
 from muedit.api.services.edit_helpers import (
     _expected_grid_count,
     _generate_mu_uids,
@@ -119,9 +122,14 @@ def load_decomposition_from_path(filepath: str) -> dict[str, Any]:
     file_label = Path(filepath).name
     loaded = _init_loaded_decomp(filepath, file_label)
 
+    from muedit.api.config import DATA_ROOT
     bids_root = _infer_bids_root_from_decomp_path(filepath)
     if bids_root is not None:
-        loaded["bids_root"] = str(bids_root)
+        try:
+            rel = bids_root.relative_to(DATA_ROOT)
+            loaded["project"] = rel.parts[0] if rel.parts else ""
+        except ValueError:
+            loaded["project"] = ""
         try:
             entity_label = parse_entity_label(file_label)
             subject, session = _parse_subject_session_from_entity_label(entity_label)
@@ -189,6 +197,48 @@ def _dedup(
         fsamp,
     )
 
+
+
+def _export_bids_from_mat_context(
+    bids_root: Path,
+    entity_label: str,
+    edit_signal_token: str | None,
+    file_label: str | None,
+    fsamp: float | None,
+    grid_names: list[str],
+    muscle_names: list[str],
+    parameters: dict[str, Any],
+) -> dict[str, str] | None:
+    """Best-effort BIDS EMG export using the raw signal cached from a .mat load."""
+    ctx = _get_edit_signal_context(edit_signal_token) or _get_edit_signal_context_by_label(file_label)
+    if ctx is None:
+        return None  # non-MAT source or context expired
+
+    entities = _parse_all_bids_entities(entity_label)
+    try:
+        aux_data = ctx.get("aux_data")
+        aux_names = ctx.get("aux_names") or None
+        paths = export_bids_emg(
+            data=ctx["data"],
+            fsamp=float(fsamp or ctx["fsamp"]),
+            grid_names=ctx["grid_names"] or grid_names,
+            coordinates=ctx.get("coordinates") or [],
+            discard_channels=ctx["emgmask"],
+            bids_root=bids_root,
+            ied=ctx.get("ied"),
+            subject=entities["sub"] or "01",
+            task=entities["task"] or "task",
+            run=entities["run"],
+            session=entities["ses"],
+            acquisition=entities["acq"],
+            recording=entities["recording"],
+            target_muscle=muscle_names if len(muscle_names) > 1 else (muscle_names[0] if muscle_names else None),
+            aux_data=aux_data if isinstance(aux_data, np.ndarray) and aux_data.size > 0 else None,
+            aux_names=aux_names if aux_names else None,
+        )
+        return {k: str(v) for k, v in paths.items()}
+    except Exception:  # noqa: BLE001
+        return None  # never block the primary save on BIDS export error
 
 
 def save_edits(payload: dict[str, Any]) -> dict[str, Any]:
@@ -276,13 +326,11 @@ def save_edits(payload: dict[str, Any]) -> dict[str, Any]:
         mu_uids = [mu_uids[i] for i in kept_idx]
         artifact_times_all = [artifact_times_all[i] for i in kept_idx if i < len(artifact_times_all)]
 
-    bids_root = payload.get("bids_root")
-    if not bids_root:
-        raise HTTPException(status_code=400, detail="bids_root is required for edit save")
+    bids_root = resolve_bids_root(payload.get("project"))
     file_label = payload.get("file_label") or ""
     entity_label = payload.get("entity_label") or parse_entity_label(file_label)
     subject, session = _parse_subject_session_from_entity_label(entity_label)
-    base_dir = Path(bids_root) / f"sub-{subject}"
+    base_dir = bids_root / f"sub-{subject}"
     if session:
         base_dir = base_dir / f"ses-{session}"
     decomp_dir = base_dir / "decomp"
@@ -300,16 +348,27 @@ def save_edits(payload: dict[str, Any]) -> dict[str, Any]:
         total_samples=total_samples,
     )
     _save_editlog(out_path.with_suffix(".json"), mu_uids, edit_history, artifact_times_all or None)
-    return make_json_safe({"saved": True, "path": str(out_path)})
+    bids_paths = _export_bids_from_mat_context(
+        bids_root=bids_root,  # already a Path
+        entity_label=entity_label,
+        edit_signal_token=payload.get("edit_signal_token"),
+        file_label=file_label,
+        fsamp=fsamp,
+        grid_names=grid_names,
+        muscle_names=muscle_names,
+        parameters=parameters,
+    )
+    result: dict[str, Any] = {"saved": True, "path": str(out_path)}
+    if bids_paths:
+        result["bids_emg_paths"] = bids_paths
+    return make_json_safe(result)
 
 
 def update_filter(payload: dict[str, Any]) -> dict[str, Any]:
-    bids_root = payload.get("bids_root")
+    bids_root = str(resolve_bids_root(payload.get("project")))
     edit_signal_token = payload.get("edit_signal_token")
     file_label = payload.get("file_label") or ""
-    entity_label = payload.get("entity_label")
-    if not entity_label and bids_root:
-        entity_label = parse_entity_label(file_label)
+    entity_label = payload.get("entity_label") or parse_entity_label(file_label)
     grid_index = as_int(payload.get("grid_index"), "grid_index", default=0)
     distimes = normalize_distimes(payload.get("distimes") or [])
     if not distimes:

@@ -1,11 +1,8 @@
-import { DEFAULT_BIDS_ROOT } from "../../config.js";
-
 export function createFileSessionService(deps) {
   const { els } = deps;
 
-  function getBidsRoot() {
-    const fromInput = (els.editBidsRoot?.value || "").trim();
-    return fromInput || DEFAULT_BIDS_ROOT;
+  function getBidsProject() {
+    return (els.bidsProject?.value || "").trim();
   }
 
   function getBidsMuscleNames() {
@@ -47,42 +44,18 @@ export function createFileSessionService(deps) {
     return "unsupported";
   }
 
-  function inferBidsRootFromSelectedPath(filePath) {
-    const rawPath = String(filePath || "");
-    const normalized = rawPath.replace(/\\/g, "/");
-    const parts = normalized.split("/");
-    const subIndex = parts.findIndex((p) => /^sub-[^/]+$/i.test(p));
-
-    if (subIndex > 0) {
-      const root = parts.slice(0, subIndex).join("/");
-      if (root) return root;
-    }
-
-    const marker = "/muedit_out";
-    const markerIndex = normalized.toLowerCase().lastIndexOf(marker);
-    if (markerIndex >= 0) {
-      return normalized.slice(0, markerIndex + marker.length);
-    }
-
-    const lastSep = Math.max(rawPath.lastIndexOf("/"), rawPath.lastIndexOf("\\"));
-    const dir = lastSep >= 0 ? rawPath.substring(0, lastSep) : ".";
-    const sep = rawPath.includes("/") ? "/" : "\\";
-    return dir + sep + "muedit_out";
-  }
-
   function setUploadLoading(active) {
     if (!els.uploadLoader) return;
     els.uploadLoader.classList.toggle("hidden", !active);
   }
 
   return {
-    getBidsRoot,
+    getBidsProject,
     getBidsMuscleNames,
     clearUploadFormatError,
     showUnsupportedUploadFormatError,
     isSupportedSignalFile,
     detectLandingFileType,
-    inferBidsRootFromSelectedPath,
     setUploadLoading,
   };
 }

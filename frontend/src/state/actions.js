@@ -8,7 +8,14 @@ export function ensureDiscardMasks(state) {
     !state.discardMasks ||
     state.discardMasks.length !== state.channelMeans.length
   ) {
-    state.discardMasks = state.channelMeans.map((cm) => cm.map(() => 0));
+    const badPerGrid = state.metadata?.bad_channels_per_grid;
+    state.discardMasks = state.channelMeans.map((cm, gridIdx) => {
+      const bad = badPerGrid?.[gridIdx];
+      if (Array.isArray(bad) && bad.length === cm.length) {
+        return bad.map((v) => (v === 1 ? 1 : 0));
+      }
+      return cm.map(() => 0);
+    });
   }
 }
 
@@ -40,8 +47,8 @@ export function setRunCurrentMu(state, idx, { resetView = true } = {}) {
   if (resetView) state.runView = null;
 }
 
-export function setEditBidsRoot(state, value) {
-  state.edit.bidsRoot = String(value || "").trim();
+export function setEditProject(state, value) {
+  state.edit.project = String(value || "").trim();
 }
 
 export function setEditSignalToken(state, value) {
@@ -334,7 +341,7 @@ export function resetEditSlice(state) {
     parameters: null,
     flagged: [],
     backup: null,
-    bidsRoot: "",
+    project: "",
     editSignalToken: "",
     muUids: [],
     editHistory: [],

@@ -25,6 +25,18 @@ def _load_bids_grid(
     return emg.copy(), float(fsamp), np.asarray(emg_mask, dtype=int).copy()
 
 
+def _parse_all_bids_entities(entity_label: str) -> dict[str, str | None]:
+    """Extract all BIDS key-value pairs from an entity label string."""
+    keys = ("sub", "ses", "task", "acq", "run", "recording")
+    result: dict[str, str | None] = {k: None for k in keys}
+    for part in str(entity_label).split("_"):
+        for k in keys:
+            prefix = f"{k}-"
+            if part.startswith(prefix) and len(part) > len(prefix):
+                result[k] = part[len(prefix):]
+    return result
+
+
 def _parse_subject_session_from_entity_label(entity_label: str) -> tuple[str, str | None]:
     subject = "01"
     session: str | None = None

@@ -8,6 +8,7 @@ from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import Response, StreamingResponse
 
 from muedit.api.common import parse_discard_channels, safe_unlink
+from muedit.api.config import resolve_bids_root
 from muedit.api.contracts import success_payload
 from muedit.api.services.decompose_service import (
     decomposition_event_stream,
@@ -65,7 +66,7 @@ async def decompose_stream(
     rois: str | None = Form(None),
     discard_channels: str | None = Form(None),
     bids_export: bool | None = Form(None),
-    bids_root: str | None = Form(None),
+    project: str | None = Form(None),
     bids_entities: str | None = Form(None),
     bids_metadata: str | None = Form(None),
     full_preview: bool = Form(False),
@@ -94,7 +95,7 @@ async def decompose_stream(
         roi=roi,
         rois=roi_list,
         discard_channels=discard_override,
-        bids_root=bids_root if bids_export else None,
+        bids_root=str(resolve_bids_root(project)) if bids_export else None,
         bids_entities=bids_entities_obj,
         bids_metadata=bids_metadata_obj,
         file_label=file_label,

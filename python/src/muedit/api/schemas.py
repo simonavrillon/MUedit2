@@ -43,17 +43,18 @@ class EditSavePayload(BaseModel):
     parameters: dict[str, Any] | None = None
     muscle_names: list[str] | str | None = None
     muscle: list[str] | str | None = None
-    bids_root: str | None = None
+    project: str | None = None
     file_label: str | None = None
     entity_label: str | None = None
     edit_history: list[dict[str, Any]] | None = None
     artifact_times: list[list[int]] | None = None
+    edit_signal_token: str | None = None
 
 
 class EditFilterPayload(BaseModel):
     """Typed request body for update-filter endpoint."""
 
-    bids_root: str | None = None
+    project: str | None = None
     edit_signal_token: str | None = None
     file_label: str | None = None
     entity_label: str | None = None

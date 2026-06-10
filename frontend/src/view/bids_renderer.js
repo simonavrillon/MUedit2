@@ -64,11 +64,21 @@ export function applySessionInfoToDom(els, payload) {
   if (els.fsamp && payload.fsampText) {
     els.fsamp.value = payload.fsampText;
   }
+
+  // Reset to HTML defaults before applying parsed values so stale values
+  // from a previously loaded file don't bleed into the new one.
+  if (els.bidsSubject) els.bidsSubject.value = "1";
+  if (els.bidsTask) els.bidsTask.value = "trapezoid";
+  if (els.bidsSession) els.bidsSession.value = "1";
+  if (els.bidsRun) els.bidsRun.value = "1";
+  if (els.bidsProject) els.bidsProject.value = "";
+
   if (els.bidsSubject && payload.entities?.subject)
     els.bidsSubject.value = payload.entities.subject;
   if (els.bidsTask && payload.entities?.task)
     els.bidsTask.value = payload.entities.task;
-  if (els.bidsSession) els.bidsSession.value = payload.entities?.session || "";
+  if (els.bidsSession && payload.entities?.session)
+    els.bidsSession.value = payload.entities.session;
   if (els.bidsRun && payload.entities?.run)
     els.bidsRun.value = payload.entities.run;
 }

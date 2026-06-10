@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 
+from muedit.api.config import DATA_ROOT
 from muedit.api.contracts import success_payload
 from muedit.api.schemas import (
     EditDeduplicatePayload,
@@ -34,6 +35,12 @@ from muedit.api.services.editing_service import (
 )
 
 router = APIRouter(prefix="/api/v1")
+
+
+@router.get("/config")
+async def get_config() -> dict[str, Any]:
+    """Return server-side configuration needed by the frontend."""
+    return success_payload({"data_root": str(DATA_ROOT)})
 
 
 @router.post("/edit/load", response_model=None)

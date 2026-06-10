@@ -127,6 +127,10 @@ export function createQcStageService(deps) {
   async function handleRawFilePath(path, name, options = {}) {
     const syntheticFile = { name };
     beginRawPreviewTransition(state, syntheticFile);
+    if (els.bidsSubject) els.bidsSubject.value = "1";
+    if (els.bidsSession) els.bidsSession.value = "1";
+    if (els.bidsRun) els.bidsRun.value = "1";
+    if (els.bidsTask) els.bidsTask.value = "trapezoid";
     if (els.fileName) {
       els.fileName.textContent = name;
       els.fileName.classList.remove("loading");

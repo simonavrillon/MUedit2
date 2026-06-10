@@ -615,6 +615,39 @@ def _parse_emgmask_cells(raw: Any) -> list[np.ndarray]:
     return masks
 
 
+def _parse_signal_coordinates(raw: Any) -> list[np.ndarray]:
+    """Parse signal.coordinates into a list of (n_channels, 2) float arrays, one per grid."""
+    if raw is None:
+        return []
+    arr = np.asarray(raw)
+    if arr.dtype == object:
+        result = []
+        for c in arr.flatten():
+            c_arr = np.asarray(c, dtype=float)
+            if c_arr.ndim == 2 and c_arr.shape[0] == 2 and c_arr.shape[1] > 2:
+                c_arr = c_arr.T  # (2, n_chan) → (n_chan, 2)
+            if c_arr.ndim == 2:
+                result.append(c_arr)
+        return result
+    if arr.ndim == 3:
+        result = []
+        for i in range(arr.shape[0]):
+            c = arr[i].astype(float)
+            if c.shape[0] == 2 and c.shape[1] > 2:
+                c = c.T  # (2, n_chan) → (n_chan, 2)
+            result.append(c)
+        return result
+    return []
+
+
+def _parse_signal_ied(raw: Any) -> list[float] | None:
+    """Parse signal.IED into a flat list of per-grid mm values."""
+    if raw is None:
+        return None
+    arr = np.asarray(raw, dtype=float).flatten()
+    return arr.tolist() if arr.size else None
+
+
 def load_decomposition_signal_context(filepath: str) -> dict[str, Any] | None:
     """Best-effort extraction of raw EMG context embedded in decomposition files."""
     ext = Path(filepath).suffix.lower()
@@ -672,9 +705,36 @@ def load_decomposition_signal_context(filepath: str) -> dict[str, Any] | None:
     )
     emgmask = _parse_emgmask_cells(emgmask_raw)
 
+    coordinates_raw = _get_case_insensitive(signal, "coordinates")
+    coordinates = _parse_signal_coordinates(coordinates_raw)
+
+    ied_raw = first_non_none(
+        _get_case_insensitive(signal, "IED", "ied"),
+        top.get("IED"),
+        top.get("ied"),
+    )
+    ied = _parse_signal_ied(ied_raw)
+
+    aux_raw = _get_case_insensitive(signal, "auxiliary")
+    aux_data: np.ndarray | None = None
+    if isinstance(aux_raw, np.ndarray) and aux_raw.size > 0:
+        aux_arr = np.asarray(aux_raw, dtype=float)
+        if aux_arr.ndim == 1:
+            aux_arr = aux_arr.reshape(1, -1)
+        if aux_arr.ndim == 2:
+            if aux_arr.shape[0] > aux_arr.shape[1]:
+                aux_arr = aux_arr.T
+            aux_data = aux_arr
+
+    aux_names = _parse_text_list(_get_case_insensitive(signal, "auxiliaryname"))
+
     return {
         "data": data_arr,
         "fsamp": fsamp,
         "grid_names": grid_names,
         "emgmask": emgmask,
+        "coordinates": coordinates,
+        "ied": ied,
+        "aux_data": aux_data,
+        "aux_names": aux_names,
     }

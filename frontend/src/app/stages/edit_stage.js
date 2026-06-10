@@ -36,7 +36,7 @@ import {
 } from "../services/editing_service.js";
 import {
   appendEditHistoryEntry,
-  setEditBidsRoot,
+  setEditProject,
   setEditCurrentMu,
   setEditCurrentMuGrid,
   setEditBookmark,
@@ -57,7 +57,6 @@ export function createEditStageService(deps) {
     getSuggestedNpzName,
     persistNpzBySaveTarget,
     getBidsMuscleNames,
-    getBidsRoot,
     buildEntityLabelFromSession,
     applySessionInfoFromDecomposition,
     showWorkspace,
@@ -66,7 +65,6 @@ export function createEditStageService(deps) {
     setEditStatus,
     setEditMode,
     refreshEditModeButtons,
-    inferBidsRootFromSelectedPath,
     renderBidsMuscleFields,
   } = deps;
 
@@ -229,7 +227,6 @@ export function createEditStageService(deps) {
         API_BASE,
         apiJson,
         setEditStatus,
-        getBidsRoot,
         getRawPulse,
         backupEditMu,
         buildEntityLabelFromSession,
@@ -450,9 +447,6 @@ export function createEditStageService(deps) {
 
   function loadDecompositionForEditByPath(path) {
     const name = path.split("/").pop().split("\\").pop() || path;
-    const bidsRoot = inferBidsRootFromSelectedPath(path);
-    if (els.editBidsRoot) els.editBidsRoot.value = bidsRoot;
-    setEditBidsRoot(state, bidsRoot);
     return loadDecompositionForEdit({ name }, path);
   }
 
@@ -507,7 +501,6 @@ export function setupEditEvents(deps) {
   const {
     els,
     state,
-    DEFAULT_BIDS_ROOT,
     bindEditCanvas,
     bindEditDrCanvas,
     bindEditTimeline,
@@ -529,11 +522,6 @@ export function setupEditEvents(deps) {
   bindEditCanvas();
   bindEditDrCanvas();
   bindEditTimeline();
-
-  if (els.editBidsRoot && !els.editBidsRoot.value.trim()) {
-    els.editBidsRoot.value = DEFAULT_BIDS_ROOT;
-    setEditBidsRoot(state, DEFAULT_BIDS_ROOT);
-  }
 
   els.editMuGridSelect?.addEventListener("change", (e) => {
     const idx = Number(e.target.value) || 0;
@@ -615,8 +603,8 @@ export function setupEditEvents(deps) {
     setEditMode("delete_spikes", "Drag a box on pulse train to delete spikes");
   });
 
-  els.editBidsRoot?.addEventListener("input", (e) => {
-    setEditBidsRoot(state, e.target.value);
+  els.bidsProject?.addEventListener("input", (e) => {
+    setEditProject(state, e.target.value);
   });
 
   refreshEditModeButtons();

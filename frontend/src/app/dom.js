@@ -48,7 +48,7 @@ export const els = {
   bidsMuscleContainer: document.getElementById("bidsMuscleContainer"),
   editStatus: document.getElementById("editStatus"),
   fsamp: document.getElementById("fsamp"),
-  editBidsRoot: document.getElementById("editBidsRoot"),
+  bidsProject: document.getElementById("bidsProject"),
   editMuGridSelect: document.getElementById("editMuGridSelect"),
   editMuSelect: document.getElementById("editMuSelect"),
   editSaveBtn: document.getElementById("editSaveBtn"),

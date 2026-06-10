@@ -1,5 +1,14 @@
 import { parseBidsEntitiesFromLabel } from "../../io/bids.js";
 
+function inferProjectFromPath(fullPath) {
+  const parts = fullPath.replace(/\\/g, "/").split("/");
+  const dataIdx = parts.lastIndexOf("data");
+  if (dataIdx < 0 || dataIdx >= parts.length - 2) return "";
+  const candidate = parts[dataIdx + 1];
+  if (!candidate || candidate.startsWith("sub-")) return "";
+  return candidate;
+}
+
 export function createImportStageService(deps) {
   const {
     apiJson,
@@ -9,10 +18,8 @@ export function createImportStageService(deps) {
     setUploadLoading,
     showUnsupportedUploadFormatError,
     detectLandingFileType,
-    inferBidsRootFromSelectedPath,
     handleRawFilePath,
     loadDecompositionForEditByPath,
-    setEditBidsRootInput,
     setBidsEntitiesInput,
   } = deps;
 
@@ -32,9 +39,6 @@ export function createImportStageService(deps) {
     if (!result.path) return;
 
     const { path, name } = result;
-    const bidsRoot = inferBidsRootFromSelectedPath(path);
-    setEditBidsRootInput(bidsRoot);
-
     const kind = detectLandingFileType({ name });
 
     if (kind === "unsupported") {
@@ -46,7 +50,10 @@ export function createImportStageService(deps) {
       const lname = name.toLowerCase();
       if (lname.endsWith(".bdf") || lname.endsWith(".edf")) {
         const entityLabel = name.replace(/_emg\.[^.]+$/i, "").replace(/\.[^.]+$/, "");
-        setBidsEntitiesInput(parseBidsEntitiesFromLabel(entityLabel));
+        setBidsEntitiesInput({
+          ...parseBidsEntitiesFromLabel(entityLabel),
+          project: inferProjectFromPath(path),
+        });
       }
     } else if (kind === "decomposition") {
       await loadDecompositionForEditByPath(path);

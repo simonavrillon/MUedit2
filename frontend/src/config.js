@@ -7,7 +7,6 @@ export const API_BASE =
     ? `${window.location.protocol}//${window.location.hostname}:8000/api/v1`
     : `${window.location.origin}/api/v1`);
 
-export const DEFAULT_BIDS_ROOT = window.MUEDIT_BIDS_ROOT || "../data/bids_out";
 
 export const COLORS = {
   primary: "#ffffff",
