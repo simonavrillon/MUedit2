@@ -16,22 +16,28 @@ from muedit.api.cache import (
 )
 from muedit.api.common import (
     _pack_json_f32_payload,
-    as_float,
-    as_int,
     make_json_safe,
     parse_entity_label,
     safe_unlink,
     save_upload_to_temp,
 )
-from muedit.api.config import resolve_bids_root
+from muedit.api.config import DATA_ROOT, resolve_bids_root
+from muedit.api.schemas import (
+    EditDeduplicatePayload,
+    EditFilterPayload,
+    EditFlagPayload,
+    EditOutliersPayload,
+    EditRoiPayload,
+    EditSavePayload,
+)
 from muedit.api.services.bids_helpers import (
     _infer_bids_root_from_decomp_path,
     _load_bids_grid,
     _parse_all_bids_entities,
     _parse_subject_session_from_entity_label,
     _read_bids_channels_sidecar,
+    read_bids_sidecar_meta,
 )
-from muedit.io.bids import export_bids_emg
 from muedit.api.services.edit_helpers import (
     _expected_grid_count,
     _generate_mu_uids,
@@ -56,6 +62,11 @@ from muedit.editing.operations import (
     delete_spikes_in_roi,
     remove_discharge_rate_outliers,
     update_motor_unit_filter_window,
+)
+from muedit.io.bids import (
+    export_bids_emg,
+    export_bids_mu_derivatives,
+    write_bids_dataset_description,
 )
 from muedit.signal.grid import format_hdemg_signal
 
@@ -122,7 +133,6 @@ def load_decomposition_from_path(filepath: str) -> dict[str, Any]:
     file_label = Path(filepath).name
     loaded = _init_loaded_decomp(filepath, file_label)
 
-    from muedit.api.config import DATA_ROOT
     bids_root = _infer_bids_root_from_decomp_path(filepath)
     if bids_root is not None:
         try:
@@ -137,7 +147,9 @@ def load_decomposition_from_path(filepath: str) -> dict[str, Any]:
             if session:
                 emg_dir = emg_dir / f"ses-{session}"
             emg_dir = emg_dir / "emg"
-            channels_path = emg_dir / f"{entity_label}_emg_channels.tsv"
+            channels_path = emg_dir / f"{entity_label}_channels.tsv"
+            if not channels_path.exists():
+                channels_path = emg_dir / f"{entity_label}_emg_channels.tsv"  # backward compat
             if channels_path.exists():
                 grid_names, muscles, fsamp = _read_bids_channels_sidecar(channels_path)
                 expected_count = _expected_grid_count(loaded)
@@ -149,6 +161,10 @@ def load_decomposition_from_path(filepath: str) -> dict[str, Any]:
                     loaded["muscle"] = muscles
                 if fsamp and fsamp > 0:
                     loaded["fsamp"] = fsamp
+
+            # Enrich with participant + hardware metadata from BIDS sidecars.
+            loaded.update(read_bids_sidecar_meta(bids_root, entity_label))
+
         except (ValueError, OSError, csv.Error, KeyError):
             pass  # best-effort; I/O and parse errors are non-fatal
 
@@ -198,7 +214,6 @@ def _dedup(
     )
 
 
-
 def _export_bids_from_mat_context(
     bids_root: Path,
     entity_label: str,
@@ -208,6 +223,13 @@ def _export_bids_from_mat_context(
     grid_names: list[str],
     muscle_names: list[str],
     parameters: dict[str, Any],
+    powerline_freq: float | None = None,
+    manufacturer: str | None = None,
+    manufacturers_model_name: str | None = None,
+    placement_scheme: str | None = None,
+    placement_scheme_description: str | None = None,
+    task_description: str | None = None,
+    software_versions: str | None = None,
 ) -> dict[str, str] | None:
     """Best-effort BIDS EMG export using the raw signal cached from a .mat load."""
     ctx = _get_edit_signal_context(edit_signal_token) or _get_edit_signal_context_by_label(file_label)
@@ -235,31 +257,43 @@ def _export_bids_from_mat_context(
             target_muscle=muscle_names if len(muscle_names) > 1 else (muscle_names[0] if muscle_names else None),
             aux_data=aux_data if isinstance(aux_data, np.ndarray) and aux_data.size > 0 else None,
             aux_names=aux_names if aux_names else None,
+            # User-editable fields take priority; fall back to loader ctx, then hardcoded default
+            manufacturer=manufacturer or ctx.get("manufacturer"),
+            manufacturers_model_name=manufacturers_model_name or ctx.get("device_name"),
+            powerline_freq=powerline_freq or ctx.get("powerline_freq") or 50.0,
+            placement_scheme=placement_scheme,
+            placement_scheme_description=placement_scheme_description,
+            task_description=task_description,
+            software_versions=software_versions,
+            # Loader-only fields — taken directly from ctx
+            units=ctx.get("units") or "uV",
+            hardware_filters=ctx.get("hardware_filters"),
+            gain=ctx.get("gains"),
+            low_cutoff=ctx.get("emg_hpf"),
+            high_cutoff=ctx.get("emg_lpf"),
+            recording_type=ctx.get("recording_type") or "continuous",
+            software_filters=ctx.get("software_filters"),
         )
         return {k: str(v) for k, v in paths.items()}
     except Exception:  # noqa: BLE001
         return None  # never block the primary save on BIDS export error
 
 
-def save_edits(payload: dict[str, Any]) -> dict[str, Any]:
-    distimes_raw = payload.get("distimes") or payload.get("discharge_times") or []
-    distimes = normalize_distimes(distimes_raw)
-    pulse_trains_raw = payload.get("pulse_trains")
-    total_samples = as_int(payload.get("total_samples"), "total_samples", default=0)
+def save_edits(payload: EditSavePayload) -> dict[str, Any]:
+    distimes = normalize_distimes(payload.distimes or payload.discharge_times or [])
+    pulse_trains_raw = payload.pulse_trains
+    total_samples = payload.total_samples
     if total_samples <= 0:
         raise HTTPException(
             status_code=400, detail="total_samples is required to save edits"
         )
 
-    fsamp_raw = payload.get("fsamp")
-    fsamp = float(fsamp_raw) if fsamp_raw is not None else None
-    mu_grid_index = _normalize_mu_grid_index(payload.get("mu_grid_index"), len(distimes))
+    fsamp = payload.fsamp
+    mu_grid_index = _normalize_mu_grid_index(payload.mu_grid_index, len(distimes))
     expected_grid_count = (max(mu_grid_index) + 1) if mu_grid_index else 1
-    grid_names = _pad_grid_names(
-        payload.get("grid_names") or [], expected_grid_count, []
-    )
-    parameters = payload.get("parameters") or {}
-    muscle_names = _normalize_muscle_names(payload)
+    grid_names = _pad_grid_names(payload.grid_names or [], expected_grid_count, [])
+    parameters = payload.parameters or {}
+    muscle_names = _normalize_muscle_names(payload.muscle_names or payload.muscle)
 
     if isinstance(parameters, dict) and muscle_names and not parameters.get("target_muscle"):
         parameters["target_muscle"] = (
@@ -281,25 +315,26 @@ def save_edits(payload: dict[str, Any]) -> dict[str, Any]:
     ):
         pulse_trains = build_pulse_trains_from_distimes(distimes, total_samples)
 
-    mu_uids_raw = payload.get("mu_uids")
+    mu_uids_raw = payload.mu_uids
     mu_uids: list[str] = (
         list(mu_uids_raw)
         if isinstance(mu_uids_raw, (list, tuple)) and len(mu_uids_raw) == len(distimes)
         else _generate_mu_uids(mu_grid_index)
     )
-    edit_history: list[dict[str, Any]] = list(payload.get("edit_history") or [])
-    artifact_times_raw = payload.get("artifact_times") or []
+    edit_history: list[dict[str, Any]] = list(payload.edit_history or [])
+    artifact_times_raw = payload.artifact_times or []
     artifact_times_all: list[list[int]] = [
         [int(x) for x in row if isinstance(x, (int, float))]
         for row in artifact_times_raw
         if isinstance(row, (list, tuple))
     ]
 
-    remove_flagged = bool(payload.get("remove_flagged", True))
-    remove_duplicates = bool(payload.get("remove_duplicates", True))
+    # Schema declares these as bool | None; default to True when unspecified.
+    remove_flagged = True if payload.remove_flagged is None else payload.remove_flagged
+    remove_duplicates = True if payload.remove_duplicates is None else payload.remove_duplicates
 
     if remove_flagged and distimes:
-        flagged = _normalize_flagged(payload.get("flagged"), len(distimes))
+        flagged = _normalize_flagged(payload.flagged, len(distimes))
         keep_idx = [
             i
             for i, spikes in enumerate(distimes)
@@ -326,14 +361,14 @@ def save_edits(payload: dict[str, Any]) -> dict[str, Any]:
         mu_uids = [mu_uids[i] for i in kept_idx]
         artifact_times_all = [artifact_times_all[i] for i in kept_idx if i < len(artifact_times_all)]
 
-    bids_root = resolve_bids_root(payload.get("project"))
-    file_label = payload.get("file_label") or ""
-    entity_label = payload.get("entity_label") or parse_entity_label(file_label)
+    bids_root = resolve_bids_root(payload.project)
+    file_label = payload.file_label or ""
+    entity_label = payload.entity_label or parse_entity_label(file_label)
     subject, session = _parse_subject_session_from_entity_label(entity_label)
-    base_dir = bids_root / f"sub-{subject}"
+    decomp_dir = bids_root / "derivatives" / "muedit" / f"sub-{subject}"
     if session:
-        base_dir = base_dir / f"ses-{session}"
-    decomp_dir = base_dir / "decomp"
+        decomp_dir = decomp_dir / f"ses-{session}"
+    decomp_dir = decomp_dir / "decomp"
     decomp_dir.mkdir(parents=True, exist_ok=True)
     out_path = decomp_dir / f"{entity_label}_edited.npz"
     _save_npz_with_app_schema(
@@ -348,50 +383,86 @@ def save_edits(payload: dict[str, Any]) -> dict[str, Any]:
         total_samples=total_samples,
     )
     _save_editlog(out_path.with_suffix(".json"), mu_uids, edit_history, artifact_times_all or None)
+
+    participant_meta = payload.participant_meta or {}
+    try:
+        write_bids_dataset_description(
+            bids_root,
+            subject=subject,
+            age=int(participant_meta["age"]) if participant_meta.get("age") not in (None, "", "n/a") else None,
+            sex=participant_meta.get("sex") or None,
+            handedness=participant_meta.get("handedness") or None,
+        )
+    except Exception:  # noqa: BLE001
+        pass  # dataset-level files are best-effort; never block the primary save
+
+    deriv_paths: dict[str, str] | None = None
+    if distimes and fsamp and fsamp > 0:
+        try:
+            deriv_result = export_bids_mu_derivatives(
+                distimes=distimes,
+                fsamp=fsamp,
+                bids_root=bids_root,
+                entities=entity_label,
+                mu_uids=mu_uids,
+            )
+            deriv_paths = {k: str(v) for k, v in deriv_result.items()}
+        except Exception:  # noqa: BLE001
+            pass  # derivatives export is best-effort; never block the primary save
+
     bids_paths = _export_bids_from_mat_context(
         bids_root=bids_root,  # already a Path
         entity_label=entity_label,
-        edit_signal_token=payload.get("edit_signal_token"),
+        edit_signal_token=payload.edit_signal_token,
         file_label=file_label,
         fsamp=fsamp,
         grid_names=grid_names,
         muscle_names=muscle_names,
         parameters=parameters,
+        powerline_freq=float(payload.powerline_freq) if payload.powerline_freq else None,
+        manufacturer=payload.manufacturer or None,
+        manufacturers_model_name=payload.manufacturers_model_name or None,
+        placement_scheme=payload.placement_scheme or None,
+        placement_scheme_description=payload.placement_scheme_description or None,
+        task_description=payload.task_description or None,
+        software_versions=payload.software_versions or None,
     )
     result: dict[str, Any] = {"saved": True, "path": str(out_path)}
     if bids_paths:
         result["bids_emg_paths"] = bids_paths
+    if deriv_paths:
+        result["bids_deriv_paths"] = deriv_paths
     return make_json_safe(result)
 
 
-def update_filter(payload: dict[str, Any]) -> dict[str, Any]:
-    bids_root = str(resolve_bids_root(payload.get("project")))
-    edit_signal_token = payload.get("edit_signal_token")
-    file_label = payload.get("file_label") or ""
-    entity_label = payload.get("entity_label") or parse_entity_label(file_label)
-    grid_index = as_int(payload.get("grid_index"), "grid_index", default=0)
-    distimes = normalize_distimes(payload.get("distimes") or [])
+def update_filter(payload: EditFilterPayload) -> dict[str, Any]:
+    bids_root = str(resolve_bids_root(payload.project))
+    edit_signal_token = payload.edit_signal_token
+    file_label = payload.file_label or ""
+    entity_label = payload.entity_label or parse_entity_label(file_label)
+    grid_index = payload.grid_index
+    distimes = normalize_distimes(payload.distimes or [])
     if not distimes:
         raise HTTPException(
             status_code=400, detail="distimes are required for filter update"
         )
 
-    mu_index = as_int(payload.get("mu_index"), "mu_index", default=0)
+    mu_index = payload.mu_index
     if mu_index < 0 or mu_index >= len(distimes):
         raise HTTPException(status_code=400, detail="mu_index out of range")
-    mu_grid_index = _normalize_mu_grid_index(payload.get("mu_grid_index"), len(distimes))
-    peeloff_win = as_float(payload.get("peel_off_win"), "peel_off_win", default=0.025)
+    mu_grid_index = _normalize_mu_grid_index(payload.mu_grid_index, len(distimes))
+    peeloff_win = payload.peel_off_win
     if peeloff_win <= 0:
         peeloff_win = 0.025
-    use_peeloff = bool(payload.get("use_peeloff", False))
-    flagged_raw = payload.get("flagged") or []
+    use_peeloff = payload.use_peeloff
+    flagged_raw = payload.flagged or []
     flagged = [bool(f) for f in flagged_raw] if flagged_raw else []
 
-    view_start = as_int(payload.get("view_start"), "view_start", default=0)
-    view_end = as_int(payload.get("view_end"), "view_end", default=0)
+    view_start = payload.view_start
+    view_end = payload.view_end
     if view_end <= view_start:
         raise HTTPException(status_code=400, detail="view_start/view_end are required")
-    nbextchan = as_int(payload.get("nbextchan"), "nbextchan", default=1000)
+    nbextchan = payload.nbextchan
 
     emg: np.ndarray | None = None
     fsamp: float | None = None
@@ -456,11 +527,11 @@ def update_filter(payload: dict[str, Any]) -> dict[str, Any]:
                 elif cell_arr.size == n_ch:
                     emg_mask = np.asarray(cell_arr != 0, dtype=int)
 
-    artifact_times_raw = payload.get("artifact_times") or []
+    artifact_times_raw = payload.artifact_times or []
     artifact_times = [int(x) for x in artifact_times_raw if isinstance(x, (int, float))]
 
     bids_emg_offset = view_start if emg_is_presliced else 0
-    lock_spikes = bool(payload.get("lock_spikes", False))
+    lock_spikes = payload.lock_spikes
     pt, updated = update_motor_unit_filter_window(
         emg,
         emg_mask,
@@ -483,7 +554,7 @@ def update_filter(payload: dict[str, Any]) -> dict[str, Any]:
         lock_spikes=lock_spikes,
     )
 
-    pulse_train = payload.get("pulse_train")
+    pulse_train = payload.pulse_train
     updated_pulse = None
     if pulse_train is not None:
         try:
@@ -511,19 +582,19 @@ def update_filter(payload: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-def add_spikes(payload: dict[str, Any]) -> dict[str, Any]:
+def add_spikes(payload: EditRoiPayload) -> dict[str, Any]:
     """Add spikes in ROI for selected motor unit."""
-    pulse_train = payload.get("pulse_train")
+    pulse_train = payload.pulse_train
     if pulse_train is None:
         raise HTTPException(status_code=400, detail="pulse_train is required")
-    distimes = normalize_distimes(payload.get("distimes") or [])
-    fsamp = as_float(payload.get("fsamp"), "fsamp", default=0.0)
+    distimes = normalize_distimes(payload.distimes or [])
+    fsamp = payload.fsamp or 0.0
     if fsamp <= 0:
         raise HTTPException(status_code=400, detail="fsamp is required")
-    x_start = as_int(payload.get("x_start"), "x_start", default=0)
-    x_end = as_int(payload.get("x_end"), "x_end", default=0)
-    y_min = as_float(payload.get("y_min"), "y_min", default=0.0)
-    mu_index = as_int(payload.get("mu_index"), "mu_index", default=0)
+    x_start = payload.x_start
+    x_end = payload.x_end
+    y_min = payload.y_min or 0.0
+    mu_index = payload.mu_index
     if mu_index < 0 or mu_index >= len(distimes):
         raise HTTPException(status_code=400, detail="mu_index out of range")
 
@@ -532,19 +603,19 @@ def add_spikes(payload: dict[str, Any]) -> dict[str, Any]:
     return make_json_safe({"distimes": updated})
 
 
-def add_artifact(payload: dict[str, Any]) -> dict[str, Any]:
+def add_artifact(payload: EditRoiPayload) -> dict[str, Any]:
     """Mark a peak in the ROI as an artifact for the selected motor unit."""
-    pulse_train = payload.get("pulse_train")
+    pulse_train = payload.pulse_train
     if pulse_train is None:
         raise HTTPException(status_code=400, detail="pulse_train is required")
-    fsamp = as_float(payload.get("fsamp"), "fsamp", default=0.0)
+    fsamp = payload.fsamp or 0.0
     if fsamp <= 0:
         raise HTTPException(status_code=400, detail="fsamp is required")
-    x_start = as_int(payload.get("x_start"), "x_start", default=0)
-    x_end = as_int(payload.get("x_end"), "x_end", default=0)
-    y_min = as_float(payload.get("y_min"), "y_min", default=0.0)
+    x_start = payload.x_start
+    x_end = payload.x_end
+    y_min = payload.y_min or 0.0
 
-    artifact_times_raw = payload.get("artifact_times") or []
+    artifact_times_raw = payload.artifact_times or []
     artifact_times = [int(x) for x in artifact_times_raw if isinstance(x, (int, float))]
 
     pulse = np.array(pulse_train, dtype=float)
@@ -552,17 +623,17 @@ def add_artifact(payload: dict[str, Any]) -> dict[str, Any]:
     return make_json_safe({"artifact_times": updated})
 
 
-def delete_spikes(payload: dict[str, Any]) -> dict[str, Any]:
+def delete_spikes(payload: EditRoiPayload) -> dict[str, Any]:
     """Delete spikes and artifacts in ROI for selected motor unit."""
-    pulse_train = payload.get("pulse_train")
+    pulse_train = payload.pulse_train
     if pulse_train is None:
         raise HTTPException(status_code=400, detail="pulse_train is required")
-    distimes = normalize_distimes(payload.get("distimes") or [])
-    x_start = as_int(payload.get("x_start"), "x_start", default=0)
-    x_end = as_int(payload.get("x_end"), "x_end", default=0)
-    y_min = as_float(payload.get("y_min"), "y_min", default=0.0)
-    y_max = as_float(payload.get("y_max"), "y_max", default=0.0)
-    mu_index = as_int(payload.get("mu_index"), "mu_index", default=0)
+    distimes = normalize_distimes(payload.distimes or [])
+    x_start = payload.x_start
+    x_end = payload.x_end
+    y_min = payload.y_min or 0.0
+    y_max = payload.y_max or 0.0
+    mu_index = payload.mu_index
     if mu_index < 0 or mu_index >= len(distimes):
         raise HTTPException(status_code=400, detail="mu_index out of range")
 
@@ -573,7 +644,7 @@ def delete_spikes(payload: dict[str, Any]) -> dict[str, Any]:
 
     # Also delete artifacts in the same ROI
     updated_artifact_times = None
-    artifact_times_raw = payload.get("artifact_times")
+    artifact_times_raw = payload.artifact_times
     if artifact_times_raw:
         artifact_times = [int(x) for x in artifact_times_raw if isinstance(x, (int, float))]
         if artifact_times:
@@ -587,19 +658,19 @@ def delete_spikes(payload: dict[str, Any]) -> dict[str, Any]:
     return make_json_safe(result)
 
 
-def delete_dr(payload: dict[str, Any]) -> dict[str, Any]:
+def delete_dr(payload: EditRoiPayload) -> dict[str, Any]:
     """Delete spikes with high discharge rates inside ROI for selected MU."""
-    pulse_train = payload.get("pulse_train")
+    pulse_train = payload.pulse_train
     if pulse_train is None:
         raise HTTPException(status_code=400, detail="pulse_train is required")
-    distimes = normalize_distimes(payload.get("distimes") or [])
-    fsamp = as_float(payload.get("fsamp"), "fsamp", default=0.0)
+    distimes = normalize_distimes(payload.distimes or [])
+    fsamp = payload.fsamp or 0.0
     if fsamp <= 0:
         raise HTTPException(status_code=400, detail="fsamp is required")
-    x_start = as_int(payload.get("x_start"), "x_start", default=0)
-    x_end = as_int(payload.get("x_end"), "x_end", default=0)
-    y_min = as_float(payload.get("y_min"), "y_min", default=0.0)
-    mu_index = as_int(payload.get("mu_index"), "mu_index", default=0)
+    x_start = payload.x_start
+    x_end = payload.x_end
+    y_min = payload.y_min or 0.0
+    mu_index = payload.mu_index
     if mu_index < 0 or mu_index >= len(distimes):
         raise HTTPException(status_code=400, detail="mu_index out of range")
 
@@ -610,16 +681,16 @@ def delete_dr(payload: dict[str, Any]) -> dict[str, Any]:
     return make_json_safe({"distimes": updated})
 
 
-def remove_outliers(payload: dict[str, Any]) -> dict[str, Any]:
+def remove_outliers(payload: EditOutliersPayload) -> dict[str, Any]:
     """Remove discharge-rate outlier spikes and return removal count."""
-    pulse_train = payload.get("pulse_train")
+    pulse_train = payload.pulse_train
     if pulse_train is None:
         raise HTTPException(status_code=400, detail="pulse_train is required")
-    distimes = normalize_distimes(payload.get("distimes") or [])
-    fsamp = as_float(payload.get("fsamp"), "fsamp", default=0.0)
+    distimes = normalize_distimes(payload.distimes or [])
+    fsamp = payload.fsamp or 0.0
     if fsamp <= 0:
         raise HTTPException(status_code=400, detail="fsamp is required")
-    mu_index = as_int(payload.get("mu_index"), "mu_index", default=0)
+    mu_index = payload.mu_index
     if mu_index < 0 or mu_index >= len(distimes):
         raise HTTPException(status_code=400, detail="mu_index out of range")
 
@@ -630,22 +701,20 @@ def remove_outliers(payload: dict[str, Any]) -> dict[str, Any]:
     return make_json_safe({"distimes": updated, "removed_count": removed})
 
 
-def remove_duplicates_service(payload: dict[str, Any]) -> dict[str, Any]:
+def remove_duplicates_service(payload: EditDeduplicatePayload) -> dict[str, Any]:
     """Remove duplicate motor units using lag-aware spike-train overlap."""
-    distimes_raw = payload.get("distimes") or []
-    distimes = normalize_distimes(distimes_raw)
+    distimes = normalize_distimes(payload.distimes or [])
     if not distimes:
         return make_json_safe({"kept_indices": [], "distimes": []})
 
-    fsamp_raw = payload.get("fsamp")
-    fsamp = float(fsamp_raw) if fsamp_raw is not None else None
+    fsamp = payload.fsamp
     if not fsamp or fsamp <= 0:
         raise HTTPException(status_code=400, detail="fsamp is required for deduplication")
 
-    total_samples = as_int(payload.get("total_samples"), "total_samples", default=0)
+    total_samples = payload.total_samples
     if total_samples <= 0:
         total_samples = max((max(d) for d in distimes if d), default=0) + 1
-    parameters = payload.get("parameters") or {}
+    parameters = payload.parameters or {}
 
     pulse_trains = build_pulse_trains_from_distimes(distimes, total_samples)
 
@@ -668,10 +737,10 @@ def remove_duplicates_service(payload: dict[str, Any]) -> dict[str, Any]:
     })
 
 
-def flag_mu(payload: dict[str, Any]) -> dict[str, Any]:
+def flag_mu(payload: EditFlagPayload) -> dict[str, Any]:
     """Validate MU index and return flag status without mutating spike times."""
-    distimes = normalize_distimes(payload.get("distimes") or [])
-    mu_index = as_int(payload.get("mu_index"), "mu_index", default=0)
+    distimes = normalize_distimes(payload.distimes or [])
+    mu_index = payload.mu_index
     if mu_index < 0 or mu_index >= len(distimes):
         raise HTTPException(status_code=400, detail="mu_index out of range")
     return make_json_safe({"flagged": True})

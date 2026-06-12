@@ -197,8 +197,8 @@ def _export_raw_emg_bids(
         acquisition=entities.get("acquisition"),
         recording=entities.get("recording"),
         emg_json_extra=emg_meta,
-        powerline_freq=entities.get("powerline_freq", 50.0),
-        placement_scheme=entities.get("placement_scheme", "ChannelSpecific"),
+        powerline_freq=float(entities.get("powerline_freq") or 50.0),
+        placement_scheme=entities.get("placement_scheme") or "ChannelSpecific",
         placement_scheme_description=entities.get("placement_scheme_description"),
         reference_description=entities.get("reference", "ChannelSpecific"),
         units=entities.get("units", "uV"),
@@ -213,6 +213,10 @@ def _export_raw_emg_bids(
         aux_gain=loader_meta.get("aux_gains"),
         aux_low_cutoff=loader_meta.get("aux_hpf"),
         aux_high_cutoff=loader_meta.get("aux_lpf"),
+        manufacturer=entities.get("manufacturer") or loader_meta.get("manufacturer"),
+        manufacturers_model_name=entities.get("manufacturers_model_name") or loader_meta.get("device_name"),
+        task_description=entities.get("task_description"),
+        software_versions=loader_meta.get("software_versions"),
     )
 
 
@@ -266,14 +270,11 @@ def preprocess_step(
     _apply_grid_bandpass_filters(data, loaded.fsamp, grid_names, coordinates, emg_type)
 
     muscles = loaded.signal.get("muscle") or []
-    device_name = loaded.signal.get("device_name")
     loader_meta = loaded.signal.get("metadata", {})
     default_target_muscle = next(
         (m for m in muscles if isinstance(m, str) and m.strip()), None
     )
     derived_bids_metadata: dict[str, Any] = {}
-    if device_name:
-        derived_bids_metadata["RecordingDevice"] = device_name
     if muscles and any(isinstance(m, str) and m for m in muscles):
         derived_bids_metadata["Muscles"] = muscles
 

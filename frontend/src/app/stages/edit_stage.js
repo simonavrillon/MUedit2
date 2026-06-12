@@ -90,7 +90,10 @@ export function createEditStageService(deps) {
   }
 
   function appendEditHistory(entry) {
-    appendEditHistoryEntry(state, { ...entry, timestamp: new Date().toISOString() });
+    appendEditHistoryEntry(state, {
+      ...entry,
+      timestamp: new Date().toISOString(),
+    });
   }
 
   function getEditTotalSamples() {
@@ -559,7 +562,10 @@ export function setupEditEvents(deps) {
     };
     applyPeelOff(els.editPeelOffToggle, false);
     els.editPeelOffToggle.addEventListener("click", () => {
-      applyPeelOff(els.editPeelOffToggle, els.editPeelOffToggle.dataset.state !== "on");
+      applyPeelOff(
+        els.editPeelOffToggle,
+        els.editPeelOffToggle.dataset.state !== "on",
+      );
     });
   }
   if (els.editLockSpikesToggle) {
@@ -575,7 +581,10 @@ export function setupEditEvents(deps) {
     };
     applyLockSpikes(els.editLockSpikesToggle, false);
     els.editLockSpikesToggle.addEventListener("click", () => {
-      applyLockSpikes(els.editLockSpikesToggle, els.editLockSpikesToggle.dataset.state !== "on");
+      applyLockSpikes(
+        els.editLockSpikesToggle,
+        els.editLockSpikesToggle.dataset.state !== "on",
+      );
     });
   }
   els.editOutliersBtn?.addEventListener("click", () => {
@@ -597,7 +606,10 @@ export function setupEditEvents(deps) {
     setEditMode("add", "Drag a box on pulse train to add spikes");
   });
   els.editAddArtifactBtn?.addEventListener("click", () => {
-    setEditMode("add_artifact", "Drag a box on pulse train to mark an artifact");
+    setEditMode(
+      "add_artifact",
+      "Drag a box on pulse train to mark an artifact",
+    );
   });
   els.editDeleteSpikeBtn?.addEventListener("click", () => {
     setEditMode("delete_spikes", "Drag a box on pulse train to delete spikes");
@@ -605,6 +617,11 @@ export function setupEditEvents(deps) {
 
   els.bidsProject?.addEventListener("input", (e) => {
     setEditProject(state, e.target.value);
+  });
+
+  els.bidsPlacementScheme?.addEventListener("change", (e) => {
+    const row = els.bidsPlacementDescRow;
+    if (row) row.classList.toggle("hidden", e.target.value !== "Other");
   });
 
   refreshEditModeButtons();

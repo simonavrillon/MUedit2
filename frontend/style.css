@@ -1397,6 +1397,44 @@ canvas {
   cursor: grabbing;
 }
 
+/* ── BIDS session panel subsections ── */
+
+.form-subsection-label {
+  font-size: 10px;
+  font-weight: var(--fw-medium);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-top: 10px;
+  margin-bottom: 2px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.form-subsection-details {
+  margin-top: 2px;
+}
+
+.form-subsection-details > summary.form-subsection-label {
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.form-subsection-details > summary.form-subsection-label::after {
+  content: " ▸";
+  font-size: 9px;
+  opacity: 0.6;
+}
+
+.form-subsection-details[open] > summary.form-subsection-label::after {
+  content: " ▾";
+}
+
+.form-row.conditional.hidden {
+  display: none;
+}
+
 /* ── Misc ── */
 
 .auto-info-box {

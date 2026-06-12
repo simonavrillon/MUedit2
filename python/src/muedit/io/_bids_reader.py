@@ -66,9 +66,12 @@ def resolve_bids_emg_path(bids_root: Path, entity_label: str) -> Path:
 
 def resolve_bids_channels_tsv(emg_path: Path, entity_label: str) -> Path:
     """Resolve the channels TSV associated with a BIDS EMG recording."""
-    channels_path = emg_path.with_name(f"{entity_label}_emg_channels.tsv")
-    if channels_path.exists():
-        return channels_path
+    for candidate in [
+        emg_path.with_name(f"{entity_label}_channels.tsv"),
+        emg_path.with_name(f"{entity_label}_emg_channels.tsv"),  # backward compat
+    ]:
+        if candidate.exists():
+            return candidate
     raise FileNotFoundError(
         f"Cannot find channels.tsv for {entity_label} in {emg_path.parent}"
     )
@@ -139,7 +142,9 @@ def load_bids_signal(filepath: str) -> dict[str, Any]:
     stem = emg_path.stem
     entity_label = stem[:-4] if stem.endswith("_emg") else stem
 
-    channels_tsv = emg_path.parent / f"{entity_label}_emg_channels.tsv"
+    channels_tsv = emg_path.parent / f"{entity_label}_channels.tsv"
+    if not channels_tsv.exists():
+        channels_tsv = emg_path.parent / f"{entity_label}_emg_channels.tsv"  # backward compat
     if not channels_tsv.exists():
         raise FileNotFoundError(f"Cannot find channels TSV for {entity_label} in {emg_path.parent}")
     json_path = emg_path.parent / f"{entity_label}_emg.json"
@@ -147,6 +152,8 @@ def load_bids_signal(filepath: str) -> dict[str, Any]:
     fsamp = 0.0
     device_name: str | None = None
     hardware_filters: list = ["n/a"]
+    bids_sidecar: dict[str, Any] = {}
+    electrode_model_name: str | None = None
     if json_path.exists():
         with json_path.open("r", encoding="utf-8") as f:
             emg_json = json.load(f)
@@ -155,6 +162,8 @@ def load_bids_signal(filepath: str) -> dict[str, Any]:
         hw = emg_json.get("HardwareFilters")
         if hw:
             hardware_filters = [str(hw)]
+        bids_sidecar = emg_json
+        electrode_model_name = emg_json.get("ElectrodeManufacturersModelName")
 
     grid_meta: dict[str, dict[str, Any]] = {}
     grid_order: list[str] = []
@@ -169,8 +178,19 @@ def load_bids_signal(filepath: str) -> dict[str, Any]:
 
             if ch_type == "EMG" and group and group.lower() != "n/a":
                 if group not in grid_meta:
+                    grid_name_col = (row.get("grid_name") or "").strip()
+                    if grid_name_col and grid_name_col.lower() != "n/a":
+                        resolved_name = grid_name_col
+                    elif electrode_model_name:
+                        resolved_name = electrode_model_name
+                    else:
+                        raise ValueError(
+                            f"Cannot determine grid model for group '{group}': "
+                            "set 'grid_name' in channels.tsv or "
+                            "'ElectrodeManufacturersModelName' in the EMG JSON sidecar."
+                        )
                     grid_meta[group] = {
-                        "grid_name": row.get("grid_name", group),
+                        "grid_name": resolved_name,
                         "target_muscle": row.get("target_muscle", ""),
                         "channel_indices": [],
                         "bad_mask": [],
@@ -239,6 +259,23 @@ def load_bids_signal(filepath: str) -> dict[str, Any]:
         "bad_channels_per_grid": grid_bad_masks,
         "bids_entity_label": entity_label,
         "bids_emg_path": str(emg_path),
+        # Round-trip fields — all keys that export_bids_emg can write
+        "software_versions": bids_sidecar.get("SoftwareVersions"),
+        "recording_type": bids_sidecar.get("RecordingType"),
+        "software_filters": bids_sidecar.get("SoftwareFilters"),
+        "manufacturer": bids_sidecar.get("Manufacturer"),
+        "manufacturers_model_name": bids_sidecar.get("ManufacturersModelName"),
+        "gain": bids_sidecar.get("Gain"),
+        "powerline_freq": bids_sidecar.get("PowerLineFrequency"),
+        "placement_scheme": bids_sidecar.get("EMGPlacementScheme"),
+        "placement_scheme_description": bids_sidecar.get("EMGPlacementSchemeDescription"),
+        "skin_preparation": bids_sidecar.get("SkinPreparation"),
+        "emg_ground": bids_sidecar.get("EMGGround"),
+        "institution_name": bids_sidecar.get("InstitutionName"),
+        "institution_address": bids_sidecar.get("InstitutionAddress"),
+        "institutional_department_name": bids_sidecar.get("InstitutionalDepartmentName"),
+        "task_description": bids_sidecar.get("TaskDescription"),
+        "instructions": bids_sidecar.get("Instructions"),
     }
 
     return {
@@ -246,7 +283,6 @@ def load_bids_signal(filepath: str) -> dict[str, Any]:
         "fsamp": fsamp,
         "gridname": grid_type_names,
         "muscle": grid_muscles,
-        "device_name": device_name,
         "auxiliary": auxiliary,
         "auxiliaryname": aux_names,
         "emgnotgrid": np.zeros((0, n_samples), dtype=float),

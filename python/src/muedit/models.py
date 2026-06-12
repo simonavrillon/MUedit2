@@ -41,7 +41,6 @@ class SignalImport:
     fsamp: float
     gridname: list[str] = field(default_factory=list)
     muscle: list[str] = field(default_factory=list)
-    device_name: str | None = None
     auxiliary: np.ndarray = field(default_factory=lambda: np.zeros((0, 0), dtype=float))
     auxiliaryname: list[str] = field(default_factory=list)
     emgnotgrid: np.ndarray = field(default_factory=lambda: np.zeros((0, 0), dtype=float))
@@ -72,7 +71,6 @@ class SignalImport:
             fsamp=fsamp,
             gridname=[str(x) for x in list(gridname)],
             muscle=[str(x) for x in list(muscle)],
-            device_name=payload.get("device_name"),
             auxiliary=_ensure_channel_matrix(payload.get("auxiliary"), n_samples),
             auxiliaryname=[str(x) for x in list(auxiliaryname)],
             emgnotgrid=_ensure_channel_matrix(payload.get("emgnotgrid"), n_samples),
@@ -90,7 +88,6 @@ class SignalImport:
             "fsamp": float(self.fsamp),
             "gridname": list(self.gridname),
             "muscle": list(self.muscle),
-            "device_name": self.device_name,
             "auxiliary": self.auxiliary.copy(),
             "auxiliaryname": list(self.auxiliaryname),
             "emgnotgrid": self.emgnotgrid.copy(),

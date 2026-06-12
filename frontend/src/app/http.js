@@ -49,7 +49,10 @@ export async function apiFetch(url, options = {}, timeoutMs = 120000) {
   }
 }
 
-export async function waitForBackend(healthUrl, { intervalMs = 500, timeoutMs = 60000 } = {}) {
+export async function waitForBackend(
+  healthUrl,
+  { intervalMs = 500, timeoutMs = 60000 } = {},
+) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {

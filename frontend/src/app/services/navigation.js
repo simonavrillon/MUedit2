@@ -62,8 +62,8 @@ export function updateStepAvailability(deps) {
     els.stepRun.disabled = !hasFile || !hasPreview;
   }
   if (els.stepEdit) {
-    // Edit is available after a run result exists, or when edit data is loaded.
-    els.stepEdit.disabled = !hasFile || (!hasRunResults && !hasEditData);
+    // Edit is available when edit data is loaded, or after a full run.
+    els.stepEdit.disabled = !hasEditData && (!hasFile || !hasRunResults);
   }
 }
 
@@ -206,7 +206,8 @@ export function goToMu(deps, direction, stage) {
     if (!mus.length) return;
     const current = state.currentMu ?? mus[0];
     const idx = mus.indexOf(current);
-    const next = mus[(idx + (direction === "prev" ? -1 : 1) + mus.length) % mus.length];
+    const next =
+      mus[(idx + (direction === "prev" ? -1 : 1) + mus.length) % mus.length];
     setRunCurrentMu(state, next, { resetView: true });
     renderMuExplorer();
   }
@@ -256,7 +257,10 @@ export function handleKeyboardNavigation(deps, e) {
       e.preventDefault();
       return;
     } else if (key === "x") {
-      setEditMode("add_artifact", "Drag a box on pulse train to mark an artifact");
+      setEditMode(
+        "add_artifact",
+        "Drag a box on pulse train to mark an artifact",
+      );
       e.preventDefault();
       return;
     } else if (e.key === "<") {
@@ -271,7 +275,10 @@ export function handleKeyboardNavigation(deps, e) {
       if (els.editPeelOffToggle) {
         const isOn = els.editPeelOffToggle.dataset.state === "on";
         els.editPeelOffToggle.dataset.state = isOn ? "off" : "on";
-        els.editPeelOffToggle.setAttribute("aria-pressed", isOn ? "false" : "true");
+        els.editPeelOffToggle.setAttribute(
+          "aria-pressed",
+          isOn ? "false" : "true",
+        );
         els.editPeelOffToggle.classList.toggle("on", !isOn);
         const label = isOn ? "Off" : "On";
         const shortEl = els.editPeelOffToggle.querySelector(".peeloff-short");
@@ -285,11 +292,16 @@ export function handleKeyboardNavigation(deps, e) {
       if (els.editLockSpikesToggle) {
         const isOn = els.editLockSpikesToggle.dataset.state === "on";
         els.editLockSpikesToggle.dataset.state = isOn ? "off" : "on";
-        els.editLockSpikesToggle.setAttribute("aria-pressed", isOn ? "false" : "true");
+        els.editLockSpikesToggle.setAttribute(
+          "aria-pressed",
+          isOn ? "false" : "true",
+        );
         els.editLockSpikesToggle.classList.toggle("on", !isOn);
         const label = isOn ? "Off" : "On";
-        const shortEl = els.editLockSpikesToggle.querySelector(".lockspikes-short");
-        const fullEl = els.editLockSpikesToggle.querySelector(".lockspikes-full");
+        const shortEl =
+          els.editLockSpikesToggle.querySelector(".lockspikes-short");
+        const fullEl =
+          els.editLockSpikesToggle.querySelector(".lockspikes-full");
         if (shortEl) shortEl.textContent = label;
         if (fullEl) fullEl.textContent = `Lock: ${label}`;
       }

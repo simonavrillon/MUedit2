@@ -13,7 +13,13 @@ function makeInfoItem(label, value) {
 export function renderBidsAutoInfo(els, model) {
   const box = els.bidsAutoInfo;
   if (!box) return;
-  if (!model || model.hidden) {
+  // Manufacturer and device model now have editable fields — only show
+  // filters and gain in the auto-info box.
+  const hasInfo =
+    model &&
+    !model.hidden &&
+    (model.musclesText || model.filtersText || model.gainText);
+  if (!hasInfo) {
     box.classList.add("hidden");
     return;
   }
@@ -24,10 +30,12 @@ export function renderBidsAutoInfo(els, model) {
   title.textContent = "Auto-detected Metadata";
   box.appendChild(title);
 
-  if (model.deviceName) box.appendChild(makeInfoItem("Device:", model.deviceName));
-  if (model.musclesText) box.appendChild(makeInfoItem("Muscles:", model.musclesText));
-  if (model.filtersText) box.appendChild(makeInfoItem("Filters:", model.filtersText));
-  if (model.gainText) box.appendChild(makeInfoItem("Amplifier Gain:", model.gainText));
+  if (model.musclesText)
+    box.appendChild(makeInfoItem("Muscles:", model.musclesText));
+  if (model.filtersText)
+    box.appendChild(makeInfoItem("Filters:", model.filtersText));
+  if (model.gainText)
+    box.appendChild(makeInfoItem("Amplifier Gain:", model.gainText));
 }
 
 export function renderBidsMuscleFields(els, rows) {
@@ -72,6 +80,18 @@ export function applySessionInfoToDom(els, payload) {
   if (els.bidsSession) els.bidsSession.value = "1";
   if (els.bidsRun) els.bidsRun.value = "1";
   if (els.bidsProject) els.bidsProject.value = "";
+  if (els.bidsPlacementScheme)
+    els.bidsPlacementScheme.value = "ChannelSpecific";
+  if (els.bidsPlacementDescription) els.bidsPlacementDescription.value = "";
+  if (els.bidsPlacementDescRow)
+    els.bidsPlacementDescRow.classList.add("hidden");
+  if (els.bidsPowerlineFreq) els.bidsPowerlineFreq.value = "50";
+  if (els.bidsManufacturer) els.bidsManufacturer.value = "";
+  if (els.bidsDeviceModel) els.bidsDeviceModel.value = "";
+  if (els.bidsTaskDescription) els.bidsTaskDescription.value = "";
+  if (els.bidsParticipantAge) els.bidsParticipantAge.value = "";
+  if (els.bidsParticipantSex) els.bidsParticipantSex.value = "";
+  if (els.bidsParticipantHandedness) els.bidsParticipantHandedness.value = "";
 
   if (els.bidsSubject && payload.entities?.subject)
     els.bidsSubject.value = payload.entities.subject;
@@ -81,4 +101,40 @@ export function applySessionInfoToDom(els, payload) {
     els.bidsSession.value = payload.entities.session;
   if (els.bidsRun && payload.entities?.run)
     els.bidsRun.value = payload.entities.run;
+
+  // Pre-fill participant fields from BIDS sidecar.
+  if (els.bidsParticipantAge && payload.participant?.age)
+    els.bidsParticipantAge.value = payload.participant.age;
+  if (els.bidsParticipantSex && payload.participant?.sex)
+    els.bidsParticipantSex.value = payload.participant.sex;
+  if (els.bidsParticipantHandedness && payload.participant?.handedness)
+    els.bidsParticipantHandedness.value = payload.participant.handedness;
+
+  // Pre-fill hardware fields from BIDS sidecar or auto-detected loader metadata.
+  if (
+    els.bidsManufacturer &&
+    (payload.hardware?.manufacturer || payload.autoInfo?.manufacturer)
+  )
+    els.bidsManufacturer.value =
+      payload.hardware?.manufacturer || payload.autoInfo.manufacturer;
+  if (
+    els.bidsDeviceModel &&
+    (payload.hardware?.deviceModel || payload.autoInfo?.deviceName)
+  )
+    els.bidsDeviceModel.value =
+      payload.hardware?.deviceModel || payload.autoInfo.deviceName;
+
+  // Pre-fill BIDS recording metadata round-tripped from the EMG JSON sidecar.
+  if (
+    els.bidsPowerlineFreq &&
+    payload.bids?.powerlineFreq != null &&
+    payload.bids.powerlineFreq !== ""
+  )
+    els.bidsPowerlineFreq.value = String(payload.bids.powerlineFreq);
+  if (els.bidsPlacementScheme && payload.bids?.placementScheme)
+    els.bidsPlacementScheme.value = payload.bids.placementScheme;
+  if (els.bidsPlacementDescription && payload.bids?.placementDescription) {
+    els.bidsPlacementDescription.value = payload.bids.placementDescription;
+    els.bidsPlacementDescRow?.classList.remove("hidden");
+  }
 }

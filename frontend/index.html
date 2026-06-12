@@ -6,7 +6,7 @@
     <title>MUedit</title>
     <link rel="icon" href="data:," />
     <link rel="shortcut icon" href="data:," />
-    <link rel="stylesheet" href="style.css?v=57" />
+    <link rel="stylesheet" href="style.css?v=60" />
   </head>
 
   <body>
@@ -148,16 +148,6 @@
                   <span class="file-display" id="fileName">None</span>
                 </div>
                 <div class="form-row">
-                  <label for="fsamp">Fs (Hz)</label>
-                  <input
-                    type="number"
-                    id="fsamp"
-                    value="2048"
-                    readonly
-                    class="muted"
-                  />
-                </div>
-                <div class="form-row">
                   <label for="bidsProject">Project</label>
                   <input
                     type="text"
@@ -168,6 +158,14 @@
                 <div class="form-row">
                   <label for="bidsSubject">Subject</label>
                   <input type="number" id="bidsSubject" value="1" min="1" />
+                </div>
+                <div class="form-row">
+                  <label for="bidsSession">Session</label>
+                  <input type="number" id="bidsSession" value="1" min="1" />
+                </div>
+                <div class="form-row">
+                  <label for="bidsRun">Run</label>
+                  <input type="number" id="bidsRun" value="1" min="1" />
                 </div>
                 <div class="form-row">
                   <label for="bidsTask">Task</label>
@@ -186,14 +184,39 @@
                     <option value="dynamic"></option>
                   </datalist>
                 </div>
+
+                <!-- Participant -->
+                <div class="form-subsection-label">Participant</div>
                 <div class="form-row">
-                  <label for="bidsSession">Session</label>
-                  <input type="number" id="bidsSession" value="1" min="1" />
+                  <label for="bidsParticipantAge">Age (years)</label>
+                  <input
+                    type="number"
+                    id="bidsParticipantAge"
+                    min="1"
+                    max="120"
+                  />
                 </div>
                 <div class="form-row">
-                  <label for="bidsRun">Run</label>
-                  <input type="number" id="bidsRun" value="1" min="1" />
+                  <label for="bidsParticipantSex">Sex</label>
+                  <select id="bidsParticipantSex">
+                    <option value="">n/a</option>
+                    <option value="M">Male</option>
+                    <option value="F">Female</option>
+                    <option value="O">Other</option>
+                  </select>
                 </div>
+                <div class="form-row">
+                  <label for="bidsParticipantHandedness">Handedness</label>
+                  <select id="bidsParticipantHandedness">
+                    <option value="">n/a</option>
+                    <option value="right">Right</option>
+                    <option value="left">Left</option>
+                    <option value="ambidextrous">Ambidextrous</option>
+                  </select>
+                </div>
+
+                <!-- Placement -->
+                <div class="form-subsection-label">Placement</div>
                 <div id="bidsMuscleContainer">
                   <div class="form-row">
                     <label for="bidsMuscle_0">Muscle</label>
@@ -205,6 +228,62 @@
                     />
                   </div>
                 </div>
+                <div class="form-row">
+                  <label for="bidsPlacementScheme">Scheme</label>
+                  <select id="bidsPlacementScheme">
+                    <option value="ChannelSpecific">Channel-specific</option>
+                    <option value="Measured">Measured</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+                <div
+                  class="form-row conditional hidden"
+                  id="bidsPlacementDescRow"
+                >
+                  <label for="bidsPlacementDescription">Description</label>
+                  <input
+                    type="text"
+                    id="bidsPlacementDescription"
+                    placeholder="Describe placement method"
+                  />
+                </div>
+
+                <!-- Hardware & signal -->
+                <div class="form-subsection-label">Hardware &amp; signal</div>
+                <div class="form-row">
+                  <label for="bidsManufacturer">Manufacturer</label>
+                  <input
+                    type="text"
+                    id="bidsManufacturer"
+                    placeholder="e.g. OT Bioelettronica"
+                  />
+                </div>
+                <div class="form-row">
+                  <label for="bidsDeviceModel">Device model</label>
+                  <input
+                    type="text"
+                    id="bidsDeviceModel"
+                    placeholder="e.g. Quattrocento"
+                  />
+                </div>
+                <div class="form-row">
+                  <label for="fsamp">Fs (Hz)</label>
+                  <input
+                    type="number"
+                    id="fsamp"
+                    value="2048"
+                    readonly
+                    class="muted"
+                  />
+                </div>
+                <div class="form-row">
+                  <label for="bidsPowerlineFreq">Power line (Hz)</label>
+                  <select id="bidsPowerlineFreq">
+                    <option value="50" selected>50</option>
+                    <option value="60">60</option>
+                  </select>
+                </div>
+
                 <div
                   id="bidsAutoInfo"
                   class="auto-info-box hidden"
@@ -311,7 +390,13 @@
               </div>
               <div class="section-content">
                 <div class="toggle-row">
-                  <button class="pill-toggle on" id="silToggle" data-state="on" type="button" aria-pressed="true">
+                  <button
+                    class="pill-toggle on"
+                    id="silToggle"
+                    data-state="on"
+                    type="button"
+                    aria-pressed="true"
+                  >
                     SIL filter: On
                   </button>
                 </div>
@@ -320,7 +405,13 @@
                   <input type="number" step="0.01" id="silValue" value="0.9" />
                 </div>
                 <div class="toggle-row">
-                  <button class="pill-toggle" id="covToggle" data-state="off" type="button" aria-pressed="false">
+                  <button
+                    class="pill-toggle"
+                    id="covToggle"
+                    data-state="off"
+                    type="button"
+                    aria-pressed="false"
+                  >
                     COV tool: Off
                   </button>
                 </div>
@@ -340,7 +431,11 @@
                   <div class="qc-tabs stage-tabs" id="qcGridTabs">
                     <!-- Dynamically populated Grid 1, Grid 2, etc. -->
                   </div>
-                  <button class="start-btn qc-run-btn" id="startBtn" type="button">
+                  <button
+                    class="start-btn qc-run-btn"
+                    id="startBtn"
+                    type="button"
+                  >
                     <span>Decompose Signal</span>
                     <svg
                       xmlns="http://www.w3.org/2000/svg"
@@ -711,9 +806,10 @@
                     </div>
                     <p class="hint muted">
                       Shortcuts: `<`/`>` previous-next MU, `R` remove outliers,
-                      `A` add spikes, `X` add artifact, `D` delete spikes/artifacts, `Space` update filter,
-                      `P` toggle peel-off, `L` toggle lock spikes,
-                      `←`/`→` scroll, `↑`/`↓` zoom.
+                      `A` add spikes, `X` add artifact, `D` delete
+                      spikes/artifacts, `Space` update filter, `P` toggle
+                      peel-off, `L` toggle lock spikes, `←`/`→` scroll, `↑`/`↓`
+                      zoom.
                     </p>
                     <span
                       id="editStatus"
@@ -723,7 +819,7 @@
                   </div>
                 </div>
                 <div class="chart-card glass edit-full" id="editDrCard">
-                  <div class="chart-title">Firing Rate (Hz)</div>
+                  <div class="chart-title">Firing Rate (pps)</div>
                   <canvas
                     id="editDrCanvas"
                     height="280"

@@ -64,6 +64,7 @@ export function buildBidsAutoInfoModel(state) {
 
   return {
     hidden: false,
+    manufacturer: meta.manufacturer || "",
     deviceName: meta.device_name || "",
     musclesText: uniqueMuscles.length ? uniqueMuscles.join(", ") : "",
     filtersText: hpf || lpf ? `${hpf || "n/a"} - ${lpf || "n/a"} Hz` : "",
@@ -78,7 +79,9 @@ export function buildBidsMuscleRowsModel(state) {
       ? state.edit.gridNames
       : [];
   const runGridNames =
-    Array.isArray(state.gridNames) && state.gridNames.length ? state.gridNames : [];
+    Array.isArray(state.gridNames) && state.gridNames.length
+      ? state.gridNames
+      : [];
   const gridNames = inEditStage
     ? editGridNames.length
       ? editGridNames
@@ -116,10 +119,28 @@ export function buildSessionInfoFromDecomposition(file, data, deps) {
     ? listifyMuscles(fromPayload)
     : listifyMuscles(fromParams);
 
+  const participant = data?.participant_meta || {};
+  const naToEmpty = (v) => (!v || v === "n/a" ? "" : v);
+
   return {
     fileLabel,
     fsampText: Number.isFinite(fs) && fs > 0 ? String(Math.round(fs)) : "",
     entities,
     muscles,
+    participant: {
+      age: naToEmpty(participant.age),
+      sex: naToEmpty(participant.sex),
+      handedness: naToEmpty(participant.handedness),
+    },
+    hardware: {
+      manufacturer: data?.manufacturer || "",
+      deviceModel: data?.manufacturers_model_name || "",
+    },
+    bids: {
+      powerlineFreq: data?.powerline_freq ?? "",
+      placementScheme: data?.placement_scheme ?? "",
+      placementDescription: data?.placement_scheme_description ?? "",
+      softwareVersions: data?.software_versions ?? null,
+    },
   };
 }

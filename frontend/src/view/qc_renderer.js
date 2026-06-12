@@ -1,7 +1,13 @@
 import { COLORS } from "../config.js";
 
 export function refreshVisuals(deps) {
-  const { state, els, drawGridOverlay, renderAuxiliaryChannels, renderMuExplorer } = deps;
+  const {
+    state,
+    els,
+    drawGridOverlay,
+    renderAuxiliaryChannels,
+    renderMuExplorer,
+  } = deps;
   const selections = state.roiDraft
     ? [...(state.rois || []), state.roiDraft]
     : state.rois;
@@ -46,7 +52,7 @@ export function enableRoiSelection(deps, canvasId) {
   const commitSelection = () => {
     if (!state.seriesLength) return;
     const { startSample, endSample } = toSamples(startX, endX);
-    const nwin = Number(els.nwindows?.value) ?? 1;
+    const nwin = Number(els.nwindows?.value) || 1;
     syncRois(nwin);
     let idx = 0;
     let best = Number.MAX_SAFE_INTEGER;

@@ -43,7 +43,7 @@ def _parse_rois(value: str) -> list[tuple[int, int]]:
 
 def serve_api() -> None:
     """Start the FastAPI backend server."""
-    app = create_app(title="MUedit API", version="2.0.0")
+    app = create_app(title="MUedit API", version="2.1.0")
     include_routers(app)
     host = os.environ.get("MUEDIT_HOST", "0.0.0.0")
     port = int(os.environ.get("MUEDIT_PORT") or os.environ.get("MUEDIT_BACKEND_PORT", "8000"))

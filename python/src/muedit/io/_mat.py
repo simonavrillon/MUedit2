@@ -167,15 +167,24 @@ def _load_mat73_signal(path: str) -> dict[str, Any]:
             n_samples,
         )
 
+        device_name = _parse_text(read_field("device_name")) or None
+
         return {
             "data": data,
             "fsamp": fsamp,
             "gridname": _parse_text_list(read_field("gridname")),
             "muscle": _parse_text_list(read_field("muscle")),
-            "device_name": _parse_text(read_field("device_name")) or None,
             "auxiliary": auxiliary,
             "auxiliaryname": _parse_text_list(read_field("auxiliaryname")),
             "emgnotgrid": emgnotgrid,
+            "metadata": {
+                "device_name": device_name,
+                "software_versions": "MATLAB",
+                "hardware_filters": None,
+                "units": "uV",
+                "recording_type": "continuous",
+                "software_filters": "n/a",
+            },
         }
 
 
@@ -202,7 +211,7 @@ def load_mat(filepath: str) -> dict[str, Any]:
             signal["fsamp"] = get_attr(signal_struct, "fsamp")
             signal["gridname"] = get_attr(signal_struct, "gridname") or []
             signal["muscle"] = get_attr(signal_struct, "muscle") or []
-            signal["device_name"] = get_attr(signal_struct, "device_name", None)
+            device_name = get_attr(signal_struct, "device_name", None)
             signal["auxiliary"] = get_attr(
                 signal_struct, "auxiliary", np.zeros((0, n_samples))
             )
@@ -210,6 +219,10 @@ def load_mat(filepath: str) -> dict[str, Any]:
             signal["emgnotgrid"] = get_attr(
                 signal_struct, "emgnotgrid", np.zeros((0, n_samples))
             )
+            signal["metadata"] = {
+                "device_name": device_name,
+                "software_versions": "MATLAB",
+            }
 
             return signal
         else:

@@ -1,3 +1,5 @@
+import { createEditSlice } from "../app/state.js";
+
 export function setCurrentGrid(state, idx) {
   state.currentGrid = Math.max(0, idx || 0);
 }
@@ -281,7 +283,9 @@ export function popLastEditHistoryEntryForMu(state, muUid) {
 
 export function clearEditHistoryForMu(state, muUid) {
   if (!Array.isArray(state.edit.editHistory)) return;
-  state.edit.editHistory = state.edit.editHistory.filter((e) => e.mu_uid !== muUid);
+  state.edit.editHistory = state.edit.editHistory.filter(
+    (e) => e.mu_uid !== muUid,
+  );
 }
 
 export function setEditBackup(state, backup) {
@@ -317,37 +321,7 @@ export function setEditDrDraftSelection(state, selection) {
 }
 
 export function resetEditSlice(state) {
-  state.edit = {
-    file: null,
-    filename: "",
-    pulseTrains: [],
-    originalPulseTrains: [],
-    distimes: [],
-    originalDistimes: [],
-    artifactTimes: [],
-    gridNames: [],
-    muGridIndex: [],
-    fsamp: null,
-    totalSamples: 0,
-    currentMuGrid: 0,
-    currentMu: 0,
-    view: null,
-    selectionPulse: null,
-    selectionDr: null,
-    draftSelectionPulse: null,
-    draftSelectionDr: null,
-    mode: null,
-    dirty: false,
-    parameters: null,
-    flagged: [],
-    backup: null,
-    project: "",
-    editSignalToken: "",
-    muUids: [],
-    editHistory: [],
-    bookmarkPosition: null,
-    showBookmark: false,
-  };
+  state.edit = createEditSlice();
 }
 
 export function setRunDownloadInFlight(state, inFlight) {

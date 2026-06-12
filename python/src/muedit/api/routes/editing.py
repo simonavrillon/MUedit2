@@ -67,53 +67,53 @@ async def load_decomposition_by_path_endpoint(request: Request, payload: PathPay
 @router.post("/edit/save")
 async def save_edits_endpoint(payload: EditSavePayload) -> dict[str, Any]:
     """Persist edited decomposition to BIDS source tree."""
-    result = save_edits(payload.model_dump(exclude_none=True))
+    result = save_edits(payload)
     return success_payload(result)
 
 
 @router.post("/edit/update-filter")
 async def update_filter_endpoint(payload: EditFilterPayload) -> dict[str, Any]:
     """Recompute MU filter segment from raw BIDS EMG for one motor unit."""
-    return success_payload(update_filter(payload.model_dump(exclude_none=True)))
+    return success_payload(update_filter(payload))
 
 
 @router.post("/edit/add-spikes")
 async def add_spikes_endpoint(payload: EditRoiPayload) -> dict[str, Any]:
     """Add spikes inside the selected ROI using pulse-train thresholds."""
-    return success_payload(add_spikes(payload.model_dump(exclude_none=True)))
+    return success_payload(add_spikes(payload))
 
 
 @router.post("/edit/add-artifact")
 async def add_artifact_endpoint(payload: EditRoiPayload) -> dict[str, Any]:
     """Mark a peak in the ROI as an artifact; it will be excluded from filter updates."""
-    return success_payload(add_artifact(payload.model_dump(exclude_none=True)))
+    return success_payload(add_artifact(payload))
 
 
 @router.post("/edit/delete-spikes")
 async def delete_spikes_endpoint(payload: EditRoiPayload) -> dict[str, Any]:
     """Delete spikes inside the selected ROI using pulse-train thresholds."""
-    return success_payload(delete_spikes(payload.model_dump(exclude_none=True)))
+    return success_payload(delete_spikes(payload))
 
 
 @router.post("/edit/delete-dr")
 async def delete_dr_endpoint(payload: EditRoiPayload) -> dict[str, Any]:
     """Delete high discharge-rate spikes inside the selected ROI."""
-    return success_payload(delete_dr(payload.model_dump(exclude_none=True)))
+    return success_payload(delete_dr(payload))
 
 
 @router.post("/edit/remove-outliers")
 async def remove_outliers_endpoint(payload: EditOutliersPayload) -> dict[str, Any]:
     """Apply discharge-rate outlier removal for the selected motor unit."""
-    return success_payload(remove_outliers(payload.model_dump(exclude_none=True)))
+    return success_payload(remove_outliers(payload))
 
 
 @router.post("/edit/remove-duplicates")
 async def remove_duplicates_endpoint(payload: EditDeduplicatePayload) -> dict[str, Any]:
     """Remove duplicate motor units using lag-aware spike-train overlap."""
-    return success_payload(remove_duplicates_service(payload.model_dump(exclude_none=True)))
+    return success_payload(remove_duplicates_service(payload))
 
 
 @router.post("/edit/flag-mu")
 async def flag_mu_endpoint(payload: EditFlagPayload) -> dict[str, Any]:
     """Flag or unflag a motor unit for deletion/review in edit workflow."""
-    return success_payload(flag_mu(payload.model_dump(exclude_none=True)))
+    return success_payload(flag_mu(payload))

@@ -42,6 +42,15 @@ python/*.log
 # ── Frontend ────────────────────────────────────────────────────────────────
 frontend/node_modules/
 
+# ── Linter & formatter configs and caches (local dev only) ──────────────────
+.eslintcache
+.prettiercache
+.stylelintcache
+frontend/eslint.config.js
+frontend/.prettierrc.json
+frontend/.prettierignore
+frontend/package-lock.json
+
 # ── EMG data files ──────────────────────────────────────────────────────────
 *.mat
 *.bdf

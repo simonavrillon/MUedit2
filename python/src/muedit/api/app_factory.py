@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from muedit.api.errors import register_exception_handlers
 
 
-def create_app(title: str = "MUedit API", version: str = "2.0") -> FastAPI:
+def create_app(title: str = "MUedit API", version: str = "2.1.0") -> FastAPI:
     """Create FastAPI app with CORS and canonical exception handlers."""
     app = FastAPI(title=title, version=version)
     app.add_middleware(

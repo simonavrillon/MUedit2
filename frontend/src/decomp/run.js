@@ -152,6 +152,21 @@ export async function runDecomposition(deps) {
     const muscleNames =
       typeof getBidsMuscleNames === "function" ? getBidsMuscleNames() : [];
     if (muscleNames.length) bidsEntities.target_muscle = muscleNames;
+    const powerlineFreq = Number(els.bidsPowerlineFreq?.value || 50);
+    if (powerlineFreq) bidsEntities.powerline_freq = powerlineFreq;
+    const manufacturer = String(els.bidsManufacturer?.value || "").trim();
+    if (manufacturer) bidsEntities.manufacturer = manufacturer;
+    const deviceModel = String(els.bidsDeviceModel?.value || "").trim();
+    if (deviceModel) bidsEntities.manufacturers_model_name = deviceModel;
+    const placementScheme = String(els.bidsPlacementScheme?.value || "").trim();
+    if (placementScheme) bidsEntities.placement_scheme = placementScheme;
+    const placementDesc = String(
+      els.bidsPlacementDescription?.value || "",
+    ).trim();
+    if (placementDesc)
+      bidsEntities.placement_scheme_description = placementDesc;
+    const taskDescription = String(els.bidsTaskDescription?.value || "").trim();
+    if (taskDescription) bidsEntities.task_description = taskDescription;
     if (Object.keys(bidsEntities).length) {
       formData.append("bids_entities", JSON.stringify(bidsEntities));
     }

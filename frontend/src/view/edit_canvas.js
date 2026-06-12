@@ -1,3 +1,9 @@
+/**
+ * Edit-stage canvas rendering and pointer interaction: pulse-train and
+ * discharge-rate plots, the navigation timeline, the bookmark marker, and the
+ * drag-to-select ROI handlers. Selection gestures update draft/committed
+ * selection state via the action helpers; the container re-renders in response.
+ */
 import { UNIFORM_PULSE_COLOR } from "../config.js";
 import {
   clearEditDrSelections,
@@ -17,7 +23,10 @@ function renderBookmark(canvas, state, muIdx, view, getCanvasPlotMetrics) {
   const ctx = canvas.getContext("2d");
   const metrics = getCanvasPlotMetrics(canvas, true, { hideYAxis: false });
 
-  const bookmarkPos = Math.max(view.start, Math.min(view.end - 1, bookmark.position));
+  const bookmarkPos = Math.max(
+    view.start,
+    Math.min(view.end - 1, bookmark.position),
+  );
   const frac = (bookmarkPos - view.start) / Math.max(1, view.end - view.start);
   const x = metrics.padding.left + frac * metrics.plotWidth;
 
@@ -71,7 +80,10 @@ export function renderEditExplorer(deps) {
   const artifactVals = artifacts.map((s) => pulse?.[s] ?? 0);
   const { COLORS } = deps;
   const pulseCanvas = els?.editPulseCanvas || "editPulseCanvas";
-  const canvasEl = typeof pulseCanvas === "string" ? document.getElementById(pulseCanvas) : pulseCanvas;
+  const canvasEl =
+    typeof pulseCanvas === "string"
+      ? document.getElementById(pulseCanvas)
+      : pulseCanvas;
   drawSeries(
     pulseCanvas,
     pulse,
@@ -88,12 +100,24 @@ export function renderEditExplorer(deps) {
       fsamp: state.edit.fsamp,
       markerColor: COLORS.muPurple,
       extraMarkers: artifacts.length
-        ? [{ positions: artifacts, values: artifactVals, color: COLORS.artifactMarker }]
+        ? [
+            {
+              positions: artifacts,
+              values: artifactVals,
+              color: COLORS.artifactMarker,
+            },
+          ]
         : [],
     },
   );
   if (canvasEl) {
-    renderBookmark(canvasEl, state, muIdx, state.edit.view, getCanvasPlotMetrics);
+    renderBookmark(
+      canvasEl,
+      state,
+      muIdx,
+      state.edit.view,
+      getCanvasPlotMetrics,
+    );
   }
   renderInstantaneousDr();
 }
@@ -296,7 +320,7 @@ export function bindEditCanvas(deps) {
 }
 
 export function renderEditTimeline(deps) {
-  const { els, state, COLORS, getDisplayPulse } = deps;
+  const { els, state, getDisplayPulse } = deps;
   const canvas = els?.editTimelineCanvas;
   if (!canvas) return;
 
@@ -324,10 +348,18 @@ export function renderEditTimeline(deps) {
   // Last edit action for this MU: green = added, red = removed
   const muUid = state.edit.muUids?.[muIdx];
   if (muUid && Array.isArray(state.edit.editHistory)) {
-    const lastEntry = [...state.edit.editHistory].reverse().find((e) => e.mu_uid === muUid);
+    const lastEntry = [...state.edit.editHistory]
+      .reverse()
+      .find((e) => e.mu_uid === muUid);
     if (lastEntry) {
-      const added = [...(lastEntry.spikes_added || []), ...(lastEntry.artifacts_added || [])];
-      const removed = [...(lastEntry.spikes_removed || []), ...(lastEntry.artifacts_removed || [])];
+      const added = [
+        ...(lastEntry.spikes_added || []),
+        ...(lastEntry.artifacts_added || []),
+      ];
+      const removed = [
+        ...(lastEntry.spikes_removed || []),
+        ...(lastEntry.artifacts_removed || []),
+      ];
       ctx.fillStyle = "rgba(74,222,128,0.85)";
       added.forEach((s) => {
         ctx.fillRect(padL + Math.round((s / total) * bw), barTop, 2, barH);
@@ -372,7 +404,8 @@ export function bindEditTimeline(deps) {
   let dragViewStart = 0;
   let didMove = false;
 
-  const getTotal = () => (getDisplayPulse(state.edit.currentMu ?? 0) || []).length;
+  const getTotal = () =>
+    (getDisplayPulse(state.edit.currentMu ?? 0) || []).length;
 
   const fracFromClientX = (clientX) => {
     const rect = canvas.getBoundingClientRect();
@@ -401,8 +434,14 @@ export function bindEditTimeline(deps) {
     const span = view.end - view.start;
     let s = dragViewStart + delta;
     let e2 = s + span;
-    if (s < 0) { e2 -= s; s = 0; }
-    if (e2 > total) { s = Math.max(0, s - (e2 - total)); e2 = total; }
+    if (s < 0) {
+      e2 -= s;
+      s = 0;
+    }
+    if (e2 > total) {
+      s = Math.max(0, s - (e2 - total));
+      e2 = total;
+    }
     setEditView(state, { start: s, end: e2 });
     renderEditExplorer();
   });
@@ -418,8 +457,14 @@ export function bindEditTimeline(deps) {
     const frac = fracFromClientX(e.clientX);
     let s = Math.round(frac * total - span / 2);
     let e2 = s + span;
-    if (s < 0) { e2 -= s; s = 0; }
-    if (e2 > total) { s = Math.max(0, s - (e2 - total)); e2 = total; }
+    if (s < 0) {
+      e2 -= s;
+      s = 0;
+    }
+    if (e2 > total) {
+      s = Math.max(0, s - (e2 - total));
+      e2 = total;
+    }
     setEditView(state, { start: s, end: e2 });
     renderEditExplorer();
   });

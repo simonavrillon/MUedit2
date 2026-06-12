@@ -251,13 +251,14 @@ export async function requestPreview(deps, options = {}) {
     setAuxData(state, data.auxiliary || [], data.auxiliary_names || []);
     if (els.fsamp) {
       const fs = Number(data.fsamp);
-      els.fsamp.value = Number.isFinite(fs) && fs > 0 ? String(Math.round(fs)) : "";
+      els.fsamp.value =
+        Number.isFinite(fs) && fs > 0 ? String(Math.round(fs)) : "";
     }
     setPreviewSeries(state, data.mean_abs || []);
     populateAuxSelector();
     ensureDiscardMasks();
     populateGridTabs();
-    const nwin = Number(els.nwindows?.value) ?? 1;
+    const nwin = Number(els.nwindows?.value) || 1;
     const defaultEnd = state.seriesLength || 0;
     const rois = [];
     for (let i = 0; i < nwin; i++) {
@@ -277,6 +278,20 @@ export async function requestPreview(deps, options = {}) {
     setCurrentStage(state, "qc");
     renderBidsAutoInfo();
     renderBidsMuscleFields();
+
+    // Populate participant and hardware fields from BIDS sidecars when available.
+    const participant = data?.participant_meta || {};
+    const naToEmpty = (v) => (!v || v === "n/a" ? "" : v);
+    if (els.bidsParticipantAge && participant.age != null)
+      els.bidsParticipantAge.value = naToEmpty(participant.age);
+    if (els.bidsParticipantSex && participant.sex != null)
+      els.bidsParticipantSex.value = naToEmpty(participant.sex);
+    if (els.bidsParticipantHandedness && participant.handedness != null)
+      els.bidsParticipantHandedness.value = naToEmpty(participant.handedness);
+    if (els.bidsManufacturer && data?.manufacturer)
+      els.bidsManufacturer.value = data.manufacturer;
+    if (els.bidsDeviceModel && data?.manufacturers_model_name)
+      els.bidsDeviceModel.value = data.manufacturers_model_name;
     updateProgress(0, "Preview ready - drag to select ROI");
     setStatus("Preview ready", "success");
     showWorkspace({ keepLandingVisible: true });

@@ -36,7 +36,9 @@ export function buildRunMuDropdownModel(deps) {
 
 export function buildRunMuExplorerModel(deps) {
   const { state, fsamp = null } = deps;
-  const allPulses = Array.isArray(state.muPulseTrains) ? state.muPulseTrains : [];
+  const allPulses = Array.isArray(state.muPulseTrains)
+    ? state.muPulseTrains
+    : [];
   const currentMu = Number(state.currentMu);
   let muIdx =
     Number.isFinite(currentMu) && currentMu >= 0 ? Math.floor(currentMu) : 0;

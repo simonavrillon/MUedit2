@@ -45,7 +45,8 @@ export function createUiService(deps) {
 
   function setRunPhase(pct, message = "", stage = "") {
     if (!els.runPhase) return;
-    const stageText = typeof stage === "string" ? stage.trim().toLowerCase() : "";
+    const stageText =
+      typeof stage === "string" ? stage.trim().toLowerCase() : "";
     const messageText = typeof message === "string" ? message.trim() : "";
     const msgLower = messageText.toLowerCase();
     let phase = "Idle";
@@ -139,7 +140,8 @@ export function createUiService(deps) {
 
   function applyToggle(btn, on) {
     if (!btn) return;
-    const label = btn.dataset.label || btn.textContent.split(":")[0] || "Toggle";
+    const label =
+      btn.dataset.label || btn.textContent.split(":")[0] || "Toggle";
     btn.dataset.state = on ? "on" : "off";
     btn.setAttribute("aria-pressed", on ? "true" : "false");
     btn.classList.toggle("on", on);

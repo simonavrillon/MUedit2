@@ -1,7 +1,6 @@
 import {
   clearEditHistoryForMu,
   clearAllEditSelections,
-  clearEditPulseSelections,
   resetEditSlice,
   setEditBackup,
   setEditCurrentMu,
@@ -315,7 +314,8 @@ export function duplicateMu(deps) {
     .filter((uid) => uid.startsWith(prefix))
     .map((uid) => parseInt(uid.slice(prefix.length), 10))
     .filter((n) => Number.isFinite(n));
-  const newCount = existingCounts.length > 0 ? Math.max(...existingCounts) + 1 : 0;
+  const newCount =
+    existingCounts.length > 0 ? Math.max(...existingCounts) + 1 : 0;
   const newUid = `${prefix}${newCount}`;
 
   const newIdx = state.edit.distimes.length;
@@ -334,7 +334,11 @@ export function duplicateMu(deps) {
 
   if (deps.appendEditHistory) {
     const sourceUid = state.edit.muUids?.[muIdx] ?? `mu${muIdx}`;
-    deps.appendEditHistory({ type: "duplicate_mu", mu_uid: newUid, source_mu_uid: sourceUid });
+    deps.appendEditHistory({
+      type: "duplicate_mu",
+      mu_uid: newUid,
+      source_mu_uid: sourceUid,
+    });
   }
 
   setEditCurrentMuGrid(state, gridIdx, { resetView: false });

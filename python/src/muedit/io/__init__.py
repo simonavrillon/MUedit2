@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from muedit.io.factory import (
-    LoaderFactory,
     LoaderFn,
     clone_signal,
     get_loader,
@@ -13,7 +12,6 @@ from muedit.io.factory import (
 )
 
 __all__ = [
-    "LoaderFactory",
     "LoaderFn",
     "clone_signal",
     "get_loader",

@@ -186,10 +186,10 @@ def postprocess_step(
             acquisition=(bids_entities or {}).get("acquisition"),
             recording=(bids_entities or {}).get("recording"),
         )
-        base_dir = Path(bids_root) / f"sub-{subj}"
+        decomp_dir = Path(bids_root) / "derivatives" / "muedit" / f"sub-{subj}"
         if sess:
-            base_dir = base_dir / f"ses-{sess}"
-        decomp_dir = base_dir / "decomp"
+            decomp_dir = decomp_dir / f"ses-{sess}"
+        decomp_dir = decomp_dir / "decomp"
         decomp_dir.mkdir(parents=True, exist_ok=True)
         out_path = decomp_dir / f"{entity_label}_decomp.npz"
         _save_npz_with_app_schema(
@@ -232,7 +232,22 @@ def export_step(
     bids_entity_label = prep.loader_meta.get("bids_entity_label")
     bids_emg_path = prep.loader_meta.get("bids_emg_path")
     if bids_entity_label and bids_emg_path:
-        decomp_dir = Path(bids_emg_path).parent.parent / "decomp"
+        _emg_parts = list(Path(bids_emg_path).resolve().parts)
+        _sub_idx = next((i for i, p in enumerate(_emg_parts) if p.lower().startswith("sub-")), -1)
+        if _sub_idx > 0:
+            _bids_rt = Path(*_emg_parts[:_sub_idx])
+            _subj = _emg_parts[_sub_idx][4:]
+            _sess = None
+            for _tok in str(bids_entity_label).split("_"):
+                if _tok.startswith("ses-") and len(_tok) > 4:
+                    _sess = _tok[4:]
+                    break
+            decomp_dir = _bids_rt / "derivatives" / "muedit" / f"sub-{_subj}"
+            if _sess:
+                decomp_dir = decomp_dir / f"ses-{_sess}"
+            decomp_dir = decomp_dir / "decomp"
+        else:
+            decomp_dir = Path(bids_emg_path).parent.parent / "decomp"
         decomp_dir.mkdir(parents=True, exist_ok=True)
         save_path = str(decomp_dir / f"{bids_entity_label}_decomp.npz")
     else:

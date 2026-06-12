@@ -24,7 +24,6 @@ export function createRunStageService(deps) {
     els,
     API_BASE,
     apiFetch,
-    COLORS,
     drawSeries,
     drawGridOverlay,
     getSuggestedNpzName,
@@ -182,7 +181,7 @@ export function setupRunEvents(deps) {
 
   if (els.nwindows) {
     els.nwindows.addEventListener("change", (e) => {
-      const nwin = Number(els.nwindows.value) ?? 1;
+      const nwin = Number(els.nwindows.value) || 1;
       syncRois(nwin);
       refreshVisuals();
       e.target.blur();

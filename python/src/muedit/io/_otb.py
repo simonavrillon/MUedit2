@@ -680,6 +680,7 @@ def load_otb_plus(filepath: str) -> dict[str, Any]:
             "acquisition_date": date_node,
             "manufacturer": "OT Bioelettronica",
             "device_name": device_name,
+            "software_versions": "OTBioLab+",
             "ad_bits": ad_bits,
             "coordinates": coordinates,
             "ieds": ieds,
@@ -699,6 +700,9 @@ def load_otb_plus(filepath: str) -> dict[str, Any]:
             ),
             "aux_hpf": aux_hpf.tolist() if isinstance(aux_hpf, np.ndarray) else aux_hpf,
             "aux_lpf": aux_lpf.tolist() if isinstance(aux_lpf, np.ndarray) else aux_lpf,
+            "units": "uV",
+            "recording_type": "continuous",
+            "software_filters": "n/a",
         }
 
         return {
@@ -706,7 +710,6 @@ def load_otb_plus(filepath: str) -> dict[str, Any]:
             "fsamp": sample_freq,
             "gridname": unique_grids,
             "muscle": unique_muscles,
-            "device_name": device_name,
             "auxiliary": auxiliary,
             "auxiliaryname": aux_names,
             "emgnotgrid": emg_not_grid,
@@ -778,6 +781,7 @@ def load_otb4(filepath: str) -> dict[str, Any]:
             "acquisition_date": None,
             "manufacturer": "OT Bioelettronica",
             "device_name": device,
+            "software_versions": "OTBIOLAB26",
             "ad_bits": None,
             "coordinates": coordinates,
             "ieds": ieds,
@@ -791,6 +795,9 @@ def load_otb4(filepath: str) -> dict[str, Any]:
             "emg_lpf": ch.emg_lpf if ch.emg_lpf else ["n/a"] * len(ch.emg_gains),
             "aux_hpf": ch.aux_hpf if ch.aux_hpf else ["n/a"] * len(ch.aux_gains),
             "aux_lpf": ch.aux_lpf if ch.aux_lpf else ["n/a"] * len(ch.aux_gains),
+            "units": "uV",
+            "recording_type": "continuous",
+            "software_filters": "n/a",
         }
 
         return {
@@ -798,7 +805,6 @@ def load_otb4(filepath: str) -> dict[str, Any]:
             "fsamp": float(ch.fs_out),
             "gridname": refined_grid_names,
             "muscle": [],
-            "device_name": device,
             "auxiliary": _sanitize_array(ch.auxiliary),
             "auxiliaryname": ch.auxiliary_names,
             "emgnotgrid": _sanitize_array(ch.emg_not_grid),

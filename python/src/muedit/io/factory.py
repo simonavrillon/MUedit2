@@ -77,47 +77,10 @@ def get_loader(filepath: str | Path) -> LoaderFn:
     return loader
 
 
-class _RegisteredSignalLoader:
-    """Compatibility wrapper exposing a ``load`` method around a registered function."""
-
-    def __init__(self, loader_fn: LoaderFn) -> None:
-        self._loader_fn = loader_fn
-
-    def load(self, filepath: str) -> SignalImport:
-        """Load a signal and normalize to ``SignalImport``."""
-        return _as_signal_import(self._loader_fn(filepath))
-
-
-class LoaderFactory:
-    """Compatibility facade over the registry-based loader dispatch."""
-
-    @classmethod
-    def register_loader(
-        cls, ext: str, loader: LoaderFn, *, overwrite: bool = False
-    ) -> None:
-        """Register loader for extension via class facade."""
-        register_loader(ext, loader, overwrite=overwrite)
-
-    @classmethod
-    def supported_extensions(cls) -> tuple[str, ...]:
-        """Return sorted tuple of registered extensions."""
-        return supported_extensions()
-
-    @classmethod
-    def create_loader(cls, filepath: str | Path) -> _RegisteredSignalLoader:
-        """Return loader object with ``load`` method for filepath extension."""
-        return _RegisteredSignalLoader(get_loader(filepath))
-
-    @classmethod
-    def load_signal(cls, filepath: str | Path) -> SignalImport:
-        """Load a signal path using the registered extension loader."""
-        loader_fn = get_loader(filepath)
-        return _as_signal_import(loader_fn(str(filepath)))
-
-
 def load_signal(filepath: str) -> dict[str, Any]:
     """Load a raw signal file and normalize it to the internal mapping shape."""
-    return LoaderFactory.load_signal(filepath).to_dict()
+    loader_fn = get_loader(filepath)
+    return _as_signal_import(loader_fn(str(filepath))).to_dict()
 
 
 def clone_signal(signal: dict[str, Any]) -> dict[str, Any]:
@@ -126,7 +89,6 @@ def clone_signal(signal: dict[str, Any]) -> dict[str, Any]:
 
 
 __all__ = [
-    "LoaderFactory",
     "LoaderFn",
     "clone_signal",
     "get_loader",

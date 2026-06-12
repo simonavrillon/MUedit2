@@ -1,4 +1,4 @@
-# MUedit (2.0)
+# MUedit
 
 Decomposes high-density EMG signals into motor unit pulse trains.
 
@@ -22,10 +22,10 @@ This software is functional and ready for use. The `adapt_decomp` feature still 
 | MATLAB | `.mat` | v5 and v7.3 (HDF5) signal structs |
 | OTB+ | `.otb+` | OT Biolab+ archive (tar/zip with XML + `.sig`) |
 | OTB4 | `.otb4` | OT Biolab4 proprietary binary format |
-| BIDS EMG | `.bdf`, `.edf` | BIDS-formatted recordings with `_emg_channels.tsv` sidecar |
+| BIDS EMG | `.bdf`, `.edf` | BIDS-formatted recordings with a `_channels.tsv` sidecar (legacy `_emg_channels.tsv` also accepted) |
 | Decomposition | `.npz` | Saved decomposition output (for editing) |
 
-For BIDS input, point to either the `*_emg.bdf/.edf` file directly or the `emg/` directory. The loader reads all grids and auxiliary channels defined in the accompanying `*_emg_channels.tsv`.
+For BIDS input, point to either the `*_emg.bdf/.edf` file directly. The loader reads all grids and auxiliary channels defined in the accompanying `*_channels.tsv`.
 
 ## Requirements
 
@@ -68,20 +68,6 @@ Windows first-time setup (if script execution is blocked):
 Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 ```
 
-## Configuration
-
-| Variable | Default | Description |
-|---|---|---|
-| `MUEDIT_HOST` | `0.0.0.0` | API bind host |
-| `MUEDIT_BACKEND_PORT` | `8000` | API port |
-| `MUEDIT_FRONTEND_PORT` | `8080` | Frontend port |
-| `MUEDIT_OPEN_BROWSER` | `1` | Set to `0` to skip auto-opening browser |
-
-Example (macOS/Linux):
-```bash
-MUEDIT_BACKEND_PORT=9000 MUEDIT_FRONTEND_PORT=9001 MUEDIT_OPEN_BROWSER=0 ./scripts/run_MUedit.sh
-```
-
 ## CLI Entrypoints
 
 After installation, MUedit exposes:
@@ -103,7 +89,7 @@ curl http://localhost:8000/api/v1/health
 
 - `python: command not found` — activate the conda env before launching.
 - Port already in use — set `MUEDIT_BACKEND_PORT` / `MUEDIT_FRONTEND_PORT` to free ports.
-- Browser does not open automatically — open `http://localhost:<MUEDIT_FRONTEND_PORT>` manually.
+- Browser does not open automatically — open `http://localhost:8080` manually.
 
 ## Documentation
 

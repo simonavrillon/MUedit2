@@ -12,6 +12,22 @@ import scipy.io
 from muedit.io._mat import _mat73_read, _parse_text_list
 from muedit.models import LoadedDecomposition
 
+# BIDS-facing metadata fields a loader may attach to the signal context. Single
+# source of truth shared with the API edit-signal cache so the two never drift.
+LOADER_BIDS_META_KEYS: tuple[str, ...] = (
+    "manufacturer",
+    "device_name",
+    "powerline_freq",
+    "gains",
+    "emg_hpf",
+    "emg_lpf",
+    "hardware_filters",
+    "units",
+    "recording_type",
+    "software_filters",
+    "software_versions",
+)
+
 DecompositionLoadTuple = tuple[
     Any,
     Any,
@@ -728,7 +744,10 @@ def load_decomposition_signal_context(filepath: str) -> dict[str, Any] | None:
 
     aux_names = _parse_text_list(_get_case_insensitive(signal, "auxiliaryname"))
 
-    return {
+    meta_raw = signal.get("metadata") or top.get("metadata") or {}
+    meta = meta_raw if isinstance(meta_raw, dict) else {}
+
+    ctx: dict[str, Any] = {
         "data": data_arr,
         "fsamp": fsamp,
         "grid_names": grid_names,
@@ -738,3 +757,7 @@ def load_decomposition_signal_context(filepath: str) -> dict[str, Any] | None:
         "aux_data": aux_data,
         "aux_names": aux_names,
     }
+    for key in LOADER_BIDS_META_KEYS:
+        if key in meta:
+            ctx[key] = meta[key]
+    return ctx

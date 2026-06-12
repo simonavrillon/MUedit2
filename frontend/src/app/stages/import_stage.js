@@ -49,7 +49,9 @@ export function createImportStageService(deps) {
       await handleRawFilePath(path, name);
       const lname = name.toLowerCase();
       if (lname.endsWith(".bdf") || lname.endsWith(".edf")) {
-        const entityLabel = name.replace(/_emg\.[^.]+$/i, "").replace(/\.[^.]+$/, "");
+        const entityLabel = name
+          .replace(/_emg\.[^.]+$/i, "")
+          .replace(/\.[^.]+$/, "");
         setBidsEntitiesInput({
           ...parseBidsEntitiesFromLabel(entityLabel),
           project: inferProjectFromPath(path),

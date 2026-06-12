@@ -1,3 +1,9 @@
+/**
+ * Low-level 2D-canvas drawing primitives (series traces, grid overlays, axes)
+ * shared across the QC, run, and edit stages. `getCanvasPlotMetrics` resolves
+ * the padding/scale box; the draw helpers map data coordinates into that box.
+ * Pure rendering — no application state is read or mutated here.
+ */
 import { COLORS } from "../config.js";
 
 export function getAxisPadding(showAxes) {
@@ -6,7 +12,11 @@ export function getAxisPadding(showAxes) {
     : { left: 0, right: 0, top: 0, bottom: 0 };
 }
 
-export function getCanvasPlotMetrics(canvas, showAxes, { hideYAxis = false } = {}) {
+export function getCanvasPlotMetrics(
+  canvas,
+  showAxes,
+  { hideYAxis = false } = {},
+) {
   const padding = showAxes
     ? hideYAxis
       ? { left: 8, right: 8, top: 8, bottom: 20 }
@@ -65,7 +75,10 @@ export function drawSeries(
       : getAxisPadding(true)
     : getAxisPadding(false);
   const plotWidth = Math.max(1, canvasEl.width - padding.left - padding.right);
-  const plotHeight = Math.max(1, canvasEl.height - padding.top - padding.bottom);
+  const plotHeight = Math.max(
+    1,
+    canvasEl.height - padding.top - padding.bottom,
+  );
 
   const startIdx = viewRange?.start ?? 0;
   const endIdx = viewRange?.end ?? series.length;

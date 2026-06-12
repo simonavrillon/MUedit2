@@ -9,7 +9,11 @@ import { apiFetch, apiJson, waitForBackend } from "./http.js";
 import {
   buildBidsAutoInfoModel as buildBidsAutoInfoModelFeature,
   buildBidsMuscleRowsModel as buildBidsMuscleRowsModelFeature,
+  buildEntityLabelFromSession,
   buildSessionInfoFromDecomposition as buildSessionInfoFromDecompositionFeature,
+  getSuggestedNpzName,
+  listifyMuscles,
+  parseBidsEntitiesFromLabel,
 } from "../io/bids.js";
 import {
   applySessionInfoToDom as applySessionInfoToDomController,
@@ -23,22 +27,25 @@ import {
   handleKeyboardNavigation as handleKeyboardNavigationFeature,
   setViewForStage as setViewForStageFeature,
 } from "./services/navigation.js";
-import { setupImportEvents } from "./stages/import_stage.js";
-import { setupRunEvents } from "./stages/run_stage.js";
-import { setupEditEvents } from "./stages/edit_stage.js";
-import { setupLayoutEvents } from "./stages/layout_stage.js";
+import {
+  createImportStageService,
+  setupImportEvents,
+} from "./stages/import_stage.js";
+import { createRunStageService, setupRunEvents } from "./stages/run_stage.js";
+import {
+  createEditStageService,
+  setupEditEvents,
+} from "./stages/edit_stage.js";
+import {
+  createLayoutStageService,
+  setupLayoutEvents,
+} from "./stages/layout_stage.js";
 import {
   drawGridOverlay,
   drawMiniSeries,
   drawSeries,
   getCanvasPlotMetrics,
 } from "../view/plots.js";
-import {
-  buildEntityLabelFromSession,
-  getSuggestedNpzName,
-  listifyMuscles,
-  parseBidsEntitiesFromLabel,
-} from "../io/bids.js";
 import { state } from "./state.js";
 import {
   ensureDiscardMasks as ensureDiscardMasksAction,
@@ -52,10 +59,6 @@ import { getCurrentGrid as getCurrentGridSelector } from "../state/selectors.js"
 import { createUiService } from "./services/ui.js";
 import { createFileSessionService } from "./services/file_session.js";
 import { createQcStageService } from "./stages/qc_stage.js";
-import { createRunStageService } from "./stages/run_stage.js";
-import { createEditStageService } from "./stages/edit_stage.js";
-import { createImportStageService } from "./stages/import_stage.js";
-import { createLayoutStageService } from "./stages/layout_stage.js";
 
 function nextFrame() {
   return new Promise((resolve) => {
@@ -78,16 +81,16 @@ function getCurrentGrid() {
 }
 
 function buildParams(isToggleOn) {
-  const niter = Number(els.niter?.value) ?? 150;
-  const nwindows = Number(els.nwindows?.value) ?? 1;
+  const niter = Number(els.niter?.value) || 150;
+  const nwindows = Number(els.nwindows?.value) || 1;
   const peelOn = isToggleOn(els.peelOffToggle);
   const adaptiveOn = isToggleOn(els.useAdaptiveToggle);
   const covOn = isToggleOn(els.covToggle);
   const silOn = isToggleOn(els.silToggle);
-  const peelWindow = Number(els.peelOffWindow?.value) ?? 25;
-  const covVal = Number(els.covValue?.value) ?? 0.5;
-  const silVal = Number(els.silValue?.value) ?? 0.9;
-  const duplicatesthresh = Number(els.duplicatesthresh?.value) ?? 0.3;
+  const peelWindow = Number(els.peelOffWindow?.value) || 25;
+  const covVal = Number(els.covValue?.value) || 0.5;
+  const silVal = Number(els.silValue?.value) || 0.9;
+  const duplicatesthresh = Number(els.duplicatesthresh?.value) || 0.3;
 
   return {
     niter,
@@ -113,11 +116,30 @@ function applySessionInfoFromDecomposition(file, data = {}) {
   });
   applySessionInfoToDomController(els, payload);
   setMuscleAction(state, payload.muscles);
+  state.edit.softwareVersions = payload.bids?.softwareVersions ?? null;
 }
 
 function renderBidsAutoInfo() {
   const model = buildBidsAutoInfoModelFeature(state);
   renderBidsAutoInfoController(els, model);
+  // Pre-fill editable hardware fields from loader metadata when empty.
+  if (model && !model.hidden) {
+    if (
+      els.bidsManufacturer &&
+      !els.bidsManufacturer.value &&
+      model.manufacturer
+    )
+      els.bidsManufacturer.value = model.manufacturer;
+    if (els.bidsDeviceModel && !els.bidsDeviceModel.value && model.deviceName)
+      els.bidsDeviceModel.value = model.deviceName;
+    const meta = state.metadata || {};
+    if (
+      els.bidsPowerlineFreq &&
+      !els.bidsPowerlineFreq.value &&
+      meta.powerline_freq
+    )
+      els.bidsPowerlineFreq.value = String(meta.powerline_freq);
+  }
 }
 
 function renderBidsMuscleFields() {
@@ -126,13 +148,11 @@ function renderBidsMuscleFields() {
 }
 
 async function persistNpzBySaveTarget(payload, fallbackName, fileSession, ui) {
+  const { subject, task, session, run } = fileSession.getBidsEntityInputs();
   const entityLabel =
-    buildEntityLabelFromSession(
-      els.bidsSubject?.value,
-      els.bidsTask?.value,
-      els.bidsSession?.value,
-      els.bidsRun?.value,
-    ) || payload.entity_label;
+    buildEntityLabelFromSession(subject, task, session, run) ||
+    payload.entity_label;
+
   const data = await apiJson(
     `${API_BASE}/edit/save`,
     {
@@ -142,7 +162,7 @@ async function persistNpzBySaveTarget(payload, fallbackName, fileSession, ui) {
         ...payload,
         file_label: payload.file_label || fallbackName || "decomposition.npz",
         entity_label: entityLabel,
-        project: fileSession.getBidsProject(),
+        ...fileSession.getBidsSaveFields(),
       }),
     },
     120000,
@@ -151,6 +171,13 @@ async function persistNpzBySaveTarget(payload, fallbackName, fileSession, ui) {
   return { mode: "saved", path: data.path || "" };
 }
 
+// The QC, run, and edit stages reference each other (e.g. run renders QC,
+// navigation drives both explorers), so they cannot be constructed in a single
+// dependency order. They are declared here and assigned further below once all
+// three factories have run. The wrapper functions that follow forward to the
+// late-bound instances with optional chaining, so they are safe to pass into
+// other services before assignment completes — prefer reusing these wrappers
+// over re-creating inline `(...args) => stage.fn(...args)` thunks.
 let qcStage;
 let runStage;
 let editStage;
@@ -206,7 +233,7 @@ function setViewForStage(stage, view) {
   setViewForStageFeature(
     {
       state,
-      renderEditExplorer: () => editStage.renderEditExplorer(),
+      renderEditExplorer,
       renderMuExplorer: () => runStage.renderMuExplorer(),
     },
     stage,
@@ -223,7 +250,7 @@ function goToMu(direction, stage) {
     {
       state,
       getEditMuIndicesForGrid: (gridIdx) => editStage.getEditMuIndices(gridIdx),
-      renderEditExplorer: () => editStage.renderEditExplorer(),
+      renderEditExplorer,
       getMuIndicesForGrid: (gridIdx) => runStage.getMuIndicesForGrid(gridIdx),
       renderMuExplorer: () => runStage.renderMuExplorer(),
     },
@@ -234,8 +261,14 @@ function goToMu(direction, stage) {
 
 function refreshEditModeButtons() {
   ui.setEditActionBusy(els.editAddBtn, state.edit.mode === "add");
-  ui.setEditActionBusy(els.editAddArtifactBtn, state.edit.mode === "add_artifact");
-  ui.setEditActionBusy(els.editDeleteSpikeBtn, state.edit.mode === "delete_spikes");
+  ui.setEditActionBusy(
+    els.editAddArtifactBtn,
+    state.edit.mode === "add_artifact",
+  );
+  ui.setEditActionBusy(
+    els.editDeleteSpikeBtn,
+    state.edit.mode === "delete_spikes",
+  );
   if (els.editUndoBtn) els.editUndoBtn.disabled = !state.edit.backup;
 }
 
@@ -309,7 +342,7 @@ runStage = createRunStageService({
   setStatus: ui.setStatus,
   updateProgress: ui.updateProgress,
   ensureDiscardMasks,
-  renderChannelQC: (...args) => qcStage.renderChannelQC(...args),
+  renderChannelQC,
   getCurrentGrid,
   requestQcGridWindow: (...args) => qcStage.requestQcGridWindow(...args),
   showWorkspace: ui.showWorkspace,
@@ -333,7 +366,8 @@ qcStage = createQcStageService({
   setStatus: ui.setStatus,
   updateProgress: ui.updateProgress,
   setUploadLoading: fileSession.setUploadLoading,
-  showUnsupportedUploadFormatError: fileSession.showUnsupportedUploadFormatError,
+  showUnsupportedUploadFormatError:
+    fileSession.showUnsupportedUploadFormatError,
   clearUploadFormatError: fileSession.clearUploadFormatError,
   isSupportedSignalFile: fileSession.isSupportedSignalFile,
   detectLandingFileType: fileSession.detectLandingFileType,
@@ -358,15 +392,18 @@ const importStage = createImportStageService({
   setStatus: ui.setStatus,
   clearUploadFormatError: fileSession.clearUploadFormatError,
   setUploadLoading: fileSession.setUploadLoading,
-  showUnsupportedUploadFormatError: fileSession.showUnsupportedUploadFormatError,
+  showUnsupportedUploadFormatError:
+    fileSession.showUnsupportedUploadFormatError,
   detectLandingFileType: fileSession.detectLandingFileType,
   handleRawFilePath: (...args) => qcStage.handleRawFilePath(...args),
   loadDecompositionForEditByPath: (...args) =>
     editStage.loadDecompositionForEditByPath(...args),
   setBidsEntitiesInput: (entities) => {
-    if (els.bidsSubject && entities.subject) els.bidsSubject.value = entities.subject;
+    if (els.bidsSubject && entities.subject)
+      els.bidsSubject.value = entities.subject;
     if (els.bidsTask && entities.task) els.bidsTask.value = entities.task;
-    if (els.bidsSession && entities.session) els.bidsSession.value = entities.session;
+    if (els.bidsSession && entities.session)
+      els.bidsSession.value = entities.session;
     if (els.bidsRun && entities.run) els.bidsRun.value = entities.run;
     if (els.bidsProject && entities.project) {
       els.bidsProject.value = entities.project;
@@ -410,7 +447,7 @@ function wireEvents() {
     runDecomposition: () => runStage.runDecomposition(),
     enableRoiSelection: (id) => qcStage.enableRoiSelection(id),
     syncRois: (nwin) => qcStage.syncRois(nwin),
-    refreshVisuals: () => qcStage.refreshVisuals(),
+    refreshVisuals,
     setupToggle: ui.setupToggle,
     setupLockedOnToggle: ui.setupLockedOnToggle,
     toggleConditional: ui.toggleConditional,
@@ -425,7 +462,7 @@ function wireEvents() {
     bindEditCanvas: () => editStage.bindEditCanvas(),
     bindEditDrCanvas: () => editStage.bindEditDrCanvas(),
     bindEditTimeline: () => editStage.bindEditTimeline(),
-    renderEditExplorer: () => editStage.renderEditExplorer(),
+    renderEditExplorer,
     runEditAction: ui.runEditAction,
     saveEditedFile: () => editStage.saveEditedFile(),
     resetCurrentMuEdits: () => editStage.resetCurrentMuEdits(),

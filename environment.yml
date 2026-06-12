@@ -19,6 +19,11 @@ dependencies:
   - fastapi=0.115.5
   - uvicorn=0.32.0
   - python-multipart=0.0.12
+  # Notebooks (utilities under notebooks/)
+  - jupyterlab=4.2.5
+  - ipykernel=6.29.5
+  # Schema-based BIDS validator used by the metadata notebook (run via `deno run`)
+  - deno=2.8.0
   - pip:
     # EMG / EEG file I/O
     - pyedflib==0.1.42

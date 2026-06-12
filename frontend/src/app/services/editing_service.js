@@ -1,3 +1,10 @@
+/**
+ * Edit-stage application service: ROI edits, filter recomputation, dedup,
+ * flagging, and decomposition load/save. Every exported action takes a `deps`
+ * object (injected from the container) so this module stays free of direct DOM
+ * or transport coupling. State mutations go exclusively through the action
+ * helpers imported from `state/actions.js`.
+ */
 import { handleError } from "./error_service.js";
 import { decodeEditLoadPayload } from "../../api/binary_payloads.js";
 import { normalizeEditLoadPayload } from "../../api/payloads.js";
@@ -37,6 +44,8 @@ import {
   setMuscle,
 } from "../../state/actions.js";
 
+// Compare a motor unit's spike times before/after an edit. The added/removed
+// lists feed the edit-history log so individual edits can be reverted per MU.
 function spikesDiff(before, after) {
   const afterSet = new Set(after);
   const beforeSet = new Set(before);
@@ -46,6 +55,8 @@ function spikesDiff(before, after) {
   };
 }
 
+// Assign stable per-grid MU identifiers ("g<grid>_mu<n>") used to correlate
+// motor units with editlog entries across reloads. Numbering restarts per grid.
 function generateMuUids(muGridIndex) {
   const counts = {};
   return (muGridIndex || []).map((gridIdx) => {
@@ -70,7 +81,9 @@ export async function requestRoiEdit(deps, action, payload) {
   } = deps;
 
   const distimesBefore = [...(state.edit.distimes?.[payload.muIdx] || [])];
-  const artifactsBefore = [...(state.edit.artifactTimes?.[payload.muIdx] || [])];
+  const artifactsBefore = [
+    ...(state.edit.artifactTimes?.[payload.muIdx] || []),
+  ];
   const isArtifact = action === "add-artifact";
   try {
     setEditStatus("Applying ROI...", "muted");
@@ -86,18 +99,23 @@ export async function requestRoiEdit(deps, action, payload) {
         x_end: payload.xEnd,
         y_min: payload.yMin,
         y_max: payload.yMax,
-        artifact_times: payload.artifact_times !== undefined
-          ? payload.artifact_times
-          : isArtifact
-            ? (state.edit.artifactTimes?.[payload.muIdx] || [])
-            : undefined,
+        artifact_times:
+          payload.artifact_times !== undefined
+            ? payload.artifact_times
+            : isArtifact
+              ? state.edit.artifactTimes?.[payload.muIdx] || []
+              : undefined,
       }),
     });
     if (data.distimes !== undefined) {
       setEditDistimesForMu(state, payload.muIdx, data.distimes || []);
     }
     if (data.artifact_times !== undefined) {
-      setEditArtifactTimesForMu(state, payload.muIdx, data.artifact_times || []);
+      setEditArtifactTimesForMu(
+        state,
+        payload.muIdx,
+        data.artifact_times || [],
+      );
     }
     ensureEditFlagged();
     setEditFlagForMu(state, payload.muIdx, false);
@@ -107,7 +125,10 @@ export async function requestRoiEdit(deps, action, payload) {
       if (action === "delete-spikes") {
         // Create separate log entries for spikes and artifacts
         const distimesAfter = state.edit.distimes?.[payload.muIdx] || [];
-        const { removed: spikesRemoved } = spikesDiff(distimesBefore, distimesAfter);
+        const { removed: spikesRemoved } = spikesDiff(
+          distimesBefore,
+          distimesAfter,
+        );
         if (spikesRemoved.length) {
           deps.appendEditHistory({
             type: "delete_spikes",
@@ -117,7 +138,10 @@ export async function requestRoiEdit(deps, action, payload) {
         }
 
         const artifactsAfter = state.edit.artifactTimes?.[payload.muIdx] || [];
-        const { removed: artifactsRemoved } = spikesDiff(artifactsBefore, artifactsAfter);
+        const { removed: artifactsRemoved } = spikesDiff(
+          artifactsBefore,
+          artifactsAfter,
+        );
         if (artifactsRemoved.length) {
           deps.appendEditHistory({
             type: "delete_artifact",
@@ -127,11 +151,19 @@ export async function requestRoiEdit(deps, action, payload) {
         }
       } else {
         // Keep existing behavior for other actions
-        const typeMap = { "add-spikes": "add_spikes", "delete-dr": "delete_dr", "add-artifact": "add_artifact" };
+        const typeMap = {
+          "add-spikes": "add_spikes",
+          "delete-dr": "delete_dr",
+          "add-artifact": "add_artifact",
+        };
         const entry = { type: typeMap[action] || action, mu_uid: muUid };
         if (isArtifact) {
-          const artifactsAfter = state.edit.artifactTimes?.[payload.muIdx] || [];
-          const { added: artifactsAdded } = spikesDiff(artifactsBefore, artifactsAfter);
+          const artifactsAfter =
+            state.edit.artifactTimes?.[payload.muIdx] || [];
+          const { added: artifactsAdded } = spikesDiff(
+            artifactsBefore,
+            artifactsAfter,
+          );
           if (artifactsAdded.length) entry.artifacts_added = artifactsAdded;
         } else {
           const distimesAfter = state.edit.distimes?.[payload.muIdx] || [];
@@ -142,7 +174,9 @@ export async function requestRoiEdit(deps, action, payload) {
         deps.appendEditHistory(entry);
       }
     }
-    const bookmarkPos = Math.round((payload.xStart + (payload.xEnd ?? payload.xStart)) / 2);
+    const bookmarkPos = Math.round(
+      (payload.xStart + (payload.xEnd ?? payload.xStart)) / 2,
+    );
     setEditBookmark(state, { muIdx: payload.muIdx, position: bookmarkPos });
     setShowBookmark(state, false);
 
@@ -170,7 +204,6 @@ export async function requestFilterUpdate(deps, mode) {
     setEditStatus,
     getRawPulse,
     backupEditMu,
-    buildEntityLabelFromSession,
     ensureEditFlagged,
     setEditBookmark,
     setShowBookmark,
@@ -231,7 +264,14 @@ export async function requestFilterUpdate(deps, mode) {
       const { added, removed } = spikesDiff(distimesBefore, distimesAfter);
       const peeloff = els.editPeelOffToggle?.dataset.state === "on";
       const lockSpikes = els.editLockSpikesToggle?.dataset.state === "on";
-      const entry = { type: "update_filter", mu_uid: muUid, view_start: start, view_end: end, use_peeloff: peeloff, lock_spikes: lockSpikes };
+      const entry = {
+        type: "update_filter",
+        mu_uid: muUid,
+        view_start: start,
+        view_end: end,
+        use_peeloff: peeloff,
+        lock_spikes: lockSpikes,
+      };
       if (added.length) entry.spikes_added = added;
       if (removed.length) entry.spikes_removed = removed;
       deps.appendEditHistory(entry);
@@ -294,10 +334,16 @@ export async function removeOutliers(deps) {
       const muUid = state.edit.muUids?.[muIdx] ?? `mu${muIdx}`;
       const distimesAfter = state.edit.distimes?.[muIdx] || [];
       const { removed } = spikesDiff(spikes, distimesAfter);
-      deps.appendEditHistory({ type: "remove_outliers", mu_uid: muUid, spikes_removed: removed });
+      deps.appendEditHistory({
+        type: "remove_outliers",
+        mu_uid: muUid,
+        spikes_removed: removed,
+      });
     }
     const distimesAfter = state.edit.distimes?.[muIdx] || [];
-    const centerPos = distimesAfter.length ? Math.round((distimesAfter[0] + distimesAfter.at(-1)) / 2) : Math.round(pulse.length / 2);
+    const centerPos = distimesAfter.length
+      ? Math.round((distimesAfter[0] + distimesAfter.at(-1)) / 2)
+      : Math.round(pulse.length / 2);
     setEditBookmark(state, { muIdx, position: centerPos });
     setShowBookmark(state, false);
     recomputeEditDirty();
@@ -319,7 +365,6 @@ export async function removeDuplicateMus(deps) {
     apiJson,
     setEditStatus,
     ensureEditFlagged,
-    setEditBookmark,
     setShowBookmark,
     recomputeEditDirty,
     renderEditExplorer,
@@ -352,19 +397,49 @@ export async function removeDuplicateMus(deps) {
 
     const keptSet = new Set(keptIdx);
     ensureEditFlagged();
-    setEditDistimes(state, keptIdx.map((i) => data.distimes[keptIdx.indexOf(i)] || distimes[i]));
-    setEditPulseTrains(state, keptIdx.map((i) => state.edit.pulseTrains?.[i] || []));
-    setEditOriginalDistimes(state, (state.edit.originalDistimes || []).filter((_, i) => keptSet.has(i)));
-    setEditOriginalPulseTrains(state, (state.edit.originalPulseTrains || []).filter((_, i) => keptSet.has(i)));
-    setEditMuGridIndex(state, (state.edit.muGridIndex || []).filter((_, i) => keptSet.has(i)));
-    setEditFlaggedArray(state, (state.edit.flagged || []).filter((_, i) => keptSet.has(i)));
-    setEditMuUids(state, (state.edit.muUids || []).filter((_, i) => keptSet.has(i)));
-    setEditArtifactTimes(state, (state.edit.artifactTimes || []).filter((_, i) => keptSet.has(i)));
+    setEditDistimes(
+      state,
+      keptIdx.map((i) => data.distimes[keptIdx.indexOf(i)] || distimes[i]),
+    );
+    setEditPulseTrains(
+      state,
+      keptIdx.map((i) => state.edit.pulseTrains?.[i] || []),
+    );
+    setEditOriginalDistimes(
+      state,
+      (state.edit.originalDistimes || []).filter((_, i) => keptSet.has(i)),
+    );
+    setEditOriginalPulseTrains(
+      state,
+      (state.edit.originalPulseTrains || []).filter((_, i) => keptSet.has(i)),
+    );
+    setEditMuGridIndex(
+      state,
+      (state.edit.muGridIndex || []).filter((_, i) => keptSet.has(i)),
+    );
+    setEditFlaggedArray(
+      state,
+      (state.edit.flagged || []).filter((_, i) => keptSet.has(i)),
+    );
+    setEditMuUids(
+      state,
+      (state.edit.muUids || []).filter((_, i) => keptSet.has(i)),
+    );
+    setEditArtifactTimes(
+      state,
+      (state.edit.artifactTimes || []).filter((_, i) => keptSet.has(i)),
+    );
 
-    const removedCount = data.removed_count || (distimes.length - keptIdx.length);
+    const removedCount = data.removed_count || distimes.length - keptIdx.length;
     if (deps.appendEditHistory) {
-      const removedUids = (state.edit.muUids || []).filter((_, i) => !keptSet.has(i));
-      deps.appendEditHistory({ type: "remove_duplicates", removed_count: removedCount, removed_mu_uids: removedUids });
+      const removedUids = (state.edit.muUids || []).filter(
+        (_, i) => !keptSet.has(i),
+      );
+      deps.appendEditHistory({
+        type: "remove_duplicates",
+        removed_count: removedCount,
+        removed_mu_uids: removedUids,
+      });
     }
 
     const currentMu = state.edit.currentMu ?? 0;
@@ -376,7 +451,10 @@ export async function removeDuplicateMus(deps) {
 
     recomputeEditDirty();
     renderEditExplorer();
-    setEditStatus(`${removedCount} duplicate${removedCount !== 1 ? "s" : ""} removed`, "success");
+    setEditStatus(
+      `${removedCount} duplicate${removedCount !== 1 ? "s" : ""} removed`,
+      "success",
+    );
   } catch (err) {
     handleError(err, setEditStatus, "Deduplication failed");
   }
@@ -391,7 +469,6 @@ export async function flagMuForDeletion(deps) {
     getRawPulse,
     backupEditMu,
     ensureEditFlagged,
-    setEditBookmark,
     setShowBookmark,
     recomputeEditDirty,
     renderEditExplorer,
@@ -418,7 +495,11 @@ export async function flagMuForDeletion(deps) {
     setEditFlagForMu(state, muIdx, data.flagged !== false);
     if (deps.appendEditHistory) {
       const muUid = state.edit.muUids?.[muIdx] ?? `mu${muIdx}`;
-      deps.appendEditHistory({ type: "flag_mu", mu_uid: muUid, flagged: data.flagged !== false });
+      deps.appendEditHistory({
+        type: "flag_mu",
+        mu_uid: muUid,
+        flagged: data.flagged !== false,
+      });
     }
     setShowBookmark(state, false);
     recomputeEditDirty();
@@ -483,6 +564,7 @@ export async function saveEditedFile(deps) {
       "_edited",
     ),
     edit_signal_token: state.edit.editSignalToken || "",
+    software_versions: state.edit.softwareVersions || null,
   };
   try {
     setEditStatus("Saving edited file...", "muted");
@@ -615,12 +697,19 @@ export async function loadDecompositionForEdit(deps, file, filepath = null) {
     }
     setEditMuUids(
       state,
-      Array.isArray(data.mu_uids) && data.mu_uids.length === state.edit.distimes.length
+      Array.isArray(data.mu_uids) &&
+        data.mu_uids.length === state.edit.distimes.length
         ? data.mu_uids
         : generateMuUids(state.edit.muGridIndex),
     );
-    setEditHistory(state, Array.isArray(data.edit_history) ? data.edit_history : []);
-    setEditArtifactTimes(state, Array.isArray(data.artifact_times) ? data.artifact_times : []);
+    setEditHistory(
+      state,
+      Array.isArray(data.edit_history) ? data.edit_history : [],
+    );
+    setEditArtifactTimes(
+      state,
+      Array.isArray(data.artifact_times) ? data.artifact_times : [],
+    );
     setEditFsamp(state, data.fsamp);
     setEditParameters(state, data.parameters || {});
     setEditTotalSamples(
@@ -636,7 +725,9 @@ export async function loadDecompositionForEdit(deps, file, filepath = null) {
 
     // Restore last session from the most recent history entry that names a MU
     const total = state.edit.totalSamples || 0;
-    const lastEntry = [...(state.edit.editHistory || [])].reverse().find((e) => e.mu_uid);
+    const lastEntry = [...(state.edit.editHistory || [])]
+      .reverse()
+      .find((e) => e.mu_uid);
     let targetMu = 0;
     let targetView = { start: 0, end: total };
     let targetBookmark = null;
@@ -644,7 +735,10 @@ export async function loadDecompositionForEdit(deps, file, filepath = null) {
       const idx = (state.edit.muUids || []).indexOf(lastEntry.mu_uid);
       if (idx !== -1) {
         targetMu = idx;
-        if (Number.isFinite(lastEntry.view_start) && Number.isFinite(lastEntry.view_end)) {
+        if (
+          Number.isFinite(lastEntry.view_start) &&
+          Number.isFinite(lastEntry.view_end)
+        ) {
           targetView = { start: lastEntry.view_start, end: lastEntry.view_end };
         } else {
           const positions = [
@@ -654,17 +748,31 @@ export async function loadDecompositionForEdit(deps, file, filepath = null) {
             ...(lastEntry.artifacts_removed || []),
           ];
           if (positions.length) {
-            const mean = Math.round(positions.reduce((a, b) => a + b, 0) / positions.length);
-            const halfSpan = Math.min(Math.round(total * 0.1), (state.edit.fsamp || 2048) * 2);
+            const mean = Math.round(
+              positions.reduce((a, b) => a + b, 0) / positions.length,
+            );
+            const halfSpan = Math.min(
+              Math.round(total * 0.1),
+              (state.edit.fsamp || 2048) * 2,
+            );
             targetView = {
               start: Math.max(0, mean - halfSpan),
               end: Math.min(total, mean + halfSpan),
             };
-            targetBookmark = { muIdx: idx, position: Math.round((targetView.start + targetView.end) / 2) };
+            targetBookmark = {
+              muIdx: idx,
+              position: Math.round((targetView.start + targetView.end) / 2),
+            };
           }
         }
-        if (Number.isFinite(lastEntry.view_start) && Number.isFinite(lastEntry.view_end) && !targetBookmark) {
-          const centerPos = Math.round((lastEntry.view_start + lastEntry.view_end) / 2);
+        if (
+          Number.isFinite(lastEntry.view_start) &&
+          Number.isFinite(lastEntry.view_end) &&
+          !targetBookmark
+        ) {
+          const centerPos = Math.round(
+            (lastEntry.view_start + lastEntry.view_end) / 2,
+          );
           targetBookmark = { muIdx: idx, position: centerPos };
         }
       }
@@ -680,7 +788,10 @@ export async function loadDecompositionForEdit(deps, file, filepath = null) {
     clearAllEditSelections(state);
     recomputeEditDirty();
     if (els.editSaveBtn) els.editSaveBtn.disabled = false;
-    setEditStatus("Loaded. You can start interacting with the pulse train.", "success");
+    setEditStatus(
+      "Loaded. You can start interacting with the pulse train.",
+      "success",
+    );
     showWorkspace({ keepLandingVisible: true });
     switchStage("edit");
     if (typeof renderBidsMuscleFields === "function") {

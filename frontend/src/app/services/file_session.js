@@ -49,9 +49,57 @@ export function createFileSessionService(deps) {
     els.uploadLoader.classList.toggle("hidden", !active);
   }
 
+  // Raw BIDS entity inputs (subject/task/session/run) used to compose the
+  // entity label. Returned untransformed so the caller owns label assembly.
+  function getBidsEntityInputs() {
+    return {
+      subject: els.bidsSubject?.value,
+      task: els.bidsTask?.value,
+      session: els.bidsSession?.value,
+      run: els.bidsRun?.value,
+    };
+  }
+
+  // Gather the participant + hardware BIDS form fields into the snake_case
+  // shape the /edit/save endpoint expects, ready to spread into the request
+  // body. Keeps all save-form DOM reads here rather than in the orchestrator.
+  function getBidsSaveFields() {
+    const age = String(els.bidsParticipantAge?.value || "").trim();
+    const sex = String(els.bidsParticipantSex?.value || "").trim();
+    const handedness = String(
+      els.bidsParticipantHandedness?.value || "",
+    ).trim();
+    const participantMeta =
+      age || sex || handedness
+        ? {
+            age: age || "n/a",
+            sex: sex || "n/a",
+            handedness: handedness || "n/a",
+          }
+        : null;
+
+    return {
+      project: getBidsProject(),
+      participant_meta: participantMeta,
+      powerline_freq: Number(els.bidsPowerlineFreq?.value || 50),
+      manufacturer: String(els.bidsManufacturer?.value || "").trim() || null,
+      manufacturers_model_name:
+        String(els.bidsDeviceModel?.value || "").trim() || null,
+      placement_scheme: String(
+        els.bidsPlacementScheme?.value || "ChannelSpecific",
+      ),
+      placement_scheme_description:
+        String(els.bidsPlacementDescription?.value || "").trim() || null,
+      task_description:
+        String(els.bidsTaskDescription?.value || "").trim() || null,
+    };
+  }
+
   return {
     getBidsProject,
     getBidsMuscleNames,
+    getBidsEntityInputs,
+    getBidsSaveFields,
     clearUploadFormatError,
     showUnsupportedUploadFormatError,
     isSupportedSignalFile,

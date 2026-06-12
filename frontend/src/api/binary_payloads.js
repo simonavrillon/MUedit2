@@ -1,3 +1,14 @@
+/**
+ * Decoders for the compact binary transport the API uses for large float32
+ * matrices (pulse trains). Each payload is either plain JSON or a binary frame:
+ *
+ *   magic(4 bytes) | uint32 version | uint32 metaLen | (uint32 rows, uint32 cols)
+ *   per array | JSON metadata (metaLen bytes) | float32 array data
+ *
+ * All integers/floats are little-endian. When the magic prefix is absent the
+ * server fell back to JSON, so the bytes are parsed as text instead. Mirrors the
+ * Python `_pack_json_f32_payload` packer in `api/common.py`.
+ */
 const textDecoder = new TextDecoder();
 
 function hasMagic(buffer, magic) {

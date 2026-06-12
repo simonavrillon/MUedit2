@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import struct
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -18,7 +19,17 @@ from muedit.api.cache import (
     _store_qc_signal,
     _store_upload_signal,
 )
-from muedit.api.common import as_float, as_int, make_json_safe, safe_unlink, save_upload_to_temp
+from muedit.api.common import (
+    make_json_safe,
+    parse_entity_label,
+    safe_unlink,
+    save_upload_to_temp,
+)
+from muedit.api.schemas import QcWindowPayload
+from muedit.api.services.bids_helpers import (
+    _infer_bids_root_from_decomp_path,
+    read_bids_sidecar_meta,
+)
 from muedit.decomp.preview import downsample_vector
 from muedit.io.factory import clone_signal, load_signal
 from muedit.signal.filters import bandpass_signals
@@ -145,17 +156,27 @@ async def build_preview(file: UploadFile) -> dict[str, Any]:
 def build_preview_from_path(filepath: str) -> dict[str, Any]:
     """Build preview payload from a file path already available on disk."""
     try:
-        return _build_preview_core(filepath)
+        result = _build_preview_core(filepath)
     except (OSError, ValueError) as exc:
         if "contains decomposition fields" in str(exc):
             raise _decomp_artifact_error("path", exc) from exc
         raise
 
+    # Best-effort: enrich with participant and hardware info from BIDS sidecars.
+    try:
+        bids_root = _infer_bids_root_from_decomp_path(filepath)
+        if bids_root is not None:
+            entity_label = parse_entity_label(Path(filepath).name)
+            result.update(read_bids_sidecar_meta(bids_root, entity_label))
+    except Exception:  # noqa: BLE001
+        pass  # best-effort; never block the preview on sidecar errors
 
-def get_qc_window(payload: dict[str, Any]) -> dict[str, Any] | Response:
+    return result
+
+
+def get_qc_window(payload: QcWindowPayload) -> dict[str, Any] | Response:
     """Return channel-window QC data from cached signal, JSON or binary."""
-    token = payload.get("upload_token")
-    cached = _get_qc_signal(token)
+    cached = _get_qc_signal(payload.upload_token)
     if cached is None:
         raise HTTPException(
             status_code=400,
@@ -165,13 +186,13 @@ def get_qc_window(payload: dict[str, Any]) -> dict[str, Any] | Response:
             },
         )
 
-    grid_index = as_int(payload.get("grid_index"), "grid_index", default=0)
-    start = as_int(payload.get("start"), "start", default=0)
-    end = as_int(payload.get("end"), "end", default=0)
-    target_points = as_int(payload.get("target_points"), "target_points", default=96)
-    target_fs = as_float(payload.get("target_fs"), "target_fs", default=1000.0)
-    representation = str(payload.get("representation") or "envelope").lower()
-    channel_index_raw = payload.get("channel_index")
+    grid_index = payload.grid_index
+    start = payload.start
+    end = payload.end
+    target_points = payload.target_points
+    target_fs = payload.target_fs
+    representation = (payload.representation or "envelope").lower()
+    channel_index_raw = payload.channel_index
 
     data = cached["data"]
     fsamp = float(cached["fsamp"])
@@ -228,7 +249,7 @@ def get_qc_window(payload: dict[str, Any]) -> dict[str, Any] | Response:
             }
         )
 
-    channel_index = as_int(channel_index_raw, "channel_index", default=0)
+    channel_index = channel_index_raw
     if channel_index < 0 or channel_index >= n_grid_ch:
         raise HTTPException(status_code=400, detail="channel_index out of range")
     if representation == "raw":

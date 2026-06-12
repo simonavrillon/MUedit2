@@ -49,6 +49,14 @@ class EditSavePayload(BaseModel):
     edit_history: list[dict[str, Any]] | None = None
     artifact_times: list[list[int]] | None = None
     edit_signal_token: str | None = None
+    participant_meta: dict[str, Any] | None = None
+    powerline_freq: float | None = None
+    manufacturer: str | None = None
+    manufacturers_model_name: str | None = None
+    placement_scheme: str | None = None
+    placement_scheme_description: str | None = None
+    task_description: str | None = None
+    software_versions: str | None = None
 
 
 class EditFilterPayload(BaseModel):

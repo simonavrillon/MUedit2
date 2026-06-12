@@ -33,12 +33,12 @@ def _pad_grid_names(names: list[str], expected_count: int, fallback: list[str]) 
     return out
 
 
-def _normalize_muscle_names(payload: dict[str, Any]) -> list[str]:
-    muscle_names_raw = payload.get("muscle_names") or payload.get("muscle") or []
-    if isinstance(muscle_names_raw, str):
-        return [muscle_names_raw.strip()] if muscle_names_raw.strip() else []
-    if isinstance(muscle_names_raw, (list, tuple)):
-        return [str(x).strip() for x in muscle_names_raw if str(x).strip()]
+def _normalize_muscle_names(raw: list[str] | str | None) -> list[str]:
+    """Normalize a muscle-name payload value into a clean list of non-empty strings."""
+    if isinstance(raw, str):
+        return [raw.strip()] if raw.strip() else []
+    if isinstance(raw, (list, tuple)):
+        return [str(x).strip() for x in raw if str(x).strip()]
     return []
 
 
