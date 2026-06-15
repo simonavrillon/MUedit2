@@ -171,7 +171,7 @@ def _export_raw_emg_bids(
     default_target_muscle: str | None,
     signal: dict[str, Any],
 ) -> None:
-    """Export preprocessed raw EMG and sidecars to a BIDS-compatible layout."""
+    """Export the raw (unfiltered) EMG and sidecars to a BIDS-compatible layout."""
     if not bids_root:
         return
 
@@ -181,6 +181,16 @@ def _export_raw_emg_bids(
     emg_meta.update(derived_bids_metadata)
     if bids_metadata:
         emg_meta.update(bids_metadata)
+
+    # When the signal was itself imported from a BIDS dataset the recording and
+    # its sidecars already exist on disk; only fill in any missing files rather
+    # than re-encoding/overwriting the originals.
+    skip_existing = bool(loader_meta.get("bids_emg_path"))
+    if skip_existing:
+        logger.info(
+            "Source is already BIDS (%s); exporting only missing files.",
+            loader_meta.get("bids_emg_path"),
+        )
 
     export_bids_emg(
         data,
@@ -217,6 +227,7 @@ def _export_raw_emg_bids(
         manufacturers_model_name=entities.get("manufacturers_model_name") or loader_meta.get("device_name"),
         task_description=entities.get("task_description"),
         software_versions=loader_meta.get("software_versions"),
+        skip_existing=skip_existing,
     )
 
 
@@ -261,6 +272,9 @@ def preprocess_step(
 ) -> PreprocessStepOutput:
     """Apply channel formatting, filtering, ROI selection, and optional BIDS raw export."""
     data = np.array(loaded.data, copy=True)
+    # Keep an untouched copy of the raw EMG for the BIDS export. The filters
+    # below mutate `data` in place, so we snapshot before that happens.
+    raw_data = np.array(loaded.data, copy=True)
     grid_names = loaded.signal.get("gridname", ["Default"])
     coordinates, ied, discard_channels, emg_type = format_hdemg_signal(
         grid_names,
@@ -282,7 +296,7 @@ def preprocess_step(
         bids_root=bids_root,
         bids_entities=bids_entities,
         bids_metadata=bids_metadata,
-        data=data,
+        data=raw_data,
         fsamp=loaded.fsamp,
         grid_names=grid_names,
         coordinates=coordinates,

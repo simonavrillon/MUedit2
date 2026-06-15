@@ -101,6 +101,12 @@ Recording-level fields (round-tripped to/from the BIDS `_emg.json` sidecar):
 - `software_filters`: `str | dict` — BIDS `SoftwareFilters` (default `"n/a"`).
 - `software_versions`: `str` — acquisition software version string.
 
+Source provenance (set by the BIDS loader only):
+- `bids_emg_path`: `str` — absolute path of the source `_emg.bdf|edf`. Its
+  presence marks the recording as a BIDS round-trip, which makes the EMG export
+  write only **missing** files instead of re-encoding/overwriting the originals.
+  Non-BIDS loaders must not set this.
+
 Shape guidance:
 - Prefer per-channel lists for `gains` / cutoff keys.
 - EMG lists should align to EMG channel count in `data`.

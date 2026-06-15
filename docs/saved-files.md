@@ -50,6 +50,20 @@ Notes:
 If `bids_root` is provided, MUedit writes raw EMG sidecars under the subject
 tree and dataset-level files at the dataset root.
 
+> **The exported signal is the raw, unfiltered EMG.** MUedit snapshots the
+> recording as loaded, *before* the notch/bandpass filters used for
+> decomposition are applied, so the BIDS `_emg.bdf|edf` always carries the raw
+> signal (filtering is a software step recorded in metadata, not baked into the
+> exported samples).
+
+> **Recordings imported from BIDS are not re-encoded.** When the source was
+> itself loaded from a BIDS dataset (a `.bdf`/`.edf` import), MUedit only writes
+> files that are **missing** at the destination — the existing signal file and
+> sidecars are left untouched rather than being re-encoded/overwritten. For
+> non-BIDS sources (`.mat`, `.otb+`, `.otb4`) every file is (re)written. In both
+> cases "missing" is judged against the export destination, so exporting a
+> BIDS-imported recording into a brand-new `bids_root` still writes everything.
+
 > **Where `<bids_root>` is.** In the app you don't type a path — you name a
 > project in the **Project** field of the Settings panel, and MUedit saves under
 > `data/<project>/` inside the repository (so `<bids_root>` = `data/<project>`).

@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import csv
 import json
+import logging
 import math
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 from muedit.io._bids_reader import (
     BidsGridSelection,
@@ -138,9 +141,30 @@ def export_bids_emg(
     software_versions: str | None = None,
     recording_type: str = "continuous",
     software_filters: str | dict[str, Any] | None = None,
+    skip_existing: bool = False,
 ) -> dict[str, Path]:
-    """Export EMG signals plus BIDS sidecars and return produced paths."""
+    """Export EMG signals plus BIDS sidecars and return produced paths.
+
+    When ``skip_existing`` is True, any output file that already exists on disk
+    is left untouched and only missing files are written. This is used when the
+    source recording was itself imported from a BIDS dataset, so the original
+    signal file and sidecars are not needlessly re-encoded/overwritten.
+    """
     pyedflib = _ensure_pyedflib()
+
+    def _write_json_if_missing(path: Path, payload: dict[str, Any]) -> None:
+        if skip_existing and path.exists():
+            logger.info("BIDS export: %s already exists, skipping", path.name)
+            return
+        _write_json(path, payload)
+
+    def _write_tsv_if_missing(
+        path: Path, header: list[str], rows: Iterable[Iterable[Any]]
+    ) -> None:
+        if skip_existing and path.exists():
+            logger.info("BIDS export: %s already exists, skipping", path.name)
+            return
+        _write_tsv(path, header, rows)
 
     def _truncate_physical(val: float) -> float:
         for decimals in range(6, -1, -1):
@@ -207,61 +231,66 @@ def export_bids_emg(
     n_aux = final_data.shape[0] - data.shape[0]
     aux_labels = _unique_labels(aux_names, n_aux)
 
-    writer = None
-    try:
-        writer = pyedflib.EdfWriter(
-            str(edf_path), n_channels=n_total_channels, file_type=edf_type
+    if skip_existing and edf_path.exists():
+        logger.info(
+            "BIDS export: %s already exists, skipping signal re-encode", edf_path.name
         )
+    else:
+        writer = None
+        try:
+            writer = pyedflib.EdfWriter(
+                str(edf_path), n_channels=n_total_channels, file_type=edf_type
+            )
 
-        if start_time:
-            writer.setStartdatetime(start_time)
+            if start_time:
+                writer.setStartdatetime(start_time)
 
-        signal_headers = []
-        signal_data = []
-        for idx in range(n_total_channels):
-            is_aux = idx >= data.shape[0]
+            signal_headers = []
+            signal_data = []
+            for idx in range(n_total_channels):
+                is_aux = idx >= data.shape[0]
 
-            if is_aux:
-                aux_idx = idx - data.shape[0]
-                ch_name = aux_labels[aux_idx]
-                ch_units = "a.u."
-            else:
-                ch_name = f"Ch{idx+1:02d}"
-                ch_units = units
+                if is_aux:
+                    aux_idx = idx - data.shape[0]
+                    ch_name = aux_labels[aux_idx]
+                    ch_units = "a.u."
+                else:
+                    ch_name = f"Ch{idx+1:02d}"
+                    ch_units = units
 
-            signal = final_data[idx, :].astype(np.float64)
-            signal_data.append(signal)
+                signal = final_data[idx, :].astype(np.float64)
+                signal_data.append(signal)
 
-            phys_min = float(np.min(signal))
-            phys_max = float(np.max(signal))
-            if math.isclose(phys_min, phys_max):
-                phys_min -= 1.0
-                phys_max += 1.0
+                phys_min = float(np.min(signal))
+                phys_max = float(np.max(signal))
+                if math.isclose(phys_min, phys_max):
+                    phys_min -= 1.0
+                    phys_max += 1.0
 
-            phys_min_t = _truncate_physical(phys_min)
-            phys_max_t = _truncate_physical(phys_max)
-            if math.isclose(phys_min_t, phys_max_t):
-                phys_min_t -= 1.0
-                phys_max_t += 1.0
+                phys_min_t = _truncate_physical(phys_min)
+                phys_max_t = _truncate_physical(phys_max)
+                if math.isclose(phys_min_t, phys_max_t):
+                    phys_min_t -= 1.0
+                    phys_max_t += 1.0
 
-            header = {
-                "label": ch_name,
-                "dimension": ch_units,
-                "sample_frequency": fsamp,
-                "physical_min": phys_min_t,
-                "physical_max": phys_max_t,
-                "digital_min": digital_min,
-                "digital_max": digital_max,
-                "transducer": "",
-                "prefilter": "n/a",
-            }
-            signal_headers.append(header)
+                header = {
+                    "label": ch_name,
+                    "dimension": ch_units,
+                    "sample_frequency": fsamp,
+                    "physical_min": phys_min_t,
+                    "physical_max": phys_max_t,
+                    "digital_min": digital_min,
+                    "digital_max": digital_max,
+                    "transducer": "",
+                    "prefilter": "n/a",
+                }
+                signal_headers.append(header)
 
-        writer.setSignalHeaders(signal_headers)
-        writer.writeSamples(signal_data)
-    finally:
-        if writer is not None:
-            writer.close()
+            writer.setSignalHeaders(signal_headers)
+            writer.writeSamples(signal_data)
+        finally:
+            if writer is not None:
+                writer.close()
 
     rows = []
     ied_values: list[float | None]
@@ -384,7 +413,7 @@ def export_bids_emg(
                 ]
             )
 
-    _write_tsv(
+    _write_tsv_if_missing(
         channels_tsv,
         [
             "name",
@@ -410,7 +439,7 @@ def export_bids_emg(
         rows,
     )
 
-    _write_json(
+    _write_json_if_missing(
         channels_tsv.with_suffix(".json"),
         {
             "group": {
@@ -483,7 +512,7 @@ def export_bids_emg(
             )
             electrode_counter += 1
 
-    _write_tsv(
+    _write_tsv_if_missing(
         electrodes_tsv,
         ["name", "x", "y", "z", "coordinate_system", "type", "material", "impedance", "group"],
         electrode_rows,
@@ -500,7 +529,7 @@ def export_bids_emg(
         coordsys_path = emg_dir / f"{session_prefix}_space-{space_label}_coordsystem.json"
         grid_ied = ied_values[g_idx] if ied_values and g_idx < len(ied_values) else None
         coord_units = "mm" if grid_ied else "a.u."
-        _write_json(
+        _write_json_if_missing(
             coordsys_path,
             {
                 "EMGCoordinateSystem": "Other",
@@ -605,7 +634,7 @@ def export_bids_emg(
         emg_json["MISCChannelCount"] = n_misc
     emg_json["RecordingDuration"] = float(n_samples / fsamp)
 
-    _write_json(json_path, emg_json)
+    _write_json_if_missing(json_path, emg_json)
 
     result: dict[str, Path] = {
         "edf": edf_path,
