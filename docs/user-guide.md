@@ -66,10 +66,11 @@ Open the sidebar with the hamburger button (top-left). It contains three collaps
 | File | Loaded filename (read-only) |
 | Fs (Hz) | Sampling frequency (read-only, from file) |
 | Project | Project name — output is saved under `data/<project>/` (your BIDS dataset root). Leave empty to use `data/muedit_out/` |
-| Subject | BIDS subject ID (e.g. `01`) |
+| Subject | BIDS subject label — alphanumeric (e.g. `01`, `S06`, `pilot01`) |
+| Session | BIDS session label — alphanumeric (e.g. `1`, `pre`, `post`) |
+| Acquisition | BIDS `acq` label, for sequential recordings of the same task (e.g. one grid/finger recorded at a time). Optional, alphanumeric |
+| Run | BIDS run index — a positive integer. Optional; leave empty to omit `run-` from the filename |
 | Task | Task label (e.g. `trapezoid`) |
-| Session | Session number |
-| Run | Run number |
 | Muscle | Muscle name(s) per grid |
 
 The panel also exposes optional **participant** (age, sex, handedness) and
