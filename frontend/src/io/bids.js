@@ -7,13 +7,28 @@ export function safeBidsToken(value, fallback = "") {
   return token || fallback;
 }
 
-export function buildEntityLabelFromSession(subject, task, session, run) {
-  const sub = safeBidsToken(subject, "01");
-  const t = safeBidsToken(task, "task");
+export function buildEntityLabelFromSession({
+  subject,
+  task,
+  session,
+  run,
+  acq,
+  recording,
+} = {}) {
+  // Emit entities in canonical BIDS order: sub, ses, task, acq, run, recording.
+  // run/acq/recording are added only when provided so sequential recordings
+  // keyed by acq-<label> are not stamped with a spurious run-01.
+  const parts = [`sub-${safeBidsToken(subject, "01")}`];
   const ses = safeBidsToken(session, "");
-  const r = safeBidsToken(run, "01");
-  const sesPart = ses ? `_ses-${ses}` : "";
-  return `sub-${sub}${sesPart}_task-${t}_run-${r}`;
+  if (ses) parts.push(`ses-${ses}`);
+  parts.push(`task-${safeBidsToken(task, "task")}`);
+  const a = safeBidsToken(acq, "");
+  if (a) parts.push(`acq-${a}`);
+  const r = safeBidsToken(run, "");
+  if (r) parts.push(`run-${r}`);
+  const rec = safeBidsToken(recording, "");
+  if (rec) parts.push(`recording-${rec}`);
+  return parts.join("_");
 }
 
 export function getSuggestedNpzName(baseName, suffix = "_edited") {
@@ -32,7 +47,9 @@ export function parseBidsEntitiesFromLabel(label) {
     subject: get("sub"),
     session: get("ses"),
     task: get("task"),
+    acq: get("acq"),
     run: get("run"),
+    recording: get("recording"),
   };
 }
 

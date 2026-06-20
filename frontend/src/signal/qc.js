@@ -322,7 +322,8 @@ export async function handleRawFile(deps, file, options = {}) {
   beginRawPreviewTransition(state, file);
   if (els.bidsSubject) els.bidsSubject.value = "1";
   if (els.bidsSession) els.bidsSession.value = "1";
-  if (els.bidsRun) els.bidsRun.value = "1";
+  if (els.bidsAcquisition) els.bidsAcquisition.value = "";
+  if (els.bidsRun) els.bidsRun.value = "";
   if (els.bidsTask) els.bidsTask.value = "trapezoid";
   if (els.fileName) {
     els.fileName.textContent = file.name;

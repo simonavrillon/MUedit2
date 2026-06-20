@@ -78,7 +78,8 @@ export function applySessionInfoToDom(els, payload) {
   if (els.bidsSubject) els.bidsSubject.value = "1";
   if (els.bidsTask) els.bidsTask.value = "trapezoid";
   if (els.bidsSession) els.bidsSession.value = "1";
-  if (els.bidsRun) els.bidsRun.value = "1";
+  if (els.bidsAcquisition) els.bidsAcquisition.value = "";
+  if (els.bidsRun) els.bidsRun.value = "";
   if (els.bidsProject) els.bidsProject.value = "";
   if (els.bidsPlacementScheme)
     els.bidsPlacementScheme.value = "ChannelSpecific";
@@ -99,6 +100,8 @@ export function applySessionInfoToDom(els, payload) {
     els.bidsTask.value = payload.entities.task;
   if (els.bidsSession && payload.entities?.session)
     els.bidsSession.value = payload.entities.session;
+  if (els.bidsAcquisition && payload.entities?.acq)
+    els.bidsAcquisition.value = payload.entities.acq;
   if (els.bidsRun && payload.entities?.run)
     els.bidsRun.value = payload.entities.run;
 

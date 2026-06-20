@@ -57,6 +57,7 @@ export function createFileSessionService(deps) {
       task: els.bidsTask?.value,
       session: els.bidsSession?.value,
       run: els.bidsRun?.value,
+      acquisition: els.bidsAcquisition?.value,
     };
   }
 

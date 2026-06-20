@@ -6,7 +6,7 @@
     <title>MUedit</title>
     <link rel="icon" href="data:," />
     <link rel="shortcut icon" href="data:," />
-    <link rel="stylesheet" href="style.css?v=60" />
+    <link rel="stylesheet" href="style.css?v=61" />
   </head>
 
   <body>
@@ -157,15 +157,38 @@
                 </div>
                 <div class="form-row">
                   <label for="bidsSubject">Subject</label>
-                  <input type="number" id="bidsSubject" value="1" min="1" />
+                  <input
+                    type="text"
+                    id="bidsSubject"
+                    value="1"
+                    placeholder="alphanumeric, e.g. 1 or pilot01"
+                  />
                 </div>
                 <div class="form-row">
                   <label for="bidsSession">Session</label>
-                  <input type="number" id="bidsSession" value="1" min="1" />
+                  <input
+                    type="text"
+                    id="bidsSession"
+                    value="1"
+                    placeholder="alphanumeric, e.g. 1 or day1"
+                  />
+                </div>
+                <div class="form-row">
+                  <label for="bidsAcquisition">Acquisition</label>
+                  <input
+                    type="text"
+                    id="bidsAcquisition"
+                    placeholder="alphanumeric, e.g. index (sequential recording)"
+                  />
                 </div>
                 <div class="form-row">
                   <label for="bidsRun">Run</label>
-                  <input type="number" id="bidsRun" value="1" min="1" />
+                  <input
+                    type="number"
+                    id="bidsRun"
+                    min="1"
+                    placeholder="optional"
+                  />
                 </div>
                 <div class="form-row">
                   <label for="bidsTask">Task</label>

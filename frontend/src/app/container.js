@@ -148,10 +148,16 @@ function renderBidsMuscleFields() {
 }
 
 async function persistNpzBySaveTarget(payload, fallbackName, fileSession, ui) {
-  const { subject, task, session, run } = fileSession.getBidsEntityInputs();
+  const { subject, task, session, run, acquisition } =
+    fileSession.getBidsEntityInputs();
   const entityLabel =
-    buildEntityLabelFromSession(subject, task, session, run) ||
-    payload.entity_label;
+    buildEntityLabelFromSession({
+      subject,
+      task,
+      session,
+      run,
+      acq: acquisition,
+    }) || payload.entity_label;
 
   const data = await apiJson(
     `${API_BASE}/edit/save`,
@@ -404,6 +410,8 @@ const importStage = createImportStageService({
     if (els.bidsTask && entities.task) els.bidsTask.value = entities.task;
     if (els.bidsSession && entities.session)
       els.bidsSession.value = entities.session;
+    if (els.bidsAcquisition && entities.acq)
+      els.bidsAcquisition.value = entities.acq;
     if (els.bidsRun && entities.run) els.bidsRun.value = entities.run;
     if (els.bidsProject && entities.project) {
       els.bidsProject.value = entities.project;

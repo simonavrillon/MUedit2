@@ -44,6 +44,7 @@ export const els = {
   bidsSubject: document.getElementById("bidsSubject"),
   bidsTask: document.getElementById("bidsTask"),
   bidsSession: document.getElementById("bidsSession"),
+  bidsAcquisition: document.getElementById("bidsAcquisition"),
   bidsRun: document.getElementById("bidsRun"),
   bidsMuscleContainer: document.getElementById("bidsMuscleContainer"),
   bidsPlacementScheme: document.getElementById("bidsPlacementScheme"),
