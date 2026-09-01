@@ -243,11 +243,25 @@ def _extract_decomp_fields(
                     except (TypeError, ValueError):
                         pass
 
-    if rois_raw is not None and np.asarray(rois_raw, dtype=object).size > 0 and not rois:
-        logger.warning(
-            "File contains ROI data but no valid entries were parsed "
-            "(odd-length or malformed); the file's ROIs will be unavailable."
-        )
+    if rois_raw is not None and np.asarray(rois_raw, dtype=object).size > 0:
+        rois_input_arr = np.asarray(rois_raw, dtype=object)
+        if rois_input_arr.ndim >= 2:
+            n_input = int(rois_input_arr.shape[0])
+        elif rois_input_arr.ndim == 1 and is_scalar_elems and rois_input_arr.size % 2 == 0:
+            n_input = int(rois_input_arr.size // 2)
+        else:
+            n_input = int(rois_input_arr.size)
+        if not rois:
+            logger.warning(
+                "File contains ROI data but no valid entries were parsed "
+                "(odd-length or malformed); the file's ROIs will be unavailable."
+            )
+        elif len(rois) < n_input:
+            logger.warning(
+                "File contains %d ROI entries but only %d were valid; "
+                "%d malformed entries discarded.",
+                n_input, len(rois), n_input - len(rois),
+            )
 
     gnames = first_non_none(top.get("grid_names"), _get_case_insensitive(signal, "gridname"))
     grid_names = _parse_text_list(gnames) if gnames is not None else ["Grid 1"]

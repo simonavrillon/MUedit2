@@ -499,6 +499,33 @@ def test_fix14_nonnumeric_roi_degrades_to_empty():
     assert len(rois) == 0
 
 
+def test_fix14_partial_corruption_keeps_valid_warns_dropped():
+    """Partial corruption: valid entries survive, dropped entries are warned."""
+    from muedit.decomp.io import _extract_decomp_fields
+    import io as _stdio
+    import logging
+
+    cell = np.empty(2, dtype=object)
+    cell[0] = np.array([0, 100])
+    cell[1] = np.array(["x", "y"])
+    preview = {"rois": cell}
+
+    handler = logging.StreamHandler(_stdio.StringIO())
+    logger = logging.getLogger("muedit.decomp.io")
+    logger.addHandler(handler)
+    old_level = logger.level
+    logger.setLevel(logging.WARNING)
+    result = _extract_decomp_fields({}, preview, None, {})
+    logger.setLevel(old_level)
+    logger.removeHandler(handler)
+
+    rois = result[7]
+    assert len(rois) == 1
+    assert rois[0] == (0, 100)
+    log_output = handler.stream.getvalue()
+    assert "malformed" in log_output.lower(), f"Expected malformed warning, got: {log_output}"
+
+
 # ---------------------------------------------------------------------------
 # Fix #16: .get("gridname", ["Default"]) dead default
 # ---------------------------------------------------------------------------
