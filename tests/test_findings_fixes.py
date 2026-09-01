@@ -489,6 +489,16 @@ def test_fix14_empty_roi_array_no_warning():
     assert log_output == "", f"Unexpected warning: {log_output}"
 
 
+def test_fix14_nonnumeric_roi_degrades_to_empty():
+    """Non-numeric ROI data must not crash the loader — degrade to []."""
+    from muedit.decomp.io import _extract_decomp_fields
+
+    preview = {"rois": np.array(["a", "b"])}
+    result = _extract_decomp_fields({}, preview, None, {})
+    rois = result[7]
+    assert len(rois) == 0
+
+
 # ---------------------------------------------------------------------------
 # Fix #16: .get("gridname", ["Default"]) dead default
 # ---------------------------------------------------------------------------

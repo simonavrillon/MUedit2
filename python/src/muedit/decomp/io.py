@@ -231,11 +231,17 @@ def _extract_decomp_fields(
             rois_arr = rois_arr.reshape(-1, 2)
         if rois_arr.ndim == 2 and rois_arr.shape[1] >= 2:
             for r in rois_arr:
-                rois.append((int(r[0]), int(r[1])))
+                try:
+                    rois.append((int(r[0]), int(r[1])))
+                except (TypeError, ValueError):
+                    pass
         else:
             for r in rois_raw:
                 if isinstance(r, (list, tuple, np.ndarray)) and np.asarray(r).size >= 2:
-                    rois.append((int(r[0]), int(r[1])))
+                    try:
+                        rois.append((int(r[0]), int(r[1])))
+                    except (TypeError, ValueError):
+                        pass
 
     if rois_raw is not None and np.asarray(rois_raw, dtype=object).size > 0 and not rois:
         logger.warning(
