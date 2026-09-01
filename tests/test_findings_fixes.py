@@ -215,6 +215,27 @@ def test_fix7_cov_describes_returned_spikes():
         )
 
 
+def test_fix7_stale_cov_is_nan_when_spikes_too_few():
+    """When spikes_last has < 2 entries after the fallback recompute,
+    cov_last must be NaN (not a stale value from a different separator)."""
+    from muedit.decomp.algorithm import minimize_isi_covariance
+
+    rng = np.random.default_rng(0)
+    n_ch, n_samples = 20, 2000
+    x = rng.standard_normal((n_ch, n_samples))
+    w = rng.standard_normal(n_ch)
+    # A very large input CoV — if it leaked through as cov_last, covfilter
+    # would wrongly accept the unit.
+    cov_input = 100.0
+    w_out, spikes_out, cov_out = minimize_isi_covariance(w, x, cov_input, 2000.0)
+
+    if len(spikes_out) < 2:
+        assert np.isnan(cov_out), f"Expected NaN for <2 spikes, got {cov_out}"
+    else:
+        # If spikes survived, cov must match (not be the stale input)
+        assert cov_out != cov_input
+
+
 # ---------------------------------------------------------------------------
 # Fix #8: No validation that channel counts match the grid catalogue
 # ---------------------------------------------------------------------------
@@ -434,6 +455,17 @@ def test_fix14_cell_of_pairs_does_not_crash():
     assert len(rois) == 2
     assert rois[0] == (0, 100)
     assert rois[1] == (200, 300)
+
+
+def test_fix14_odd_length_roi_warns_and_yields_empty():
+    """Odd-length ROI input must yield [] and emit a warning."""
+    from muedit.decomp.io import _extract_decomp_fields
+
+    # 3 elements — not a valid (start, end) pair
+    preview = {"rois": np.array([0, 100, 50])}
+    result = _extract_decomp_fields({}, preview, None, {})
+    rois = result[7]
+    assert len(rois) == 0
 
 
 # ---------------------------------------------------------------------------

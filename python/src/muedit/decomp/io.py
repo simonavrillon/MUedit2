@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,8 @@ import scipy.io
 
 from muedit.io._mat import _mat73_read, _parse_text_list
 from muedit.models import LoadedDecomposition
+
+logger = logging.getLogger(__name__)
 
 # BIDS-facing metadata fields a loader may attach to the signal context. Single
 # source of truth shared with the API edit-signal cache so the two never drift.
@@ -233,6 +236,12 @@ def _extract_decomp_fields(
             for r in rois_raw:
                 if isinstance(r, (list, tuple, np.ndarray)) and np.asarray(r).size >= 2:
                     rois.append((int(r[0]), int(r[1])))
+
+    if rois_raw is not None and not rois:
+        logger.warning(
+            "ROIs present in file but none parsed (odd-length or malformed); "
+            "falling back to full-signal ROI."
+        )
 
     gnames = first_non_none(top.get("grid_names"), _get_case_insensitive(signal, "gridname"))
     grid_names = _parse_text_list(gnames) if gnames is not None else ["Grid 1"]

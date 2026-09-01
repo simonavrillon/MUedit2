@@ -198,6 +198,11 @@ def minimize_isi_covariance(
     # caller's input CoV and spikes_last was recomputed above from w_last.
     if len(spikes_last) >= 2:
         cov_last = isi_cov(spikes_last, fsamp)
+    else:
+        # spikes_last still has < 2 entries — cov_last is stale.  Return
+        # NaN so covfilter (if enabled) rejects the unit rather than
+        # accepting it on a CoV from a different separator.
+        cov_last = float("nan")
 
     return w_last, spikes_last, cov_last
 
