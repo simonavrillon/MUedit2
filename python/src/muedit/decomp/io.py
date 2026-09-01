@@ -237,10 +237,10 @@ def _extract_decomp_fields(
                 if isinstance(r, (list, tuple, np.ndarray)) and np.asarray(r).size >= 2:
                     rois.append((int(r[0]), int(r[1])))
 
-    if rois_raw is not None and not rois:
+    if rois_raw is not None and np.asarray(rois_raw, dtype=object).size > 0 and not rois:
         logger.warning(
-            "ROIs present in file but none parsed (odd-length or malformed); "
-            "falling back to full-signal ROI."
+            "File contains ROI data but no valid entries were parsed "
+            "(odd-length or malformed); the file's ROIs will be unavailable."
         )
 
     gnames = first_non_none(top.get("grid_names"), _get_case_insensitive(signal, "gridname"))

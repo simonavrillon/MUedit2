@@ -468,6 +468,27 @@ def test_fix14_odd_length_roi_warns_and_yields_empty():
     assert len(rois) == 0
 
 
+def test_fix14_empty_roi_array_no_warning():
+    """An empty (0, 2) ROI array is a valid 'no ROIs recorded' file — no warning."""
+    from muedit.decomp.io import _extract_decomp_fields
+    import io as _stdio
+    import logging
+
+    preview = {"rois": np.empty((0, 2), dtype=float)}
+    handler = logging.StreamHandler(_stdio.StringIO())
+    logger = logging.getLogger("muedit.decomp.io")
+    logger.addHandler(handler)
+    old_level = logger.level
+    logger.setLevel(logging.WARNING)
+    result = _extract_decomp_fields({}, preview, None, {})
+    logger.setLevel(old_level)
+    logger.removeHandler(handler)
+    rois = result[7]
+    assert len(rois) == 0
+    log_output = handler.stream.getvalue()
+    assert log_output == "", f"Unexpected warning: {log_output}"
+
+
 # ---------------------------------------------------------------------------
 # Fix #16: .get("gridname", ["Default"]) dead default
 # ---------------------------------------------------------------------------
