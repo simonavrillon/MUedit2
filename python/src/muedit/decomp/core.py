@@ -78,7 +78,7 @@ def decompose_step(
             e_sig = extend_signal(demean(win_data_arr), ex_factor)
 
             edge_samples = int(round(prep.fsamp * params.edges_sec))
-            trim_edges = win_data_arr.shape[1] > 2 * edge_samples
+            trim_edges = edge_samples > 0 and win_data_arr.shape[1] > 2 * edge_samples
             if trim_edges:
                 e_sig = e_sig[:, edge_samples:-edge_samples]
                 coordinates_plateau[win_global * 2] += edge_samples
@@ -98,6 +98,12 @@ def decompose_step(
             filter_matrix = np.zeros((w_sig_win.shape[0], params.niter))
             sil_scores = np.zeros(params.niter)
             cov_scores = np.zeros(params.niter)
+            # Whether iteration j produced a fitted separator (len(spikes) > 10).
+            # Iterations that fall through to the else branch leave sil_scores[j]
+            # at 0 but are not "fitted"; the mask excludes them explicitly rather
+            # than via the sil_scores > 0 heuristic, which would also reject a
+            # legitimately-zero SIL when sil_thr <= 0.
+            fitted = np.zeros(params.niter, dtype=bool)
             x = w_sig_win.copy()
 
             for j in range(params.niter):
@@ -114,7 +120,6 @@ def decompose_step(
 
                 if len(spikes) > 10:
                     cov_val = isi_cov(spikes, prep.fsamp)
-                    cov_scores[j] = cov_val
                     w_ini = np.sum(x[:, spikes], axis=1)
                     w_final, spikes_final, cov_final = minimize_isi_covariance(
                         w_ini, x, cov_val, prep.fsamp
@@ -126,6 +131,7 @@ def decompose_step(
                     filter_matrix[:, j] = w_final
                     basis[:, j] = w_final
                     cov_scores[j] = cov_final
+                    fitted[j] = True
                     _, _, sil_val = compute_silhouette(x, w_final, prep.fsamp)
                     sil_scores[j] = sil_val
                     if params.peel_off_enabled and sil_val > params.sil_thr:
@@ -150,7 +156,7 @@ def decompose_step(
                         },
                     )
 
-            good_indices = sil_scores >= params.sil_thr
+            good_indices = (sil_scores >= params.sil_thr) & fitted
             if params.covfilter:
                 good_indices = good_indices & (cov_scores <= params.cov_thr)
             mu_filters[win_global] = filter_matrix[:, good_indices]

@@ -318,12 +318,14 @@ def format_hdemg_signal(
 
         discard_mask = np.zeros(nbelectrodes, dtype=int)
         if discard_overrides and i < len(discard_overrides):
-            try:
-                mask_arr = np.array(discard_overrides[i], dtype=int)
-                if mask_arr.size == nbelectrodes:
-                    discard_mask = mask_arr
-            except (IndexError, TypeError, ValueError):
-                pass
+            mask_arr = np.array(discard_overrides[i], dtype=int)
+            if mask_arr.size != nbelectrodes:
+                raise ValueError(
+                    f"discard_overrides[{i}] has {mask_arr.size} elements but "
+                    f"grid '{grid_name}' has {nbelectrodes} channels. "
+                    f"Provide a full-length binary mask (1 = discard, 0 = keep)."
+                )
+            discard_mask = mask_arr
 
         discard_channels_vec.append(discard_mask)
 

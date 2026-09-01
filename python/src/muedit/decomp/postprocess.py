@@ -38,14 +38,21 @@ def _remove_duplicates_by_grid(
     ngrid: int,
     params: DecompositionParameters,
     fsamp: float,
-) -> tuple[np.ndarray, list[np.ndarray], list[int]]:
-    """Remove duplicate motor units within each grid and optionally across grids."""
+) -> tuple[np.ndarray, list[np.ndarray], list[int], list[int]]:
+    """Remove duplicate motor units within each grid and optionally across grids.
+
+    Returns ``(pulse_t, distime, mu_grid_index, kept_global_indices)`` where
+    ``kept_global_indices`` maps each surviving MU to its index in the input
+    ``pulse_t`` array, so callers can subset per-window metadata (e.g. SIL
+    scores) to match the deduplicated output.
+    """
     if len(distime) == 0:
-        return np.array([]), [], []
+        return np.array([]), [], [], []
 
     filtered_pulses = []
     filtered_distime: list[np.ndarray] = []
     filtered_grid_index: list[int] = []
+    global_indices: list[int] = []
     logger.info("Removing duplicates...")
 
     for g_idx in range(ngrid):
@@ -54,7 +61,7 @@ def _remove_duplicates_by_grid(
             continue
         pulses_subset = pulse_t[mu_indices, :]
         dist_subset = [distime[idx] for idx in mu_indices]
-        pulses_subset, dist_subset, _ = rem_duplicates(
+        pulses_subset, dist_subset, kept_local = rem_duplicates(
             pulses_subset,
             dist_subset,
             dist_subset,
@@ -68,6 +75,7 @@ def _remove_duplicates_by_grid(
         filtered_pulses.append(pulses_subset)
         filtered_distime.extend(dist_subset)
         filtered_grid_index.extend([g_idx] * pulses_subset.shape[0])
+        global_indices.extend(mu_indices[l] for l in kept_local)
 
     if params.duplicatesbgrids and filtered_pulses:
         combined_pulses = np.vstack(filtered_pulses)
@@ -81,16 +89,22 @@ def _remove_duplicates_by_grid(
             params.duplicatesthresh,
             fsamp,
         )
-        return combined_pulses, combined_distime, [filtered_grid_index[i] for i in kept_idx]
+        kept_global = [global_indices[i] for i in kept_idx]
+        return (
+            combined_pulses,
+            combined_distime,
+            [filtered_grid_index[i] for i in kept_idx],
+            kept_global,
+        )
 
     pulse_t_out = np.vstack(filtered_pulses) if filtered_pulses else np.array([])
-    return pulse_t_out, filtered_distime, filtered_grid_index
+    return pulse_t_out, filtered_distime, filtered_grid_index, global_indices
 
 
 def _save_npz_with_app_schema(
     out_path: str | Path,
     pulse_trains: np.ndarray,
-    distimes: list[np.ndarray],
+    distimes: list[np.ndarray] | list[list[int]],
     fsamp: float,
     grid_names: list[str],
     mu_grid_index: list[int],
@@ -100,9 +114,13 @@ def _save_npz_with_app_schema(
     extras: dict[str, Any] | None = None,
 ) -> None:
     """Save NPZ using the same core key schema as web-app edit saves."""
+    distime_arrays = [np.asarray(d, dtype=int) for d in distimes]
+    distime_obj = np.empty(len(distime_arrays), dtype=object)
+    for i, d in enumerate(distime_arrays):
+        distime_obj[i] = d
     payload: dict[str, Any] = {
         "pulse_trains": pulse_trains,
-        "discharge_times": np.array(distimes, dtype=object),
+        "discharge_times": distime_obj,
         "fsamp": fsamp,
         "grid_names": np.array(grid_names, dtype=object),
         "mu_grid_index": np.array(mu_grid_index, dtype=int),
@@ -128,7 +146,7 @@ def postprocess_step(
         progress_cb("progress", {"message": "Batch processing filters", "pct": 92})
 
     nwindows = len(prep.roi_list)
-    adaptive_losses: dict[str, Any] = {}
+    adaptive_losses: dict[int, Any] = {}
     if params.use_adaptive:
         grid_data: dict[int, np.ndarray] = {}
         ch_idx_g = 0
@@ -150,9 +168,15 @@ def postprocess_step(
             prep.data.shape[1],
             prep.fsamp,
             nwindows,
+            win_means_by_window=decomposed.win_means,
             batch_ms=params.adapt_batch_ms,
             adapt_wh=params.adapt_wh,
             adapt_sv=params.adapt_sv,
+            adapt_sd=params.adapt_sd,
+            wh_learning_rate=params.adapt_wh_learning_rate,
+            sv_learning_rate=params.adapt_sv_learning_rate,
+            cov_alpha=params.adapt_cov_alpha,
+            spike_prev_weight=params.adapt_spike_prev_weight,
         )
     else:
         full_extended_by_window: dict[int, np.ndarray] | None = None
@@ -182,13 +206,12 @@ def postprocess_step(
             decomposed.coordinates_plateau,
             prep.data.shape[1],
             prep.fsamp,
-            nwindows,
             whiten_mat_by_window=decomposed.whiten_mat if full_extended_by_window else None,
             full_extended_by_window=full_extended_by_window,
             win_means_by_window=decomposed.win_means if full_extended_by_window else None,
         )
 
-    pulse_t, distime, mu_grid_index = _remove_duplicates_by_grid(
+    pulse_t, distime, mu_grid_index, kept_global = _remove_duplicates_by_grid(
         pulse_t,
         distime,
         decomposed.mu_grid_index,
@@ -197,6 +220,23 @@ def postprocess_step(
         prep.fsamp,
     )
 
+    # Subset SIL scores to match the deduplicated MUs.  Each global MU index
+    # maps to a (window, local_index) pair via the sorted mu_filters order that
+    # batch_process_filters / adaptive_batch_process used to build pulse_t.
+    mu_window_map: list[tuple[int, int]] = []
+    for nwin in sorted(decomposed.mu_filters.keys()):
+        n_good = decomposed.mu_filters[nwin].shape[1]
+        for j in range(n_good):
+            mu_window_map.append((nwin, j))
+
+    sil_by_window: dict[int, list[float]] = {}
+    for g_idx in kept_global:
+        if g_idx < len(mu_window_map):
+            win, local = mu_window_map[g_idx]
+            old_sil = decomposed.sil_by_window.get(win, [])
+            if local < len(old_sil):
+                sil_by_window.setdefault(win, []).append(old_sil[local])
+
     if progress_cb:
         progress_cb("progress", {"message": "Finalizing output", "pct": 97})
 
@@ -204,7 +244,7 @@ def postprocess_step(
         pulse_t=pulse_t,
         distime=distime,
         mu_grid_index=mu_grid_index,
-        sil_by_window=decomposed.sil_by_window,
+        sil_by_window=sil_by_window,
         adaptive_losses=adaptive_losses,
     )
 

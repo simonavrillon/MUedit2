@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 from scipy.linalg import eigh, inv
 
@@ -13,6 +15,8 @@ from muedit.signal.decomp_primitives import (
     signed_square,
     split_by_amplitude,
 )
+
+logger = logging.getLogger(__name__)
 
 _FIXED_POINT_TOL = 1e-4
 _FIXED_POINT_MAXITER = 500
@@ -188,6 +192,13 @@ def minimize_isi_covariance(
     if len(spikes_last) < 2:
         _, spikes_last = get_spikes(w_last, x, fsamp)
 
+    # Recompute cov_last from the actual returned spike train so that the
+    # reported CoV describes spikes_last, not the caller's input separator.
+    # When the loop made one pass (the common case), cov_last is still the
+    # caller's input CoV and spikes_last was recomputed above from w_last.
+    if len(spikes_last) >= 2:
+        cov_last = isi_cov(spikes_last, fsamp)
+
     return w_last, spikes_last, cov_last
 
 
@@ -254,7 +265,6 @@ def batch_process_filters(
     coordinates: list[int],
     ltime: int,
     fsamp: float,
-    nwindows_per_grid: int,
     whiten_mat_by_window: dict[int, np.ndarray] | None = None,
     full_extended_by_window: dict[int, np.ndarray] | None = None,
     win_means_by_window: dict[int, np.ndarray] | None = None,
@@ -289,7 +299,6 @@ def batch_process_filters(
     for nwin in sorted_wins:
         filters = mu_filters_by_window[nwin]
         n_filters = filters.shape[1]
-        grid_idx = nwin // max(1, nwindows_per_grid)
 
         for j in range(n_filters):
             current_filter = filters[:, j]
@@ -316,17 +325,19 @@ def batch_process_filters(
                     pt_full = pt_full - corr
                 pulse_t[mu_nb, :ltime] = pt_full[:ltime]
             else:
-                for nwin2 in whitened_windows:
-                    if nwin2 // max(1, nwindows_per_grid) != grid_idx:
-                        continue
-                    start = coordinates[nwin2 * 2]
-                    segment_len = whitened_windows[nwin2].shape[1]
-                    pt_segment = np.dot(current_filter, whitened_windows[nwin2])
-                    if start + segment_len <= ltime:
-                        pulse_t[mu_nb, start : start + segment_len] = pt_segment
-                    else:
-                        valid_len = ltime - start
-                        pulse_t[mu_nb, start:ltime] = pt_segment[:valid_len]
+                # Apply the filter only to its own window's whitened signal.
+                # Each window has its own whitening basis (estimated from that
+                # window's PCA), so projecting a filter onto another window's
+                # whitened signal would be invalid. Use ``full_trace`` to spread
+                # a filter across the whole grid via dewhitening.
+                start = coordinates[nwin * 2]
+                segment_len = whitened_windows[nwin].shape[1]
+                pt_segment = np.dot(current_filter, whitened_windows[nwin])
+                if start + segment_len <= ltime:
+                    pulse_t[mu_nb, start : start + segment_len] = pt_segment
+                else:
+                    valid_len = ltime - start
+                    pulse_t[mu_nb, start:ltime] = pt_segment[:valid_len]
 
             pulse_t[mu_nb, :] = signed_square(pulse_t[mu_nb, :])
             spikes = find_refractory_peaks(pulse_t[mu_nb, :], fsamp, min_isi_sec=_MIN_ISI_SEC)
@@ -353,7 +364,14 @@ def rem_duplicates(
     tol: float,
     fsamp: float,
 ) -> tuple[np.ndarray, list[np.ndarray], list[int]]:
-    """Remove duplicated motor units based on lag-aware spike-train overlap."""
+    """Remove duplicated motor units based on lag-aware spike-train overlap.
+
+    MUs with an empty spike train (``len(distime[i]) == 0``) are skipped and
+    excluded from the output — they are never added to ``pulsenew``,
+    ``distimenew``, or ``kept_indices``.  Callers reading ``kept_indices``
+    should be aware that the returned indices may be a strict subset of
+    ``range(n_mus)`` when some MUs have no spikes.
+    """
 
     if distime_ref is None:
         distime_ref = distime
@@ -393,6 +411,7 @@ def rem_duplicates(
             continue
         ref_expanded = distimmp[i]
         if len(ref_expanded) == 0:
+            logger.debug("rem_duplicates: skipping MU %d (empty spike train)", i)
             continue
         duplicates = [i]
 
@@ -406,7 +425,15 @@ def rem_duplicates(
             tgt_set = distimmp_sets[j]
             best_corr = 0.0
             best_lag = 0
-            norm = np.sqrt(max(len(distime[i]), 1) * max(len(distime[j]), 1))
+            # Normalise by the jitter-expanded set sizes so the overlap
+            # coefficient stays in [0, 1] (the overlap counts expanded samples).
+            norm = np.sqrt(max(len(ref_expanded), 1) * max(len(target_expanded), 1))
+            # The lag gate is rescaled by (2*jit+1) to preserve the behaviour of
+            # the original 0.2 threshold, which was tuned against raw spike
+            # counts. The expanded norm is ~(2*jit+1) larger, so the same
+            # overlap now yields a ~(2*jit+1) smaller coefficient; dividing the
+            # gate by the same factor keeps the alignment decision unchanged.
+            lag_gate = 0.2 / (2 * jit + 1)
             lag_range = range(-2 * maxlag, 2 * maxlag + 1)
             for lag in lag_range:
                 shifted = {t + lag for t in tgt_set if 0 <= t + lag < l_sig}
@@ -415,7 +442,7 @@ def rem_duplicates(
                 if corr_val > best_corr:
                     best_corr = corr_val
                     best_lag = lag
-            aligned_target = target_expanded + best_lag if best_corr > 0.2 else target_expanded
+            aligned_target = target_expanded + best_lag if best_corr > lag_gate else target_expanded
             common = np.intersect1d(ref_expanded, aligned_target)
             if len(common) > 0:
                 common = np.sort(common)

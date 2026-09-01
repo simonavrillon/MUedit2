@@ -10,7 +10,7 @@ keeps the two decomposition backends consistent and avoids drift.
 from __future__ import annotations
 
 import numpy as np
-from scipy.cluster.vq import kmeans2
+from scipy.cluster.vq import ClusterError, kmeans2
 from scipy.signal import find_peaks
 
 #: Default k-means iteration count for the 2-cluster amplitude split.
@@ -108,10 +108,22 @@ def split_by_amplitude(
     belonging to the cluster with the larger centroid, together with the
     centroids and labels so callers that need the spread (e.g. silhouette)
     or the low cluster can reuse the result.
+
+    When all peak amplitudes are identical (degenerate clustering — e.g. a
+    saturated segment or a source peeled to near-zero), k-means cannot split
+    them into two non-empty clusters. In that case all peaks are assigned to
+    the high cluster instead of raising, so a single bad window cannot abort
+    a multi-hour run.
     """
-    centroids, labels = kmeans2(
-        values[peaks], 2, iter=kmeans_iter, minit="++", missing=missing, seed=seed
-    )
+    try:
+        centroids, labels = kmeans2(
+            values[peaks], 2, iter=kmeans_iter, minit="++", missing=missing, seed=seed
+        )
+    except ClusterError:
+        peak_vals = values[peaks]
+        centroid = float(np.mean(peak_vals)) if peak_vals.size > 0 else 0.0
+        centroids = np.array([centroid, centroid])
+        labels = np.zeros(len(peaks), dtype=int)
     hi = int(np.argmax(centroids))
     high_indices = peaks[labels == hi]
     return high_indices, centroids, labels

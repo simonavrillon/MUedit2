@@ -43,7 +43,6 @@ class SignalImport:
     muscle: list[str] = field(default_factory=list)
     auxiliary: np.ndarray = field(default_factory=lambda: np.zeros((0, 0), dtype=float))
     auxiliaryname: list[str] = field(default_factory=list)
-    emgnotgrid: np.ndarray = field(default_factory=lambda: np.zeros((0, 0), dtype=float))
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -73,7 +72,6 @@ class SignalImport:
             muscle=[str(x) for x in list(muscle)],
             auxiliary=_ensure_channel_matrix(payload.get("auxiliary"), n_samples),
             auxiliaryname=[str(x) for x in list(auxiliaryname)],
-            emgnotgrid=_ensure_channel_matrix(payload.get("emgnotgrid"), n_samples),
             metadata=dict(metadata),
         )
 
@@ -90,7 +88,6 @@ class SignalImport:
             "muscle": list(self.muscle),
             "auxiliary": self.auxiliary.copy(),
             "auxiliaryname": list(self.auxiliaryname),
-            "emgnotgrid": self.emgnotgrid.copy(),
             "metadata": dict(self.metadata),
         }
 
@@ -135,11 +132,15 @@ class DecompositionSignalExport:
 
     def to_dict(self) -> dict[str, Any]:
         """Serialise to a dictionary using MATLAB-compatible key names."""
+        n_mu = len(self.discharge_times)
+        distime_obj = np.empty(n_mu, dtype=object)
+        for i, d in enumerate(self.discharge_times):
+            distime_obj[i] = np.asarray(d)
         return {
             "data": self.data,
             "fsamp": float(self.fsamp),
             "PulseT": self.pulse_t,
-            "Dischargetimes": np.array(self.discharge_times, dtype=object),
+            "Dischargetimes": distime_obj,
         }
 
 

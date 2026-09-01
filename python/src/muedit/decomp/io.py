@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -128,6 +129,20 @@ def build_pulse_trains_from_distimes(
     return pulses
 
 
+def save_editlog(
+    editlog_path: Path,
+    mu_uids: list[str],
+    edit_history: list[dict[str, Any]],
+    artifact_times: list[list[int]] | None = None,
+) -> None:
+    """Write a JSON editlog sidecar alongside a decomposition artifact."""
+    payload: dict[str, Any] = {"mu_uids": mu_uids, "history": edit_history}
+    if artifact_times:
+        payload["artifact_times"] = artifact_times
+    with editlog_path.open("w", encoding="utf-8") as fh:
+        json.dump(payload, fh, indent=2)
+
+
 def _parse_mu_grid_index(raw: Any) -> list[int]:
     """Normalize MU-to-grid assignment payloads to a flat integer list."""
     if raw is None:
@@ -179,8 +194,11 @@ def _extract_decomp_fields(
         pulse_trains = _normalize_pulse_matrix(pulse_trains)
         distime_raw = _get_case_insensitive(signal, "Dischargetimes")
 
-    fsamp_val = _get_case_insensitive(signal, "fsamp")
-    fsamp = float(fsamp_val) if fsamp_val is not None else None
+    fsamp_val = first_non_none(
+        _get_case_insensitive(signal, "fsamp"),
+        top.get("fsamp"),
+    )
+    fsamp = float(np.asarray(fsamp_val).ravel()[0]) if fsamp_val is not None else None
 
     data_block = _get_case_insensitive(signal, "data")
     total_samples = _infer_total_samples_from_pulse(pulse_trains)
@@ -191,10 +209,9 @@ def _extract_decomp_fields(
     rois_raw = _get_case_insensitive(preview_block, "rois")
     rois: list[tuple[int, int]] = []
     if rois_raw is not None:
-        rois = [
-            (int(r[0]), int(r[1])) if isinstance(r, (list, tuple)) else r
-            for r in rois_raw
-        ]
+        for r in rois_raw:
+            if isinstance(r, (list, tuple, np.ndarray)) and np.asarray(r).size >= 2:
+                rois.append((int(r[0]), int(r[1])))
 
     gnames = first_non_none(top.get("grid_names"), _get_case_insensitive(signal, "gridname"))
     grid_names = _parse_text_list(gnames) if gnames is not None else ["Grid 1"]
@@ -240,6 +257,7 @@ def _load_mat73_decomp(filepath: str) -> DecompositionLoadTuple:
             "grid_names": read_root("grid_names"),
             "mu_grid_index": read_root("mu_grid_index"),
             "parameters": read_root("parameters"),
+            "fsamp": read_root("fsamp"),
         }
         return _extract_decomp_fields(signal, preview_block, read_root("edition"), top)
 
@@ -250,8 +268,14 @@ def _load_npz_decomp(filepath: str) -> DecompositionLoadTuple:
     pulse_trains = data.get("pulse_trains", np.array([]))
     distime_raw = first_non_none(data.get("discharge_times"), data.get("distime"))
     fsamp_val = data.get("fsamp")
-    fsamp = float(fsamp_val) if fsamp_val is not None else None
-    total_samples = int(pulse_trains.shape[1]) if hasattr(pulse_trains, "shape") else None
+    fsamp = float(np.asarray(fsamp_val).ravel()[0]) if fsamp_val is not None else None
+    stored_total = data.get("total_samples")
+    if stored_total is not None and int(stored_total) > 0:
+        total_samples = int(stored_total)
+    elif getattr(pulse_trains, "ndim", 0) == 2:
+        total_samples = int(pulse_trains.shape[1])
+    else:
+        total_samples = None
 
     gnames = first_non_none(data.get("grid_names"), data.get("grid_name"))
     grid_names = _parse_text_list(gnames) if gnames is not None else []
@@ -288,6 +312,15 @@ def _load_npz_decomp(filepath: str) -> DecompositionLoadTuple:
     )
 
 
+def _mat_struct_to_dict(obj: Any) -> Any:
+    """Recursively convert scipy mat_struct objects to plain dicts."""
+    if hasattr(obj, "_fieldnames") and hasattr(obj, "__dict__"):
+        return {name: _mat_struct_to_dict(getattr(obj, name)) for name in obj._fieldnames}
+    if isinstance(obj, np.ndarray) and obj.dtype == object:
+        return np.array([_mat_struct_to_dict(item) for item in obj.flatten()], dtype=object).reshape(obj.shape)
+    return obj
+
+
 def _load_mat_decomp(filepath: str) -> DecompositionLoadTuple:
     """Load decomposition artifacts from MATLAB MAT structures."""
     try:
@@ -301,7 +334,11 @@ def _load_mat_decomp(filepath: str) -> DecompositionLoadTuple:
             return _load_mat73_decomp(filepath)
         raise
     except TypeError:
-        mat = scipy.io.loadmat(filepath)
+        # scipy < 1.12 does not support simplify_cells; fall back to
+        # struct_as_record=False + squeeze_me=True and convert mat_struct
+        # objects to dicts so the rest of the pipeline can consume them.
+        mat = scipy.io.loadmat(filepath, struct_as_record=False, squeeze_me=True)
+        mat = {k: _mat_struct_to_dict(v) for k, v in mat.items()}
 
     signal = mat.get("signal")
     if not isinstance(signal, dict):
@@ -554,7 +591,7 @@ def load_decomposition_file(filepath: str) -> dict[str, Any]:
         mu_grid_index = [0] * len(distimes)
 
     total_samples = int(
-        total_samples or (pulse_trains.shape[1] if hasattr(pulse_trains, "shape") else 0)
+        total_samples or (pulse_trains.shape[1] if getattr(pulse_trains, "ndim", 0) == 2 else 0)
     )
     if total_samples <= 0 and distimes:
         max_spike = max((max(d) for d in distimes if d), default=-1)
@@ -567,19 +604,22 @@ def load_decomposition_file(filepath: str) -> dict[str, Any]:
         and int(pulse_matrix_candidate.shape[1]) == int(total_samples)
     )
 
+    # MATLAB decomposition exports are 1-based by convention.
+    # Convert to 0-based for internal indexing while preserving MU order.
+    # This must happen before build_pulse_trains_from_distimes so the pulse
+    # matrix and distimes agree, and must be skipped when distimes are derived
+    # from a 0-based pulse matrix (np.flatnonzero is already 0-based).
+    if ext == ".mat" and distimes:
+        has_zero_index = any(any(int(v) == 0 for v in row) for row in distimes)
+        if not has_zero_index:
+            distimes = _shift_distimes(distimes, -1, int(total_samples))
+
     if has_pulse_matrix:
         pulse_matrix = np.asarray(pulse_matrix_candidate, dtype=float)
         if not distimes:
             distimes = _distimes_from_pulse_matrix(pulse_matrix)
     else:
         pulse_matrix = build_pulse_trains_from_distimes(distimes, int(total_samples))
-
-    # MATLAB decomposition exports are 1-based by convention.
-    # Convert to 0-based for internal indexing while preserving MU order.
-    if ext == ".mat" and distimes:
-        has_zero_index = any(any(int(v) == 0 for v in row) for row in distimes)
-        if not has_zero_index:
-            distimes = _shift_distimes(distimes, -1, int(total_samples))
 
     if not mu_grid_index or len(mu_grid_index) != len(distimes):
         mu_grid_index = [0] * len(distimes)
@@ -588,7 +628,7 @@ def load_decomposition_file(filepath: str) -> dict[str, Any]:
 
     norm_rois: list[tuple[int, int]] = []
     for item in rois:
-        if isinstance(item, (list, tuple)) and len(item) == 2:
+        if isinstance(item, (list, tuple, np.ndarray)) and np.asarray(item).size >= 2:
             norm_rois.append((int(item[0]), int(item[1])))
 
     loaded = LoadedDecomposition(
@@ -606,31 +646,41 @@ def load_decomposition_file(filepath: str) -> dict[str, Any]:
 
 
 def _parse_emgmask_cells(raw: Any) -> list[np.ndarray]:
+    """Parse EMGmask cell arrays into per-grid binary channel masks.
+
+    Binary masks must preserve order and length — unlike discharge times,
+    they are not index sets.  Routing them through ``normalize_distimes``
+    (which does ``sorted(set(...))``) collapses a 64-channel mask into the
+    set of its unique values (e.g. ``[0, 0, 1, 0, 1, ...]`` → ``[0, 1]``),
+    silently corrupting the ``emgmask → discard_channels`` path.
+    """
+
+    def _parse_mask_item(item: Any) -> np.ndarray:
+        """Flatten one cell into a 1-D int array, preserving order and length."""
+        if item is None:
+            return np.array([], dtype=int)
+        if isinstance(item, np.ndarray):
+            if item.dtype == object:
+                flat = np.array([int(v) for v in item.flatten().tolist()], dtype=int)
+                return flat
+            try:
+                return np.asarray(item, dtype=int).flatten()
+            except (TypeError, ValueError):
+                return np.array([], dtype=int)
+        if isinstance(item, (list, tuple)):
+            try:
+                return np.asarray([int(v) for v in item], dtype=int)
+            except (TypeError, ValueError):
+                return np.array([], dtype=int)
+        try:
+            return np.asarray([int(item)], dtype=int)
+        except (TypeError, ValueError):
+            return np.array([], dtype=int)
+
     items = _top_level_cell_items(raw)
     masks: list[np.ndarray] = []
     for item in items:
-        if item is None:
-            masks.append(np.array([], dtype=int))
-            continue
-        if isinstance(item, np.ndarray):
-            if item.dtype == object:
-                vals = normalize_distimes(item)
-                flat = [int(v) for row in vals for v in row]
-                masks.append(np.asarray(flat, dtype=int))
-            else:
-                try:
-                    masks.append(np.asarray(item, dtype=int).flatten())
-                except (TypeError, ValueError):
-                    masks.append(np.array([], dtype=int))
-            continue
-        if isinstance(item, (list, tuple)):
-            flat = normalize_distimes(item)
-            masks.append(np.asarray([int(v) for row in flat for v in row], dtype=int))
-            continue
-        try:
-            masks.append(np.asarray([int(item)], dtype=int))
-        except (TypeError, ValueError):
-            masks.append(np.array([], dtype=int))
+        masks.append(_parse_mask_item(item))
     return masks
 
 
@@ -680,7 +730,8 @@ def load_decomposition_signal_context(filepath: str) -> dict[str, Any] | None:
         try:
             mat = scipy.io.loadmat(filepath, simplify_cells=True)
         except TypeError:
-            mat = scipy.io.loadmat(filepath)
+            mat = scipy.io.loadmat(filepath, struct_as_record=False, squeeze_me=True)
+            mat = {k: _mat_struct_to_dict(v) for k, v in mat.items()}
         top = mat if isinstance(mat, dict) else {}
         candidate = top.get("signal")
         signal = candidate if isinstance(candidate, dict) else {}
@@ -692,7 +743,7 @@ def load_decomposition_signal_context(filepath: str) -> dict[str, Any] | None:
             if "signal" in h5f:
                 sig = _mat73_read(h5f["signal"], h5f)
                 signal = sig if isinstance(sig, dict) else {}
-            for key in ("fsamp", "grid_names", "EMGmask", "emgmask"):
+            for key in ("fsamp", "grid_names", "EMGmask", "emgmask", "metadata"):
                 if key in h5f:
                     top[key] = _mat73_read(h5f[key], h5f)
 
@@ -713,7 +764,7 @@ def load_decomposition_signal_context(filepath: str) -> dict[str, Any] | None:
         _get_case_insensitive(signal, "fsamp"),
         top.get("fsamp"),
     )
-    fsamp = float(fsamp_val) if fsamp_val is not None else None
+    fsamp = float(np.asarray(fsamp_val).ravel()[0]) if fsamp_val is not None else None
 
     grid_names_raw = first_non_none(
         _get_case_insensitive(signal, "gridname"),

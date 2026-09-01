@@ -41,6 +41,11 @@ class DecompositionParameters:
     adapt_batch_ms: int = 100
     adapt_wh: bool = True
     adapt_sv: bool = True
+    adapt_sd: bool = True
+    adapt_wh_learning_rate: float = 7e-3
+    adapt_sv_learning_rate: float = 3e-3
+    adapt_cov_alpha: float = 0.1
+    adapt_spike_prev_weight: int = 5
     full_trace: bool = False
 
 
@@ -95,4 +100,4 @@ class PostprocessStepOutput:
     distime: list[np.ndarray]
     mu_grid_index: list[int]
     sil_by_window: dict[int, list[float]]
-    adaptive_losses: dict[str, Any]
+    adaptive_losses: dict[int, Any]

@@ -81,12 +81,28 @@ def _resolve_roi_list(
     manual_roi: bool,
     roi: tuple[int, int] | None,
     rois: list[tuple[int, int]] | None,
+    nwindows: int = 1,
 ) -> list[tuple[int, int]]:
-    """Resolve the analysis ROI from the various supported input methods."""
+    """Resolve the analysis ROI from the various supported input methods.
+
+    When ``nwindows > 1`` and a single base ROI is resolved (from ``roi``,
+    ``manual_roi``, ``duration``, or the full signal), it is split into
+    ``nwindows`` equal contiguous sub-windows. Explicit ``rois`` are never
+    split — the caller defined the windows.
+    """
     total_len = data.shape[1]
     if total_len == 0:
         raise ValueError("Input signal contains zero samples; cannot define ROI.")
     roi_list: list[tuple[int, int]] = []
+    explicit_rois = bool(rois)
+    n_rois = len(rois) if rois is not None else 0
+    if explicit_rois and nwindows > 1 and n_rois != nwindows:
+        logger.warning(
+            "nwindows=%d ignored because %d explicit ROI(s) were provided; the "
+            "ROI(s) are used as-is (one window each).",
+            nwindows,
+            n_rois,
+        )
     if rois:
         for r in rois:
             s = max(0, min(int(r[0]), total_len - 1))
@@ -104,6 +120,22 @@ def _resolve_roi_list(
         roi_list = [(0, ltime)]
     else:
         roi_list = [(0, total_len)]
+
+    if nwindows > 1 and not explicit_rois and len(roi_list) == 1:
+        s, e = roi_list[0]
+        span = e - s
+        if span >= nwindows:
+            step = span // nwindows
+            roi_list = [(s + i * step, s + (i + 1) * step) for i in range(nwindows)]
+            # Extend the last sub-window to the original end so no samples are lost.
+            roi_list[-1] = (roi_list[-1][0], e)
+        else:
+            logger.warning(
+                "nwindows=%d requested but the ROI span (%d samples) is smaller "
+                "than nwindows; using a single window.",
+                nwindows,
+                span,
+            )
     return roi_list
 
 
@@ -270,15 +302,27 @@ def preprocess_step(
     bids_metadata: dict[str, Any] | None,
 ) -> PreprocessStepOutput:
     """Apply channel formatting, filtering, ROI selection, and optional BIDS raw export."""
-    data = np.array(loaded.data, copy=True)
+    data = np.asarray(loaded.data, dtype=np.float64)
     # Keep an untouched copy of the raw EMG for the BIDS export. The filters
     # below mutate `data` in place, so we snapshot before that happens.
-    raw_data = np.array(loaded.data, copy=True)
-    grid_names = loaded.signal.get("gridname", ["Default"])
+    raw_data = np.array(data, copy=True)
+    grid_names = loaded.signal.get("gridname") or []
+    if not grid_names:
+        raise ValueError(
+            "Signal has no grid name. Set signal.gridname to a name present in "
+            "_GRID_CATALOG (signal/grid.py) before decomposing."
+        )
     coordinates, ied, discard_channels, emg_type = format_hdemg_signal(
         grid_names,
         discard_overrides=discard_overrides,
     )
+    total_declared_channels = sum(c.shape[0] for c in coordinates)
+    if total_declared_channels > data.shape[0]:
+        raise ValueError(
+            f"Grid catalogue declares {total_declared_channels} channels "
+            f"({', '.join(grid_names)}) but the signal has only {data.shape[0]} "
+            f"channels. Check that the grid name matches the recording."
+        )
     _apply_grid_notch_filters(data, loaded.fsamp, grid_names, coordinates)
     _apply_grid_bandpass_filters(data, loaded.fsamp, grid_names, coordinates, emg_type)
 
@@ -318,7 +362,9 @@ def preprocess_step(
         loader_meta["bids_entity_label"] = entity_label
         loader_meta["bids_emg_path"] = str(resolve_bids_emg_path(Path(bids_root), entity_label))
 
-    roi_list = _resolve_roi_list(data, loaded.fsamp, duration, manual_roi, roi, rois)
+    roi_list = _resolve_roi_list(
+        data, loaded.fsamp, duration, manual_roi, roi, rois, params.nwindows
+    )
     ngrid = len(grid_names)
     return PreprocessStepOutput(
         signal=loaded.signal,
