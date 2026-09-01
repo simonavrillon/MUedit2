@@ -262,6 +262,29 @@ def test_fix9_integer_input_promoted_to_float():
     assert prep.data.dtype == np.float64
 
 
+def test_fix9_float64_input_does_not_share_array():
+    """float64 input must be copied, not shared with the caller's array."""
+    from muedit.decomp.types import LoadStepOutput
+    from muedit.decomp.preprocess import preprocess_step, DecompositionParameters
+
+    data = np.random.default_rng(0).standard_normal((64, 200)).astype(np.float64)
+    original = data.copy()
+    loaded = LoadStepOutput(
+        full_path="test.mat",
+        filename="test.mat",
+        signal={"gridname": ["GR04MM1305"], "muscle": [], "metadata": {}},
+        data=data,
+        fsamp=2000.0,
+    )
+    params = DecompositionParameters()
+    prep = preprocess_step(
+        loaded, None, False, None, None, params, None, None, None, None
+    )
+    # Filters mutate prep.data in place — the caller's array must not be affected.
+    assert not np.shares_memory(prep.data, data), "prep.data shares memory with loaded.data"
+    assert np.allclose(data, original), "caller's data was mutated by filtering"
+
+
 # ---------------------------------------------------------------------------
 # Fix #10: discard_overrides silently ignored on size mismatch
 # ---------------------------------------------------------------------------
@@ -339,6 +362,37 @@ def test_fix13_unequal_length_distimes_still_1d_object():
 
 
 # ---------------------------------------------------------------------------
+# Fix #15 regression: _mat_struct_to_dict must not hit the #13 trap
+# ---------------------------------------------------------------------------
+def test_fix15_mat_struct_to_dict_equal_length_object_array():
+    """_mat_struct_to_dict must produce a 1-D object array even when cell
+    contents are equal-length (the #13 trap that np.array(..., dtype=object)
+    falls into)."""
+    from muedit.decomp.io import _mat_struct_to_dict
+
+    # Equal-length contents — np.array([...], dtype=object) would build a 2-D
+    # array and .reshape((2,)) would fail.
+    obj = np.empty(2, dtype=object)
+    obj[0] = np.array([1, 2, 3])
+    obj[1] = np.array([4, 5, 6])
+    result = _mat_struct_to_dict(obj)
+    assert result.ndim == 1, f"Expected 1-D object array, got shape {result.shape}"
+    assert result.shape == (2,)
+
+
+def test_fix15_mat_struct_to_dict_ragged_object_array():
+    """_mat_struct_to_dict with ragged contents must also stay 1-D."""
+    from muedit.decomp.io import _mat_struct_to_dict
+
+    obj = np.empty(2, dtype=object)
+    obj[0] = np.array([1, 2])
+    obj[1] = np.array([3, 4, 5, 6])
+    result = _mat_struct_to_dict(obj)
+    assert result.ndim == 1
+    assert result.shape == (2,)
+
+
+# ---------------------------------------------------------------------------
 # Fix #14: rois np.ndarray entries silently dropped
 # ---------------------------------------------------------------------------
 def test_fix14_rois_ndarray_entries_survive():
@@ -352,6 +406,18 @@ def test_fix14_rois_ndarray_entries_survive():
     assert len(rois) == 2
     assert rois[0] == (10, 20)
     assert rois[1] == (30, 40)
+
+
+def test_fix14_single_roi_squeezed_to_1d_survives():
+    """A single ROI squeezed to 1-D by simplify_cells must not be dropped."""
+    from muedit.decomp.io import _extract_decomp_fields
+
+    # simplify_cells squeezes a (1, 2) cell to (2,) — iteration yields scalars
+    preview = {"rois": np.array([0, 100])}
+    result = _extract_decomp_fields({}, preview, None, {})
+    rois = result[7]
+    assert len(rois) == 1, f"Expected 1 ROI, got {len(rois)}"
+    assert rois[0] == (0, 100)
 
 
 # ---------------------------------------------------------------------------
@@ -398,20 +464,25 @@ def test_fix16_missing_gridname_raises():
 
 
 # ---------------------------------------------------------------------------
-# Fix #17: e_pre keeps leading warm-up rows
+# Fix #17: e_pre slice must not shift backward pass output
 # ---------------------------------------------------------------------------
-def test_fix17_e_pre_trims_leading_warmup():
-    """e_pre must trim the leading ex_factor-1 warm-up rows from the backward pass."""
+def test_fix17_e_pre_no_time_shift():
+    """The backward pass slice must not shift the output by ex_factor-1 samples.
+
+    The original .T[:calib_start] is correctly aligned — row c of the
+    transposed extended signal is the delay-embedded frame at time c.
+    Trimming to .T[ex_factor-1:] shifts every backward discharge time late.
+    This test verifies the output row count and that the backward region
+    is not shifted.
+    """
     from muedit.decomp.adaptive_batch import _run_adapt_decomp_bidirectional
     from muedit.adapt_decomp.config import Config
-    from muedit.decomp.algorithm import extend_signal
 
     n_ch = 4
     calib_start = 100
     n_samples = 300
     ex_factor = 3
 
-    # Build a simple grid data and calibration window
     rng = np.random.default_rng(0)
     grid_data_g = rng.standard_normal((n_ch, n_samples)).astype(np.float32)
     win_data_g = rng.standard_normal((n_ch, calib_start)).astype(np.float32)
@@ -421,9 +492,6 @@ def test_fix17_e_pre_trims_leading_warmup():
 
     config = Config(fsamp=2000, batch_ms=50, compute_loss=False)
 
-    # The call should not process warm-up rows as real data.
-    # We can't easily check the internal e_pre, but we can verify the output
-    # shape is correct (calib_start + forward = total output).
     ipts, spikes, losses = _run_adapt_decomp_bidirectional(
         grid_data_g=grid_data_g,
         win_data_g=win_data_g,
@@ -434,8 +502,36 @@ def test_fix17_e_pre_trims_leading_warmup():
         config=config,
     )
     # The backward pass covers [0, calib_start) and the forward pass covers
-    # [calib_start, ...). Total ipts rows should be n_samples.
+    # [calib_start, ...). Total ipts rows should be n_samples — no shift.
     assert ipts.shape[0] == n_samples
+
+
+def test_fix17_e_pre_slice_alignment():
+    """Directly verify that .T[:calib_start] keeps row 0 = time 0 alignment."""
+    from muedit.decomp.algorithm import extend_signal
+
+    n_ch = 4
+    calib_start = 10
+    ex_factor = 3
+
+    signal = np.arange(n_ch * calib_start, dtype=float).reshape(n_ch, calib_start)
+    ext = extend_signal(signal, ex_factor)  # (n_ch*ex, calib_start + ex-1)
+    ext_t = ext.T  # (calib_start + ex-1, n_ch*ex)
+
+    # The original slice [:calib_start] gives rows 0..calib_start-1
+    # Row 0 of the transposed signal is the frame at time 0 (block 0 = signal[:, 0])
+    old_slice = ext_t[:calib_start]
+    assert old_slice.shape[0] == calib_start
+
+    # Row 0 of old_slice should have block 0 = signal[:, 0]
+    block0 = old_slice[0, :n_ch]
+    assert np.allclose(block0, signal[:, 0]), "old slice row 0 block 0 != signal[:, 0]"
+
+    # The incorrect slice [ex_factor-1:] shifts everything: row 0 = old row 2
+    new_slice = ext_t[ex_factor - 1:]
+    block0_new = new_slice[0, :n_ch]
+    assert np.allclose(block0_new, signal[:, 2]), "new slice row 0 should be signal[:, 2]"
+    assert not np.allclose(block0_new, signal[:, 0]), "new slice is shifted — this is the bug"
 
 
 # ---------------------------------------------------------------------------

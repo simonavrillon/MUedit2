@@ -302,7 +302,7 @@ def preprocess_step(
     bids_metadata: dict[str, Any] | None,
 ) -> PreprocessStepOutput:
     """Apply channel formatting, filtering, ROI selection, and optional BIDS raw export."""
-    data = np.asarray(loaded.data, dtype=np.float64)
+    data = np.array(loaded.data, dtype=np.float64, copy=True)
     # Keep an untouched copy of the raw EMG for the BIDS export. The filters
     # below mutate `data` in place, so we snapshot before that happens.
     raw_data = np.array(data, copy=True)

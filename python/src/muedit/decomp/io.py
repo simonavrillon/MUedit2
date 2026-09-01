@@ -209,9 +209,20 @@ def _extract_decomp_fields(
     rois_raw = _get_case_insensitive(preview_block, "rois")
     rois: list[tuple[int, int]] = []
     if rois_raw is not None:
-        for r in rois_raw:
-            if isinstance(r, (list, tuple, np.ndarray)) and np.asarray(r).size >= 2:
+        rois_arr = np.asarray(rois_raw, dtype=object)
+        # simplify_cells squeezes a single ROI from (1, 2) to (2,), so
+        # iteration yields scalars and the pair is dropped.  Reshape to
+        # (-1, 2) so every row is one (start, end) pair regardless of how
+        # scipy packed it.
+        if rois_arr.ndim == 1 and rois_arr.size >= 2 and rois_arr.size % 2 == 0:
+            rois_arr = rois_arr.reshape(-1, 2)
+        if rois_arr.ndim == 2 and rois_arr.shape[1] >= 2:
+            for r in rois_arr:
                 rois.append((int(r[0]), int(r[1])))
+        else:
+            for r in rois_raw:
+                if isinstance(r, (list, tuple, np.ndarray)) and np.asarray(r).size >= 2:
+                    rois.append((int(r[0]), int(r[1])))
 
     gnames = first_non_none(top.get("grid_names"), _get_case_insensitive(signal, "gridname"))
     grid_names = _parse_text_list(gnames) if gnames is not None else ["Grid 1"]
@@ -317,7 +328,11 @@ def _mat_struct_to_dict(obj: Any) -> Any:
     if hasattr(obj, "_fieldnames") and hasattr(obj, "__dict__"):
         return {name: _mat_struct_to_dict(getattr(obj, name)) for name in obj._fieldnames}
     if isinstance(obj, np.ndarray) and obj.dtype == object:
-        return np.array([_mat_struct_to_dict(item) for item in obj.flatten()], dtype=object).reshape(obj.shape)
+        flat = obj.flatten()
+        converted = np.empty(flat.size, dtype=object)
+        for i, item in enumerate(flat):
+            converted[i] = _mat_struct_to_dict(item)
+        return converted.reshape(obj.shape)
     return obj
 
 

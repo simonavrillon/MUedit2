@@ -142,11 +142,13 @@ def _run_adapt_decomp_bidirectional(
         return ipts_fwd, spikes_fwd, losses_fwd
 
     # --- Backward pass over [0, calib_start) --------------------------------
-    # extend_signal adds (ex_factor - 1) leading warm-up rows from the delay
-    # embedding and (ex_factor - 1) trailing padded rows.  Trim both ends to
-    # keep exactly the original calib_start rows of real data, matching the
-    # forward pass which skips warm-up via warmup=ex_factor-1.
-    e_pre = extend_signal(grid_data_g[:, :calib_start], ex_factor).T[ex_factor - 1:]
+    # extend_signal adds (ex_factor - 1) trailing padded samples; keep only
+    # the original pre-calibration duration to avoid forward/backward offset.
+    # The leading (ex_factor - 1) warm-up rows are inherent — the signal starts
+    # at t=0 so there is no history to recover — and must not be trimmed, or
+    # the backward output is time-shifted by ex_factor-1 samples relative to
+    # the forward pass.
+    e_pre = extend_signal(grid_data_g[:, :calib_start], ex_factor).T[:calib_start]
 
     # Pad at the start (original time 0) to a multiple of bs so that reversed
     # blocks align with batch strides. This makes the backward losses
