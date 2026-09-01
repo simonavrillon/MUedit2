@@ -212,9 +212,19 @@ def _extract_decomp_fields(
         rois_arr = np.asarray(rois_raw, dtype=object)
         # simplify_cells squeezes a single ROI from (1, 2) to (2,), so
         # iteration yields scalars and the pair is dropped.  Reshape to
-        # (-1, 2) so every row is one (start, end) pair regardless of how
-        # scipy packed it.
-        if rois_arr.ndim == 1 and rois_arr.size >= 2 and rois_arr.size % 2 == 0:
+        # (-1, 2) so every row is one (start, end) pair — but only when the
+        # elements are scalars.  An object array of length-2 arrays (a cell
+        # array of ROI pairs) must fall through to the else branch instead
+        # of being collapsed into a single row of arrays.
+        is_scalar_elems = rois_arr.size > 0 and all(
+            np.ndim(v) == 0 for v in rois_arr.ravel()
+        )
+        if (
+            rois_arr.ndim == 1
+            and is_scalar_elems
+            and rois_arr.size >= 2
+            and rois_arr.size % 2 == 0
+        ):
             rois_arr = rois_arr.reshape(-1, 2)
         if rois_arr.ndim == 2 and rois_arr.shape[1] >= 2:
             for r in rois_arr:

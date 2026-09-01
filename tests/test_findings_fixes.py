@@ -420,6 +420,22 @@ def test_fix14_single_roi_squeezed_to_1d_survives():
     assert rois[0] == (0, 100)
 
 
+def test_fix14_cell_of_pairs_does_not_crash():
+    """An object array of length-2 ROI arrays (a cell of pairs) must not
+    be reshaped into a single row of arrays that then crashes int()."""
+    from muedit.decomp.io import _extract_decomp_fields
+
+    # Hand-authored preview.rois = {[0 100], [200 300]}
+    cell = np.empty(2, dtype=object)
+    cell[0] = np.array([0, 100])
+    cell[1] = np.array([200, 300])
+    result = _extract_decomp_fields({}, {"rois": cell}, None, {})
+    rois = result[7]
+    assert len(rois) == 2
+    assert rois[0] == (0, 100)
+    assert rois[1] == (200, 300)
+
+
 # ---------------------------------------------------------------------------
 # Fix #16: .get("gridname", ["Default"]) dead default
 # ---------------------------------------------------------------------------
