@@ -60,9 +60,12 @@ class AdaptiveDecomp:
         """Initialise whitening covariance from calibration batches and compute KL divergence stats."""
         emg_extended = extend_signal(emg_calib, config.ex_factor, samples_first=True)
         whitened_emg = emg_extended @ self.whitening.T
-        self.whitening_covariance = np.cov(whitened_emg.T).astype(np.float32)
 
         batch_size = config.batch_size
+        warmup = config.ex_factor - 1
+        whitened_emg = whitened_emg[warmup:]
+        self.whitening_covariance = np.cov(whitened_emg.T).astype(np.float32)
+
         kl_divs: list[float] = []
         for start_idx in range(0, len(whitened_emg) - batch_size + 1, batch_size):
             batch = whitened_emg[start_idx : start_idx + batch_size]
@@ -90,12 +93,13 @@ class AdaptiveDecomp:
         whitened = self.whitening @ emg_extended.T  # (n_extended, n_calib)
 
         batch_size = config.batch_size
-        n_batches = emg_extended.shape[0] // batch_size
+        warmup = config.ex_factor - 1
+        n_batches = (emg_extended.shape[0] - warmup) // batch_size
         contrast_values: list[np.ndarray] = []
 
         for b in range(n_batches):
-            start = b * batch_size
-            end   = (b + 1) * batch_size
+            start = warmup + b * batch_size
+            end   = start + batch_size
             ipts_batch = (self.sep_vectors @ whitened[:, start:end]).T  # (batch, n_mu)
             ipts_sq    = signed_square(ipts_batch)
             spikes_batch = self._detect_spikes(ipts_sq, update_centroids=False)
@@ -156,12 +160,6 @@ class AdaptiveDecomp:
         remainder_samples = n_samples - n_batches * batch_size
         if remainder_samples > 0:
             start_idx = n_batches * batch_size
-            # The tail is often shorter than a full batch; np.cov on a
-            # 1-sample tail returns NaN (with RuntimeWarnings), which would
-            # poison whitening_covariance. Skip the whitening-covariance
-            # update here — run() returns immediately after, so the
-            # whitening matrix is never exposed. Spike detection and SV
-            # adaptation still run on the tail samples.
             whitened_batch = self.whitening @ self.emg_extended[start_idx:].T
             ipts_batch = (self.sep_vectors @ whitened_batch).T
             ipts_sq = signed_square(ipts_batch)
@@ -267,14 +265,12 @@ class AdaptiveDecomp:
     def _contrast_value(
         self, ipts_batch: np.ndarray, spikes_batch: np.ndarray
     ) -> np.ndarray:
-        """Mean contrast function value at spike positions, per MU (nan when no spikes)."""
+        """Mean logcosh contrast value at spike positions, per MU (nan when no spikes)."""
         n_spikes  = spikes_batch.sum(axis=0).astype(float)
         mean_ipts = (ipts_batch * spikes_batch).sum(axis=0) / (n_spikes + 1e-6)
         mean_ipts = mean_ipts.copy()
         mean_ipts[n_spikes == 0] = np.nan
-        if self.config.contrast_func == "logcosh":
-            return np.log(np.cosh(mean_ipts))
-        return mean_ipts ** 3 / 6
+        return np.log(np.cosh(mean_ipts))
 
     def _sv_loss(self, contrast: np.ndarray) -> np.ndarray:
         """Normalised separation vector loss (squared z-score against calibration contrast)."""
@@ -286,11 +282,8 @@ class AdaptiveDecomp:
         ipts: np.ndarray,
         spikes: np.ndarray,
     ) -> None:
-        """Gradient ascent on contrast function with Gram-Schmidt deflation."""
-        if self.config.contrast_func == "logcosh":
-            gradients_all = np.tanh(ipts) * spikes
-        else:
-            gradients_all = (ipts**2 / 2.0) * spikes
+        """Gradient ascent on the logcosh contrast with Gram-Schmidt deflation."""
+        gradients_all = np.tanh(ipts) * spikes
 
         spike_counts = spikes.sum(axis=0)
         gradients = whitened_signal @ gradients_all / np.maximum(spike_counts, 1)

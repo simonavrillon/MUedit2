@@ -27,8 +27,17 @@ from muedit.decomp.types import (
     PreprocessStepOutput,
 )
 from muedit.models import DecompositionExport, DecompositionSignalExport
+from muedit.signal.filters import demean
 
 logger = logging.getLogger(__name__)
+
+
+def _pack_object_array(items: list[Any]) -> np.ndarray:
+    """Pack a list of arrays into a 1-D object ndarray of consistent shape."""
+    arr = np.empty(len(items), dtype=object)
+    for i, item in enumerate(items):
+        arr[i] = item
+    return arr
 
 
 def _remove_duplicates_by_grid(
@@ -39,13 +48,7 @@ def _remove_duplicates_by_grid(
     params: DecompositionParameters,
     fsamp: float,
 ) -> tuple[np.ndarray, list[np.ndarray], list[int], list[int]]:
-    """Remove duplicate motor units within each grid and optionally across grids.
-
-    Returns ``(pulse_t, distime, mu_grid_index, kept_global_indices)`` where
-    ``kept_global_indices`` maps each surviving MU to its index in the input
-    ``pulse_t`` array, so callers can subset per-window metadata (e.g. SIL
-    scores) to match the deduplicated output.
-    """
+    """Remove duplicate motor units within each grid and optionally across grids."""
     if len(distime) == 0:
         return np.array([]), [], [], []
 
@@ -124,7 +127,6 @@ def _save_npz_with_app_schema(
         "fsamp": fsamp,
         "grid_names": np.array(grid_names, dtype=object),
         "mu_grid_index": np.array(mu_grid_index, dtype=int),
-        "muscle_names": np.array(muscles, dtype=object),
         "muscle": np.array(muscles, dtype=object),
         "parameters": np.array([parameters], dtype=object),
         "total_samples": total_samples,
@@ -132,6 +134,69 @@ def _save_npz_with_app_schema(
     if extras:
         payload.update(extras)
     np.savez_compressed(out_path, **payload)
+
+
+def _reconstruct_window_signal(
+    prep: PreprocessStepOutput,
+    params: DecompositionParameters,
+    win_global: int,
+    whiten_mat: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Recompute ``(win_data, w_sig)`` for one window from ``prep.data`` + ``whiten_mat``."""
+    nwindows = len(prep.roi_list)
+    grid_idx = win_global // max(1, nwindows)
+
+    ch_offset = 0
+    for g in range(grid_idx):
+        ch_offset += int(np.array(prep.discard_channels[g]).astype(int).size)
+
+    mask = np.array(prep.discard_channels[grid_idx]).astype(int)
+    n_ch_grid = mask.size
+    keep_idx = np.where(mask == 0)[0]
+
+    start = prep.coordinates_plateau[win_global * 2]
+    end = prep.coordinates_plateau[win_global * 2 + 1]
+    grid_block = prep.data[ch_offset : ch_offset + n_ch_grid, start:end]
+    win_data_arr = grid_block[keep_idx, :]
+
+    ex_factor = int(round(params.nbextchan / win_data_arr.shape[0]))
+    edge_samples = int(round(prep.fsamp * params.edges_sec))
+    trim_edges = edge_samples > 0 and win_data_arr.shape[1] > 2 * edge_samples
+
+    e_sig = extend_signal(demean(win_data_arr), ex_factor)
+    if trim_edges:
+        e_sig = e_sig[:, edge_samples:-edge_samples]
+        win_data = win_data_arr[:, edge_samples:-edge_samples]
+    else:
+        win_data = win_data_arr
+
+    w_sig = whiten_mat @ e_sig
+    return win_data, w_sig
+
+
+def _make_window_reconstructors(
+    prep: PreprocessStepOutput,
+    params: DecompositionParameters,
+    decomposed: DecomposeStepOutput,
+) -> tuple[Callable[[int], np.ndarray], Callable[[int], np.ndarray]]:
+    """Return ``(get_win_data, get_w_sig)`` callables with a one-window cache."""
+    cache: dict[int, tuple[np.ndarray, np.ndarray]] = {}
+
+    def _get(nwin: int) -> tuple[np.ndarray, np.ndarray]:
+        if nwin not in cache:
+            cache.clear()
+            cache[nwin] = _reconstruct_window_signal(
+                prep, params, nwin, decomposed.whiten_mat[nwin]
+            )
+        return cache[nwin]
+
+    def get_win_data(nwin: int) -> np.ndarray:
+        return _get(nwin)[0]
+
+    def get_w_sig(nwin: int) -> np.ndarray:
+        return _get(nwin)[1]
+
+    return get_win_data, get_w_sig
 
 
 def postprocess_step(
@@ -147,6 +212,8 @@ def postprocess_step(
 
     nwindows = len(prep.roi_list)
     adaptive_losses: dict[int, Any] = {}
+    get_win_data, get_w_sig = _make_window_reconstructors(prep, params, decomposed)
+
     if params.use_adaptive:
         grid_data: dict[int, np.ndarray] = {}
         ch_idx_g = 0
@@ -160,8 +227,8 @@ def postprocess_step(
 
         pulse_t, distime, adaptive_losses = adaptive_batch_process(
             decomposed.mu_filters,
-            decomposed.w_sig,
-            decomposed.win_data,
+            get_w_sig,
+            get_win_data,
             decomposed.whiten_mat,
             grid_data,
             decomposed.coordinates_plateau,
@@ -179,36 +246,45 @@ def postprocess_step(
             spike_prev_weight=params.adapt_spike_prev_weight,
         )
     else:
-        full_extended_by_window: dict[int, np.ndarray] | None = None
+        build_full_extended: Callable[[int], np.ndarray] | None = None
+        window_to_grid: dict[int, int] | None = None
         if params.full_trace:
-            full_extended_by_window = {}
             ch_idx_g = 0
-            grid_full_ext: dict[int, np.ndarray] = {}
+            keep_idx_by_grid: dict[int, np.ndarray] = {}
+            ch_offset_by_grid: dict[int, int] = {}
+            ex_factor_by_grid: dict[int, int] = {}
             for i in range(prep.ngrid):
                 mask = np.array(prep.discard_channels[i]).astype(int)
                 n_ch_g = mask.size
-                keep_idx = np.where(mask == 0)[0]
-                grid_raw = prep.data[ch_idx_g + keep_idx, :]
-                ex_factor = int(round(params.nbextchan / max(1, grid_raw.shape[0])))
-                # Raw (non-demeaned) extended signal, shared across the grid's
-                # windows. The per-window DC baseline is removed as an additive
-                # correction inside batch_process_filters via win_means.
-                grid_full_ext[i] = extend_signal(grid_raw, ex_factor)
+                keep_idx_by_grid[i] = np.where(mask == 0)[0]
+                ex_factor_by_grid[i] = int(
+                    round(params.nbextchan / max(1, keep_idx_by_grid[i].size))
+                )
+                ch_offset_by_grid[i] = ch_idx_g
                 ch_idx_g += n_ch_g
-            for nwin in decomposed.mu_filters:
-                grid_idx = nwin // max(1, nwindows)
-                full_extended_by_window[nwin] = grid_full_ext[grid_idx]
+
+            def _build_full_extended(grid_idx: int) -> np.ndarray:
+                grid_raw = prep.data[
+                    ch_offset_by_grid[grid_idx] + keep_idx_by_grid[grid_idx], :
+                ]
+                return extend_signal(grid_raw, ex_factor_by_grid[grid_idx])
+
+            build_full_extended = _build_full_extended
+            window_to_grid = {
+                nwin: nwin // max(1, nwindows) for nwin in decomposed.mu_filters
+            }
             logger.info("Applying MU filters over the full trace (dewhitened).")
 
         pulse_t, distime = batch_process_filters(
             decomposed.mu_filters,
-            decomposed.w_sig,
+            get_w_sig,
             decomposed.coordinates_plateau,
             prep.data.shape[1],
             prep.fsamp,
-            whiten_mat_by_window=decomposed.whiten_mat if full_extended_by_window else None,
-            full_extended_by_window=full_extended_by_window,
-            win_means_by_window=decomposed.win_means if full_extended_by_window else None,
+            whiten_mat_by_window=decomposed.whiten_mat if build_full_extended else None,
+            build_full_extended=build_full_extended,
+            window_to_grid=window_to_grid,
+            win_means_by_window=decomposed.win_means if build_full_extended else None,
         )
 
     pulse_t, distime, mu_grid_index, kept_global = _remove_duplicates_by_grid(
@@ -220,21 +296,20 @@ def postprocess_step(
         prep.fsamp,
     )
 
-    # Subset SIL scores to match the deduplicated MUs.  Each global MU index
-    # maps to a (window, local_index) pair via the sorted mu_filters order that
-    # batch_process_filters / adaptive_batch_process used to build pulse_t.
     mu_window_map: list[tuple[int, int]] = []
     for nwin in sorted(decomposed.mu_filters.keys()):
         n_good = decomposed.mu_filters[nwin].shape[1]
         for j in range(n_good):
             mu_window_map.append((nwin, j))
 
+    sil_flat: list[float] = []
     sil_by_window: dict[int, list[float]] = {}
     for g_idx in kept_global:
         if g_idx < len(mu_window_map):
             win, local = mu_window_map[g_idx]
             old_sil = decomposed.sil_by_window.get(win, [])
             if local < len(old_sil):
+                sil_flat.append(old_sil[local])
                 sil_by_window.setdefault(win, []).append(old_sil[local])
 
     if progress_cb:
@@ -245,6 +320,7 @@ def postprocess_step(
         distime=distime,
         mu_grid_index=mu_grid_index,
         sil_by_window=sil_by_window,
+        sil=sil_flat,
         adaptive_losses=adaptive_losses,
     )
 
@@ -264,7 +340,9 @@ def export_step(
     bids_emg_path = prep.loader_meta.get("bids_emg_path")
     if bids_entity_label and bids_emg_path:
         _emg_parts = list(Path(bids_emg_path).resolve().parts)
-        _sub_idx = next((i for i, p in enumerate(_emg_parts) if p.lower().startswith("sub-")), -1)
+        _dir_parts = _emg_parts[:-1]  # exclude the filename
+        _sub_idx = next((i for i in range(len(_dir_parts) - 1, -1, -1)
+                        if _dir_parts[i].lower().startswith("sub-")), -1)
         if _sub_idx > 0:
             _bids_rt = Path(*_emg_parts[:_sub_idx])
             _subj = _emg_parts[_sub_idx][4:]
@@ -310,7 +388,7 @@ def export_step(
         ),
         parameters=asdict(params),
         grid_names=prep.grid_names,
-        sil=post.sil_by_window,
+        sil=post.sil,
         discard_channels=prep.discard_channels,
         coordinates=prep.coordinates,
         mu_grid_index=post.mu_grid_index,
@@ -320,13 +398,24 @@ def export_step(
     result["adaptive_losses"] = post.adaptive_losses
 
     if save_npz:
+        _sil_keys = sorted(post.sil_by_window)
         extras: dict[str, Any] = {
             "adaptive_losses": np.array([post.adaptive_losses], dtype=object),
+            "sil": np.asarray(post.sil, dtype=float),
+            "sil_keys": np.array(_sil_keys, dtype=int),
+            "sil_by_window": _pack_object_array([
+                np.asarray(post.sil_by_window.get(k, []), dtype=float)
+                for k in _sil_keys
+            ]),
+            "rois": np.array(
+                [(int(s), int(e)) for s, e in prep.roi_list],
+                dtype=int,
+            ) if prep.roi_list else np.array([], dtype=int),
         }
         if save_emg_data:
             extras["emg_data"] = prep.data
-            extras["discard_channels"] = np.array(prep.discard_channels, dtype=object)
-            extras["coordinates"] = np.array(prep.coordinates, dtype=object)
+            extras["discard_channels"] = _pack_object_array(prep.discard_channels)
+            extras["coordinates"] = _pack_object_array(prep.coordinates)
         _save_npz_with_app_schema(
             save_path,
             pulse_trains=post.pulse_t,

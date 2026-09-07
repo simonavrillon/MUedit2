@@ -11,11 +11,7 @@ from fastapi import HTTPException, UploadFile
 from fastapi.responses import Response
 
 from muedit.api.cache import (
-    PREVIEW_MOVING_AVG_MS,
-    _envelope_bins,
     _get_qc_signal,
-    _moving_average_ms,
-    _raw_series_at_fs,
     _store_qc_signal,
     _store_upload_signal,
 )
@@ -32,6 +28,11 @@ from muedit.api.services.bids_helpers import (
 )
 from muedit.decomp.preview import downsample_vector
 from muedit.io.factory import clone_signal, load_signal
+from muedit.signal.downsample import (
+    PREVIEW_MOVING_AVG_MS,
+    moving_average_ms,
+    raw_series_at_fs,
+)
 from muedit.signal.filters import bandpass_signals
 from muedit.signal.grid import format_hdemg_signal
 
@@ -89,7 +90,7 @@ def _build_preview_core(filepath: str) -> dict[str, Any]:
 
     _store_qc_signal(upload_token, data, fsamp, grid_names, discard_channels)
 
-    mean_abs = _moving_average_ms(np.mean(np.abs(data), axis=0), fsamp, PREVIEW_MOVING_AVG_MS)
+    mean_abs = moving_average_ms(np.mean(np.abs(data), axis=0), fsamp, PREVIEW_MOVING_AVG_MS)
     mean_abs_downsampled = downsample_vector(mean_abs, fsamp)
 
     grid_means = []
@@ -98,7 +99,7 @@ def _build_preview_core(filepath: str) -> dict[str, Any]:
     for i in range(len(grid_names)):
         n_channels_grid = len(discard_channels[i])
         grid_data = data[ch_idx : ch_idx + n_channels_grid, :]
-        grid_mean_abs = _moving_average_ms(
+        grid_mean_abs = moving_average_ms(
             np.mean(np.abs(grid_data), axis=0), fsamp, PREVIEW_MOVING_AVG_MS
         )
         grid_means.append(downsample_vector(grid_mean_abs, fsamp))
@@ -174,8 +175,8 @@ def build_preview_from_path(filepath: str) -> dict[str, Any]:
     return result
 
 
-def get_qc_window(payload: QcWindowPayload) -> dict[str, Any] | Response:
-    """Return channel-window QC data from cached signal, JSON or binary."""
+def get_qc_window(payload: QcWindowPayload) -> Response:
+    """Return channel-window QC data from cached signal as packed float32 binary."""
     cached = _get_qc_signal(payload.upload_token)
     if cached is None:
         raise HTTPException(
@@ -189,16 +190,13 @@ def get_qc_window(payload: QcWindowPayload) -> dict[str, Any] | Response:
     grid_index = payload.grid_index
     start = payload.start
     end = payload.end
-    target_points = payload.target_points
     target_fs = payload.target_fs
-    representation = (payload.representation or "envelope").lower()
     channel_index_raw = payload.channel_index
 
     data = cached["data"]
     fsamp = float(cached["fsamp"])
     offsets: list[int] = cached["channel_offsets"]
     masks: list[np.ndarray] = cached["discard_channels"]
-    grid_names: list[str] = cached["grid_names"]
 
     if grid_index < 0 or grid_index >= len(offsets):
         raise HTTPException(status_code=400, detail="grid_index out of range")
@@ -213,73 +211,43 @@ def get_qc_window(payload: QcWindowPayload) -> dict[str, Any] | Response:
     grid_block = data[offset : offset + n_grid_ch, s:e]
 
     if channel_index_raw is None:
-        channels_payload = []
-        for ch_idx in range(n_grid_ch):
-            if representation == "raw":
-                series = _raw_series_at_fs(grid_block[ch_idx], fsamp, target_fs)
-                channels_payload.append({"channel_index": ch_idx, "series": series})
-            else:
-                mins, maxs = _envelope_bins(grid_block[ch_idx], target_points)
-                channels_payload.append({"channel_index": ch_idx, "min": mins, "max": maxs})
-        if representation == "raw":
-            payload_bytes = _encode_qc_raw_f32(
-                grid_index=grid_index,
-                channel_index=-1,
-                start=s,
-                end=e,
-                total_samples=total_samples,
-                fsamp=fsamp,
-                channels=channels_payload,
-            )
-            return Response(
-                content=payload_bytes,
-                media_type="application/octet-stream",
-                headers={"x-muedit-format": "qc-raw-f32-v1"},
-            )
-        return make_json_safe(
+        channels_payload = [
             {
-                "grid_index": grid_index,
-                "grid_name": grid_names[grid_index] if grid_index < len(grid_names) else "",
-                "start": s,
-                "end": e,
-                "total_samples": total_samples,
-                "fsamp": fsamp,
-                "representation": representation,
-                "channels": channels_payload,
+                "channel_index": ch_idx,
+                "series": raw_series_at_fs(grid_block[ch_idx], fsamp, target_fs),
             }
-        )
-
-    channel_index = channel_index_raw
-    if channel_index < 0 or channel_index >= n_grid_ch:
-        raise HTTPException(status_code=400, detail="channel_index out of range")
-    if representation == "raw":
-        series = _raw_series_at_fs(grid_block[channel_index], fsamp, target_fs)
+            for ch_idx in range(n_grid_ch)
+        ]
         payload_bytes = _encode_qc_raw_f32(
             grid_index=grid_index,
-            channel_index=channel_index,
+            channel_index=-1,
             start=s,
             end=e,
             total_samples=total_samples,
             fsamp=fsamp,
-            channels=[{"channel_index": channel_index, "series": series}],
+            channels=channels_payload,
         )
         return Response(
             content=payload_bytes,
             media_type="application/octet-stream",
             headers={"x-muedit-format": "qc-raw-f32-v1"},
         )
-    mins, maxs = _envelope_bins(grid_block[channel_index], target_points)
-    return make_json_safe(
-        {
-            "grid_index": grid_index,
-            "grid_name": grid_names[grid_index] if grid_index < len(grid_names) else "",
-            "channel_index": channel_index,
-            "start": s,
-            "end": e,
-            "total_samples": total_samples,
-            "fsamp": fsamp,
-            "representation": representation,
-            "min": mins,
-            "max": maxs,
-        }
+
+    channel_index = channel_index_raw
+    if channel_index < 0 or channel_index >= n_grid_ch:
+        raise HTTPException(status_code=400, detail="channel_index out of range")
+    series = raw_series_at_fs(grid_block[channel_index], fsamp, target_fs)
+    payload_bytes = _encode_qc_raw_f32(
+        grid_index=grid_index,
+        channel_index=channel_index,
+        start=s,
+        end=e,
+        total_samples=total_samples,
+        fsamp=fsamp,
+        channels=[{"channel_index": channel_index, "series": series}],
+    )
+    return Response(
+        content=payload_bytes,
+        media_type="application/octet-stream",
+        headers={"x-muedit-format": "qc-raw-f32-v1"},
     )

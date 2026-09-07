@@ -64,7 +64,6 @@ At minimum, ensure the loader output can be normalized to `SignalImport` fields:
 - `muscle`
 - `auxiliary`
 - `auxiliaryname`
-- `emgnotgrid`
 
 `metadata` is optional but recommended when available for a complient BIDS export.
 

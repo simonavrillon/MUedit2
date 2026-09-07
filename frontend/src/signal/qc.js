@@ -26,11 +26,7 @@ import { roiStart, roiEnd } from "../state/selectors.js";
 function channelsToEnv(channels) {
   return (Array.isArray(channels) ? channels : [])
     .sort((a, b) => (a.channel_index ?? 0) - (b.channel_index ?? 0))
-    .map((c) =>
-      Array.isArray(c.series)
-        ? c.series
-        : { min: c.min || [], max: c.max || [] },
-    );
+    .map((c) => c.series);
 }
 
 export function syncRois(state, nwin) {
@@ -41,13 +37,7 @@ export function syncRois(state, nwin) {
   }
 }
 
-export async function requestQcGridWindow(
-  deps,
-  gridIdx,
-  start,
-  end,
-  targetPoints = 96,
-) {
+export async function requestQcGridWindow(deps, gridIdx, start, end) {
   const { state, api, renderChannelQC, setStatus } = deps;
   const s = Number.isFinite(start) ? start : 0;
   const e = Number.isFinite(end) ? end : state.seriesLength;
@@ -62,14 +52,10 @@ export async function requestQcGridWindow(
       grid_index: gridIdx,
       start: s,
       end: e,
-      representation: state.qcRepresentation || "raw",
       target_fs: 1000,
-      target_points: targetPoints,
     };
 
-    const preferBinary =
-      (state.qcRepresentation || "raw") === "raw" &&
-      typeof api?.fetchQcWindow === "function";
+    const preferBinary = typeof api?.fetchQcWindow === "function";
     const data = await api.fetchQcWindow(requestPayload, { preferBinary });
     const env = channelsToEnv(data.channels);
     setChannelTraceForGrid(state, gridIdx, env);

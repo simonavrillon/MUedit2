@@ -13,13 +13,13 @@ import numpy as np
 from fastapi import HTTPException, UploadFile
 from fastapi.responses import Response
 
+from muedit.api.binary import pack_json_f32_payload
 from muedit.api.cache import (
     _get_decomp_preview_binary,
     _get_upload_signal,
     _store_decomp_preview_binary,
 )
 from muedit.api.common import (
-    _pack_json_f32_payload,
     build_params,
     make_json_safe,
     parse_discard_channels,
@@ -32,25 +32,27 @@ from muedit.api.common import (
 from muedit.decomp.pipeline import run_decomposition
 
 
+def _as_f32_matrix(value: Any) -> np.ndarray:
+    """Coerce a preview pulse payload into a 2-D float32 matrix."""
+    matrix = np.asarray(value if value is not None else [], dtype=np.float32)
+    if matrix.ndim == 1:
+        matrix = matrix.reshape(1, -1)
+    if matrix.ndim != 2:
+        matrix = np.zeros((0, 0), dtype=np.float32)
+    return matrix
+
+
 def _encode_decompose_preview_f32(preview: dict[str, Any]) -> bytes:
     """Encode streamed preview arrays as float32 binary payload (MDPV v1)."""
-    preview_copy = make_json_safe(dict(preview))
-    pulse_full = np.asarray(preview_copy.pop("pulse_trains_full", []), dtype=np.float32)
-    pulse_all = np.asarray(preview_copy.pop("pulse_trains_all", []), dtype=np.float32)
-
-    if pulse_full.ndim == 1:
-        pulse_full = pulse_full.reshape(1, -1)
-    if pulse_all.ndim == 1:
-        pulse_all = pulse_all.reshape(1, -1)
-    if pulse_full.ndim != 2:
-        pulse_full = np.zeros((0, 0), dtype=np.float32)
-    if pulse_all.ndim != 2:
-        pulse_all = np.zeros((0, 0), dtype=np.float32)
+    rest = dict(preview)
+    pulse_full = _as_f32_matrix(rest.pop("pulse_trains_full", None))
+    pulse_all = _as_f32_matrix(rest.pop("pulse_trains_all", None))
+    preview_copy = make_json_safe(rest)
 
     preview_copy["pulse_trains_full_shape"] = [int(pulse_full.shape[0]), int(pulse_full.shape[1])]
     preview_copy["pulse_trains_all_shape"] = [int(pulse_all.shape[0]), int(pulse_all.shape[1])]
     preview_copy["pulse_dtype"] = "float32"
-    return _pack_json_f32_payload(b"MDPV", preview_copy, pulse_full, pulse_all)
+    return pack_json_f32_payload(b"MDPV", preview_copy, pulse_full, pulse_all)
 
 
 def fetch_decompose_preview_binary(token: str) -> Response:
@@ -121,9 +123,6 @@ def decomposition_event_stream(
     def progress(stage: str, payload: dict[str, Any]) -> None:
         """Normalize and queue progress callback payload from the pipeline."""
         if stage == "done":
-            # The pipeline emits its own "done" via progress_cb, but the worker
-            # emits the real terminal event (with the binary preview token).
-            # Swallow the pipeline's "done" here to avoid a duplicate terminal.
             return
         event = {"stage": stage}
         event.update({k: make_json_safe(v) for k, v in payload.items()})
@@ -151,14 +150,20 @@ def decomposition_event_stream(
                 include_full_preview=include_full_preview,
                 preloaded_signal=preloaded_signal,
             )
-            preview_payload = make_json_safe(result.get("preview", {}))
+            preview_raw = result.get("preview", {})
             if binary_preview:
-                bin_payload = _encode_decompose_preview_f32(preview_payload)
+                bin_payload = _encode_decompose_preview_f32(preview_raw)
                 preview_token = _store_decomp_preview_binary(bin_payload)
-                preview_payload = dict(preview_payload)
-                preview_payload.pop("pulse_trains_full", None)
-                preview_payload.pop("pulse_trains_all", None)
+                preview_payload = make_json_safe(
+                    {
+                        k: v
+                        for k, v in preview_raw.items()
+                        if k not in ("pulse_trains_full", "pulse_trains_all")
+                    }
+                )
                 preview_payload["preview_binary_token"] = preview_token
+            else:
+                preview_payload = make_json_safe(preview_raw)
             q.put(
                 {
                     "stage": "done",

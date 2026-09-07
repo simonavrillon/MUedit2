@@ -6,6 +6,7 @@ import argparse
 import json
 import logging
 import os
+import sys
 from pathlib import Path
 
 import uvicorn
@@ -13,7 +14,15 @@ import uvicorn
 from muedit.api.app_factory import create_app
 from muedit.api.routes import include_routers
 from muedit.decomp.pipeline import run_decomposition
-from muedit.decomp.types import DEFAULT_NBEXTCHAN, DEFAULT_PEEL_OFF_WIN_SEC, DecompositionParameters
+from muedit.decomp.types import (
+    DEFAULT_NBEXTCHAN,
+    DEFAULT_PEEL_OFF_WIN_SEC,
+    DEFAULT_POSTPROCESS_MODE,
+    POSTPROCESS_MODES,
+    DecompositionParameters,
+)
+
+_DEFAULT_PARAMS = DecompositionParameters()
 
 
 def _parse_roi(value: str) -> tuple[int, int]:
@@ -50,7 +59,7 @@ def serve_api() -> None:
     uvicorn.run(app, host=host, port=port, log_level="warning", access_log=False)
 
 
-def run_decomposition_cli() -> None:
+def run_decomposition_cli(argv: list[str] | None = None) -> None:
     """Run end-to-end decomposition from command-line arguments."""
     if not logging.getLogger().handlers:
         logging.basicConfig(
@@ -130,6 +139,19 @@ def run_decomposition_cli() -> None:
         help="Enable/disable COV filter (app setting: COV tool).",
     )
     parser.add_argument(
+        "--contrast-func",
+        type=str,
+        choices=["skew", "kurtosis", "logcosh"],
+        default=_DEFAULT_PARAMS.contrast_func,
+        help="FastICA contrast function (app setting: Contrast func).",
+    )
+    parser.add_argument(
+        "--initialization",
+        action=argparse.BooleanOptionalAction,
+        default=_DEFAULT_PARAMS.initialization,
+        help="Enable/disable ICA initialization (app setting: Initialization).",
+    )
+    parser.add_argument(
         "--peel-off",
         action=argparse.BooleanOptionalAction,
         default=False,
@@ -142,16 +164,80 @@ def run_decomposition_cli() -> None:
         help="Peel-off window in milliseconds (app setting: Window (ms)).",
     )
     parser.add_argument(
+        "--postprocess",
+        choices=sorted(POSTPROCESS_MODES),
+        default=None,
+        help=(
+            "Post-processing route (app setting: Post-processing). "
+            f"Default: {DEFAULT_POSTPROCESS_MODE}. Mutually exclusive with the "
+            "legacy --use-adaptive/--full-trace flags."
+        ),
+    )
+    parser.add_argument(
         "--use-adaptive",
         action=argparse.BooleanOptionalAction,
-        default=False,
-        help="Enable/disable adaptive mode (app setting: Use adaptive).",
+        default=None,
+        help=(
+            "Deprecated alias for --postprocess adaptive; "
+            "cannot be combined with --full-trace or --postprocess."
+        ),
+    )
+    parser.add_argument(
+        "--adapt-batch-ms",
+        type=int,
+        default=_DEFAULT_PARAMS.adapt_batch_ms,
+        help="Adaptive batch duration in milliseconds.",
+    )
+    parser.add_argument(
+        "--adapt-wh",
+        action=argparse.BooleanOptionalAction,
+        default=_DEFAULT_PARAMS.adapt_wh,
+        help="Enable/disable adaptive whitening matrix update.",
+    )
+    parser.add_argument(
+        "--adapt-sv",
+        action=argparse.BooleanOptionalAction,
+        default=_DEFAULT_PARAMS.adapt_sv,
+        help="Enable/disable adaptive separation vector update.",
+    )
+    parser.add_argument(
+        "--adapt-sd",
+        action=argparse.BooleanOptionalAction,
+        default=_DEFAULT_PARAMS.adapt_sd,
+        help="Enable/disable adaptive spike detection (centroid update).",
+    )
+    parser.add_argument(
+        "--adapt-wh-learning-rate",
+        type=float,
+        default=_DEFAULT_PARAMS.adapt_wh_learning_rate,
+        help="Learning rate for adaptive whitening matrix update.",
+    )
+    parser.add_argument(
+        "--adapt-sv-learning-rate",
+        type=float,
+        default=_DEFAULT_PARAMS.adapt_sv_learning_rate,
+        help="Learning rate for adaptive separation vector update.",
+    )
+    parser.add_argument(
+        "--adapt-cov-alpha",
+        type=float,
+        default=_DEFAULT_PARAMS.adapt_cov_alpha,
+        help="EMA weight for online covariance estimate.",
+    )
+    parser.add_argument(
+        "--adapt-spike-prev-weight",
+        type=int,
+        default=_DEFAULT_PARAMS.adapt_spike_prev_weight,
+        help="Inertia weight for centroid EMA update (higher = slower adaptation).",
     )
     parser.add_argument(
         "--full-trace",
         action=argparse.BooleanOptionalAction,
-        default=False,
-        help="Apply MU filters over the full EMG trace instead of only the decomposed windows.",
+        default=None,
+        help=(
+            "Deprecated alias for --postprocess full-trace; "
+            "cannot be combined with --use-adaptive or --postprocess."
+        ),
     )
     parser.add_argument(
         "--bids-root",
@@ -175,10 +261,34 @@ def run_decomposition_cli() -> None:
         default=None,
         help="Path to JSON object merged into *_emg.json.",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     if args.roi and args.rois:
         parser.error("Use either --roi or --rois, not both.")
+
+    legacy_used = args.use_adaptive is not None or args.full_trace is not None
+    if args.postprocess is not None and legacy_used:
+        parser.error(
+            "Use --postprocess or the legacy --use-adaptive/--full-trace flags, "
+            "not both."
+        )
+    if args.use_adaptive and args.full_trace:
+        parser.error(
+            "--use-adaptive and --full-trace select different post-processing "
+            "routes and cannot be combined; use --postprocess adaptive or "
+            "--postprocess full-trace."
+        )
+    if args.postprocess is not None:
+        mode = args.postprocess
+    elif args.use_adaptive:
+        mode = "adaptive"
+    elif args.full_trace:
+        mode = "full-trace"
+    else:
+        mode = DEFAULT_POSTPROCESS_MODE
+    postprocess_flags = POSTPROCESS_MODES[mode]
+    args.use_adaptive = postprocess_flags["use_adaptive"]
+    args.full_trace = postprocess_flags["full_trace"]
     if args.bids_metadata and args.bids_metadata_file:
         parser.error("Use either --bids-metadata or --bids-metadata-file, not both.")
     if (args.bids_metadata or args.bids_metadata_file) and not args.bids_root:
@@ -189,6 +299,22 @@ def run_decomposition_cli() -> None:
         parser.error("--nwindows must be >= 1.")
     if args.peel_off_window_ms <= 0:
         parser.error("--peel-off-window-ms must be > 0.")
+    if args.adapt_batch_ms <= 0:
+        parser.error("--adapt-batch-ms must be > 0.")
+    if args.use_adaptive and args.adapt_batch_ms > _DEFAULT_PARAMS.edges_sec * 1000:
+        parser.error(
+            f"--adapt-batch-ms must be <= {_DEFAULT_PARAMS.edges_sec * 1000:.0f} "
+            f"(edges_sec * 1000) when adaptive mode is enabled; larger batches "
+            f"exceed the calibration window and produce a loss-tracking gap."
+        )
+    if args.adapt_wh_learning_rate <= 0:
+        parser.error("--adapt-wh-learning-rate must be > 0.")
+    if args.adapt_sv_learning_rate <= 0:
+        parser.error("--adapt-sv-learning-rate must be > 0.")
+    if not (0.0 < args.adapt_cov_alpha <= 1.0):
+        parser.error("--adapt-cov-alpha must be in (0, 1].")
+    if args.adapt_spike_prev_weight < 0:
+        parser.error("--adapt-spike-prev-weight must be >= 0.")
 
     if args.filepath:
         full_path = Path(args.filepath)
@@ -252,12 +378,20 @@ def run_decomposition_cli() -> None:
         sil_thr=(float("-inf") if not args.sil_filter else args.sil_thr),
         cov_thr=args.cov_thr,
         covfilter=args.cov_filter,
-        contrast_func="skew",
-        initialization=False,
+        contrast_func=args.contrast_func,
+        initialization=args.initialization,
         peel_off_enabled=args.peel_off,
         peel_off_win=args.peel_off_window_ms / 1000.0,
-        use_adaptive=args.use_adaptive,
-        full_trace=args.full_trace,
+        use_adaptive=postprocess_flags["use_adaptive"],
+        adapt_batch_ms=args.adapt_batch_ms,
+        adapt_wh=args.adapt_wh,
+        adapt_sv=args.adapt_sv,
+        adapt_sd=args.adapt_sd,
+        adapt_wh_learning_rate=args.adapt_wh_learning_rate,
+        adapt_sv_learning_rate=args.adapt_sv_learning_rate,
+        adapt_cov_alpha=args.adapt_cov_alpha,
+        adapt_spike_prev_weight=args.adapt_spike_prev_weight,
+        full_trace=postprocess_flags["full_trace"],
     )
 
     run_decomposition(
@@ -276,16 +410,18 @@ def run_decomposition_cli() -> None:
 
 def main() -> None:
     """Dispatch the top-level ``muedit`` CLI subcommands."""
-    parser = argparse.ArgumentParser(prog="muedit")
-    sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("api", help="Run FastAPI backend")
-    sub.add_parser("decompose", help="Run decomposition CLI")
-    args, _unknown = parser.parse_known_args()
-
-    if args.command == "api":
+    if len(sys.argv) < 2 or sys.argv[1] in ("--help", "-h"):
+        is_help = len(sys.argv) >= 2
+        print("usage: muedit {api,decompose} ...", file=None if is_help else sys.stderr)
+        sys.exit(0 if is_help else 2)
+    command = sys.argv[1]
+    if command == "api":
         serve_api()
-    elif args.command == "decompose":
-        run_decomposition_cli()
+    elif command == "decompose":
+        run_decomposition_cli(argv=sys.argv[2:])
+    else:
+        print(f"muedit: unknown command '{command}'", file=sys.stderr)
+        sys.exit(2)
 
 
 if __name__ == "__main__":

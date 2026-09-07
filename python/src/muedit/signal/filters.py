@@ -5,6 +5,8 @@ from __future__ import annotations
 import numpy as np
 from scipy.signal import butter, filtfilt
 
+NOTCH_WINDOW_HZ: float = 50.0
+
 
 def demean(signal: np.ndarray) -> np.ndarray:
     """Remove per-channel DC offset from a 2D signal array."""
@@ -14,6 +16,10 @@ def demean(signal: np.ndarray) -> np.ndarray:
 def bandpass_signals(signal: np.ndarray, fsamp: float, emg_type: int = 1) -> np.ndarray:
     """Zero-phase Butterworth bandpass: emg_type=1 → 20–500 Hz (surface), 2 → 100–4400 Hz (intramuscular)."""
     if emg_type == 1:
+        if fsamp <= 1000:
+            raise ValueError(
+                f"Surface bandpass (20-500 Hz) requires fsamp > 1000 Hz; got {fsamp} Hz."
+            )
         b, a = butter(2, [20, 500], btype="bandpass", fs=fsamp)
     else:
         if fsamp <= 8800:
@@ -26,13 +32,13 @@ def bandpass_signals(signal: np.ndarray, fsamp: float, emg_type: int = 1) -> np.
 
 
 def notch_signals(signal: np.ndarray, fsamp: float) -> np.ndarray:
-    """FFT-based notch: flags bins exceeding median+5·std in 1-second windows and zeros them, suppressing mains harmonics without knowing the line frequency."""
+    """FFT-based notch that suppresses mains harmonics without knowing the line frequency."""
     if signal.size == 0:
         return signal
 
     n_channels, n_samples = signal.shape
     frad = int(round(4 / (fsamp / n_samples)))
-    window = int(fsamp)
+    window = max(1, int(round(NOTCH_WINDOW_HZ * n_samples / fsamp)))
 
     def _remove_line_interference(x: np.ndarray) -> np.ndarray:
         """Remove interference from a single-channel signal."""
@@ -55,7 +61,6 @@ def notch_signals(signal: np.ndarray, fsamp: float) -> np.ndarray:
         if tstamp_arr.size:
             fcorrec[tstamp_arr] = fsignal[tstamp_arr]
 
-        # Enforce conjugate symmetry so the IFFT produces a real signal.
         n = len(fsignal)
         correc = n - (n // 2) * 2
         upper = int(np.ceil(n / 2))

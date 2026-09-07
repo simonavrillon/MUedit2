@@ -22,9 +22,7 @@ class QcWindowPayload(BaseModel):
     grid_index: int = 0
     start: int = 0
     end: int = 0
-    target_points: int = 96
     target_fs: float = 1000.0
-    representation: str = "envelope"
     channel_index: int | None = None
 
 
@@ -43,8 +41,8 @@ class EditSavePayload(BaseModel):
     mu_grid_index: list[int] | None = None
     mu_uids: list[str] | None = None
     parameters: dict[str, Any] | None = None
-    muscle_names: list[str] | str | None = None
     muscle: list[str] | str | None = None
+    muscle_names: list[str] | str | None = None  # deprecated alias for ``muscle``
     project: str | None = None
     file_label: str | None = None
     entity_label: str | None = None

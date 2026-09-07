@@ -374,28 +374,15 @@
                   <label for="peelOffWindow">Window (ms)</label>
                   <input type="number" id="peelOffWindow" value="25" min="1" />
                 </div>
-                <div class="toggle-row">
-                  <button
-                    class="pill-toggle"
-                    id="useAdaptiveToggle"
-                    data-state="off"
-                    type="button"
-                    aria-pressed="false"
-                  >
-                    Use adaptive: Off
-                  </button>
+                <div class="form-row">
+                  <label for="postprocessMode">Post-processing</label>
+                  <select id="postprocessMode">
+                    <option value="windowed" selected>Windowed</option>
+                    <option value="full_trace">Full trace</option>
+                    <option value="adaptive">Adaptive</option>
+                  </select>
                 </div>
-                <div class="toggle-row">
-                  <button
-                    class="pill-toggle"
-                    id="fullTraceToggle"
-                    data-state="off"
-                    type="button"
-                    aria-pressed="false"
-                  >
-                    Full trace: Off
-                  </button>
-                </div>
+                <p class="form-hint" id="postprocessModeHint"></p>
               </div>
             </section>
 

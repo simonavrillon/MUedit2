@@ -321,6 +321,5 @@ def load_bids_signal(filepath: str) -> dict[str, Any]:
         "muscle": grid_muscles,
         "auxiliary": auxiliary,
         "auxiliaryname": aux_names,
-        "emgnotgrid": np.zeros((0, n_samples), dtype=float),
         "metadata": metadata,
     }

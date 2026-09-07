@@ -1,7 +1,6 @@
 """Configuration dataclass for adaptive decomposition routines."""
 
 from dataclasses import dataclass, field
-from typing import Literal
 
 
 @dataclass
@@ -16,8 +15,6 @@ class Config:
 
     wh_learning_rate: float = 7e-3
     sv_learning_rate: float = 3e-3
-
-    contrast_func: Literal["logcosh", "cube"] = "logcosh"
 
     cov_alpha: float = 0.1
 

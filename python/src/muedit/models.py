@@ -53,9 +53,12 @@ class SignalImport:
         fsamp_raw = payload.get("fsamp", 0.0)
         fsamp = float(fsamp_raw) if fsamp_raw is not None else 0.0
 
-        gridname = payload.get("gridname") or []
-        muscle = payload.get("muscle") or []
-        auxiliaryname = payload.get("auxiliaryname") or []
+        gridname = payload.get("gridname")
+        gridname = [] if gridname is None else gridname
+        muscle = payload.get("muscle")
+        muscle = [] if muscle is None else muscle
+        auxiliaryname = payload.get("auxiliaryname")
+        auxiliaryname = [] if auxiliaryname is None else auxiliaryname
         if isinstance(gridname, str):
             gridname = [gridname]
         if isinstance(muscle, str):
@@ -105,6 +108,7 @@ class LoadedDecomposition:
     rois: list[tuple[int, int]] = field(default_factory=list)
     parameters: dict[str, Any] = field(default_factory=dict)
     muscle: list[str] = field(default_factory=list)
+    sil: list[float] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialise to a JSON-safe dictionary."""
@@ -118,6 +122,7 @@ class LoadedDecomposition:
             "rois": [(int(s), int(e)) for s, e in self.rois],
             "parameters": dict(self.parameters),
             "muscle": list(self.muscle),
+            "sil": [float(x) for x in self.sil],
         }
 
 
@@ -151,7 +156,7 @@ class DecompositionExport:
     signal: DecompositionSignalExport
     parameters: dict[str, Any]
     grid_names: list[str]
-    sil: dict[int, list[float]]
+    sil: list[float]
     discard_channels: list[np.ndarray]
     coordinates: list[np.ndarray]
     mu_grid_index: list[int]

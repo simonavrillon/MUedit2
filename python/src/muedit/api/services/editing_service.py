@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -9,13 +10,13 @@ import numpy as np
 from fastapi import HTTPException, UploadFile
 from fastapi.responses import Response
 
+from muedit.api.binary import pack_json_f32_payload
 from muedit.api.cache import (
     _get_edit_signal_context,
     _get_edit_signal_context_by_label,
     _store_edit_signal_context,
 )
 from muedit.api.common import (
-    _pack_json_f32_payload,
     make_json_safe,
     parse_entity_label,
     safe_unlink,
@@ -53,6 +54,7 @@ from muedit.decomp.io import (
     load_decomposition_file,
     load_decomposition_signal_context,
     normalize_distimes,
+    save_editlog,
 )
 from muedit.decomp.postprocess import _save_npz_with_app_schema
 from muedit.decomp.types import DEFAULT_PEEL_OFF_WIN_SEC
@@ -72,18 +74,7 @@ from muedit.io.bids import (
 )
 from muedit.signal.grid import format_hdemg_signal
 
-
-def _save_editlog(
-    editlog_path: Path,
-    mu_uids: list[str],
-    edit_history: list[dict[str, Any]],
-    artifact_times: list[list[int]] | None = None,
-) -> None:
-    payload: dict[str, Any] = {"mu_uids": mu_uids, "history": edit_history}
-    if artifact_times:
-        payload["artifact_times"] = artifact_times
-    with editlog_path.open("w", encoding="utf-8") as fh:
-        json.dump(payload, fh, indent=2)
+logger = logging.getLogger(__name__)
 
 
 def _init_loaded_decomp(filepath: str, file_label: str) -> dict[str, Any]:
@@ -116,7 +107,7 @@ def _encode_edit_load_f32(loaded: dict[str, Any]) -> bytes | None:
     metadata["pulse_shape"] = [int(pulse.shape[0]), int(pulse.shape[1])]
     metadata["pulse_dtype"] = "float32"
     metadata["pulse_binary"] = True
-    return _pack_json_f32_payload(b"MELD", metadata, pulse)
+    return pack_json_f32_payload(b"MELD", metadata, pulse)
 
 
 def _wrap_edit_load_binary(loaded: dict[str, Any]) -> Response | dict[str, Any]:
@@ -296,7 +287,7 @@ def save_edits(payload: EditSavePayload) -> dict[str, Any]:
     expected_grid_count = (max(mu_grid_index) + 1) if mu_grid_index else 1
     grid_names = _pad_grid_names(payload.grid_names or [], expected_grid_count, [])
     parameters = payload.parameters or {}
-    muscle_names = _normalize_muscle_names(payload.muscle_names or payload.muscle)
+    muscle_names = _normalize_muscle_names(payload.muscle or payload.muscle_names)
 
     if isinstance(parameters, dict) and muscle_names and not parameters.get("target_muscle"):
         parameters["target_muscle"] = (
@@ -391,7 +382,7 @@ def save_edits(payload: EditSavePayload) -> dict[str, Any]:
         parameters=parameters,
         total_samples=total_samples,
     )
-    _save_editlog(out_path.with_suffix(".json"), mu_uids, edit_history, artifact_times_all or None)
+    save_editlog(out_path.with_suffix(".json"), mu_uids, edit_history, artifact_times_all or None)
 
     participant_meta = payload.participant_meta or {}
     try:
@@ -403,7 +394,7 @@ def save_edits(payload: EditSavePayload) -> dict[str, Any]:
             handedness=participant_meta.get("handedness") or None,
         )
     except Exception:  # noqa: BLE001
-        pass  # dataset-level files are best-effort; never block the primary save
+        logger.warning("Failed to write participants.tsv", exc_info=True)
 
     deriv_paths: dict[str, str] | None = None
     if distimes and fsamp and fsamp > 0:

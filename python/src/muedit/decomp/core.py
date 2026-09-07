@@ -9,7 +9,7 @@ from typing import Any
 import numpy as np
 
 from muedit.decomp.algorithm import (
-    _FIXED_POINT_MAXITER,
+    FIXED_POINT_MAXITER,
     compute_silhouette,
     extend_signal,
     fixed_point_alg,
@@ -20,7 +20,7 @@ from muedit.decomp.algorithm import (
     whiten_extended_signal,
 )
 from muedit.decomp.types import DecomposeStepOutput, DecompositionParameters, PreprocessStepOutput
-from muedit.signal.decomp_primitives import isi_cov
+from muedit.signal.decomp_primitives import DECOMP_MIN_ISI_SEC, isi_cov
 from muedit.signal.filters import demean
 
 logger = logging.getLogger(__name__)
@@ -34,12 +34,10 @@ def decompose_step(
 ) -> DecomposeStepOutput:
     """Run decomposition iterations over every grid and ROI window."""
     nwindows = len(prep.roi_list)
-    total_windows = max(1, prep.ngrid * nwindows)
+    total_windows = prep.ngrid * nwindows
 
     coordinates_plateau = list(prep.coordinates_plateau)
     mu_filters: dict[int, np.ndarray] = {}
-    w_sig: dict[int, np.ndarray] = {}
-    win_data: dict[int, np.ndarray] = {}
     whiten_mat: dict[int, np.ndarray] = {}
     win_means: dict[int, np.ndarray] = {}
 
@@ -61,6 +59,7 @@ def decompose_step(
 
         for nwin in range(nwindows):
             win_global = i * nwindows + nwin
+            span = 80 / total_windows
             logger.info(
                 "Processing Grid %d (%s), Window %d",
                 i + 1,
@@ -73,7 +72,7 @@ def decompose_step(
             grid_block = prep.data[ch_idx : ch_idx + n_channels_grid, start:end]
             win_data_arr = grid_block[keep_idx, :]
 
-            ex_factor = int(round(params.nbextchan / max(1, win_data_arr.shape[0])))
+            ex_factor = int(round(params.nbextchan / win_data_arr.shape[0]))
             win_means[win_global] = np.mean(win_data_arr, axis=1)
             e_sig = extend_signal(demean(win_data_arr), ex_factor)
 
@@ -85,12 +84,8 @@ def decompose_step(
                 coordinates_plateau[win_global * 2 + 1] -= edge_samples
 
             eigenvectors, eigenvalues_diag = pca_extended_signal(e_sig)
-            w_sig_win, whiten_mat_win, _ = whiten_extended_signal(
+            w_sig_win, whiten_mat_win = whiten_extended_signal(
                 e_sig, eigenvectors, eigenvalues_diag
-            )
-            w_sig[win_global] = w_sig_win
-            win_data[win_global] = (
-                win_data_arr[:, edge_samples:-edge_samples] if trim_edges else win_data_arr
             )
             whiten_mat[win_global] = whiten_mat_win
 
@@ -98,24 +93,38 @@ def decompose_step(
             filter_matrix = np.zeros((w_sig_win.shape[0], params.niter))
             sil_scores = np.zeros(params.niter)
             cov_scores = np.zeros(params.niter)
-            # Whether iteration j produced a fitted separator (len(spikes) > 10).
-            # Iterations that fall through to the else branch leave sil_scores[j]
-            # at 0 but are not "fitted"; the mask excludes them explicitly rather
-            # than via the sil_scores > 0 heuristic, which would also reject a
-            # legitimately-zero SIL when sil_thr <= 0.
             fitted = np.zeros(params.niter, dtype=bool)
-            x = w_sig_win.copy()
+            x = w_sig_win
+
+            use_activity_init = not params.initialization
+            if use_activity_init:
+                refractory = max(1, int(round(prep.fsamp * DECOMP_MIN_ISI_SEC)))
+                consumed = np.zeros(x.shape[1], dtype=bool)
 
             for j in range(params.niter):
-                if not params.initialization:
-                    act_ind = np.sum(x, axis=0) ** 2
-                    w = x[:, int(np.argmax(act_ind))]
-                else:
-                    w = rng.standard_normal(x.shape[0])
+                w = rng.standard_normal(x.shape[0])
 
-                w = w - basis @ (basis.T @ w)
-                w = w / np.linalg.norm(w)
-                w = fixed_point_alg(w, x, basis, _FIXED_POINT_MAXITER, params.contrast_func)
+                if use_activity_init:
+                    act_ind = np.sum(x * x, axis=0)
+                    act_ind[consumed] = -1.0
+                    col_idx = int(np.argmax(act_ind))
+                    if act_ind[col_idx] > 0:
+                        w = x[:, col_idx]
+                        lo = max(0, col_idx - refractory)
+                        hi = min(len(consumed), col_idx + refractory + 1)
+                        consumed[lo:hi] = True
+
+                w = w - basis[:, :j] @ (basis[:, :j].T @ w)
+                w_norm = np.linalg.norm(w)
+                if w_norm < 1e-12:
+                    logger.info(
+                        "Grid %d, Window %d: basis exhausted after %d/%d "
+                        "iterations, stopping (deflated seed norm %.2e)",
+                        i + 1, nwin + 1, j, params.niter, w_norm,
+                    )
+                    break
+                w = w / w_norm
+                w = fixed_point_alg(w, x, basis[:, :j], FIXED_POINT_MAXITER, params.contrast_func)
                 _, spikes = get_spikes(w, x, prep.fsamp)
 
                 if len(spikes) > 10:
@@ -124,17 +133,22 @@ def decompose_step(
                     w_final, spikes_final, cov_final = minimize_isi_covariance(
                         w_ini, x, cov_val, prep.fsamp
                     )
-                    # Keep separator vector scaling consistent with adapt_decomp.
                     w_final_norm = np.sqrt(np.sum(w_final**2))
                     if w_final_norm > 0:
                         w_final = w_final / w_final_norm
                     filter_matrix[:, j] = w_final
-                    basis[:, j] = w_final
+                    w_basis = w_final - basis[:, :j] @ (basis[:, :j].T @ w_final)
+                    w_basis_norm = np.linalg.norm(w_basis)
+                    if w_basis_norm > 1e-12:
+                        w_basis = w_basis / w_basis_norm
+                    else:
+                        w_basis = w
+                    basis[:, j] = w_basis
                     cov_scores[j] = cov_final
                     fitted[j] = True
                     _, _, sil_val = compute_silhouette(x, w_final, prep.fsamp)
                     sil_scores[j] = sil_val
-                    if params.peel_off_enabled and sil_val > params.sil_thr:
+                    if params.peel_off_enabled and sil_val >= params.sil_thr:
                         x = subtract_mu_waveforms(
                             x, spikes_final, prep.fsamp, params.peel_off_win
                         )
@@ -142,7 +156,6 @@ def decompose_step(
                     basis[:, j] = w
 
                 if progress_cb and (j % 5 == 4 or j == params.niter - 1):
-                    span = 80 / total_windows
                     pct_iter = 10 + win_global * span + ((j + 1) / params.niter) * span
                     progress_cb(
                         "progress",
@@ -164,8 +177,7 @@ def decompose_step(
             mu_grid_index.extend([i] * int(np.sum(good_indices)))
 
             if progress_cb:
-                win_idx = win_global + 1
-                pct = min(90, int(win_idx / total_windows * 80) + 10)
+                pct = min(90, int(10 + (win_global + 1) * span))
                 progress_cb(
                     "progress",
                     {
@@ -181,8 +193,6 @@ def decompose_step(
 
     return DecomposeStepOutput(
         mu_filters=mu_filters,
-        w_sig=w_sig,
-        win_data=win_data,
         whiten_mat=whiten_mat,
         coordinates_plateau=coordinates_plateau,
         sil_by_window=sil_by_window,

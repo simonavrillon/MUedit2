@@ -30,7 +30,6 @@ Core NPZ keys (aligned with web-app save format):
 - `fsamp`
 - `grid_names`
 - `mu_grid_index`
-- `muscle_names`
 - `muscle`
 - `total_samples`
 - `parameters`
@@ -134,7 +133,6 @@ BIDS decomposition NPZ keys (same core schema):
 - `fsamp`
 - `grid_names`
 - `mu_grid_index`
-- `muscle_names`
 - `muscle`
 - `total_samples`
 - `parameters`
@@ -172,7 +170,6 @@ Edited NPZ keys:
 - `fsamp`
 - `grid_names`
 - `mu_grid_index`
-- `muscle_names`
 - `muscle`
 - `parameters`
 - `total_samples`

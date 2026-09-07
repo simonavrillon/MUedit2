@@ -57,11 +57,30 @@ package-dir = {"" = "python/src"}
 
 [tool.setuptools.packages.find]
 where = ["python/src"]
-include = ["muedit*", "adapt_decomp*"]
+include = ["muedit*"]
 
 [project.urls]
 Repository = "https://github.com/simonavrillon/MUedit2"
 "Bug Tracker" = "https://github.com/simonavrillon/MUedit2/issues"
+
+[tool.pytest.ini_options]
+# The ``muedit`` package lives under ``python/src`` (see [tool.setuptools]
+# above).  Adding it to ``pythonpath`` lets the suite run from a fresh
+# checkout without an editable install (``pip install -e .``), which is
+# convenient for CI and local one-shot runs.
+pythonpath = ["python/src"]
+testpaths = ["tests"]
+# Report a one-line summary for every non-passed outcome (skips, xfails,
+# failures).  Useful here because conftest.py skips data-dependent tests
+# when the git-ignored sample files are absent, so a clean run still emits
+# skips worth seeing at a glance.
+addopts = "-ra"
+# Real data files under data/ are git-ignored; conftest.py skips the tests
+# that need them when the files are absent.  Treat those skips as expected
+# rather than reporting them as warnings noise.
+filterwarnings = [
+  "ignore::DeprecationWarning",
+]
 
 [tool.ruff]
 target-version = "py311"

@@ -11,7 +11,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from muedit.decomp.types import DecompositionParameters, LoadStepOutput, PreprocessStepOutput
-from muedit.io.bids import build_entities, export_bids_emg, resolve_bids_emg_path
+from muedit.io.bids import (
+    build_entities,
+    export_bids_emg,
+    resolve_bids_emg_path,
+    write_bids_dataset_description,
+)
 from muedit.io.factory import clone_signal, load_signal
 from muedit.signal.filters import bandpass_signals, notch_signals
 from muedit.signal.grid import format_hdemg_signal
@@ -83,17 +88,10 @@ def _resolve_roi_list(
     rois: list[tuple[int, int]] | None,
     nwindows: int = 1,
 ) -> list[tuple[int, int]]:
-    """Resolve the analysis ROI from the various supported input methods.
-
-    When ``nwindows > 1`` and a single base ROI is resolved (from ``roi``,
-    ``manual_roi``, ``duration``, or the full signal), it is split into
-    ``nwindows`` equal contiguous sub-windows. Explicit ``rois`` are never
-    split — the caller defined the windows.
-    """
+    """Resolve the analysis ROI from the various supported input methods."""
     total_len = data.shape[1]
     if total_len == 0:
         raise ValueError("Input signal contains zero samples; cannot define ROI.")
-    roi_list: list[tuple[int, int]] = []
     explicit_rois = bool(rois)
     n_rois = len(rois) if rois is not None else 0
     if explicit_rois and nwindows > 1 and n_rois != nwindows:
@@ -104,6 +102,7 @@ def _resolve_roi_list(
             n_rois,
         )
     if rois:
+        roi_list = []
         for r in rois:
             s = max(0, min(int(r[0]), total_len - 1))
             e = max(s + 1, min(int(r[1]), total_len))
@@ -116,7 +115,7 @@ def _resolve_roi_list(
         s, e = select_roi_interactively(data, fsamp)
         roi_list = [(s, e)]
     elif duration is not None:
-        ltime = min(total_len, int(duration * fsamp))
+        ltime = max(1, min(total_len, int(duration * fsamp)))
         roi_list = [(0, ltime)]
     else:
         roi_list = [(0, total_len)]
@@ -214,9 +213,6 @@ def _export_raw_emg_bids(
     if bids_metadata:
         emg_meta.update(bids_metadata)
 
-    # When the signal was itself imported from a BIDS dataset the recording and
-    # its sidecars already exist on disk; only fill in any missing files rather
-    # than re-encoding/overwriting the originals.
     skip_existing = bool(loader_meta.get("bids_emg_path"))
     if skip_existing:
         logger.info(
@@ -263,6 +259,19 @@ def _export_raw_emg_bids(
         skip_existing=skip_existing,
     )
 
+    participant_meta = entities.get("participant_meta") or {}
+    age_raw = participant_meta.get("age")
+    try:
+        write_bids_dataset_description(
+            Path(bids_root),
+            subject=entities.get("subject", "01"),
+            age=int(age_raw) if str(age_raw).strip() not in ("", "n/a", "None") else None,
+            sex=participant_meta.get("sex") or None,
+            handedness=participant_meta.get("handedness") or None,
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning("Failed to write participants.tsv", exc_info=True)
+
 
 def load_step(
     filepath: str,
@@ -303,8 +312,6 @@ def preprocess_step(
 ) -> PreprocessStepOutput:
     """Apply channel formatting, filtering, ROI selection, and optional BIDS raw export."""
     data = np.array(loaded.data, dtype=np.float64, copy=True)
-    # Keep an untouched copy of the raw EMG for the BIDS export. The filters
-    # below mutate `data` in place, so we snapshot before that happens.
     raw_data = np.array(data, copy=True)
     grid_names = loaded.signal.get("gridname") or []
     if not grid_names:
@@ -327,7 +334,7 @@ def preprocess_step(
     _apply_grid_bandpass_filters(data, loaded.fsamp, grid_names, coordinates, emg_type)
 
     muscles = loaded.signal.get("muscle") or []
-    loader_meta = loaded.signal.get("metadata", {})
+    loader_meta = loaded.signal.get("metadata") or {}
     default_target_muscle = next((m for m in muscles if isinstance(m, str) and m.strip()), None)
     derived_bids_metadata: dict[str, Any] = {}
     if muscles and any(isinstance(m, str) and m for m in muscles):

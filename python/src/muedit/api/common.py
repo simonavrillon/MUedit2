@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import struct
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -122,6 +121,22 @@ def safe_unlink(path: str) -> None:
         pass
 
 
+def _coerce_param_value(current: Any, value: Any) -> Any:
+    """Coerce a JSON override value to match the type of the existing param.
+
+    ``bool`` is handled explicitly because ``bool("false")`` is ``True`` in Python;
+    string values are interpreted case-insensitively.
+    """
+    if isinstance(current, bool):
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return value.strip().lower() in ("true", "1", "yes")
+        return bool(value)
+    target_type = type(current)
+    return target_type(value)
+
+
 def build_params(raw: str | None) -> DecompositionParameters:
     """Build decomposition parameters from optional JSON override payload."""
     base = DecompositionParameters()
@@ -140,9 +155,35 @@ def build_params(raw: str | None) -> DecompositionParameters:
         if hasattr(base, key) and value is not None:
             current = getattr(base, key)
             try:
-                setattr(base, key, type(current)(value))
-            except (TypeError, ValueError):
-                setattr(base, key, value)
+                setattr(base, key, _coerce_param_value(current, value))
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "field": key,
+                        "reason": f"Cannot coerce {value!r} to {type(current).__name__}",
+                    },
+                ) from exc
+
+    if base.adapt_batch_ms <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "field": "adapt_batch_ms",
+                "reason": "adapt_batch_ms must be > 0",
+            },
+        )
+    if base.use_adaptive and base.adapt_batch_ms > base.edges_sec * 1000:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "field": "adapt_batch_ms",
+                "reason": (
+                    f"adapt_batch_ms must be <= {base.edges_sec * 1000:.0f} "
+                    f"(edges_sec * 1000) when use_adaptive is enabled"
+                ),
+            },
+        )
     return base
 
 
@@ -158,18 +199,6 @@ def make_json_safe(value: Any) -> Any:
     if isinstance(value, (list, tuple)):
         return [make_json_safe(v) for v in value]
     return value
-
-
-def _pack_json_f32_payload(magic: bytes, meta: dict[str, Any], *arrays: np.ndarray) -> bytes:
-    """Pack versioned binary payload: magic(4) + v1 + JSON-meta + float32 arrays."""
-    meta_bytes = json.dumps(make_json_safe(meta), separators=(",", ":")).encode("utf-8")
-    parts: list[bytes] = [magic, struct.pack("<I", 1), struct.pack("<I", len(meta_bytes))]
-    for arr in arrays:
-        parts += [struct.pack("<I", arr.shape[0]), struct.pack("<I", arr.shape[1])]
-    parts.append(meta_bytes)
-    for arr in arrays:
-        parts.append(arr.astype("<f4", copy=False).tobytes(order="C"))
-    return b"".join(parts)
 
 
 async def save_upload_to_temp(file: UploadFile) -> str:
@@ -239,7 +268,7 @@ def summarize_result(
         "grid_names": result.get("grid_names", []),
         "mu_count": mu_count,
         "pulse_length": pulse_len,
-        "sil": result.get("sil", {}),
+        "sil": result.get("sil", []),
         "discard_channels": result.get("discard_channels"),
         "save_path": save_path if persisted else None,
         "parameters": result.get("parameters"),

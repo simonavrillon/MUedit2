@@ -407,6 +407,14 @@
   font-weight: var(--fw-light);
 }
 
+.form-hint {
+  margin: -2px 0 0;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-light);
+  line-height: 1.4;
+}
+
 .form-row input,
 .form-row select {
   width: 100%;

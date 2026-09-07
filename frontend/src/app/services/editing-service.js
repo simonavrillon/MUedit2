@@ -521,7 +521,7 @@ export async function saveEditedFile(deps) {
     mu_grid_index: state.edit.muGridIndex,
     mu_uids: state.edit.muUids || [],
     parameters: state.edit.parameters,
-    muscle_names: muscleNames,
+    muscle: muscleNames,
     edit_history: state.edit.editHistory || [],
     artifact_times: distimes.map((_, i) => {
       const times = state.edit.artifactTimes?.[i];

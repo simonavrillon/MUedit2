@@ -53,7 +53,6 @@ export const state = {
   coordinates: [],
   discardMasks: [],
   channelTraces: [],
-  qcRepresentation: "raw",
   qcWindowLoading: {},
   metadata: {},
   muscle: [],

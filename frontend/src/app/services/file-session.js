@@ -124,6 +124,20 @@ export function createFileSessionService(deps) {
     if (placementDesc) entities.placement_scheme_description = placementDesc;
     const taskDescription = String(els.bidsTaskDescription?.value || "").trim();
     if (taskDescription) entities.task_description = taskDescription;
+
+    const age = String(els.bidsParticipantAge?.value || "").trim();
+    const sex = String(els.bidsParticipantSex?.value || "").trim();
+    const handedness = String(
+      els.bidsParticipantHandedness?.value || "",
+    ).trim();
+    if (age || sex || handedness) {
+      entities.participant_meta = {
+        age: age || "n/a",
+        sex: sex || "n/a",
+        handedness: handedness || "n/a",
+      };
+    }
+
     return entities;
   }
 

@@ -59,14 +59,12 @@ export function createQcStageService(deps) {
     gridIdx,
     start = 0,
     end = state.seriesLength,
-    targetPoints = 96,
   ) {
     return requestQcGridWindowFeature(
       { state, api, renderChannelQC, setStatus },
       gridIdx,
       start,
       end,
-      targetPoints,
     );
   }
 

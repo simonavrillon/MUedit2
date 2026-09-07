@@ -55,7 +55,7 @@ export async function autoSaveRunDecomposition(deps) {
     grid_names: state.gridNames || ["Grid 1"],
     mu_grid_index: state.muGridIndex || [],
     parameters: state.parameters || {},
-    muscle_names: muscleNames,
+    muscle: muscleNames,
     file_label: suggestedName,
   };
   setRunDownloadInFlight(state, true);
@@ -360,6 +360,11 @@ export function handleStreamMessage(deps, msg) {
     emgCanvasId,
   } = deps;
 
+  // Set when the "done" event arrives before binary preview hydration has
+  // populated state.muPulseTrains. The hydration callback checks this flag
+  // and triggers the deferred auto-save once MU data is available.
+  let pendingAutoSave = false;
+
   if (msg.stage === "error") {
     const detail = msg.detail
       ? `: ${typeof msg.detail === "string" ? msg.detail : JSON.stringify(msg.detail)}`
@@ -409,11 +414,19 @@ export function handleStreamMessage(deps, msg) {
       void hydrateBinaryDecomposePreview({
         api,
         token: msg.preview.preview_binary_token,
-        applyPreview: (previewPayload) =>
+        applyPreview: (previewPayload) => {
           applyPreviewData(
             commonPreviewDeps,
             normalizePreviewPayload(previewPayload),
-          ),
+          );
+          // The "done" event may arrive before binary hydration populates
+          // state.muPulseTrains. When that happens the auto-save is deferred
+          // until hydration completes here.
+          if (pendingAutoSave) {
+            renderMuExplorer();
+            void autoSaveRunDecomposition?.();
+          }
+        },
         onError: (err) => {
           console.error(err);
           setStatus("Preview hydration failed", "error");
@@ -460,6 +473,10 @@ export function handleStreamMessage(deps, msg) {
     if (Array.isArray(state.muPulseTrains) && state.muPulseTrains.length) {
       renderMuExplorer();
       void autoSaveRunDecomposition?.();
+    } else {
+      // Binary preview: MU data not yet hydrated — defer auto-save until
+      // hydrateBinaryDecomposePreview completes.
+      pendingAutoSave = true;
     }
     setStatus("Complete", "success");
   }

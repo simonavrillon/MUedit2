@@ -195,7 +195,6 @@ class _OTB4Channels:
     aux_gains: list
     aux_hpf: list
     aux_lpf: list
-    emg_not_grid: np.ndarray
 
 
 def _parse_otb4_novecento(tmpdir: str, track_list: list[dict[str, Any]]) -> _OTB4Channels:
@@ -267,7 +266,6 @@ def _parse_otb4_novecento(tmpdir: str, track_list: list[dict[str, Any]]) -> _OTB
         aux_gains=aux_gains,
         aux_hpf=aux_hpf,
         aux_lpf=aux_lpf,
-        emg_not_grid=np.zeros((0, grid_data.shape[1] or auxiliary.shape[1])),
     )
 
 
@@ -377,7 +375,6 @@ def _parse_otb4_generic(tmpdir: str, track_list: list[dict[str, Any]]) -> _OTB4C
         aux_gains=aux_gains,
         aux_hpf=aux_hpf,
         aux_lpf=aux_lpf,
-        emg_not_grid=np.zeros((0, grid_data.shape[1] or auxiliary.shape[1])),
     )
 
 
@@ -569,9 +566,6 @@ def load_otb_plus(filepath: str) -> dict[str, Any]:
         auxiliary = data[aux_mask, :]
         aux_names = [grid_names[i] for i in range(len(grid_names)) if aux_mask[i]]
 
-        emg_mask = adapter_types_arr < 3
-        emg_not_grid = data[emg_mask, :]
-
         sip_files = sorted([f for f in os.listdir(tmpdir) if f.endswith(".sip")])
         if len(sip_files) >= 2:
             for sip in sip_files:
@@ -680,7 +674,6 @@ def load_otb_plus(filepath: str) -> dict[str, Any]:
             "muscle": unique_muscles,
             "auxiliary": auxiliary,
             "auxiliaryname": aux_names,
-            "emgnotgrid": emg_not_grid,
             "metadata": metadata,
         }
 
@@ -775,6 +768,5 @@ def load_otb4(filepath: str) -> dict[str, Any]:
             "muscle": [],
             "auxiliary": _sanitize_array(ch.auxiliary),
             "auxiliaryname": ch.auxiliary_names,
-            "emgnotgrid": _sanitize_array(ch.emg_not_grid),
             "metadata": metadata,
         }

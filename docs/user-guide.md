@@ -204,7 +204,7 @@ Written after decomposition or after saving edits. Core arrays:
 | `fsamp` | Sampling frequency (Hz) |
 | `grid_names` | Grid labels |
 | `mu_grid_index` | Grid assignment for each MU |
-| `muscle_names` | Muscle label(s) |
+| `muscle` | Muscle label(s) |
 | `total_samples` | Total recording length in samples |
 | `parameters` | Decomposition parameters used |
 

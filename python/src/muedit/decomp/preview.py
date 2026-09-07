@@ -14,8 +14,10 @@ def downsample_vector(
     if vector.size == 0:
         return []
     if source_fs <= 0 or target_fs <= 0:
-        return vector.astype(float).tolist()
-
+        raise ValueError(
+            f"Sample rates must be positive (source_fs={source_fs}, "
+            f"target_fs={target_fs}); cannot downsample."
+        )
     step = max(1, int(np.round(source_fs / target_fs)))
     return vector[::step].astype(float).tolist()
 
@@ -39,17 +41,18 @@ def build_preview_payload(
     preview_signal = np.mean(np.abs(data), axis=0)
     pulse_preview: list[list[float]] = []
     pulse_preview_all: list[list[float]] = []
-    pulse_full_all: list[list[float]] = []
+    pulse_full_all: np.ndarray | list[list[float]] = []
     distime_lists: list[list[int]] = []
 
     if pulse_t.size > 0:
+        if include_full_preview:
+            pulse_full_all = np.asarray(pulse_t, dtype=np.float32)
         for i in range(pulse_t.shape[0]):
-            ds = downsample_vector(pulse_t[i, :], fsamp)
-            pulse_preview_all.append(ds)
-            if i < 3:
-                pulse_preview.append(ds)
-            if include_full_preview:
-                pulse_full_all.append(pulse_t[i, :].astype(float).tolist())
+            if not include_full_preview:
+                ds = downsample_vector(pulse_t[i, :], fsamp)
+                pulse_preview_all.append(ds)
+                if i < 3:
+                    pulse_preview.append(ds)
             distime_lists.append([int(x) for x in distime[i]])
 
     preview = {

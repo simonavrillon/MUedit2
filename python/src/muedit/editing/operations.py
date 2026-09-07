@@ -66,7 +66,7 @@ def _recompute_spikes_in_window(
     ex_factor = max(1, ex_factor)
     e_sig = extend_signal(window_emg, ex_factor)
     eigenvectors, eigenvalues_diag = pca_extended_signal(e_sig)
-    w_sig, _, _ = whiten_extended_signal(e_sig, eigenvectors, eigenvalues_diag)
+    w_sig, _ = whiten_extended_signal(e_sig, eigenvectors, eigenvalues_diag)
 
     if use_peeloff and peeloff_spike_times:
         for other_spikes in peeloff_spike_times:

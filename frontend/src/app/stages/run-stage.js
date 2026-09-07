@@ -17,6 +17,10 @@ import {
   setRunView,
 } from "../../state/actions.js";
 import { getRunMuIndicesForGrid } from "../../state/selectors.js";
+import {
+  DEFAULT_POSTPROCESS_MODE,
+  POSTPROCESS_MODES,
+} from "../../decomp/params.js";
 
 export function createRunStageService(deps) {
   const {
@@ -191,8 +195,18 @@ export function setupRunEvents(deps) {
   setupToggle(els.peelOffToggle, (on) =>
     toggleConditional("peelOffSettings", on),
   );
-  setupToggle(els.useAdaptiveToggle);
-  setupToggle(els.fullTraceToggle);
+  const renderPostprocessHint = () => {
+    if (!els.postprocessModeHint) return;
+    const mode =
+      POSTPROCESS_MODES[els.postprocessMode?.value] ||
+      POSTPROCESS_MODES[DEFAULT_POSTPROCESS_MODE];
+    els.postprocessModeHint.textContent = mode.hint;
+  };
+  renderPostprocessHint();
+  els.postprocessMode?.addEventListener("change", (e) => {
+    renderPostprocessHint();
+    e.target.blur();
+  });
   setupToggle(els.covToggle, (on) => toggleConditional("covSettings", on));
   setupLockedOnToggle(els.silToggle, (on) =>
     toggleConditional("silSettings", on),
