@@ -24,29 +24,18 @@ EDIT_SIGNAL_CONTEXT_MAX_ITEMS = 1
 DECOMP_PREVIEW_BINARY_TTL_SEC = 10 * 60
 DECOMP_PREVIEW_BINARY_MAX_ITEMS = 8
 
+UPLOAD_CACHE_MAX_BYTES = 1024 * 1024 * 1024
+DECOMP_PREVIEW_BINARY_MAX_BYTES = 512 * 1024 * 1024
+
 _CACHE_LOCK = threading.Lock()
-# One record per upload token, holding both the raw signal snapshot and the
-# preprocessed QC arrays derived from it under a single expiry. Keeping them in
-# one entry means neither half can outlive the other, and a hit on either half
-# refreshes the whole session rather than only its own former cache.
 _UPLOAD_SESSION_CACHE: dict[str, dict[str, Any]] = {}
 _DECOMP_PREVIEW_BINARY_CACHE: dict[str, dict[str, Any]] = {}
 _EDIT_SIGNAL_CONTEXT_CACHE: dict[str, dict[str, Any]] = {}
 _EDIT_SIGNAL_LABEL_INDEX: dict[str, str] = {}
 
-# Cached entries are immutable once stored -- only ``expires_at`` is ever
-# reassigned -- and a local reference keeps the arrays alive even if another
-# thread evicts the token meanwhile. Getters therefore resolve the entry under
-# the lock and deep-copy after releasing it, so a large clone never blocks
-# unrelated cache traffic.
-
 
 def _clone_signal(signal: dict[str, Any]) -> dict[str, Any]:
-    """Clone signal mapping through typed model to avoid shared mutable arrays.
-
-    ``from_mapping`` rebuilds every list and dict, and ``to_dict`` copies both
-    arrays, so a single pass already yields a fully independent mapping.
-    """
+    """Clone signal mapping through typed model to avoid shared mutable arrays."""
     return SignalImport.from_mapping(signal).to_dict()
 
 
@@ -72,11 +61,49 @@ def _purge_expired_caches_locked() -> None:
                 _EDIT_SIGNAL_LABEL_INDEX.pop(label, None)
 
 
-def _evict_oldest_locked(cache: dict[Any, dict[str, Any]], max_items: int) -> None:
-    """Trim cache to max size by evicting the oldest-expiring entries."""
-    while len(cache) > max_items:
-        oldest_key = min(cache.items(), key=lambda item: item[1]["expires_at"])[0]
-        cache.pop(oldest_key, None)
+def _array_nbytes(value: Any) -> int:
+    """Resident size of a NumPy array, or 0 for anything else."""
+    return int(value.nbytes) if isinstance(value, np.ndarray) else 0
+
+
+def _signal_nbytes(signal: dict[str, Any] | None) -> int:
+    """Resident size of the array payload of a cached signal mapping."""
+    if not signal:
+        return 0
+    return _array_nbytes(signal.get("data")) + _array_nbytes(signal.get("auxiliary"))
+
+
+def _qc_nbytes(qc: dict[str, Any] | None) -> int:
+    """Resident size of the array payload of a cached QC mapping."""
+    if not qc:
+        return 0
+    masks = qc.get("discard_channels") or []
+    return _array_nbytes(qc.get("data")) + sum(_array_nbytes(m) for m in masks)
+
+
+def _evict_to_budget_locked(
+    cache: dict[Any, dict[str, Any]],
+    max_items: int,
+    max_bytes: int | None = None,
+    protect: Any = None,
+) -> None:
+    """Trim cache to its item and byte budget, evicting oldest-expiring first."""
+    total = sum(int(entry.get("nbytes", 0)) for entry in cache.values())
+    while len(cache) > max_items or (max_bytes is not None and total > max_bytes):
+        candidates = [key for key in cache if key != protect]
+        if not candidates:
+            return  # only the protected entry is left; keep it whatever its size
+        oldest_key = min(candidates, key=lambda key: cache[key]["expires_at"])
+        evicted = cache.pop(oldest_key, None)
+        if evicted is not None:
+            total -= int(evicted.get("nbytes", 0))
+            logger.debug(
+                "Evicted cache entry %s (%.1f MB); %d entries / %.1f MB retained",
+                oldest_key,
+                int(evicted.get("nbytes", 0)) / 1e6,
+                len(cache),
+                total / 1e6,
+            )
 
 
 def _store_upload_signal(signal: dict[str, Any]) -> str:
@@ -88,9 +115,15 @@ def _store_upload_signal(signal: dict[str, Any]) -> str:
         _UPLOAD_SESSION_CACHE[token] = {
             "signal": cloned,
             "qc": None,
+            "nbytes": _signal_nbytes(cloned),
             "expires_at": time.time() + UPLOAD_CACHE_TTL_SEC,
         }
-        _evict_oldest_locked(_UPLOAD_SESSION_CACHE, UPLOAD_CACHE_MAX_ITEMS)
+        _evict_to_budget_locked(
+            _UPLOAD_SESSION_CACHE,
+            UPLOAD_CACHE_MAX_ITEMS,
+            UPLOAD_CACHE_MAX_BYTES,
+            protect=token,
+        )
     return token
 
 
@@ -123,22 +156,27 @@ def _store_qc_signal(
         offset += int(np.asarray(mask).size)
 
     qc: dict[str, Any] = {
-        "data": np.asarray(data, dtype=np.float32),
+        "data": np.array(data, dtype=np.float32),
         "fsamp": float(fsamp),
         "grid_names": list(grid_names),
         "channel_offsets": channel_offsets,
-        "discard_channels": [np.asarray(m, dtype=int) for m in discard_channels],
+        "discard_channels": [np.array(m, dtype=int) for m in discard_channels],
     }
     with _CACHE_LOCK:
         _purge_expired_caches_locked()
         entry = _UPLOAD_SESSION_CACHE.get(token)
         if entry is None:
-            # Upload session expired or was capacity-evicted between preview
-            # steps; the token is already dead, so QC data has no owner.
             logger.debug("Dropping QC data: upload token %s is no longer cached", token)
             return
         entry["qc"] = qc
+        entry["nbytes"] = _signal_nbytes(entry["signal"]) + _qc_nbytes(qc)
         entry["expires_at"] = time.time() + UPLOAD_CACHE_TTL_SEC
+        _evict_to_budget_locked(
+            _UPLOAD_SESSION_CACHE,
+            UPLOAD_CACHE_MAX_ITEMS,
+            UPLOAD_CACHE_MAX_BYTES,
+            protect=token,
+        )
 
 
 def _get_qc_signal(token: str | None) -> dict[str, Any] | None:
@@ -152,8 +190,10 @@ def _get_qc_signal(token: str | None) -> dict[str, Any] | None:
         if entry is None or qc is None:
             return None
         entry["expires_at"] = time.time() + UPLOAD_CACHE_TTL_SEC
+    data_view = qc["data"].view()
+    data_view.flags.writeable = False
     return {
-        "data": qc["data"],
+        "data": data_view,
         "fsamp": qc["fsamp"],
         "grid_names": list(qc["grid_names"]),
         "channel_offsets": list(qc["channel_offsets"]),
@@ -168,10 +208,14 @@ def _store_decomp_preview_binary(payload: bytes) -> str:
         _purge_expired_caches_locked()
         _DECOMP_PREVIEW_BINARY_CACHE[token] = {
             "payload": payload,
+            "nbytes": len(payload),
             "expires_at": time.time() + DECOMP_PREVIEW_BINARY_TTL_SEC,
         }
-        _evict_oldest_locked(
-            _DECOMP_PREVIEW_BINARY_CACHE, DECOMP_PREVIEW_BINARY_MAX_ITEMS
+        _evict_to_budget_locked(
+            _DECOMP_PREVIEW_BINARY_CACHE,
+            DECOMP_PREVIEW_BINARY_MAX_ITEMS,
+            DECOMP_PREVIEW_BINARY_MAX_BYTES,
+            protect=token,
         )
     return token
 
@@ -212,6 +256,12 @@ def _store_edit_signal_context(context: dict[str, Any], file_label: str | None =
         "ied": ied,
         "aux_data": aux_data,
         "aux_names": aux_names,
+        "nbytes": (
+            _array_nbytes(data)
+            + _array_nbytes(aux_data)
+            + sum(_array_nbytes(m) for m in emgmask)
+            + sum(_array_nbytes(c) for c in coordinates)
+        ),
         "expires_at": time.time() + EDIT_SIGNAL_CONTEXT_TTL_SEC,
     }
     # Loader-provided BIDS metadata fields (single source: LOADER_BIDS_META_KEYS).
@@ -223,7 +273,11 @@ def _store_edit_signal_context(context: dict[str, Any], file_label: str | None =
         label = str(file_label or "").strip()
         if label:
             _EDIT_SIGNAL_LABEL_INDEX[label] = token
-        _evict_oldest_locked(_EDIT_SIGNAL_CONTEXT_CACHE, EDIT_SIGNAL_CONTEXT_MAX_ITEMS)
+        _evict_to_budget_locked(
+            _EDIT_SIGNAL_CONTEXT_CACHE,
+            EDIT_SIGNAL_CONTEXT_MAX_ITEMS,
+            protect=token,
+        )
     return token
 
 
