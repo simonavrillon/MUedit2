@@ -1,5 +1,15 @@
 import { parseBidsEntitiesFromLabel } from "../../io/bids.js";
 
+function displayNameForPath(fullPath, name) {
+  if (String(name || "").toLowerCase() !== "info.rhd") return name;
+  const parts = String(fullPath || "")
+    .replace(/\\/g, "/")
+    .split("/")
+    .filter(Boolean);
+  const folder = parts[parts.length - 2];
+  return folder ? `${folder}.rhd` : name;
+}
+
 function inferProjectFromPath(fullPath) {
   const parts = fullPath.replace(/\\/g, "/").split("/");
   const dataIdx = parts.lastIndexOf("data");
@@ -37,7 +47,8 @@ export function createImportStageService(deps) {
 
     if (!result.path) return;
 
-    const { path, name } = result;
+    const { path } = result;
+    const name = displayNameForPath(path, result.name);
     const kind = detectLandingFileType({ name });
 
     if (kind === "unsupported") {

@@ -265,6 +265,7 @@ def _export_bids_from_mat_context(
             aux_gain=ctx.get("aux_gains"),
             aux_low_cutoff=ctx.get("aux_hpf"),
             aux_high_cutoff=ctx.get("aux_lpf"),
+            aux_units=ctx.get("aux_units"),
             recording_type=ctx.get("recording_type") or "continuous",
             software_filters=ctx.get("software_filters"),
         )

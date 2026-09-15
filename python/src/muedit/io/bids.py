@@ -127,6 +127,7 @@ def export_bids_emg(
     aux_gain: list[float] | None = None,
     aux_low_cutoff: list[float] | None = None,
     aux_high_cutoff: list[float] | None = None,
+    aux_units: str | None = None,
     manufacturer: str | None = None,
     manufacturers_model_name: str | None = None,
     task_description: str | None = None,
@@ -224,6 +225,7 @@ def export_bids_emg(
 
     n_aux = final_data.shape[0] - data.shape[0]
     aux_labels = _unique_labels(aux_names, n_aux)
+    resolved_aux_units = aux_units or "a.u."
 
     if skip_existing and edf_path.exists():
         logger.info(
@@ -247,7 +249,7 @@ def export_bids_emg(
                 if is_aux:
                     aux_idx = idx - data.shape[0]
                     ch_name = aux_labels[aux_idx]
-                    ch_units = "a.u."
+                    ch_units = resolved_aux_units
                 else:
                     ch_name = f"Ch{idx+1:02d}"
                     ch_units = units
@@ -377,7 +379,7 @@ def export_bids_emg(
                 [
                     name,
                     ctype,
-                    "a.u.",
+                    resolved_aux_units,
                     "Auxiliary Channel",
                     fsamp,
                     "n/a",

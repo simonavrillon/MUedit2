@@ -22,10 +22,13 @@ This software is functional and ready for use. The `adapt_decomp` feature still 
 | MATLAB | `.mat` | v5 and v7.3 (HDF5) signal structs |
 | OTB+ | `.otb+` | OT Biolab+ archive (tar/zip with XML + `.sig`) |
 | OTB4 | `.otb4` | OT Biolab4 proprietary binary format |
+| Intan RHD | `.rhd` | Intan RHD recordings — single-file or directory (all three save layouts) |
 | BIDS EMG | `.bdf`, `.edf` | BIDS-formatted recordings with a `_channels.tsv` sidecar (legacy `_emg_channels.tsv` also accepted) |
 | Decomposition | `.npz` | Saved decomposition output (for editing) |
 
 For BIDS input, point to either the `*_emg.bdf/.edf` file directly. The loader reads all grids and auxiliary channels defined in the accompanying `*_channels.tsv`.
+
+For Intan RHD input, point to the `.rhd` file (traditional single-file layout) or the recording directory (split layouts). The loader reads the header, resolves the save layout, groups amplifier channels into one grid per port, and picks up a `muedit_grids.json` sidecar if present for grid/muscle identification.
 
 ## Requirements
 

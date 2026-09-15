@@ -240,6 +240,28 @@ _GRID_CATALOG: dict[str, GridSpec] = {
         electrode_type="intramuscular array",
         electrode_material="gold coated",
     ),
+    # ── Intan RHD2164 adapter, GR08MM1305 array (64 ch) ─────────────────────
+    "INTAN64-1305": GridSpec(
+        channel_map=np.array([
+            [ 0, 33, 34,  3,  1],
+            [37, 46, 35,  5,  7],
+            [39, 48, 36,  2,  9],
+            [41, 50, 38, 18, 11],
+            [43, 52, 40, 16, 13],
+            [45, 54, 42, 14, 29],
+            [47, 56, 44, 12, 27],
+            [49, 58, 32, 10, 25],
+            [51, 60, 31,  8, 23],
+            [62, 53, 30,  6, 21],
+            [64, 55, 28,  4, 19],
+            [59, 57, 26, 20, 17],
+            [61, 63, 24, 22, 15],
+        ]),
+        nbelectrodes=64, ied=8.0, emg_type=1,
+        manufacturer="OTBioelettronica",
+        electrode_type="surface array",
+        electrode_material="gold coated",
+    ),
 }
 # ── End of catalogue ──────────────────────────────────────────────────────────
 

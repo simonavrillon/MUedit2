@@ -28,6 +28,7 @@ LOADER_BIDS_META_KEYS: tuple[str, ...] = (
     "aux_gains",
     "aux_hpf",
     "aux_lpf",
+    "aux_units",
     "hardware_filters",
     "units",
     "recording_type",

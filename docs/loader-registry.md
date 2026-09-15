@@ -10,6 +10,7 @@ python/src/muedit/io/
   loaders.py        ← thin re-exports only; do NOT add parsing logic here
   _mat.py           ← MAT v5/v7.3 loader
   _otb.py           ← OTB+ and OTB4 loaders
+  _intan.py         ← Intan RHD loader (all three save layouts)
   _bids_reader.py   ← BIDS (EDF/BDF) loader + grid-read helpers
   bids.py           ← BIDS export + re-exports of read helpers
 ```
@@ -19,7 +20,7 @@ python/src/muedit/io/
 Loader dispatch is registry-based in `python/src/muedit/io/factory.py`:
 
 - `register_loader(ext, loader, overwrite=False)` — register/override an extension
-- `get_loader(filepath)` — resolve the loader for a path (or a BIDS `emg/` directory)
+- `get_loader(filepath)` — resolve the loader for a path (or a BIDS/Intan recording directory)
 - `supported_extensions()` — list registered extensions
 - `load_signal(filepath)` — load and normalize to the internal mapping shape
 
@@ -90,6 +91,8 @@ Strongly recommended (per-channel filters and gains):
   - EMG low-pass cutoff(s).
 - `aux_gains` / `aux_hpf` / `aux_lpf`: `float | list[float]`
   - Auxiliary channel gains / cutoffs (if auxiliary channels exist).
+- `aux_units`: `str`
+  - Physical units of auxiliary channels (e.g. `"V"`). Defaults to `"a.u."` in BIDS export when not set.
 
 Recording-level fields (round-tripped to/from the BIDS `_emg.json` sidecar):
 - `manufacturer`: `str` — amplifier/system manufacturer.

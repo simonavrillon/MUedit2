@@ -251,6 +251,7 @@ def _export_raw_emg_bids(
         aux_gain=loader_meta.get("aux_gains"),
         aux_low_cutoff=loader_meta.get("aux_hpf"),
         aux_high_cutoff=loader_meta.get("aux_lpf"),
+        aux_units=loader_meta.get("aux_units"),
         manufacturer=entities.get("manufacturer") or loader_meta.get("manufacturer"),
         manufacturers_model_name=entities.get("manufacturers_model_name")
         or loader_meta.get("device_name"),

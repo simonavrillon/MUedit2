@@ -23,12 +23,15 @@ Each step is represented by a button in the top navigation bar. Steps unlock pro
 | MATLAB | `.mat` | v5 and v7.3 (HDF5) |
 | OT Biolab+ | `.otb+` | Archive with XML + `.sig` |
 | OT Biolab 4 | `.otb4` | Proprietary binary |
+| Intan RHD | `.rhd` | Single-file or directory (all three save layouts) |
 | BIDS EMG | `.bdf`, `.edf` | Requires a `*_channels.tsv` sidecar (legacy `*_emg_channels.tsv` also accepted) |
 | Decomposition | `.npz` | Saved decomposition — goes straight to Edit |
 
 ### Loading a file
 
 Click the folder icon in the landing page to browse.
+
+**Intan RHD recordings:** point to the `.rhd` file or the recording directory. The loader supports all three Intan save layouts (traditional single-file, one file per channel, one file per signal type). Amplifier channels are grouped into one grid per port in header order. Grid identity is resolved from a `muedit_grids.json` sidecar beside the recording (if present), or defaulted for 64-channel ports. Auxiliary, supply, board-ADC, and digital I/O channels are returned alongside the EMG data.
 
 **BIDS recordings:** point to either the `*_emg.bdf/.edf` file or the `emg/` directory. MUedit reads all grids and auxiliary channels defined in the `*_channels.tsv` sidecar automatically.
 

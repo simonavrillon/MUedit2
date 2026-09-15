@@ -23,7 +23,7 @@ export function createFileSessionService(deps) {
   function showUnsupportedUploadFormatError() {
     if (!els.uploadFormatError) return;
     els.uploadFormatError.textContent =
-      "Accepted: raw (.mat, .otb+, .otb4, .bdf, .edf) or decomposition (.npz, .mat)";
+      "Accepted: raw (.mat, .otb+, .otb4, .bdf, .edf, .rhd) or decomposition (.npz, .mat)";
     els.uploadFormatError.classList.remove("hidden");
   }
 
@@ -39,6 +39,7 @@ export function createFileSessionService(deps) {
     const name = (file?.name || "").toLowerCase();
     if (name.endsWith(".otb+") || name.endsWith(".otb4")) return "raw";
     if (name.endsWith(".bdf") || name.endsWith(".edf")) return "raw";
+    if (name.endsWith(".rhd")) return "raw";
     if (name.endsWith(".npz")) return "decomposition";
     if (name.endsWith(".mat")) return "ambiguous_mat";
     return "unsupported";
