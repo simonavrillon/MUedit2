@@ -116,6 +116,7 @@ def decomposition_event_stream(
     preloaded_signal: dict[str, Any] | None = None,
     cleanup: Callable[[str], None] | None = None,
     binary_preview: bool = False,
+    artifact_regions: list[tuple[int, int]] | None = None,
 ) -> Iterator[str]:
     """Yield NDJSON progress events while decomposition executes in background thread."""
     q: queue.Queue[dict[str, Any] | None] = queue.Queue()
@@ -149,6 +150,7 @@ def decomposition_event_stream(
                 file_label=file_label,
                 include_full_preview=include_full_preview,
                 preloaded_signal=preloaded_signal,
+                artifact_regions=artifact_regions,
             )
             preview_raw = result.get("preview", {})
             if binary_preview:
@@ -245,12 +247,14 @@ def parse_stream_options(
     discard_channels: str | None,
     bids_entities: str | None,
     bids_metadata: str | None,
+    artifact_regions: str | None = None,
 ) -> tuple[
     tuple[int, int] | None,
     list[tuple[int, int]] | None,
     list[list[int]] | None,
     dict | None,
     dict | None,
+    list[tuple[int, int]] | None,
 ]:
     """Parse optional stream route form inputs into typed decomposition options."""
     roi = None
@@ -263,4 +267,5 @@ def parse_stream_options(
         parse_discard_channels(discard_channels),
         parse_json_object(bids_entities, "bids_entities"),
         parse_json_object(bids_metadata, "bids_metadata"),
+        parse_rois(artifact_regions, "artifact_regions"),
     )

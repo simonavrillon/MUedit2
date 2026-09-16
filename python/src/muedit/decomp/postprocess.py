@@ -244,6 +244,7 @@ def postprocess_step(
             sv_learning_rate=params.adapt_sv_learning_rate,
             cov_alpha=params.adapt_cov_alpha,
             spike_prev_weight=params.adapt_spike_prev_weight,
+            artifact_mask=prep.artifact_mask,
         )
     else:
         build_full_extended: Callable[[int], np.ndarray] | None = None
@@ -285,6 +286,7 @@ def postprocess_step(
             build_full_extended=build_full_extended,
             window_to_grid=window_to_grid,
             win_means_by_window=decomposed.win_means if build_full_extended else None,
+            artifact_mask=prep.artifact_mask,
         )
 
     pulse_t, distime, mu_grid_index, kept_global = _remove_duplicates_by_grid(
@@ -416,6 +418,8 @@ def export_step(
             extras["emg_data"] = prep.data
             extras["discard_channels"] = _pack_object_array(prep.discard_channels)
             extras["coordinates"] = _pack_object_array(prep.coordinates)
+        if prep.artifact_mask is not None:
+            extras["artifact_mask"] = prep.artifact_mask
         _save_npz_with_app_schema(
             save_path,
             pulse_trains=post.pulse_t,

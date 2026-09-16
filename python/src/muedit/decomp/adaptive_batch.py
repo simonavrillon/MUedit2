@@ -55,6 +55,7 @@ def _run_one_pass(
     spikes_centr: np.ndarray,
     ex_factor: int,
     config: Config,
+    artifact_mask: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
     """Run adaptive decomposition on a single EMG segment and return ipts, spikes, and losses."""
     from muedit.adapt_decomp.adaptation import run_adaptive_decomposition
@@ -68,6 +69,7 @@ def _run_one_pass(
         spikes_centr=spikes_centr.copy(),
         emg_calib=emg_calib.astype(np.float32),
         config=cfg,
+        artifact_mask=artifact_mask,
     )
     return ipts.astype(np.float64), spikes, losses
 
@@ -80,6 +82,7 @@ def _run_adapt_decomp_bidirectional(
     w_sig: np.ndarray,
     calib_start: int,
     config: Config,
+    artifact_mask: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
     """Run adaptive decomposition forward from calib_start and, if needed, backward over the pre-calibration segment."""
     base_centr, spikes_centr = _compute_calibration_stats(
@@ -95,6 +98,7 @@ def _run_adapt_decomp_bidirectional(
 
     fwd_start = max(0, calib_start - bs)
     emg_fwd = np.ascontiguousarray(grid_data_g[:, fwd_start:].T.astype(np.float32))
+    fwd_mask = artifact_mask[fwd_start:] if artifact_mask is not None else None
     ipts_fwd_full, spikes_fwd_full, losses_fwd = _run_one_pass(
         emg_seg=emg_fwd,
         emg_calib=emg_calib_raw,
@@ -104,6 +108,7 @@ def _run_adapt_decomp_bidirectional(
         spikes_centr=spikes_centr,
         ex_factor=ex_factor,
         config=config,
+        artifact_mask=fwd_mask,
     )
 
     pre_offset = calib_start - fwd_start
@@ -128,6 +133,14 @@ def _run_adapt_decomp_bidirectional(
     blocks = np.split(e_pre, split_pts, axis=0)
     emg_bwd = np.ascontiguousarray(np.concatenate(blocks[::-1], axis=0).astype(np.float32))
 
+    bwd_mask = None
+    if artifact_mask is not None:
+        pre_mask = artifact_mask[:calib_start]
+        if pad_len > 0:
+            pre_mask = np.pad(pre_mask, (pad_len, 0), mode="constant", constant_values=False)
+        mask_blocks = np.split(pre_mask, split_pts)
+        bwd_mask = np.concatenate(mask_blocks[::-1])
+
     ipts_bwd_rev, spikes_bwd_rev, losses_bwd_rev = _run_one_pass(
         emg_seg=emg_bwd,
         emg_calib=emg_calib_ext,
@@ -137,6 +150,7 @@ def _run_adapt_decomp_bidirectional(
         spikes_centr=spikes_centr,
         ex_factor=1,
         config=config,
+        artifact_mask=bwd_mask,
     )
 
     # Re-split at the reversed block boundaries and restore original order.
@@ -197,6 +211,7 @@ def adaptive_batch_process(
     cov_alpha: float = _DEFAULT_CONFIG.cov_alpha,
     spike_prev_weight: int = _DEFAULT_CONFIG.spike_prev_weight,
     compute_loss: bool = _DEFAULT_CONFIG.compute_loss,
+    artifact_mask: np.ndarray | None = None,
 ) -> tuple[np.ndarray, list[np.ndarray], dict[int, dict[str, Any]]]:
     """Apply adaptive post-processing across all decomposition windows and grids."""
     config = Config(
@@ -247,6 +262,7 @@ def adaptive_batch_process(
             w_sig=w_sig_nwin,
             calib_start=calib_start,
             config=config,
+            artifact_mask=artifact_mask,
         )
 
         if compute_loss and win_losses:
@@ -254,7 +270,10 @@ def adaptive_batch_process(
 
         for j in range(filters.shape[1]):
             pt = signed_square(ipts_out[:, j])
-            pulse_t[mu_nb, :] = pt[:ltime]
+            pt = pt[:ltime]
+            if artifact_mask is not None:
+                pt[artifact_mask[:ltime]] = 0.0
+            pulse_t[mu_nb, :] = pt
             distime.append(np.where(spikes_out[:ltime, j] > 0)[0].astype(int))
             mu_nb += 1
 

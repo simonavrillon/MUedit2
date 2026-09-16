@@ -50,6 +50,10 @@ export function createApiClient({ apiFetch, apiJson, API_BASE }) {
       return postJson(`${API_BASE}${routes.qcWindow}`, payload, 120000);
     },
 
+    runAutoQc(payload) {
+      return postJson(`${API_BASE}${routes.qcAuto}`, payload, 300000);
+    },
+
     fetchPreview(formData) {
       return apiJson(
         `${API_BASE}${routes.preview}`,

@@ -21,7 +21,7 @@ from muedit.api.common import (
     safe_unlink,
     save_upload_to_temp,
 )
-from muedit.api.schemas import QcWindowPayload
+from muedit.api.schemas import QcAutoPayload, QcWindowPayload
 from muedit.api.services.bids_helpers import (
     _infer_bids_root_from_decomp_path,
     read_bids_sidecar_meta,
@@ -35,6 +35,7 @@ from muedit.signal.downsample import (
 )
 from muedit.signal.filters import bandpass_signals
 from muedit.signal.grid import format_hdemg_signal
+from muedit.signal.qc_pipeline import run_auto_qc
 
 
 def _encode_qc_raw_f32(
@@ -250,4 +251,65 @@ def get_qc_window(payload: QcWindowPayload) -> Response:
         content=payload_bytes,
         media_type="application/octet-stream",
         headers={"x-muedit-format": "qc-raw-f32-v1"},
+    )
+
+
+def _mask_to_regions(mask: np.ndarray) -> list[list[int]]:
+    """Convert a boolean sample mask into contiguous ``[start, end)`` ranges."""
+    if mask is None or not mask.any():
+        return []
+    diff = np.diff(mask.astype(np.int8), prepend=0, append=0)
+    starts = np.flatnonzero(diff == 1)
+    ends = np.flatnonzero(diff == -1)
+    return [[int(s), int(e)] for s, e in zip(starts, ends, strict=True)]
+
+
+def run_auto_qc_on_token(payload: QcAutoPayload) -> dict[str, Any]:
+    """Run the automatic QC pipeline over the cached preview signal."""
+    cached = _get_qc_signal(payload.upload_token)
+    if cached is None:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "field": "upload_token",
+                "reason": "Missing or expired QC cache; request /api/v1/preview first",
+            },
+        )
+
+    fsamp = float(cached["fsamp"])
+    grid_names = list(cached["grid_names"])
+    coordinates, _, _, _ = format_hdemg_signal(grid_names)
+    grid_channel_counts = [int(c.shape[0]) for c in coordinates]
+    total_declared = sum(grid_channel_counts)
+
+    data = np.asarray(cached["data"], dtype=np.float64)
+    if total_declared > data.shape[0]:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "field": "upload_token",
+                "reason": (
+                    f"Grid catalogue declares {total_declared} channels but the cached "
+                    f"signal has {data.shape[0]}"
+                ),
+            },
+        )
+
+    result = run_auto_qc(
+        data[:total_declared],
+        fsamp,
+        grid_channel_counts,
+        grid_coordinates=coordinates,
+    )
+    return make_json_safe(
+        {
+            "bad_channels_per_grid": [
+                np.asarray(m, dtype=int).tolist() for m in result.bad_channel_masks
+            ],
+            "artifact_regions": _mask_to_regions(result.artifact_mask),
+            "artifact_samples": int(np.asarray(result.artifact_mask).sum()),
+            "total_samples": int(data.shape[1]),
+            "fsamp": fsamp,
+            "grid_names": grid_names,
+        }
     )

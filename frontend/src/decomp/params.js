@@ -34,8 +34,9 @@ export const DEFAULT_POSTPROCESS_MODE = "windowed";
 
 /** Resolve a mode key to its backend flags, falling back to the default. */
 export function postprocessFlags(mode) {
-  return (POSTPROCESS_MODES[mode] || POSTPROCESS_MODES[DEFAULT_POSTPROCESS_MODE])
-    .flags;
+  return (
+    POSTPROCESS_MODES[mode] || POSTPROCESS_MODES[DEFAULT_POSTPROCESS_MODE]
+  ).flags;
 }
 
 export function buildDecomposeParams(raw) {
@@ -51,6 +52,7 @@ export function buildDecomposeParams(raw) {
     initialization: 0,
     peel_off_enabled: raw.peelOn ? 1 : 0,
     peel_off_win: raw.peelWindow / 1000,
+    auto_mask_artifacts: 0,
     ...postprocessFlags(raw.postprocessMode),
   };
 }

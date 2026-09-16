@@ -20,6 +20,7 @@ from muedit.io.bids import (
 from muedit.io.factory import clone_signal, load_signal
 from muedit.signal.filters import bandpass_signals, notch_signals
 from muedit.signal.grid import format_hdemg_signal
+from muedit.signal.qc_pipeline import run_auto_qc
 
 logger = logging.getLogger(__name__)
 
@@ -299,6 +300,25 @@ def load_step(
     )
 
 
+def _build_manual_artifact_mask(
+    artifact_regions: list[tuple[int, int]] | None,
+    n_samples: int,
+) -> np.ndarray | None:
+    """Rasterize user-drawn ``(start, end)`` sample ranges into a boolean mask."""
+    if not artifact_regions or n_samples <= 0:
+        return None
+    mask = np.zeros(n_samples, dtype=bool)
+    for start_raw, end_raw in artifact_regions:
+        start, end = int(start_raw), int(end_raw)
+        if end < start:
+            start, end = end, start
+        start = max(0, min(start, n_samples))
+        end = max(0, min(end, n_samples))
+        if end > start:
+            mask[start:end] = True
+    return mask if mask.any() else None
+
+
 def preprocess_step(
     loaded: LoadStepOutput,
     duration: float | None,
@@ -310,6 +330,7 @@ def preprocess_step(
     bids_root: str | None,
     bids_entities: dict[str, Any] | None,
     bids_metadata: dict[str, Any] | None,
+    artifact_regions: list[tuple[int, int]] | None = None,
 ) -> PreprocessStepOutput:
     """Apply channel formatting, filtering, ROI selection, and optional BIDS raw export."""
     data = np.array(loaded.data, dtype=np.float64, copy=True)
@@ -374,6 +395,37 @@ def preprocess_step(
         data, loaded.fsamp, duration, manual_roi, roi, rois, params.nwindows
     )
     ngrid = len(grid_names)
+
+    artifact_mask: np.ndarray | None = None
+    bad_channel_masks: list[np.ndarray] | None = None
+    if params.auto_mask_artifacts:
+        grid_channel_counts = [c.shape[0] for c in coordinates]
+        qc_result = run_auto_qc(
+            data, loaded.fsamp, grid_channel_counts, grid_coordinates=coordinates,
+        )
+        artifact_mask = qc_result.artifact_mask
+        bad_channel_masks = qc_result.bad_channel_masks
+
+        for i, auto_bad in enumerate(bad_channel_masks):
+            if auto_bad.any():
+                discard_channels[i] = np.maximum(
+                    discard_channels[i].astype(int), auto_bad.astype(int),
+                )
+                logger.info(
+                    "Grid %d: auto-detected %d bad channel(s), "
+                    "%d total discarded.",
+                    i + 1, int(auto_bad.sum()), int(discard_channels[i].sum()),
+                )
+
+    manual_mask = _build_manual_artifact_mask(artifact_regions, data.shape[1])
+    if manual_mask is not None:
+        artifact_mask = manual_mask if artifact_mask is None else (artifact_mask | manual_mask)
+        logger.info(
+            "Manual artifact regions: %d region(s), %d / %d samples (%.2f%%)",
+            len(artifact_regions or []), int(manual_mask.sum()), data.shape[1],
+            100.0 * manual_mask.sum() / max(data.shape[1], 1),
+        )
+
     return PreprocessStepOutput(
         signal=loaded.signal,
         data=data,
@@ -387,4 +439,6 @@ def preprocess_step(
         roi_list=roi_list,
         ngrid=ngrid,
         coordinates_plateau=_build_coordinates_plateau(ngrid, roi_list),
+        artifact_mask=artifact_mask,
+        bad_channel_masks=bad_channel_masks,
     )

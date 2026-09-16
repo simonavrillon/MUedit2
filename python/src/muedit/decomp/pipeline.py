@@ -29,6 +29,7 @@ def run_decomposition(
     file_label: str | None = None,
     include_full_preview: bool = False,
     preloaded_signal: dict[str, Any] | None = None,
+    artifact_regions: list[tuple[int, int]] | None = None,
 ) -> tuple[dict[str, Any], str]:
     """Execute the full load → preprocess → decompose → postprocess pipeline."""
     params = params or DecompositionParameters()
@@ -46,6 +47,7 @@ def run_decomposition(
         bids_root=bids_root,
         bids_entities=bids_entities,
         bids_metadata=bids_metadata,
+        artifact_regions=artifact_regions,
     )
     decomposed = decompose_step(
         prep=preprocessed,

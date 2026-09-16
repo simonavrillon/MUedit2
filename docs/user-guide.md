@@ -47,9 +47,13 @@ This stage lets you inspect signal quality and define which part of the recordin
 
 Each electrode on the grid is shown as a tile. Channels can be toggled to exclude them from decomposition.
 
+**Automatic QC:** press the **Automatic QC** button (sparkle icon, next to the grid tabs) to run the server-side QC pipeline. It detects bad channels (flat, saturated, quantized, noisy, low-SNR, intermittent, contact-loss) and artifact-contaminated time regions automatically. Detected bad channels replace the current discard masks — click individual tiles to override. Detected artifact regions populate the artifact windows list (see below). Nothing is committed yet; you can review and correct the results before decomposing.
+
 ### Average EMG Activity chart
 
 Displays the rectified average across all active channels. Use this to identify the contraction window you want to decompose.
+
+**Artifact windows:** use the **+** button (top-right of the chart card) to arm artifact selection, then drag on the chart to mark a time region as an artifact. Marked windows are shaded on the chart. Use the **-** button to remove the last window. The count next to the buttons shows how many windows are active. Artifact windows are excluded from decomposition filter updates and state propagation — they prevent transient noise from corrupting the separation. These windows are combined with any automatically detected artifacts (from the Automatic QC button) and travel with the decomposition request.
 
 ### Auxiliary Channels panel
 

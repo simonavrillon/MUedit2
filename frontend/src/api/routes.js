@@ -5,6 +5,7 @@
  */
 export const routes = {
   qcWindow: "/qc/window",
+  qcAuto: "/qc/auto",
   previewByPath: "/preview-by-path",
   preview: "/preview",
   decomposeStream: "/decompose_stream",

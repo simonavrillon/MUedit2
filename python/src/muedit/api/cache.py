@@ -237,7 +237,12 @@ def _get_decomp_preview_binary(token: str | None) -> bytes | None:
 def _store_edit_signal_context(context: dict[str, Any], file_label: str | None = None) -> str:
     """Store decomposition raw-signal context and return short-lived token."""
     token = uuid.uuid4().hex
-    data = np.asarray(context.get("data"), dtype=np.float32)
+    data_raw = context.get("data")
+    data = (
+        np.asarray(data_raw, dtype=np.float32)
+        if isinstance(data_raw, np.ndarray) and data_raw.size > 0
+        else np.zeros((0, 0), dtype=np.float32)
+    )
     emgmask_raw = context.get("emgmask") or []
     emgmask = [np.asarray(m, dtype=int).copy() for m in emgmask_raw]
     coordinates_raw = context.get("coordinates") or []
@@ -247,6 +252,10 @@ def _store_edit_signal_context(context: dict[str, Any], file_label: str | None =
     aux_raw = context.get("aux_data")
     aux_data = np.asarray(aux_raw, dtype=np.float32).copy() if isinstance(aux_raw, np.ndarray) and aux_raw.size > 0 else None
     aux_names = list(context.get("aux_names") or [])
+    artifact_mask_raw = context.get("artifact_mask")
+    artifact_mask: np.ndarray | None = None
+    if isinstance(artifact_mask_raw, np.ndarray) and artifact_mask_raw.size > 0:
+        artifact_mask = np.asarray(artifact_mask_raw, dtype=bool).copy()
     cache_entry: dict[str, Any] = {
         "data": data.copy(),
         "fsamp": float(context.get("fsamp") or 0.0),
@@ -256,9 +265,11 @@ def _store_edit_signal_context(context: dict[str, Any], file_label: str | None =
         "ied": ied,
         "aux_data": aux_data,
         "aux_names": aux_names,
+        "artifact_mask": artifact_mask,
         "nbytes": (
             _array_nbytes(data)
             + _array_nbytes(aux_data)
+            + _array_nbytes(artifact_mask)
             + sum(_array_nbytes(m) for m in emgmask)
             + sum(_array_nbytes(c) for c in coordinates)
         ),
@@ -292,6 +303,7 @@ def _get_edit_signal_context(token: str | None) -> dict[str, Any] | None:
             return None
         entry["expires_at"] = time.time() + EDIT_SIGNAL_CONTEXT_TTL_SEC
     aux = entry.get("aux_data")
+    am = entry.get("artifact_mask")
     result: dict[str, Any] = {
         "data": np.asarray(entry["data"], dtype=np.float32).copy(),
         "fsamp": float(entry["fsamp"]),
@@ -301,6 +313,7 @@ def _get_edit_signal_context(token: str | None) -> dict[str, Any] | None:
         "ied": list(entry["ied"]) if entry.get("ied") is not None else None,
         "aux_data": np.asarray(aux, dtype=np.float32).copy() if isinstance(aux, np.ndarray) else None,
         "aux_names": list(entry.get("aux_names") or []),
+        "artifact_mask": np.asarray(am, dtype=bool).copy() if isinstance(am, np.ndarray) else None,
     }
     for key in LOADER_BIDS_META_KEYS:
         result[key] = entry.get(key)

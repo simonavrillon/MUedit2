@@ -56,6 +56,7 @@ export async function autoSaveRunDecomposition(deps) {
     mu_grid_index: state.muGridIndex || [],
     parameters: state.parameters || {},
     muscle: muscleNames,
+    artifact_regions: state.artifactRegions || [],
     file_label: suggestedName,
   };
   setRunDownloadInFlight(state, true);
@@ -128,6 +129,12 @@ export async function runDecomposition(deps) {
     }
     if (state.rois && state.rois.length) {
       formData.append("rois", JSON.stringify(state.rois));
+    }
+    if (state.artifactRegions && state.artifactRegions.length) {
+      formData.append(
+        "artifact_regions",
+        JSON.stringify(state.artifactRegions),
+      );
     }
 
     const project =

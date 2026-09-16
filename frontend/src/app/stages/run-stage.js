@@ -177,9 +177,21 @@ export function setupRunEvents(deps) {
     updateStartAvailability,
     renderAuxiliaryChannels,
     renderMuExplorer,
+    runAutoQc,
+    toggleArtifactMode,
+    removeLastArtifact,
   } = deps;
 
   els.start?.addEventListener("click", runDecomposition);
+
+  if (runAutoQc) els.qcAutoBtn?.addEventListener("click", runAutoQc);
+  if (toggleArtifactMode) {
+    els.artifactAddBtn?.addEventListener("click", toggleArtifactMode);
+  }
+  if (removeLastArtifact) {
+    els.artifactRemoveBtn?.addEventListener("click", removeLastArtifact);
+  }
+  refreshVisuals?.();
 
   enableRoiSelection("emgCanvas");
 

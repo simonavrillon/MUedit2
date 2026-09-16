@@ -26,6 +26,12 @@ class QcWindowPayload(BaseModel):
     channel_index: int | None = None
 
 
+class QcAutoPayload(BaseModel):
+    """Typed request body for the on-demand automatic QC pass."""
+
+    upload_token: str
+
+
 class EditSavePayload(BaseModel):
     """Typed request body for persisting edited decomposition outputs."""
 
@@ -48,6 +54,7 @@ class EditSavePayload(BaseModel):
     entity_label: str | None = None
     edit_history: list[dict[str, Any]] | None = None
     artifact_times: list[list[int]] | None = None
+    artifact_regions: list[Any] | None = None
     edit_signal_token: str | None = None
     participant_meta: dict[str, Any] | None = None
     powerline_freq: float | None = None

@@ -53,9 +53,10 @@ export function drawRoiRects(ctx, selections, totalSamples, width, height) {
   selections.forEach((sel) => {
     const startX = (sel.start / totalSamples) * width;
     const endX = (sel.end / totalSamples) * width;
-    ctx.fillStyle = COLORS.roiFill;
+    const isArtifact = sel?.kind === "artifact";
+    ctx.fillStyle = isArtifact ? COLORS.artifactFill : COLORS.roiFill;
     ctx.fillRect(Math.min(startX, endX), 0, Math.abs(endX - startX), height);
-    ctx.strokeStyle = COLORS.roiStroke;
+    ctx.strokeStyle = isArtifact ? COLORS.artifactStroke : COLORS.roiStroke;
     ctx.lineWidth = 1;
     ctx.strokeRect(Math.min(startX, endX), 0, Math.abs(endX - startX), height);
   });

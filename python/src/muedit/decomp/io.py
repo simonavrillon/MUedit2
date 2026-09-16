@@ -49,6 +49,7 @@ class DecompositionLoad(NamedTuple):
     rois: list[tuple[int, int]]
     muscles: list[str]
     sil: list[float]
+    artifact_mask: np.ndarray | None = None
 
 
 def normalize_distimes(raw: Any) -> list[list[int]]:
@@ -279,6 +280,11 @@ def _load_npz_decomp(filepath: str) -> DecompositionLoad:
     if sil_raw is not None:
         sil = np.asarray(sil_raw, dtype=float).flatten().tolist()
 
+    artifact_mask_raw = data.get("artifact_mask")
+    artifact_mask: np.ndarray | None = None
+    if artifact_mask_raw is not None:
+        artifact_mask = np.asarray(artifact_mask_raw, dtype=bool)
+
     return DecompositionLoad(
         pulse_trains=pulse_trains,
         distime_raw=distime_raw,
@@ -290,6 +296,7 @@ def _load_npz_decomp(filepath: str) -> DecompositionLoad:
         rois=rois,
         muscles=muscles,
         sil=sil,
+        artifact_mask=artifact_mask,
     )
 
 
@@ -623,9 +630,59 @@ def _parse_signal_ied(raw: Any) -> list[float] | None:
     return arr.tolist() if arr.size else None
 
 
+def _load_npz_signal_context(filepath: str) -> dict[str, Any] | None:
+    """Extract raw EMG + artifact mask from a MUedit NPZ decomposition save."""
+    data = np.load(filepath, allow_pickle=True)
+    emg_raw = data.get("emg_data")
+    emg: np.ndarray | None = None
+    if isinstance(emg_raw, np.ndarray) and emg_raw.size > 0:
+        emg = np.asarray(emg_raw, dtype=float)
+        if emg.ndim == 1:
+            emg = emg.reshape(1, -1)
+        if emg.ndim != 2:
+            return None
+        if emg.shape[0] > emg.shape[1]:
+            emg = emg.T
+
+    fsamp_val = data.get("fsamp")
+    fsamp = float(np.asarray(fsamp_val).ravel()[0]) if fsamp_val is not None else None
+
+    grid_names = _parse_text_list(data.get("grid_names")) if data.get("grid_names") is not None else []
+
+    discard_raw = data.get("discard_channels")
+    emgmask = _parse_emgmask_cells(discard_raw)
+
+    coordinates_raw = data.get("coordinates")
+    coordinates = _parse_signal_coordinates(coordinates_raw)
+
+    artifact_mask_raw = data.get("artifact_mask")
+    artifact_mask: np.ndarray | None = None
+    if artifact_mask_raw is not None:
+        artifact_mask = np.asarray(artifact_mask_raw, dtype=bool)
+
+    if emg is None and artifact_mask is None:
+        return None
+
+    ctx: dict[str, Any] = {
+        "data": emg if emg is not None else np.zeros((0, 0), dtype=float),
+        "fsamp": fsamp,
+        "grid_names": grid_names,
+        "emgmask": emgmask,
+        "coordinates": coordinates,
+        "ied": None,
+        "aux_data": None,
+        "aux_names": [],
+        "artifact_mask": artifact_mask,
+    }
+    return ctx
+
+
 def load_decomposition_signal_context(filepath: str) -> dict[str, Any] | None:
     """Best-effort extraction of raw EMG context embedded in decomposition files."""
     ext = Path(filepath).suffix.lower()
+
+    if ext == ".npz":
+        return _load_npz_signal_context(filepath)
     if ext != ".mat":
         return None
 

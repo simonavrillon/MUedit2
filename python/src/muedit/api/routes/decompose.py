@@ -71,18 +71,27 @@ async def decompose_stream(
     bids_metadata: str | None = Form(None),
     full_preview: bool = Form(False),
     upload_token: str | None = Form(None),
+    artifact_regions: str | None = Form(None),
 ) -> StreamingResponse:
     """Run decomposition and stream stage/progress events as NDJSON."""
     tmp_path, run_path, preloaded_signal, file_label = await resolve_decompose_input(
         file, upload_token
     )
-    roi, roi_list, discard_override, bids_entities_obj, bids_metadata_obj = parse_stream_options(
+    (
+        roi,
+        roi_list,
+        discard_override,
+        bids_entities_obj,
+        bids_metadata_obj,
+        artifact_region_list,
+    ) = parse_stream_options(
         roi_start=roi_start,
         roi_end=roi_end,
         rois=rois,
         discard_channels=discard_channels,
         bids_entities=bids_entities,
         bids_metadata=bids_metadata,
+        artifact_regions=artifact_regions,
     )
 
     wants_binary_preview = request.headers.get("x-muedit-binary", "1") != "0"
@@ -103,6 +112,7 @@ async def decompose_stream(
         preloaded_signal=preloaded_signal,
         cleanup=safe_unlink,
         binary_preview=wants_binary_preview,
+        artifact_regions=artifact_region_list,
     )
     return StreamingResponse(generator, media_type="application/x-ndjson")
 

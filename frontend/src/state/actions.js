@@ -354,6 +354,48 @@ export function setRoiForIndex(state, idx, roi) {
   state.rois[idx] = { start: roi.start, end: roi.end };
 }
 
+export function setArtifactMode(state, on) {
+  state.artifactMode = !!on;
+}
+
+export function setArtifactDraft(state, draft) {
+  state.artifactDraft = draft || null;
+}
+
+export function setArtifactRegions(state, regions) {
+  state.artifactRegions = Array.isArray(regions)
+    ? regions
+        .map((r) => ({
+          start: Number(r?.start ?? r?.[0]),
+          end: Number(r?.end ?? r?.[1]),
+        }))
+        .filter((r) => Number.isFinite(r.start) && Number.isFinite(r.end))
+    : [];
+}
+
+export function addArtifactRegion(state, region) {
+  if (!Array.isArray(state.artifactRegions)) state.artifactRegions = [];
+  const start = Number(region?.start);
+  const end = Number(region?.end);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return;
+  state.artifactRegions.push({ start, end });
+}
+
+export function removeLastArtifactRegion(state) {
+  if (!Array.isArray(state.artifactRegions) || !state.artifactRegions.length) {
+    return false;
+  }
+  state.artifactRegions.pop();
+  return true;
+}
+
+export function setDiscardMasks(state, masks) {
+  if (!Array.isArray(masks)) return;
+  state.discardMasks = masks.map((grid) =>
+    Array.isArray(grid) ? grid.map((v) => (v ? 1 : 0)) : [],
+  );
+}
+
 export function setDiscardMaskChannel(state, gridIdx, chIdx, value) {
   if (!Array.isArray(state.discardMasks)) state.discardMasks = [];
   if (!Array.isArray(state.discardMasks[gridIdx])) {

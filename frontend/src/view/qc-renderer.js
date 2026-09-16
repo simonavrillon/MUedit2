@@ -3,12 +3,55 @@ import { drawRoiRects } from "./plots.js";
 import { gridDimensionsFor } from "../io/grid.js";
 import { roiStart, roiEnd } from "../state/selectors.js";
 import {
+  addArtifactRegion,
+  setArtifactDraft,
+  setArtifactMode,
   setChannelTraces,
   setCurrentGrid,
   setDiscardMaskChannel,
   setRoiDraft,
   setRoiForIndex,
 } from "../state/actions.js";
+
+/**
+ * Decomposition ROIs and artifact windows are drawn on the same canvases, so
+ * they travel as one selection list; `kind: "artifact"` is what tells
+ * `drawRoiRects` to switch colour. Drafts are appended so an in-flight drag
+ * renders alongside the committed windows.
+ */
+export function buildSelections(state) {
+  const rois = state.roiDraft
+    ? [...(state.rois || []), state.roiDraft]
+    : state.rois || [];
+  const artifacts = state.artifactDraft
+    ? [...(state.artifactRegions || []), state.artifactDraft]
+    : state.artifactRegions || [];
+  return [
+    ...rois,
+    ...artifacts.map((a) => ({ start: a.start, end: a.end, kind: "artifact" })),
+  ];
+}
+
+/**
+ * Sync the +/- control row with state. Driven from `refreshVisuals` so every
+ * path that changes artifact windows updates the count and armed state
+ * without having to remember to call this itself.
+ */
+export function renderArtifactControls(els, state) {
+  if (els?.artifactCount) {
+    els.artifactCount.textContent = String(
+      (state.artifactRegions || []).length,
+    );
+  }
+  if (els?.artifactAddBtn) {
+    const armed = !!state.artifactMode;
+    els.artifactAddBtn.classList.toggle("armed", armed);
+    els.artifactAddBtn.setAttribute("aria-pressed", armed ? "true" : "false");
+  }
+  if (els?.artifactRemoveBtn) {
+    els.artifactRemoveBtn.disabled = !(state.artifactRegions || []).length;
+  }
+}
 
 export function refreshVisuals(deps) {
   const {
@@ -18,9 +61,8 @@ export function refreshVisuals(deps) {
     renderAuxiliaryChannels,
     renderMuExplorer,
   } = deps;
-  const selections = state.roiDraft
-    ? [...(state.rois || []), state.roiDraft]
-    : state.rois;
+  const selections = buildSelections(state);
+  renderArtifactControls(els, state);
   const emgCanvas = els?.emgCanvas || "emgCanvas";
   drawGridOverlay(
     emgCanvas,
@@ -49,6 +91,7 @@ export function enableRoiSelection(deps, canvasId) {
   let dragging = false;
   let startX = 0;
   let endX = 0;
+  let dragIsArtifact = false;
 
   const toSamples = (sx, ex) => {
     const width = canvas.clientWidth || 1;
@@ -91,13 +134,32 @@ export function enableRoiSelection(deps, canvasId) {
     );
   };
 
+  const commitArtifact = () => {
+    if (!state.seriesLength) return;
+    const { startSample, endSample } = toSamples(startX, endX);
+    addArtifactRegion(state, {
+      start: startSample,
+      end: Math.max(startSample + 1, endSample),
+    });
+    setArtifactDraft(state, null);
+    setArtifactMode(state, false);
+    refreshVisualsFn();
+    const n = state.artifactRegions.length;
+    updateProgress(
+      undefined,
+      `Artifact window added (${n} window${n > 1 ? "s" : ""})`,
+    );
+  };
+
   canvas.addEventListener("mousedown", (e) => {
     if (!state.seriesLength) return;
     dragging = true;
+    dragIsArtifact = !!state.artifactMode;
     const rect = canvas.getBoundingClientRect();
     startX = e.clientX - rect.left;
     endX = startX;
     setRoiDraft(state, null);
+    setArtifactDraft(state, null);
   });
 
   canvas.addEventListener("mousemove", (e) => {
@@ -105,10 +167,12 @@ export function enableRoiSelection(deps, canvasId) {
     const rect = canvas.getBoundingClientRect();
     endX = e.clientX - rect.left;
     const { startSample, endSample } = toSamples(startX, endX);
-    setRoiDraft(state, {
+    const draft = {
       start: startSample,
       end: Math.max(startSample + 1, endSample),
-    });
+    };
+    if (dragIsArtifact) setArtifactDraft(state, draft);
+    else setRoiDraft(state, draft);
     refreshVisualsFn();
   });
 
@@ -120,10 +184,12 @@ export function enableRoiSelection(deps, canvasId) {
     dragging = false;
     if (Math.abs(endX - startX) < 4) {
       setRoiDraft(state, null);
+      setArtifactDraft(state, null);
       refreshVisualsFn();
       return;
     }
-    commitSelection();
+    if (dragIsArtifact) commitArtifact();
+    else commitSelection();
   });
 }
 
@@ -263,9 +329,7 @@ export function renderAuxiliaryChannels(els, state) {
   if (globalMin === Infinity) return;
   const span = globalMax - globalMin || 1;
 
-  const selections = state.roiDraft
-    ? [...(state.rois || []), state.roiDraft]
-    : state.rois;
+  const selections = buildSelections(state);
   drawRoiRects(
     ctx,
     selections,

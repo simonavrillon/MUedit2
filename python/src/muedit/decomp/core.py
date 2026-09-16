@@ -83,7 +83,24 @@ def decompose_step(
                 coordinates_plateau[win_global * 2] += edge_samples
                 coordinates_plateau[win_global * 2 + 1] -= edge_samples
 
-            eigenvectors, eigenvalues_diag = pca_extended_signal(e_sig)
+            win_artifact = False
+            clean_cols = slice(None)
+            win_clean = None
+            if prep.artifact_mask is not None:
+                win_mask_raw = np.asarray(prep.artifact_mask[start:end], dtype=bool)
+                n_win = win_mask_raw.size
+                win_mask_ext = np.zeros(n_win + ex_factor - 1, dtype=bool)
+                for m in range(ex_factor):
+                    win_mask_ext[m : m + n_win] |= win_mask_raw
+                if trim_edges:
+                    win_mask_ext = win_mask_ext[edge_samples:-edge_samples]
+                if win_mask_ext.any() and not win_mask_ext.all():
+                    win_artifact = True
+                    clean_cols = np.where(~win_mask_ext)[0]
+                    win_clean = ~win_mask_ext
+
+            e_sig_clean = e_sig[:, clean_cols] if win_artifact else e_sig
+            eigenvectors, eigenvalues_diag = pca_extended_signal(e_sig_clean)
             w_sig_win, whiten_mat_win = whiten_extended_signal(
                 e_sig, eigenvectors, eigenvalues_diag
             )
@@ -107,6 +124,8 @@ def decompose_step(
                 if use_activity_init:
                     act_ind = np.sum(x * x, axis=0)
                     act_ind[consumed] = -1.0
+                    if win_clean is not None:
+                        act_ind[~win_clean] = -1.0
                     col_idx = int(np.argmax(act_ind))
                     if act_ind[col_idx] > 0:
                         w = x[:, col_idx]
@@ -126,6 +145,9 @@ def decompose_step(
                 w = w / w_norm
                 w = fixed_point_alg(w, x, basis[:, :j], FIXED_POINT_MAXITER, params.contrast_func)
                 _, spikes = get_spikes(w, x, prep.fsamp)
+
+                if win_clean is not None and len(spikes) > 0:
+                    spikes = spikes[win_clean[spikes]]
 
                 if len(spikes) > 10:
                     cov_val = isi_cov(spikes, prep.fsamp)

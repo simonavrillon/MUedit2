@@ -34,4 +34,6 @@
   --mu-4: #e7c1ff;
   --mu-5: #ffb7c3;
   --mu-4-dim: rgba(231, 193, 255, 0.12);
+  /* Artifact windows — matches COLORS.artifactStroke in src/config.js. */
+  --artifact-clr: #ff8c66;
 }

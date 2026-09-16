@@ -39,6 +39,7 @@ def _recompute_spikes_in_window(
     use_peeloff: bool = False,
     artifact_times: SpikeTimes | None = None,
     lock_spikes: bool = False,
+    artifact_mask: np.ndarray | None = None,
 ) -> FilterUpdateResult:
     """Recompute motor-unit pulse train and spikes within a visible time window."""
     if emg.size == 0 or start >= end:
@@ -65,7 +66,24 @@ def _recompute_spikes_in_window(
     ex_factor = int(round(nbextchan / max(window_emg.shape[0], 1)))
     ex_factor = max(1, ex_factor)
     e_sig = extend_signal(window_emg, ex_factor)
-    eigenvectors, eigenvalues_diag = pca_extended_signal(e_sig)
+
+    win_artifact_mask: np.ndarray | None = None
+    if artifact_mask is not None:
+        wm = artifact_mask[start:end]
+        if wm.size == (end - start) and wm.any():
+            win_artifact_mask = wm
+
+    e_sig_pca = e_sig
+    if win_artifact_mask is not None:
+        n_win = win_artifact_mask.size
+        win_mask_ext = np.zeros(n_win + ex_factor - 1, dtype=bool)
+        for m in range(ex_factor):
+            win_mask_ext[m : m + n_win] |= win_artifact_mask
+        if win_mask_ext.any() and not win_mask_ext.all():
+            clean_cols = np.where(~win_mask_ext)[0]
+            if len(clean_cols) > e_sig.shape[0]:
+                e_sig_pca = e_sig[:, clean_cols]
+    eigenvectors, eigenvalues_diag = pca_extended_signal(e_sig_pca)
     w_sig, _ = whiten_extended_signal(e_sig, eigenvectors, eigenvalues_diag)
 
     if use_peeloff and peeloff_spike_times:
@@ -96,6 +114,9 @@ def _recompute_spikes_in_window(
     pt[-edge:] = 0
     pt = signed_square(pt)
 
+    if win_artifact_mask is not None:
+        pt[win_artifact_mask] = 0.0
+
     peaks = find_refractory_peaks(pt, fsamp, min_isi_sec=POSTPROC_MIN_ISI_SEC)
     if peaks.size <= 2:
         return None, spike_times
@@ -103,6 +124,9 @@ def _recompute_spikes_in_window(
     if len(np.unique(labels)) < 2:
         return None, spike_times
     idx2 = int(np.argmax(centroids))
+
+    if win_artifact_mask is not None and len(spikes_new) > 0:
+        spikes_new = spikes_new[~win_artifact_mask[spikes_new]]
 
     if lock_spikes and spikes1.size > 0:
         # Realign original spikes to their exact peak positions within ±10 samples
@@ -145,6 +169,7 @@ def update_motor_unit_filter_window(
     use_peeloff: bool = False,
     artifact_times: SpikeTimes | None = None,
     lock_spikes: bool = False,
+    artifact_mask: np.ndarray | None = None,
 ) -> FilterUpdateResult:
     """Update a motor-unit pulse train and spikes inside a time window."""
     emg_sel = emg[emg_mask == 0, :] if emg_mask.size else emg
@@ -161,6 +186,7 @@ def update_motor_unit_filter_window(
         use_peeloff=use_peeloff,
         artifact_times=artifact_times,
         lock_spikes=lock_spikes,
+        artifact_mask=artifact_mask,
     )
     return pt, updated
 

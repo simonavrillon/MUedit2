@@ -46,6 +46,7 @@ class DecompositionParameters:
     adapt_cov_alpha: float = 0.1
     adapt_spike_prev_weight: int = 5
     full_trace: bool = False
+    auto_mask_artifacts: bool = False
 
 
 @dataclass
@@ -75,6 +76,8 @@ class PreprocessStepOutput:
     roi_list: list[tuple[int, int]]
     ngrid: int
     coordinates_plateau: list[int]
+    artifact_mask: np.ndarray | None = None
+    bad_channel_masks: list[np.ndarray] | None = None
 
 
 @dataclass

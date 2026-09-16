@@ -1,10 +1,13 @@
 import {
+  setArtifactMode,
+  setArtifactRegions,
   setAuxData,
   setChannelMeans,
   setChannelTraceForGrid,
   setChannelTraces,
   setCoordinates,
   setCurrentStage,
+  setDiscardMasks,
   setFsamp,
   setGridNames,
   setGridSeries,
@@ -34,6 +37,66 @@ export function syncRois(state, nwin) {
   if (state.rois.length > nwin) state.rois = state.rois.slice(0, nwin);
   while (state.rois.length < nwin) {
     state.rois.push({ start: 0, end: state.seriesLength || 0 });
+  }
+}
+
+/**
+ * Run the automatic QC pipeline server-side and load the result into the
+ * interactive controls: detected bad channels replace the discard masks (click
+ * a cell to correct one) and detected artifacts replace the artifact windows
+ * (+/- to correct those). Nothing is sent to the decomposition here — the
+ * corrected masks travel with the run request.
+ */
+export async function requestAutoQc(deps) {
+  const {
+    state,
+    els,
+    api,
+    setStatus,
+    updateProgress,
+    renderChannelQC,
+    refreshVisuals,
+  } = deps;
+
+  if (!state.uploadToken) {
+    setStatus("Load a signal first", "error");
+    return false;
+  }
+
+  if (els?.qcAutoBtn) els.qcAutoBtn.disabled = true;
+  updateProgress(undefined, "Running automatic QC...");
+  setStatus("Running automatic QC...", "muted");
+
+  try {
+    const data = await api.runAutoQc({ upload_token: state.uploadToken });
+    if (Array.isArray(data?.bad_channels_per_grid)) {
+      setDiscardMasks(state, data.bad_channels_per_grid);
+    }
+    setArtifactRegions(state, data?.artifact_regions || []);
+    setArtifactMode(state, false);
+    setChannelTraces(state, []);
+
+    const nBad = (state.discardMasks || []).reduce(
+      (sum, grid) =>
+        sum + (grid || []).reduce((acc, v) => acc + (v ? 1 : 0), 0),
+      0,
+    );
+    const nArtifact = state.artifactRegions.length;
+
+    await renderChannelQC(false);
+    refreshVisuals();
+    updateProgress(
+      undefined,
+      `Automatic QC: ${nBad} bad channel(s), ${nArtifact} artifact window(s)`,
+    );
+    setStatus("Automatic QC complete", "success");
+    return true;
+  } catch (err) {
+    console.error(err);
+    setStatus(`Automatic QC failed: ${err.message}`, "error");
+    return false;
+  } finally {
+    if (els?.qcAutoBtn) els.qcAutoBtn.disabled = false;
   }
 }
 
@@ -134,6 +197,8 @@ export async function requestPreview(deps, options = {}) {
       rois.push({ start: 0, end: defaultEnd });
     }
     setRois(state, rois);
+    setArtifactRegions(state, []);
+    setArtifactMode(state, false);
     const roiPreview = state.rois?.[0];
     await requestQcGridWindow(
       getCurrentGrid(),

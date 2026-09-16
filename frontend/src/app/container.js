@@ -473,6 +473,9 @@ function wireEvents() {
     updateStartAvailability,
     renderAuxiliaryChannels: () => qcStage.renderAuxiliaryChannels(),
     renderMuExplorer: () => runStage.renderMuExplorer(),
+    runAutoQc: () => qcStage.runAutoQc(),
+    toggleArtifactMode: () => qcStage.toggleArtifactMode(),
+    removeLastArtifact: () => qcStage.removeLastArtifact(),
   });
 
   setupEditEvents({

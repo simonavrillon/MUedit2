@@ -268,6 +268,7 @@ def batch_process_filters(
     build_full_extended: Callable[[int], np.ndarray] | None = None,
     window_to_grid: dict[int, int] | None = None,
     win_means_by_window: dict[int, np.ndarray] | None = None,
+    artifact_mask: np.ndarray | None = None,
 ) -> tuple[np.ndarray, list[np.ndarray]]:
     """Apply MU filters across windows and reconstruct pulse trains/spike times."""
     total_mus = 0
@@ -328,6 +329,8 @@ def batch_process_filters(
                 pulse_t[mu_nb, start : start + segment_len] = pt_segment[: ltime - start]
 
             pulse_t[mu_nb, :] = signed_square(pulse_t[mu_nb, :])
+            if artifact_mask is not None:
+                pulse_t[mu_nb, artifact_mask] = 0.0
             spikes = find_refractory_peaks(
                 pulse_t[mu_nb, :], fsamp, min_isi_sec=POSTPROC_MIN_ISI_SEC
             )
@@ -336,8 +339,12 @@ def batch_process_filters(
                 high_spikes, _, _ = split_by_amplitude(
                     pulse_t[mu_nb, :], spikes, kmeans_iter=_KMEANS_ITER
                 )
+                if artifact_mask is not None and len(high_spikes) > 0:
+                    high_spikes = high_spikes[~artifact_mask[high_spikes]]
                 distime.append(high_spikes)
             else:
+                if artifact_mask is not None and len(spikes) > 0:
+                    spikes = spikes[~artifact_mask[spikes]]
                 distime.append(spikes)
 
             mu_nb += 1

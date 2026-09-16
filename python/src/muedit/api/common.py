@@ -65,15 +65,15 @@ def parse_discard_channels(raw: str | None) -> list[list[int]] | None:
     return result
 
 
-def parse_rois(raw: str | None) -> list[tuple[int, int]] | None:
-    """Parse ROI payload into list of (start, end) sample tuples."""
-    parsed = parse_json(raw, "rois")
+def parse_rois(raw: str | None, field: str = "rois") -> list[tuple[int, int]] | None:
+    """Parse a sample-range payload into a list of (start, end) tuples."""
+    parsed = parse_json(raw, field)
     if parsed is None:
         return None
     if not isinstance(parsed, list):
         raise HTTPException(
             status_code=400,
-            detail={"field": "rois", "reason": "Expected list of [start, end] pairs"},
+            detail={"field": field, "reason": "Expected list of [start, end] pairs"},
         )
 
     result: list[tuple[int, int]] = []
@@ -86,8 +86,8 @@ def parse_rois(raw: str | None) -> list[tuple[int, int]] | None:
             raise HTTPException(
                 status_code=400,
                 detail={
-                    "field": "rois",
-                    "reason": f"ROI {idx} must be [start, end] or object with start/end",
+                    "field": field,
+                    "reason": f"Range {idx} must be [start, end] or object with start/end",
                 },
             )
         try:
@@ -95,7 +95,7 @@ def parse_rois(raw: str | None) -> list[tuple[int, int]] | None:
         except (TypeError, ValueError) as exc:
             raise HTTPException(
                 status_code=400,
-                detail={"field": "rois", "reason": f"ROI {idx} has non-integer bounds"},
+                detail={"field": field, "reason": f"Range {idx} has non-integer bounds"},
             ) from exc
     return result
 

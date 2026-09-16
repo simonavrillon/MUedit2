@@ -39,6 +39,95 @@
   border-color: var(--mu-3);
 }
 
+/* Automatic QC shares the run-button shape but takes the QC stage's green
+   so it reads as part of the quality-check step, not as "run". */
+.qc-auto-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: auto;
+  margin-top: 0;
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--mu-2);
+  border-radius: var(--radius-sm);
+  font-weight: var(--fw-bold);
+  font-size: var(--fs-md);
+  letter-spacing: 0;
+  text-transform: none;
+  line-height: normal;
+}
+
+.qc-auto-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+.qc-auto-btn:hover {
+  opacity: 1;
+  border-color: var(--mu-2);
+}
+
+.qc-auto-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ── Artifact window controls (above the Average EMG plot) ── */
+
+.artifact-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.artifact-controls-label {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-right: 2px;
+}
+
+.artifact-btn {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-bold);
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.artifact-btn:hover {
+  border-color: var(--artifact-clr);
+}
+
+/* Armed: the next drag on the plot creates an artifact window. */
+.artifact-btn.armed {
+  border-color: var(--artifact-clr);
+  color: var(--artifact-clr);
+  background: var(--surface-active);
+}
+
+.artifact-count {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+
 .stage-tabs {
   display: flex;
   gap: 6px;

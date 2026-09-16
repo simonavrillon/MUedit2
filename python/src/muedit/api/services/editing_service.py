@@ -57,6 +57,7 @@ from muedit.decomp.io import (
     save_editlog,
 )
 from muedit.decomp.postprocess import _save_npz_with_app_schema
+from muedit.decomp.preprocess import _build_manual_artifact_mask
 from muedit.decomp.types import DEFAULT_PEEL_OFF_WIN_SEC
 from muedit.editing.operations import (
     add_artifact_in_roi,
@@ -372,6 +373,30 @@ def save_edits(payload: EditSavePayload) -> dict[str, Any]:
     decomp_dir = decomp_dir / "decomp"
     decomp_dir.mkdir(parents=True, exist_ok=True)
     out_path = decomp_dir / f"{entity_label}_edited.npz"
+
+    regions: list[tuple[int, int]] = []
+    for row in payload.artifact_regions or []:
+        pair: tuple[Any, Any] | None = None
+        if isinstance(row, (list, tuple)) and len(row) == 2:
+            pair = (row[0], row[1])
+        elif isinstance(row, dict) and "start" in row and "end" in row:
+            pair = (row["start"], row["end"])
+        if pair is None:
+            continue
+        try:
+            regions.append((int(pair[0]), int(pair[1])))
+        except (TypeError, ValueError):
+            continue
+    artifact_mask = _build_manual_artifact_mask(regions, total_samples)
+    if artifact_mask is None:
+        ctx_for_mask = _get_edit_signal_context(
+            payload.edit_signal_token
+        ) or _get_edit_signal_context_by_label(file_label)
+        if ctx_for_mask is not None:
+            cached_mask = ctx_for_mask.get("artifact_mask")
+            if isinstance(cached_mask, np.ndarray) and cached_mask.size == total_samples:
+                artifact_mask = np.asarray(cached_mask, dtype=bool)
+
     _save_npz_with_app_schema(
         out_path,
         pulse_trains=pulse_trains,
@@ -382,6 +407,7 @@ def save_edits(payload: EditSavePayload) -> dict[str, Any]:
         muscles=muscle_names,
         parameters=parameters,
         total_samples=total_samples,
+        extras={"artifact_mask": artifact_mask} if artifact_mask is not None else None,
     )
     save_editlog(out_path.with_suffix(".json"), mu_uids, edit_history, artifact_times_all or None)
 
@@ -488,6 +514,11 @@ def update_filter(payload: EditFilterPayload) -> dict[str, Any]:
                 detail="No BIDS EMG available. Reload decomposition MAT and retry filter update.",
             )
         data = np.asarray(ctx.get("data"), dtype=float)
+        if data.size == 0:
+            raise HTTPException(
+                status_code=400,
+                detail="No BIDS EMG available. Reload decomposition MAT and retry filter update.",
+            )
         if data.ndim == 1:
             data = data.reshape(1, -1)
         if data.ndim != 2:
@@ -530,6 +561,13 @@ def update_filter(payload: EditFilterPayload) -> dict[str, Any]:
     artifact_times_raw = payload.artifact_times or []
     artifact_times = [int(x) for x in artifact_times_raw if isinstance(x, (int, float))]
 
+    artifact_mask: np.ndarray | None = None
+    ctx_for_mask = _get_edit_signal_context(edit_signal_token) or _get_edit_signal_context_by_label(file_label)
+    if ctx_for_mask is not None:
+        am = ctx_for_mask.get("artifact_mask")
+        if isinstance(am, np.ndarray) and am.size > 0:
+            artifact_mask = am
+
     bids_emg_offset = view_start if emg_is_presliced else 0
     if view_start - bids_emg_offset < 0 or view_end - bids_emg_offset > emg.shape[1]:
         raise HTTPException(
@@ -557,6 +595,7 @@ def update_filter(payload: EditFilterPayload) -> dict[str, Any]:
         use_peeloff=use_peeloff,
         artifact_times=artifact_times or None,
         lock_spikes=lock_spikes,
+        artifact_mask=artifact_mask,
     )
 
     pulse_train = payload.pulse_train

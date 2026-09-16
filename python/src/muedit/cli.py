@@ -240,6 +240,15 @@ def run_decomposition_cli(argv: list[str] | None = None) -> None:
         ),
     )
     parser.add_argument(
+        "--auto-mask-artifacts",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Enable/disable automatic QC pipeline (bad-channel detection and "
+            "artifact masking)."
+        ),
+    )
+    parser.add_argument(
         "--bids-root",
         type=str,
         default=None,
@@ -392,6 +401,7 @@ def run_decomposition_cli(argv: list[str] | None = None) -> None:
         adapt_cov_alpha=args.adapt_cov_alpha,
         adapt_spike_prev_weight=args.adapt_spike_prev_weight,
         full_trace=postprocess_flags["full_trace"],
+        auto_mask_artifacts=args.auto_mask_artifacts,
     )
 
     run_decomposition(
