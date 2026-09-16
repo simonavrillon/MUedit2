@@ -9,6 +9,7 @@ import {
 export function setStatus(els, text, tone = "muted") {
   if (!els.status) return;
   els.status.textContent = text;
+  els.status.title = text;
   els.status.dataset.tone = tone;
 }
 

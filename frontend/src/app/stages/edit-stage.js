@@ -29,7 +29,6 @@ import {
 import {
   saveEditedFile as saveEditedFileFeature,
   loadDecompositionForEdit as loadDecompositionForEditFeature,
-  handleDecompositionFile as handleDecompositionFileFeature,
   requestRoiEdit as requestRoiEditFeature,
   requestFilterUpdate as requestFilterUpdateFeature,
   removeOutliers as removeOutliersFeature,
@@ -47,26 +46,11 @@ import {
 import { getEditMuIndicesForGrid } from "../../state/selectors.js";
 
 export function createEditStageService(deps) {
-  const {
-    state,
-    els,
-    api,
-    COLORS,
-    drawSeries,
-    getCanvasPlotMetrics,
-    getSuggestedNpzName,
-    persistNpzBySaveTarget,
-    getBidsMuscleNames,
-    buildEntityLabelFromSession,
-    applySessionInfoFromDecomposition,
-    showWorkspace,
-    switchStage,
-    setUploadLoading,
-    setEditStatus,
-    setEditMode,
-    refreshEditModeButtons,
-    renderBidsMuscleFields,
-  } = deps;
+  const { state, els, getCanvasPlotMetrics, refreshEditModeButtons } = deps;
+
+  function plotHeight(canvas) {
+    return canvas ? getCanvasPlotMetrics(canvas, true).plotHeight || 1 : 1;
+  }
 
   function ensureEditFlagged() {
     ensureEditFlaggedFeature(state);
@@ -109,7 +93,7 @@ export function createEditStageService(deps) {
   }
 
   function resetEditState() {
-    resetEditStateFeature({ state, refreshEditModeButtons });
+    resetEditStateFeature(ctx);
     if (els.editSaveBtn) els.editSaveBtn.disabled = true;
     if (els.bidsProject) els.bidsProject.value = "";
   }
@@ -130,292 +114,67 @@ export function createEditStageService(deps) {
   }
 
   function renderInstantaneousDr() {
-    renderInstantaneousDrFeature({
-      state,
-      els,
-      COLORS,
-      drawSeries,
-      getEditTotalSamples,
-      ensureEditFlagged,
-    });
+    renderInstantaneousDrFeature(ctx);
   }
 
   function renderEditExplorer() {
-    renderEditExplorerFeature({
-      els,
-      state,
-      COLORS,
-      drawSeries,
-      renderEditDropdowns,
-      getDisplayPulse,
-      renderInstantaneousDr,
-      getCanvasPlotMetrics,
-    });
-    renderEditTimelineFeature({ els, state, COLORS, getDisplayPulse });
+    renderEditExplorerFeature(ctx);
+    renderEditTimelineFeature(ctx);
   }
 
-  function restoreEditBackup() {
-    restoreEditBackupFeature({
-      state,
-      setEditStatus,
-      renderEditExplorer,
-      recomputeEditDirty,
-      ensureEditFlagged,
-    });
-  }
-
-  async function requestRoiEdit(action, payload) {
-    return requestRoiEditFeature(
-      {
-        state,
-        api,
-        setEditStatus,
-        ensureEditFlagged,
-        setEditMode,
-        recomputeEditDirty,
-        renderEditExplorer,
-        appendEditHistory,
-      },
-      action,
-      payload,
-    );
-  }
-
-  async function requestFilterUpdate(mode) {
-    return requestFilterUpdateFeature(
-      {
-        state,
-        els,
-        api,
-        setEditStatus,
-        getRawPulse,
-        backupEditMu,
-        buildEntityLabelFromSession,
-        ensureEditFlagged,
-        recomputeEditDirty,
-        refreshEditTotals,
-        renderEditExplorer,
-        appendEditHistory,
-      },
-      mode,
-    );
-  }
-
-  function updateMuFilter() {
-    return requestFilterUpdate("update-filter");
-  }
-
-  function addSpikesInSelection(sel) {
-    return addSpikesInSelectionFeature(
-      {
-        state,
-        getRawPulse,
-        backupEditMu,
-        getPulseViewMeta,
-        getPulsePlotHeight: () =>
-          els.editPulseCanvas
-            ? getCanvasPlotMetrics(els.editPulseCanvas, true).plotHeight || 1
-            : 1,
-        requestRoiEdit,
-      },
-      sel,
-    );
-  }
-
-  function addArtifactInSelection(sel) {
-    return addArtifactInSelectionFeature(
-      {
-        state,
-        getRawPulse,
-        backupEditMu,
-        getPulseViewMeta,
-        getPulsePlotHeight: () =>
-          els.editPulseCanvas
-            ? getCanvasPlotMetrics(els.editPulseCanvas, true).plotHeight || 1
-            : 1,
-        requestRoiEdit,
-      },
-      sel,
-    );
-  }
-
-  function deleteSpikesInSelection(sel) {
-    return deleteSpikesInSelectionFeature(
-      {
-        state,
-        getRawPulse,
-        backupEditMu,
-        getPulseViewMeta,
-        getPulsePlotHeight: () =>
-          els.editPulseCanvas
-            ? getCanvasPlotMetrics(els.editPulseCanvas, true).plotHeight || 1
-            : 1,
-        requestRoiEdit,
-      },
-      sel,
-    );
-  }
-
-  function deleteDrInSelection(sel) {
-    return deleteDrInSelectionFeature(
-      {
-        state,
-        backupEditMu,
-        getDrPlotHeight: () =>
-          els.editDrCanvas
-            ? getCanvasPlotMetrics(els.editDrCanvas, true).plotHeight || 1
-            : 1,
-        getRawPulse,
-        requestRoiEdit,
-      },
-      sel,
-    );
-  }
-
-  async function removeOutliers() {
-    return removeOutliersFeature({
-      state,
-      api,
-      setEditStatus,
-      getRawPulse,
-      backupEditMu,
-      ensureEditFlagged,
-      recomputeEditDirty,
-      renderEditExplorer,
-      appendEditHistory,
-    });
-  }
-
-  async function flagMuForDeletion() {
-    return flagMuForDeletionFeature({
-      state,
-      api,
-      setEditStatus,
-      getRawPulse,
-      backupEditMu,
-      ensureEditFlagged,
-      setEditBookmark,
-      setShowBookmark,
-      recomputeEditDirty,
-      renderEditExplorer,
-      appendEditHistory,
-    });
-  }
-
-  function resetCurrentMuEdits() {
-    resetCurrentMuEditsFeature({
-      state,
-      ensureEditFlagged,
-      recomputeEditDirty,
-      renderEditExplorer,
-    });
-  }
-
-  async function removeDuplicateMus() {
-    return removeDuplicateMusFeature({
-      state,
-      api,
-      setEditStatus,
-      ensureEditFlagged,
-      setEditBookmark,
-      setShowBookmark,
-      recomputeEditDirty,
-      renderEditExplorer,
-      appendEditHistory,
-    });
-  }
-
-  function duplicateMu() {
-    duplicateMuFeature({
-      state,
-      setEditStatus,
-      ensureEditFlagged,
-      recomputeEditDirty,
-      renderEditExplorer,
-      appendEditHistory,
-    });
-  }
-
-  function bindEditCanvas() {
-    bindEditCanvasFeature({
-      els,
-      state,
-      getRawPulse,
-      getCanvasPlotMetrics,
-      renderEditExplorer,
-      setEditStatus,
-      addSpikesInSelection,
-      addArtifactInSelection,
-      deleteSpikesInSelection,
-      setEditMode,
-      setShowBookmark,
-    });
-  }
-
-  function bindEditDrCanvas() {
-    bindEditDrCanvasFeature({
-      els,
-      state,
-      getCanvasPlotMetrics,
-      getEditTotalSamples,
-      renderEditExplorer,
-      deleteDrInSelection,
-    });
-  }
-
-  function bindEditTimeline() {
-    bindEditTimelineFeature({
-      els,
-      state,
-      getDisplayPulse,
-      renderEditExplorer,
-    });
-  }
-
-  function saveEditedFile() {
-    return saveEditedFileFeature({
-      state,
-      getSuggestedNpzName,
-      persistNpzBySaveTarget,
-      getBidsMuscleNames,
-      setEditStatus,
-      recomputeEditDirty,
-    });
-  }
-
-  function loadDecompositionForEdit(file, absolutePath) {
-    return loadDecompositionForEditFeature(
-      {
-        state,
-        api,
-        applySessionInfoFromDecomposition,
-        ensureEditFlagged,
-        recomputeEditDirty,
-        showWorkspace,
-        switchStage,
-        renderEditExplorer,
-        renderBidsMuscleFields,
-        setUploadLoading,
-        setEditStatus,
-        resetEditState,
-        els,
-      },
-      file,
-      absolutePath,
-    );
-  }
+  const restoreEditBackup = () => restoreEditBackupFeature(ctx);
+  const requestRoiEdit = (action, payload) =>
+    requestRoiEditFeature(ctx, action, payload);
+  const requestFilterUpdate = (mode) => requestFilterUpdateFeature(ctx, mode);
+  const updateMuFilter = () => requestFilterUpdate("update-filter");
+  const addSpikesInSelection = (sel) => addSpikesInSelectionFeature(ctx, sel);
+  const addArtifactInSelection = (sel) =>
+    addArtifactInSelectionFeature(ctx, sel);
+  const deleteSpikesInSelection = (sel) =>
+    deleteSpikesInSelectionFeature(ctx, sel);
+  const deleteDrInSelection = (sel) => deleteDrInSelectionFeature(ctx, sel);
+  const removeOutliers = () => removeOutliersFeature(ctx);
+  const flagMuForDeletion = () => flagMuForDeletionFeature(ctx);
+  const resetCurrentMuEdits = () => resetCurrentMuEditsFeature(ctx);
+  const removeDuplicateMus = () => removeDuplicateMusFeature(ctx);
+  const duplicateMu = () => duplicateMuFeature(ctx);
+  const bindEditCanvas = () => bindEditCanvasFeature(ctx);
+  const bindEditDrCanvas = () => bindEditDrCanvasFeature(ctx);
+  const bindEditTimeline = () => bindEditTimelineFeature(ctx);
+  const saveEditedFile = () => saveEditedFileFeature(ctx);
+  const loadDecompositionForEdit = (file, absolutePath) =>
+    loadDecompositionForEditFeature(ctx, file, absolutePath);
 
   function loadDecompositionForEditByPath(path) {
     const name = path.split("/").pop().split("\\").pop() || path;
     return loadDecompositionForEdit({ name }, path);
   }
 
-  function handleDecompositionFile(file) {
-    return handleDecompositionFileFeature(
-      { loadDecompositionForEdit: (f) => loadDecompositionForEdit(f) },
-      file,
-    );
-  }
+  const ctx = {
+    ...deps,
+    setEditBookmark,
+    setShowBookmark,
+    appendEditHistory,
+    ensureEditFlagged,
+    getRawPulse,
+    getDisplayPulse,
+    backupEditMu,
+    recomputeEditDirty,
+    refreshEditTotals,
+    resetEditState,
+    getEditTotalSamples,
+    getPulseViewMeta,
+    getPulsePlotHeight: () => plotHeight(els.editPulseCanvas),
+    getDrPlotHeight: () => plotHeight(els.editDrCanvas),
+    renderEditDropdowns,
+    renderEditExplorer,
+    renderInstantaneousDr,
+    requestRoiEdit,
+    addSpikesInSelection,
+    addArtifactInSelection,
+    deleteSpikesInSelection,
+    deleteDrInSelection,
+  };
 
   return {
     getEditMuIndices,
@@ -444,7 +203,6 @@ export function createEditStageService(deps) {
     saveEditedFile,
     loadDecompositionForEdit,
     loadDecompositionForEditByPath,
-    handleDecompositionFile,
     duplicateMu,
     removeDuplicateMus,
   };

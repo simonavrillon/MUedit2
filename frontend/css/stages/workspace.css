@@ -24,13 +24,26 @@
 .status-pill {
   padding: 4px 6px;
   border-radius: 999px;
-  border: 1px solid transparent;
+  border: none;
   background: transparent;
   color: var(--muted);
   font-size: var(--fs-sm);
   letter-spacing: 0.02em;
   text-transform: none;
   font-weight: var(--fw-light);
+}
+
+.app-status {
+  position: absolute;
+  right: 14px;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-status:empty {
+  display: none;
 }
 
 .settings-toggle-btn {
@@ -78,12 +91,10 @@
 
 .status-pill[data-tone="error"] {
   color: var(--danger);
-  border-color: var(--danger);
 }
 
 .status-pill[data-tone="success"] {
   color: var(--success);
-  border-color: var(--success);
 }
 
 /* ── Workflow Stepper ── */

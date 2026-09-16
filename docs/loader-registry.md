@@ -8,7 +8,7 @@ This guide explains how to add a new raw-signal loader in MUedit.
 python/src/muedit/io/
   factory.py        ← extension→loader registry (entry point for all loading)
   loaders.py        ← thin re-exports only; do NOT add parsing logic here
-  _mat.py           ← MAT v5/v7.3 loader
+  mat.py            ← MAT v5/v7.3 loader (helpers shared with decomp/decomposition_file.py)
   _otb.py           ← OTB+ and OTB4 loaders
   _intan.py         ← Intan RHD loader (all three save layouts)
   _bids_reader.py   ← BIDS (EDF/BDF) loader + grid-read helpers
@@ -73,7 +73,7 @@ At minimum, ensure the loader output can be normalized to `SignalImport` fields:
 `metadata` is a free-form `dict`, but these keys are what current backend logic
 uses during BIDS export and preview payload construction. The set of keys carried
 from a loaded decomposition through to BIDS export is defined once as
-`LOADER_BIDS_META_KEYS` in `python/src/muedit/decomp/io.py` — keep new keys in
+`LOADER_BIDS_META_KEYS` in `python/src/muedit/decomp/decomposition_file.py` — keep new keys in
 sync there.
 
 Required:

@@ -18,6 +18,7 @@ from muedit.decomp.algorithm import (
     extend_signal,
     rem_duplicates,
 )
+from muedit.decomp.decomposition_file import pack_object_array, save_decomposition_npz
 from muedit.decomp.preview import build_preview_payload
 from muedit.decomp.types import (
     DecomposeStepOutput,
@@ -30,14 +31,6 @@ from muedit.models import DecompositionExport, DecompositionSignalExport
 from muedit.signal.filters import demean
 
 logger = logging.getLogger(__name__)
-
-
-def _pack_object_array(items: list[Any]) -> np.ndarray:
-    """Pack a list of arrays into a 1-D object ndarray of consistent shape."""
-    arr = np.empty(len(items), dtype=object)
-    for i, item in enumerate(items):
-        arr[i] = item
-    return arr
 
 
 def _remove_duplicates_by_grid(
@@ -102,38 +95,6 @@ def _remove_duplicates_by_grid(
 
     pulse_t_out = np.vstack(filtered_pulses) if filtered_pulses else np.array([])
     return pulse_t_out, filtered_distime, filtered_grid_index, global_indices
-
-
-def _save_npz_with_app_schema(
-    out_path: str | Path,
-    pulse_trains: np.ndarray,
-    distimes: list[np.ndarray] | list[list[int]],
-    fsamp: float,
-    grid_names: list[str],
-    mu_grid_index: list[int],
-    muscles: list[str],
-    parameters: dict[str, Any],
-    total_samples: int,
-    extras: dict[str, Any] | None = None,
-) -> None:
-    """Save NPZ using the same core key schema as web-app edit saves."""
-    distime_arrays = [np.asarray(d, dtype=int) for d in distimes]
-    distime_obj = np.empty(len(distime_arrays), dtype=object)
-    for i, d in enumerate(distime_arrays):
-        distime_obj[i] = d
-    payload: dict[str, Any] = {
-        "pulse_trains": pulse_trains,
-        "discharge_times": distime_obj,
-        "fsamp": fsamp,
-        "grid_names": np.array(grid_names, dtype=object),
-        "mu_grid_index": np.array(mu_grid_index, dtype=int),
-        "muscle": np.array(muscles, dtype=object),
-        "parameters": np.array([parameters], dtype=object),
-        "total_samples": total_samples,
-    }
-    if extras:
-        payload.update(extras)
-    np.savez_compressed(out_path, **payload)
 
 
 def _reconstruct_window_signal(
@@ -405,7 +366,7 @@ def export_step(
             "adaptive_losses": np.array([post.adaptive_losses], dtype=object),
             "sil": np.asarray(post.sil, dtype=float),
             "sil_keys": np.array(_sil_keys, dtype=int),
-            "sil_by_window": _pack_object_array([
+            "sil_by_window": pack_object_array([
                 np.asarray(post.sil_by_window.get(k, []), dtype=float)
                 for k in _sil_keys
             ]),
@@ -416,11 +377,11 @@ def export_step(
         }
         if save_emg_data:
             extras["emg_data"] = prep.data
-            extras["discard_channels"] = _pack_object_array(prep.discard_channels)
-            extras["coordinates"] = _pack_object_array(prep.coordinates)
+            extras["discard_channels"] = pack_object_array(prep.discard_channels)
+            extras["coordinates"] = pack_object_array(prep.coordinates)
         if prep.artifact_mask is not None:
             extras["artifact_mask"] = prep.artifact_mask
-        _save_npz_with_app_schema(
+        save_decomposition_npz(
             save_path,
             pulse_trains=post.pulse_t,
             distimes=post.distime,

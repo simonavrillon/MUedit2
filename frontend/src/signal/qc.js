@@ -20,10 +20,6 @@ import {
   setSeriesLength,
   setUploadToken,
 } from "../state/actions.js";
-import {
-  beginRawPreviewTransition,
-  rollbackRawPreviewTransition,
-} from "../state/transitions.js";
 import { roiStart, roiEnd } from "../state/selectors.js";
 
 function channelsToEnv(channels) {
@@ -160,19 +156,12 @@ export async function requestPreview(deps, options = {}) {
     hideLanding,
   } = deps;
 
-  if (!state.file && !filepath) return;
+  if (!filepath) return;
   setUploadLoading(true);
   updateProgress(0, "Fetching preview...");
 
   try {
-    let data;
-    if (filepath) {
-      data = await api.fetchPreviewByPath(filepath);
-    } else {
-      const formData = new FormData();
-      formData.append("file", state.file);
-      data = await api.fetchPreview(formData);
-    }
+    const data = await api.fetchPreviewByPath(filepath);
     setUploadToken(state, data.upload_token || null);
     setGridSeries(state, data.grid_mean_abs || []);
     setGridNames(state, data.grid_names || []);
@@ -232,65 +221,4 @@ export async function requestPreview(deps, options = {}) {
   } finally {
     setUploadLoading(false);
   }
-}
-
-export async function handleRawFile(deps, file, options = {}) {
-  const { silentPreviewFailure = false } = options;
-  const {
-    state,
-    resetBidsEntityDefaults,
-    requestPreview,
-    setStatus,
-    updateStartAvailability,
-  } = deps;
-
-  if (!file) return;
-  beginRawPreviewTransition(state, file);
-  resetBidsEntityDefaults(file.name);
-  setStatus("File ready");
-  updateStartAvailability();
-  const ok = await requestPreview({ silentFailure: silentPreviewFailure });
-  if (!ok) {
-    rollbackRawPreviewTransition(state);
-    updateStartAvailability();
-  }
-  return ok;
-}
-
-export async function handleLandingFile(deps, file) {
-  const {
-    setUploadLoading,
-    showUnsupportedUploadFormatError,
-    clearUploadFormatError,
-    isSupportedSignalFile,
-    detectLandingFileType,
-    handleRawFile,
-    handleDecompositionFile,
-  } = deps;
-
-  if (!file) return;
-  if (!isSupportedSignalFile(file)) {
-    setUploadLoading(false);
-    showUnsupportedUploadFormatError();
-    return;
-  }
-  clearUploadFormatError();
-  const kind = detectLandingFileType(file);
-  if (kind === "raw") {
-    await handleRawFile(file);
-    return;
-  }
-  if (kind === "decomposition") {
-    await handleDecompositionFile(file);
-    return;
-  }
-  if (kind === "ambiguous_mat") {
-    const rawOk = await handleRawFile(file, { silentPreviewFailure: true });
-    if (!rawOk) {
-      await handleDecompositionFile(file);
-    }
-    return;
-  }
-  setUploadLoading(false);
-  showUnsupportedUploadFormatError();
 }

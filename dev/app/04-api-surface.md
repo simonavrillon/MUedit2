@@ -7,24 +7,24 @@ All HTTP endpoints used by the frontend, their payloads, and binary formats.
 | # | Method | Route | Client Method | Used By | Timeout | Purpose |
 |---|---|---|---|---|---|---|
 | 1 | GET | `/health` | `api.healthUrl()` | `initializeApp` → `waitForBackend` | 60s poll | Backend health check |
-| 2 | POST | `/dialog/open-file` | `api.openFileDialog()` | `importStage.handleNativeDialogOpen` | 120s | Open native OS file dialog |
+| 2 | GET | `/dialog/open-file` | `api.openFileDialog()` | `importStage.handleNativeDialogOpen` | 120s | Open native OS file dialog |
 | 3 | POST | `/preview-by-path` | `api.fetchPreviewByPath(path)` | `qcStage.requestPreview` (with filepath) | 120s | Fetch preview metadata for raw file by path |
-| 4 | POST | `/preview` | `api.fetchPreview(formData)` | `qcStage.requestPreview` (with file blob) | 120s | Fetch preview by uploaded file (legacy/browser) |
-| 5 | POST | `/qc/window` | `api.fetchQcWindow(payload, {preferBinary})` | `qcStage.requestQcGridWindow` | 120s | Fetch QC channel traces for a grid window |
-| 6 | POST | `/qc/auto` | `api.runAutoQc(payload)` | `qcStage.runAutoQc` | 300s | Run automatic QC: detect bad channels + artifact windows |
-| 7 | POST | `/decompose_stream` | `api.decomposeStream(formData)` | `runStage.runDecomposition` | 15min | Main decomposition (streaming NDJSON response) |
-| 8 | GET | `/decompose_preview/{token}` | `api.fetchDecomposePreview(token)` | `handleStreamMessage` (binary fast-path) | 120s | Fetch heavy MU arrays in binary format |
-| 9 | POST | `/edit/load-by-path` | `api.editLoad({filepath})` | `editStage.loadDecompositionForEdit` | 120s | Load decomposition file by server path |
-| 10 | POST | `/edit/load` | `api.editLoad({file})` | `editStage.loadDecompositionForEdit` (legacy) | 120s | Load decomposition by file blob (FormData) |
-| 11 | POST | `/edit/add-spikes` | `api.editAction("add-spikes", payload)` | `requestRoiEdit` | 120s | Add spikes in a selected region |
-| 12 | POST | `/edit/add-artifact` | `api.editAction("add-artifact", payload)` | `requestRoiEdit` | 120s | Mark an artifact region |
-| 13 | POST | `/edit/delete-spikes` | `api.editAction("delete-spikes", payload)` | `requestRoiEdit` | 120s | Delete spikes in a selected region |
-| 14 | POST | `/edit/delete-dr` | `api.editAction("delete-dr", payload)` | `requestRoiEdit` | 120s | Delete discharge-rate outliers in a selected range |
-| 15 | POST | `/edit/update-filter` | `api.editMode("update-filter", payload)` | `requestFilterUpdate` | 120s | Re-run separation filter on current MU |
-| 16 | POST | `/edit/remove-outliers` | `api.editRemoveOutliers(payload)` | `removeOutliers` | 120s | Remove outlier spikes from current MU |
-| 17 | POST | `/edit/remove-duplicates` | `api.editRemoveDuplicates(payload)` | `removeDuplicateMus` | 120s | Remove duplicate MUs |
-| 18 | POST | `/edit/flag-mu` | `api.editFlagMu(payload)` | `flagMuForDeletion` | 120s | Toggle MU deletion flag |
-| 19 | POST | `/edit/save` | `api.editSave(payload)` | `saveEditedFile`, `autoSaveRunDecomposition` | 120s | Save edited decomposition to .npz |
+| 4 | POST | `/qc/window` | `api.fetchQcWindow(payload, {preferBinary})` | `qcStage.requestQcGridWindow` | 120s | Fetch QC channel traces for a grid window |
+| 5 | POST | `/qc/auto` | `api.runAutoQc(payload)` | `qcStage.runAutoQc` | 300s | Run automatic QC: detect bad channels + artifact windows |
+| 6 | POST | `/decompose_stream` | `api.decomposeStream(formData)` | `runStage.runDecomposition` | 15min | Main decomposition (streaming NDJSON response) |
+| 7 | GET | `/decompose_preview/{token}` | `api.fetchDecomposePreview(token)` | `handleStreamMessage` (binary fast-path) | 120s | Fetch heavy MU arrays in binary format |
+| 8 | POST | `/edit/load-by-path` | `api.editLoadByPath(filepath)` | `editStage.loadDecompositionForEdit` | 120s | Load decomposition file by server path |
+| 9 | POST | `/edit/add-spikes` | `api.editAction("add-spikes", payload)` | `requestRoiEdit` | 120s | Add spikes in a selected region |
+| 10 | POST | `/edit/add-artifact` | `api.editAction("add-artifact", payload)` | `requestRoiEdit` | 120s | Mark an artifact region |
+| 11 | POST | `/edit/delete-spikes` | `api.editAction("delete-spikes", payload)` | `requestRoiEdit` | 120s | Delete spikes in a selected region |
+| 12 | POST | `/edit/delete-dr` | `api.editAction("delete-dr", payload)` | `requestRoiEdit` | 120s | Delete discharge-rate outliers in a selected range |
+| 13 | POST | `/edit/update-filter` | `api.editMode("update-filter", payload)` | `requestFilterUpdate` | 120s | Re-run separation filter on current MU |
+| 14 | POST | `/edit/remove-outliers` | `api.editRemoveOutliers(payload)` | `removeOutliers` | 120s | Remove outlier spikes from current MU |
+| 15 | POST | `/edit/remove-duplicates` | `api.editRemoveDuplicates(payload)` | `removeDuplicateMus` | 120s | Remove duplicate MUs |
+| 16 | POST | `/edit/flag-mu` | `api.editFlagMu(payload)` | `flagMuForDeletion` | 120s | Toggle MU deletion flag |
+| 17 | POST | `/edit/save` | `api.editSave(payload)` | `saveEditedFile`, `autoSaveRunDecomposition` | 120s | Save edited decomposition to .npz |
+
+> Files are only ever opened by path through the native dialog. The browser-upload routes (`POST /preview`, `POST /edit/load`) and their client code were removed (audit F2/F4); `tests/test_api_http.py` fails if `routes.js` names a route the backend does not serve.
 
 ## Route Definitions (`api/routes.js`)
 
@@ -33,7 +33,6 @@ export const routes = {
   qcWindow: "/qc/window",
   qcAuto: "/qc/auto",
   previewByPath: "/preview-by-path",
-  preview: "/preview",
   decomposeStream: "/decompose_stream",
   decomposePreview: (token) => `/decompose_preview/${encodeURIComponent(token)}`,
   editSave: "/edit/save",
@@ -43,7 +42,6 @@ export const routes = {
   editRemoveDuplicates: "/edit/remove-duplicates",
   editFlagMu: "/edit/flag-mu",
   editLoadByPath: "/edit/load-by-path",
-  editLoad: "/edit/load",
   dialogOpenFile: "/dialog/open-file",
   health: "/health",
 };
@@ -53,7 +51,7 @@ export const routes = {
 
 ## Payload Details
 
-### POST /dialog/open-file
+### GET /dialog/open-file
 
 ```
 Request:  no body
@@ -86,13 +84,6 @@ Response: {
 }
 ```
 
-### POST /preview (legacy, FormData)
-
-```
-Request:  FormData with "file" field
-Response: same as /preview-by-path
-```
-
 ### POST /qc/window
 
 ```
@@ -121,8 +112,7 @@ Response (binary MQCR format or JSON fallback):
 
 ```
 Request FormData:
-  upload_token: string           (preferred) OR
-  file: File                     (fallback)
+  upload_token: string           (required; from /preview-by-path)
   params: string                 (JSON.stringify of buildDecomposeParams)
   persist_output: "false"
   discard_channels: string       (JSON.stringify of state.discardMasks, if any)
@@ -178,13 +168,6 @@ Response (binary MELD format or JSON fallback):
     mu_uids?: string[],
     edit_history?: object[]
   }
-```
-
-### POST /edit/load (legacy, FormData)
-
-```
-Request: FormData with "file" field
-Response: same as /edit/load-by-path
 ```
 
 ### POST /edit/add-spikes
@@ -336,13 +319,16 @@ Built by `buildDecomposeParams()` in `decomp/params.js`:
 | `peel_off_win` | `raw.peelWindow / 1000` | `#peelOffWindow` | Peel-off window (ms -> s) |
 | `use_adaptive` | 0/1 | `#postprocessMode` | From postprocess mode flags |
 | `full_trace` | 0/1 | `#postprocessMode` | From postprocess mode flags |
+| `auto_mask_artifacts` | `0` | hardcoded | Auto-QC runs only on demand via `POST /qc/auto` |
 
 ### Post-processing Mode Flags
+
+Mode keys match `POSTPROCESS_MODES` in `decomp/types.py` and the CLI `--postprocess` choices (checked by `tests/test_frontend_param_parity.py`).
 
 | Mode | `use_adaptive` | `full_trace` |
 |---|---|---|
 | `windowed` (default) | 0 | 0 |
-| `full_trace` | 0 | 1 |
+| `full-trace` | 0 | 1 |
 | `adaptive` (beta) | 1 | 0 |
 
 ---
@@ -418,9 +404,12 @@ setStatus(`${label}: ${err.message}`, "error")
 
 ### Upload Token Expiry
 
-When `/decompose_stream` returns an upload-token error, the client:
-1. Clears the upload token
-2. Retries once with the full file upload instead of the token
+The backend caches the loaded signal under the upload token; it is lost on backend restart or cache eviction. When `/decompose_stream` returns an `upload_token` error, `runDecomposition` (`decomp/run.js`):
+1. Clears the token
+2. Calls `POST /preview-by-path` with `state.file.path` to mint a fresh token (ROIs, channel masks and artifact regions stay in frontend state and are reused)
+3. Retries the decomposition once; if the reload fails the original error is shown
+
+The QC-stage calls (`/qc/window`, `/qc/auto`) do not retry; they report the error.
 
 ### Silent Failure (Ambiguous .mat)
 

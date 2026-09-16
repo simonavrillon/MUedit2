@@ -6,13 +6,14 @@ All routers use prefix `/api/v1` (dialog uses `/api/v1/dialog`). All JSON respon
 
 ## Routes
 
+The non-streaming `POST /decompose`, `GET /config`, and the multipart upload routes `POST /preview` and `POST /edit/load` were removed as unreachable from the frontend (structural audit F4). Signals and decompositions are always opened by server path; `/decompose_stream` only accepts an `upload_token` minted by `/preview-by-path`.
+
 ### Preview Router (`routes/preview.py`)
 
 | Method | Path | Accepts | Returns | Service |
 |---|---|---|---|---|
 | GET | `/health` | — | `{status: "ok"}` | — |
-| POST | `/preview` | multipart: `file: UploadFile` | JSON: `{upload_token, mean_abs, grid_mean_abs, grid_names, total_samples, fsamp, channel_means, coordinates, metadata, muscle, auxiliary, auxiliary_names}` | `build_preview(file)` |
-| POST | `/preview-by-path` | JSON: `PathPayload` | JSON (same as preview + BIDS sidecar metadata) | `build_preview_from_path(path)` |
+| POST | `/preview-by-path` | JSON: `PathPayload` | JSON: `{upload_token, mean_abs, grid_mean_abs, grid_names, total_samples, fsamp, channel_means, coordinates, metadata, muscle, auxiliary, auxiliary_names}` + BIDS sidecar metadata | `build_preview_from_path(path)` |
 | POST | `/qc/window` | JSON: `QcWindowPayload` | Binary MQCR (`x-muedit-format: qc-raw-f32-v1`) | `get_qc_window(payload)` |
 | POST | `/qc/auto` | JSON: `QcAutoPayload` | JSON: `{bad_channels_per_grid, artifact_regions, artifact_samples, total_samples, fsamp, grid_names}` | `run_auto_qc_on_token(payload)` |
 
@@ -20,8 +21,7 @@ All routers use prefix `/api/v1` (dialog uses `/api/v1/dialog`). All JSON respon
 
 | Method | Path | Accepts | Returns | Service |
 |---|---|---|---|---|
-| POST | `/decompose` | multipart: `file`, `params` (JSON str), `duration: float`, `persist_output: bool`, `discard_channels` (JSON str), `full_preview: bool`, `upload_token` | JSON: `{summary, preview, parameters}` | `run_decomposition_once()` |
-| POST | `/decompose_stream` | multipart: `file`, `params`, `duration`, `persist_output`, `roi_start: int`, `roi_end: int`, `rois` (JSON str), `discard_channels`, `bids_export: bool`, `project: str`, `bids_entities` (JSON str), `bids_metadata` (JSON str), `full_preview`, `upload_token`, `artifact_regions` (JSON str) | `StreamingResponse` NDJSON (`application/x-ndjson`) | `decomposition_event_stream()` |
+| POST | `/decompose_stream` | form fields: `upload_token` (required; 400 with `field: upload_token` when missing or expired), `params`, `duration`, `persist_output`, `roi_start: int`, `roi_end: int`, `rois` (JSON str), `discard_channels`, `bids_export: bool`, `project: str`, `bids_entities` (JSON str), `bids_metadata` (JSON str), `full_preview`, `artifact_regions` (JSON str) | `StreamingResponse` NDJSON (`application/x-ndjson`) | `decomposition_event_stream()` |
 | GET | `/decompose_preview/{token}` | path param `token: str` | Binary MDPV (`x-muedit-format: decompose-preview-f32-v1`) | `fetch_decompose_preview_binary(token)` |
 
 Header `x-muedit-binary` (default `"1"`) controls binary vs JSON preview encoding in stream mode.
@@ -30,9 +30,7 @@ Header `x-muedit-binary` (default `"1"`) controls binary vs JSON preview encodin
 
 | Method | Path | Accepts | Returns | Service |
 |---|---|---|---|---|
-| GET | `/config` | — | JSON: `{data_root: str}` | `DATA_ROOT` constant |
-| POST | `/edit/load` | multipart: `file`; header `x-muedit-binary` | JSON or Binary MELD (`x-muedit-format: edit-load-f32-v1`) | `load_decomposition_binary(file)` / `load_decomposition(file)` |
-| POST | `/edit/load-by-path` | JSON: `PathPayload` | JSON or Binary MELD | `load_decomposition_binary_from_path(path)` / `load_decomposition_from_path(path)` |
+| POST | `/edit/load-by-path` | JSON: `PathPayload`; header `x-muedit-binary` | JSON or Binary MELD (`x-muedit-format: edit-load-f32-v1`) | `load_decomposition_binary_from_path(path)` / `load_decomposition_from_path(path)` |
 | POST | `/edit/save` | JSON: `EditSavePayload` | JSON: `{saved, path, bids_emg_paths?, bids_deriv_paths?}` | `save_edits(payload)` |
 | POST | `/edit/update-filter` | JSON: `EditFilterPayload` | JSON: `{fsamp, distimes, pulse_train}` | `update_filter(payload)` |
 | POST | `/edit/add-spikes` | JSON: `EditRoiPayload` | JSON: `{distimes}` | `add_spikes(payload)` |
@@ -267,10 +265,7 @@ Signal cloning uses `SignalImport.from_mapping().clone()` to avoid shared mutabl
 | `parse_discard_channels` | `(raw) -> list[list[int]] \| None` | Parse channel discard overrides |
 | `parse_rois` | `(raw) -> list[tuple[int,int]] \| None` | Parse ROI payload |
 | `parse_json_object` | `(raw, field_name) -> dict \| None` | Parse and validate JSON object |
-| `safe_unlink` | `(path) -> None` | Best-effort file removal |
 | `build_params` | `(raw) -> DecompositionParameters` | Build decomp params from JSON override |
 | `make_json_safe` | `(value) -> Any` | Convert numpy to JSON-serializable |
-| `save_upload_to_temp` | `(file: UploadFile) -> str` | Persist upload to temp file (async) |
 | `parse_entity_label` | `(file_label) -> str` | Derive BIDS entity label from filename |
-| `serialize_preview` | `(result) -> dict` | Extract/normalize preview from decomp result |
 | `summarize_result` | `(result, save_path, persisted) -> dict` | Build compact decomposition summary |

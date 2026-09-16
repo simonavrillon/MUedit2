@@ -455,7 +455,10 @@ export async function flagMuForDeletion(deps) {
   const targetFlag = !state.edit.flagged[muIdx];
   backupEditMu();
   try {
-    setEditStatus(targetFlag ? "Flagging MU for deletion..." : "Unflagging MU...", "muted");
+    setEditStatus(
+      targetFlag ? "Flagging MU for deletion..." : "Unflagging MU...",
+      "muted",
+    );
     const data = await api.editFlagMu({
       distimes: state.edit.distimes,
       mu_index: muIdx,
@@ -473,7 +476,10 @@ export async function flagMuForDeletion(deps) {
     setShowBookmark(state, false);
     recomputeEditDirty();
     renderEditExplorer();
-    setEditStatus(targetFlag ? "MU flagged for deletion" : "MU unflagged", "success");
+    setEditStatus(
+      targetFlag ? "MU flagged for deletion" : "MU unflagged",
+      "success",
+    );
   } catch (err) {
     handleError(err, setEditStatus, "Flagging failed");
   }
@@ -554,7 +560,7 @@ export async function saveEditedFile(deps) {
   }
 }
 
-export async function loadDecompositionForEdit(deps, file, filepath = null) {
+export async function loadDecompositionForEdit(deps, file, filepath) {
   const {
     state,
     api,
@@ -571,15 +577,13 @@ export async function loadDecompositionForEdit(deps, file, filepath = null) {
     els,
   } = deps;
 
-  if (!file && !filepath) return;
+  if (!filepath) return;
   setUploadLoading(true);
   setEditStatus("Loading...", "muted");
   setEditGridNames(state, []);
   setMuscle(state, []);
   try {
-    let data;
-    data = await api.editLoad({ file, filepath });
-    data = normalizeEditLoadPayload(data);
+    const data = normalizeEditLoadPayload(await api.editLoadByPath(filepath));
     const resolvedGridNames = normalizeGridNames(data.grid_names, {
       minimumCount: inferGridCount({
         gridNames: data.grid_names,
@@ -732,9 +736,4 @@ export async function loadDecompositionForEdit(deps, file, filepath = null) {
   } finally {
     setUploadLoading(false);
   }
-}
-
-export async function handleDecompositionFile(deps, file) {
-  if (!file) return;
-  await deps.loadDecompositionForEdit(file);
 }

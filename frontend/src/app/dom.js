@@ -57,7 +57,6 @@ export const els = {
   bidsPowerlineFreq: document.getElementById("bidsPowerlineFreq"),
   bidsManufacturer: document.getElementById("bidsManufacturer"),
   bidsDeviceModel: document.getElementById("bidsDeviceModel"),
-  bidsTaskDescription: document.getElementById("bidsTaskDescription"),
   bidsParticipantAge: document.getElementById("bidsParticipantAge"),
   bidsParticipantSex: document.getElementById("bidsParticipantSex"),
   bidsParticipantHandedness: document.getElementById(

@@ -32,7 +32,7 @@ class DecompositionParameters:
     nbextchan: int = DEFAULT_NBEXTCHAN
     edges_sec: float = 0.2
     contrast_func: str = "skew"
-    sil_thr: float = 0.88
+    sil_thr: float = 0.9
     cov_thr: float = 0.5
     peel_off_win: float = DEFAULT_PEEL_OFF_WIN_SEC
     duplicatesthresh: float = 0.3

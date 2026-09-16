@@ -66,7 +66,6 @@ export const state = {
   runDownloadInFlight: false,
   lastRunDownloadKey: "",
   runView: null,
-  muSelectionRange: null,
   roiDraft: null,
   artifactRegions: [],
   artifactDraft: null,

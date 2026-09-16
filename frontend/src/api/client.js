@@ -54,14 +54,6 @@ export function createApiClient({ apiFetch, apiJson, API_BASE }) {
       return postJson(`${API_BASE}${routes.qcAuto}`, payload, 300000);
     },
 
-    fetchPreview(formData) {
-      return apiJson(
-        `${API_BASE}${routes.preview}`,
-        { method: "POST", body: formData },
-        120000,
-      );
-    },
-
     fetchPreviewByPath(path) {
       return postJson(`${API_BASE}${routes.previewByPath}`, { path }, 120000);
     },
@@ -110,41 +102,19 @@ export function createApiClient({ apiFetch, apiJson, API_BASE }) {
       return postJson(`${API_BASE}${routes.editFlagMu}`, payload);
     },
 
-    async editLoad({ file, filepath } = {}) {
-      if (filepath) {
-        const res = await apiFetch(
-          `${API_BASE}${routes.editLoadByPath}`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ path: filepath }),
-          },
-          120000,
-        );
-        return decodeEditLoadPayload(
-          await res.arrayBuffer(),
-          res.headers.get("x-muedit-format"),
-        );
-      }
-      if (typeof apiFetch === "function") {
-        const formData = new FormData();
-        formData.append("file", file);
-        const res = await apiFetch(
-          `${API_BASE}${routes.editLoad}`,
-          { method: "POST", headers: {}, body: formData },
-          120000,
-        );
-        return decodeEditLoadPayload(
-          await res.arrayBuffer(),
-          res.headers.get("x-muedit-format"),
-        );
-      }
-      const formData = new FormData();
-      formData.append("file", file);
-      return apiJson(
-        `${API_BASE}${routes.editLoad}`,
-        { method: "POST", body: formData },
+    async editLoadByPath(filepath) {
+      const res = await apiFetch(
+        `${API_BASE}${routes.editLoadByPath}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path: filepath }),
+        },
         120000,
+      );
+      return decodeEditLoadPayload(
+        await res.arrayBuffer(),
+        res.headers.get("x-muedit-format"),
       );
     },
 

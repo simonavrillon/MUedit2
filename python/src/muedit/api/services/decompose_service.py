@@ -4,19 +4,22 @@ from __future__ import annotations
 
 import json
 import queue
+import tempfile
 import threading
 import traceback
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import numpy as np
-from fastapi import HTTPException, UploadFile
+from fastapi import HTTPException
 from fastapi.responses import Response
 
 from muedit.api.binary import pack_json_f32_payload
 from muedit.api.cache import (
     _get_decomp_preview_binary,
     _get_upload_signal,
+    _get_upload_source_path,
     _store_decomp_preview_binary,
 )
 from muedit.api.common import (
@@ -25,8 +28,6 @@ from muedit.api.common import (
     parse_discard_channels,
     parse_json_object,
     parse_rois,
-    save_upload_to_temp,
-    serialize_preview,
     summarize_result,
 )
 from muedit.decomp.pipeline import run_decomposition
@@ -67,40 +68,7 @@ def fetch_decompose_preview_binary(token: str) -> Response:
     )
 
 
-def run_decomposition_once(
-    input_path: str,
-    duration: float | None,
-    params_raw: str | None,
-    persist_output: bool,
-    discard_override: list[list[int]] | None,
-    file_label: str | None,
-    include_full_preview: bool,
-    preloaded_signal: dict[str, Any] | None,
-) -> dict[str, Any]:
-    """Run decomposition synchronously and return summary + preview payload."""
-    param_obj = build_params(params_raw)
-    result, save_path = run_decomposition(
-        input_path,
-        duration=duration,
-        manual_roi=False,
-        params=param_obj,
-        save_npz=persist_output,
-        discard_overrides=discard_override,
-        file_label=file_label,
-        include_full_preview=include_full_preview,
-        preloaded_signal=preloaded_signal,
-    )
-    return make_json_safe(
-        {
-            "summary": summarize_result(result, save_path, persist_output),
-            "preview": serialize_preview(result),
-            "parameters": param_obj.__dict__,
-        }
-    )
-
-
 def decomposition_event_stream(
-    tmp_path: str | None,
     run_path: str,
     params_raw: str | None,
     duration: float | None,
@@ -111,10 +79,8 @@ def decomposition_event_stream(
     bids_root: str | None = None,
     bids_entities: dict | None = None,
     bids_metadata: dict | None = None,
-    file_label: str | None = None,
     include_full_preview: bool = False,
     preloaded_signal: dict[str, Any] | None = None,
-    cleanup: Callable[[str], None] | None = None,
     binary_preview: bool = False,
     artifact_regions: list[tuple[int, int]] | None = None,
 ) -> Iterator[str]:
@@ -147,7 +113,6 @@ def decomposition_event_stream(
                 bids_root=bids_root,
                 bids_entities=bids_entities,
                 bids_metadata=bids_metadata,
-                file_label=file_label,
                 include_full_preview=include_full_preview,
                 preloaded_signal=preloaded_signal,
                 artifact_regions=artifact_regions,
@@ -198,8 +163,6 @@ def decomposition_event_stream(
                         "message": "Decomposition worker terminated unexpectedly",
                     }
                 )
-            if tmp_path and cleanup:
-                cleanup(tmp_path)
             q.put(None)
 
     thread = threading.Thread(target=worker, daemon=True)
@@ -213,30 +176,23 @@ def decomposition_event_stream(
         yield json.dumps(safe_event) + "\n"
 
 
-async def resolve_decompose_input(
-    file: UploadFile | None,
+def resolve_decompose_input(
     upload_token: str | None,
-) -> tuple[str | None, str, dict[str, Any] | None, str | None]:
-    """Resolve file upload token/path into decomposition input tuple."""
-    tmp_path: str | None = None
+) -> tuple[str, dict[str, Any]]:
+    """Resolve an upload token into ``(run_path, preloaded_signal)``."""
     preloaded_signal = _get_upload_signal(upload_token)
-    file_label = file.filename if file else None
-
     if preloaded_signal is None:
-        if file is None:
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "field": "upload_token",
-                    "reason": "Token expired or missing, and no file was provided",
-                },
-            )
-        tmp_path = await save_upload_to_temp(file)
-        run_path = tmp_path
-    else:
-        run_path = "cached_input"
-
-    return tmp_path, run_path, preloaded_signal, file_label
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "field": "upload_token",
+                "reason": "Token expired or missing; reload the file via /preview-by-path",
+            },
+        )
+    run_path = _get_upload_source_path(upload_token) or str(
+        Path(tempfile.gettempdir()) / "muedit_cached_input"
+    )
+    return run_path, preloaded_signal
 
 
 def parse_stream_options(

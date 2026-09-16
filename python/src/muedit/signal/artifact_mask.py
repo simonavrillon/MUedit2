@@ -18,7 +18,7 @@ _LOCAL_STEP_MS: int = 25
 
 @dataclass
 class ArtifactMaskConfig:
-    """Tunable parameters for :func:`detect_artifact_mask`."""
+    """Tunable parameters for :func:`_detect_artifact_mask`."""
 
     win_ms: int = 20
     z_thr: float = 9.0
@@ -74,7 +74,7 @@ def _exceeds(
     return out
 
 
-def detect_artifact_mask(
+def _detect_artifact_mask(
     data: np.ndarray,
     fsamp: float,
     config: ArtifactMaskConfig | None = None,
@@ -130,7 +130,7 @@ def detect_artifact_masks(
     ch_idx = 0
     for grid_idx, n_ch in enumerate(grid_channel_counts):
         grid_data = data[ch_idx : ch_idx + n_ch, :]
-        mask = detect_artifact_mask(grid_data, fsamp, config)
+        mask = _detect_artifact_mask(grid_data, fsamp, config)
         per_grid_masks.append(mask)
         global_mask |= mask
         ch_idx += n_ch

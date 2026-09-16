@@ -1,6 +1,6 @@
 # MUedit Backend Development Docs
 
-Auto-generated documentation of the MUedit2 Python backend: architecture, API surface, decomposition engine, I/O, signal processing, editing operations, and a worktree for dead-code auditing.
+Auto-generated documentation of the MUedit2 Python backend: architecture, API surface, decomposition engine, I/O, signal processing, editing operations, and a worktree of what each module exposes.
 
 ## Contents
 
@@ -12,7 +12,6 @@ Auto-generated documentation of the MUedit2 Python backend: architecture, API su
 | [04-io-signal-qc.md](04-io-signal-qc.md) | File loaders, BIDS export, filtering, grid inference, QC pipeline, artifact masking |
 | [05-editing-operations.md](05-editing-operations.md) | Every motor-unit editing operation, parameters, and data flow |
 | [06-worktree.md](06-worktree.md) | Worktree: user-exposed elements vs app-internal functions, per module |
-| [07-dead-code-candidates.md](07-dead-code-candidates.md) | Dead code, deprecated paths, and unreachable branch candidates |
 
 ## How to Use This Documentation
 
@@ -21,7 +20,7 @@ Auto-generated documentation of the MUedit2 Python backend: architecture, API su
 - **Understanding the decomposition pipeline**: start with `03-decomposition-engine.md`
 - **Understanding file loading and QC**: start with `04-io-signal-qc.md`
 - **Finding a specific editing operation**: check `05-editing-operations.md`
-- **Auditing for dead code**: check `06-worktree.md` then `07-dead-code-candidates.md`
+- **Checking what a module exposes or who calls it**: check `06-worktree.md`
 
 ## The Four Workflow Stages
 
@@ -44,9 +43,9 @@ python/src/muedit/
 │   ├── app_factory.py                       FastAPI app construction + CORS
 │   ├── routes/
 │   │   ├── __init__.py                       include_routers()
-│   │   ├── preview.py                        /preview, /preview-by-path, /qc/window, /health
-│   │   ├── decompose.py                      /decompose, /decompose_stream, /decompose_preview/{token}
-│   │   ├── editing.py                        /config, /edit/* (load, save, update-filter, add/delete, dedup, flag)
+│   │   ├── preview.py                        /preview-by-path, /qc/window, /qc/auto, /health
+│   │   ├── decompose.py                      /decompose_stream, /decompose_preview/{token}
+│   │   ├── editing.py                        /edit/* (load-by-path, save, update-filter, add/delete, dedup, flag)
 │   │   └── dialog.py                         /dialog/open-file
 │   ├── services/
 │   │   ├── preview_service.py                Preview building + QC window encoding
@@ -70,7 +69,7 @@ python/src/muedit/
 │   ├── postprocess.py                        postprocess_step, export_step, NPZ save
 │   ├── adaptive_batch.py                     Online adaptive post-processing
 │   ├── preview.py                            Preview payload builder
-│   ├── io.py                                 Decomposition file load/save (NPZ, MAT)
+│   ├── decomposition_file.py                 Decomposition file load/save (NPZ schema, MAT)
 │   └── types.py                              DecompositionParameters, step output dataclasses
 │
 ├── io/
@@ -79,7 +78,7 @@ python/src/muedit/
 │   ├── bids.py                               BIDS EMG export (EDF/BDF + sidecars + derivatives)
 │   ├── _bids_reader.py                       BIDS EMG reading (pyedflib + channels.tsv)
 │   ├── _intan.py                             Intan RHD loader (3 save layouts)
-│   ├── _mat.py                               MATLAB .mat v5 + v7.3 (HDF5) loader
+│   ├── mat.py                                MATLAB .mat v5 + v7.3 (HDF5) loader
 │   └── _otb.py                               OT Bioelettronica OTB+ and OTB4 loaders
 │
 ├── signal/

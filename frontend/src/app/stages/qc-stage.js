@@ -3,8 +3,6 @@ import {
   requestAutoQc as requestAutoQcFeature,
   requestQcGridWindow as requestQcGridWindowFeature,
   requestPreview as requestPreviewFeature,
-  handleRawFile as handleRawFileFeature,
-  handleLandingFile as handleLandingFileFeature,
 } from "../../signal/qc.js";
 import {
   populateAuxSelector as populateAuxSelectorFeature,
@@ -24,33 +22,8 @@ import {
 } from "../../state/actions.js";
 
 export function createQcStageService(deps) {
-  const {
-    state,
-    els,
-    api,
-    drawMiniSeries,
-    drawGridOverlay,
-    setStatus,
-    updateProgress,
-    setUploadLoading,
-    showUnsupportedUploadFormatError,
-    clearUploadFormatError,
-    isSupportedSignalFile,
-    detectLandingFileType,
-    rawAndDecompositionExtensions,
-    ensureDiscardMasks,
-    populateGridTabs,
-    getCurrentGrid,
-    renderBidsAutoInfo,
-    renderBidsMuscleFields,
-    showWorkspace,
-    nextFrame,
-    updateStartAvailability,
-    resetBidsEntityDefaults: resetBidsEntityDefaultsFn,
-    applyPreviewMetadata,
-    getNwindows,
-    hideLanding,
-  } = deps;
+  const { state, els, setStatus, updateProgress, updateStartAvailability } =
+    deps;
 
   function populateAuxSelector() {
     populateAuxSelectorFeature(els, state);
@@ -65,74 +38,15 @@ export function createQcStageService(deps) {
     start = 0,
     end = state.seriesLength,
   ) {
-    return requestQcGridWindowFeature(
-      { state, api, renderChannelQC, setStatus },
-      gridIdx,
-      start,
-      end,
-    );
+    return requestQcGridWindowFeature(ctx, gridIdx, start, end);
   }
 
   async function requestPreview(options = {}) {
-    return requestPreviewFeature(
-      {
-        state,
-        api,
-        setUploadLoading,
-        updateProgress,
-        populateAuxSelector,
-        ensureDiscardMasks,
-        populateGridTabs,
-        requestQcGridWindow,
-        getCurrentGrid,
-        enableRoiSelection,
-        renderBidsAutoInfo,
-        renderBidsMuscleFields,
-        setStatus,
-        showWorkspace,
-        nextFrame,
-        refreshVisuals,
-        renderChannelQC,
-        applyPreviewMetadata,
-        getNwindows,
-        hideLanding,
-      },
-      options,
-    );
-  }
-
-  async function handleRawFile(file, options = {}) {
-    return handleRawFileFeature(
-      {
-        state,
-        resetBidsEntityDefaults: resetBidsEntityDefaultsFn,
-        requestPreview,
-        setStatus,
-        updateStartAvailability,
-      },
-      file,
-      options,
-    );
-  }
-
-  async function handleLandingFile(file, handleDecompositionFile) {
-    return handleLandingFileFeature(
-      {
-        setUploadLoading,
-        showUnsupportedUploadFormatError,
-        clearUploadFormatError,
-        isSupportedSignalFile: (input) =>
-          isSupportedSignalFile(input, rawAndDecompositionExtensions),
-        detectLandingFileType,
-        handleRawFile,
-        handleDecompositionFile,
-      },
-      file,
-    );
+    return requestPreviewFeature(ctx, options);
   }
 
   async function handleRawFilePath(path, name, options = {}) {
-    const syntheticFile = { name };
+    const syntheticFile = { name, path };
     beginRawPreviewTransition(state, syntheticFile);
     resetBidsEntityDefaults(els, name);
     setStatus("File ready");
@@ -149,42 +63,15 @@ export function createQcStageService(deps) {
   }
 
   function renderChannelQC(waitForMiniPlots = false) {
-    return renderChannelQCController(
-      {
-        state,
-        els,
-        nextFrame,
-        drawMiniSeries,
-        requestQcGridWindow,
-        getCurrentGrid,
-        ensureDiscardMasks,
-      },
-      waitForMiniPlots,
-    );
+    return renderChannelQCController(ctx, waitForMiniPlots);
   }
 
   function enableRoiSelection(canvasId) {
-    return enableRoiSelectionController(
-      {
-        state,
-        els,
-        syncRois,
-        refreshVisualsFn: refreshVisuals,
-        requestQcGridWindow,
-        updateProgress,
-      },
-      canvasId,
-    );
+    return enableRoiSelectionController(ctx, canvasId);
   }
 
   function refreshVisuals() {
-    refreshVisualsController({
-      state,
-      els,
-      drawGridOverlay,
-      renderAuxiliaryChannels,
-      renderMuExplorer: deps.renderMuExplorer,
-    });
+    refreshVisualsController(ctx);
   }
 
   function syncRois(nwin) {
@@ -192,15 +79,7 @@ export function createQcStageService(deps) {
   }
 
   function runAutoQc() {
-    return requestAutoQcFeature({
-      state,
-      els,
-      api,
-      setStatus,
-      updateProgress,
-      renderChannelQC,
-      refreshVisuals,
-    });
+    return requestAutoQcFeature(ctx);
   }
 
   /** Arm (or cancel) artifact selection for the next drag on the EMG plot. */
@@ -228,13 +107,23 @@ export function createQcStageService(deps) {
     );
   }
 
+  const ctx = {
+    ...deps,
+    populateAuxSelector,
+    renderAuxiliaryChannels,
+    requestQcGridWindow,
+    renderChannelQC,
+    enableRoiSelection,
+    refreshVisuals,
+    refreshVisualsFn: refreshVisuals,
+    syncRois,
+  };
+
   return {
     populateAuxSelector,
     renderAuxiliaryChannels,
     requestQcGridWindow,
     requestPreview,
-    handleRawFile,
-    handleLandingFile,
     handleRawFilePath,
     renderChannelQC,
     enableRoiSelection,

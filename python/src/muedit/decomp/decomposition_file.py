@@ -1,4 +1,5 @@
-"""Decomposition artifact I/O: loading .npz/.mat files and signal normalization."""
+"""Decomposition files: the app .npz schema (save + load), MUedit .mat loading,
+and signal-context normalization."""
 
 from __future__ import annotations
 
@@ -11,7 +12,7 @@ import h5py
 import numpy as np
 import scipy.io
 
-from muedit.io._mat import _mat73_read, _parse_text_list
+from muedit.io.mat import mat73_read, parse_text_list
 from muedit.models import LoadedDecomposition
 
 logger = logging.getLogger(__name__)
@@ -50,6 +51,48 @@ class DecompositionLoad(NamedTuple):
     muscles: list[str]
     sil: list[float]
     artifact_mask: np.ndarray | None = None
+
+
+def pack_object_array(items: list[Any]) -> np.ndarray:
+    """Pack a list of arrays into a 1-D object ndarray of consistent shape."""
+    arr = np.empty(len(items), dtype=object)
+    for i, item in enumerate(items):
+        arr[i] = item
+    return arr
+
+
+def save_decomposition_npz(
+    out_path: str | Path,
+    pulse_trains: np.ndarray,
+    distimes: list[np.ndarray] | list[list[int]],
+    fsamp: float,
+    grid_names: list[str],
+    mu_grid_index: list[int],
+    muscles: list[str],
+    parameters: dict[str, Any],
+    total_samples: int,
+    extras: dict[str, Any] | None = None,
+) -> None:
+    """Save a decomposition in the app .npz schema read by :func:`_load_npz_decomp`.
+
+    Shared by the decomposition pipeline and the edit-stage save so both write
+    the same core keys.
+    """
+    payload: dict[str, Any] = {
+        "pulse_trains": pulse_trains,
+        "discharge_times": pack_object_array(
+            [np.asarray(d, dtype=int) for d in distimes]
+        ),
+        "fsamp": fsamp,
+        "grid_names": np.array(grid_names, dtype=object),
+        "mu_grid_index": np.array(mu_grid_index, dtype=int),
+        "muscle": np.array(muscles, dtype=object),
+        "parameters": np.array([parameters], dtype=object),
+        "total_samples": total_samples,
+    }
+    if extras:
+        payload.update(extras)
+    np.savez_compressed(out_path, **payload)
 
 
 def normalize_distimes(raw: Any) -> list[list[int]]:
@@ -156,9 +199,9 @@ def _unwrap_parameters(raw: Any) -> dict[str, Any]:
 
 def _resolve_muscles(primary_raw: Any, parameters: dict[str, Any]) -> list[str]:
     """Resolve target muscle names from a primary payload or the parameters fallback."""
-    muscles = _parse_text_list(primary_raw)
+    muscles = parse_text_list(primary_raw)
     if not muscles:
-        muscles = _parse_text_list(parameters.get("target_muscle"))
+        muscles = parse_text_list(parameters.get("target_muscle"))
     return muscles
 
 
@@ -208,7 +251,7 @@ def _extract_decomp_fields(
     rois = _parse_rois(_get_case_insensitive(preview_block, "rois"))
 
     gnames = first_non_none(top.get("grid_names"), _get_case_insensitive(signal, "gridname"))
-    grid_names = _parse_text_list(gnames) if gnames is not None else ["Grid 1"]
+    grid_names = parse_text_list(gnames) if gnames is not None else ["Grid 1"]
 
     mu_grid_index = _parse_mu_grid_index(top.get("mu_grid_index"))
 
@@ -233,7 +276,7 @@ def _load_mat73_decomp(filepath: str) -> DecompositionLoad:
     """Load a MATLAB v7.3 (HDF5) decomposition file into a DecompositionLoad."""
     with h5py.File(filepath, "r") as h5f:
         def read_root(name: str) -> Any:
-            return _mat73_read(h5f[name], h5f) if name in h5f else None
+            return mat73_read(h5f[name], h5f) if name in h5f else None
 
         signal = read_root("signal")
         if not isinstance(signal, dict):
@@ -265,7 +308,7 @@ def _load_npz_decomp(filepath: str) -> DecompositionLoad:
     else:
         total_samples = None
 
-    grid_names = _parse_text_list(data.get("grid_names")) if data.get("grid_names") is not None else []
+    grid_names = parse_text_list(data.get("grid_names")) if data.get("grid_names") is not None else []
     mu_grid_index = _parse_mu_grid_index(data.get("mu_grid_index"))
 
     parameters = _unwrap_parameters(data.get("parameters"))
@@ -647,7 +690,7 @@ def _load_npz_signal_context(filepath: str) -> dict[str, Any] | None:
     fsamp_val = data.get("fsamp")
     fsamp = float(np.asarray(fsamp_val).ravel()[0]) if fsamp_val is not None else None
 
-    grid_names = _parse_text_list(data.get("grid_names")) if data.get("grid_names") is not None else []
+    grid_names = parse_text_list(data.get("grid_names")) if data.get("grid_names") is not None else []
 
     discard_raw = data.get("discard_channels")
     emgmask = _parse_emgmask_cells(discard_raw)
@@ -693,11 +736,11 @@ def load_decomposition_signal_context(filepath: str) -> dict[str, Any] | None:
         is_v73 = True
         with h5py.File(filepath, "r") as h5f:
             if "signal" in h5f:
-                sig = _mat73_read(h5f["signal"], h5f)
+                sig = mat73_read(h5f["signal"], h5f)
                 signal = sig if isinstance(sig, dict) else {}
             for key in ("fsamp", "grid_names", "EMGmask", "emgmask", "metadata"):
                 if key in h5f:
-                    top[key] = _mat73_read(h5f[key], h5f)
+                    top[key] = mat73_read(h5f[key], h5f)
     else:
         mat = scipy.io.loadmat(filepath, simplify_cells=True)
         top = mat if isinstance(mat, dict) else {}
@@ -725,7 +768,7 @@ def load_decomposition_signal_context(filepath: str) -> dict[str, Any] | None:
         _get_case_insensitive(signal, "gridname"),
         top.get("grid_names"),
     )
-    grid_names = _parse_text_list(grid_names_raw)
+    grid_names = parse_text_list(grid_names_raw)
 
     emgmask_raw = first_non_none(
         _get_case_insensitive(signal, "EMGmask", "emgmask"),
@@ -755,7 +798,7 @@ def load_decomposition_signal_context(filepath: str) -> dict[str, Any] | None:
                 aux_arr = aux_arr.T
             aux_data = aux_arr
 
-    aux_names = _parse_text_list(_get_case_insensitive(signal, "auxiliaryname"))
+    aux_names = parse_text_list(_get_case_insensitive(signal, "auxiliaryname"))
 
     meta_raw = signal.get("metadata") or top.get("metadata") or {}
     meta = meta_raw if isinstance(meta_raw, dict) else {}

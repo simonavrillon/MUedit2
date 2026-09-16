@@ -57,7 +57,7 @@ Algorithm hyper-parameters for a single decomposition run.
 | `nbextchan` | `int` | `1000` | Target number of extended channels |
 | `edges_sec` | `float` | `0.2` | Edge-trim duration in seconds |
 | `contrast_func` | `str` | `"skew"` | FastICA contrast (`"skew"`, `"kurtosis"`, `"logcosh"`) |
-| `sil_thr` | `float` | `0.88` | Silhouette threshold for accepting MUs |
+| `sil_thr` | `float` | `0.9` | Silhouette threshold for accepting MUs |
 | `cov_thr` | `float` | `0.5` | ISI CoV threshold (if `covfilter`) |
 | `peel_off_win` | `float` | `0.025` | Peel-off window half-width in seconds |
 | `duplicatesthresh` | `float` | `0.3` | Duplicate overlap score threshold |
@@ -162,7 +162,7 @@ Steps in order:
 6. Export raw EMG to BIDS (if `bids_root` provided)
 7. Resolve ROI list (explicit `rois`, single `roi`, interactive `manual_roi`, `duration`, or full signal). If `nwindows > 1` and single ROI resolved, split into `nwindows` equal sub-windows.
 8. Build `coordinates_plateau` (legacy flat format: `[s0, e0, s1, e1, ...]`)
-9. If `auto_mask_artifacts`: run `run_auto_qc()` to detect artifact mask and bad channels — OR bad channels into `discard_channels`. User-drawn `artifact_regions` (if provided) are rasterized via `_build_manual_artifact_mask` and OR'd into the artifact mask.
+9. If `auto_mask_artifacts`: run `run_auto_qc()` to detect artifact mask and bad channels — OR bad channels into `discard_channels`. User-drawn `artifact_regions` (if provided) are rasterized via `build_manual_artifact_mask` and OR'd into the artifact mask.
 
 ### Helper functions (private)
 
@@ -174,7 +174,7 @@ Steps in order:
 | `_apply_grid_notch_filters(data, fsamp, grid_names, coordinates)` | Per-grid notch filtering (in-place) |
 | `_apply_grid_bandpass_filters(data, fsamp, grid_names, coordinates, emg_type)` | Per-grid bandpass filtering (in-place) |
 | `_export_raw_emg_bids(...)` | Exports raw unfiltered EMG + sidecars to BIDS layout |
-| `_build_manual_artifact_mask(artifact_regions, n_samples)` | Rasterize user-drawn `(start, end)` ranges into a boolean mask |
+| `build_manual_artifact_mask(artifact_regions, n_samples)` | Rasterize user-drawn `(start, end)` ranges into a boolean mask |
 
 ---
 
@@ -286,7 +286,6 @@ Steps:
 | Function | Description |
 |---|---|
 | `_remove_duplicates_by_grid(pulse_t, distime, mu_grid_index, ngrid, params, fsamp)` | Within-grid (and optionally cross-grid) dedup |
-| `_save_npz_with_app_schema(out_path, pulse_trains, distimes, fsamp, grid_names, mu_grid_index, muscles, parameters, total_samples, extras)` | NPZ save with core key schema + extras |
 | `_reconstruct_window_signal(prep, params, win_global, whiten_mat) -> (win_data, w_sig)` | Recompute window data for filter application |
 | `_make_window_reconstructors(prep, params, decomposed) -> (get_win_data, get_w_sig)` | Returns cached callable reconstructors |
 
@@ -338,7 +337,9 @@ Builds the preview payload dict sent to the frontend:
 
 ---
 
-## Decomposition File I/O (`decomp/io.py`)
+## Decomposition Files (`decomp/decomposition_file.py`)
+
+Owns the app `.npz` schema: `save_decomposition_npz(out_path, pulse_trains, distimes, fsamp, grid_names, mu_grid_index, muscles, parameters, total_samples, extras)` writes it (used by the pipeline and the edit-stage save), and `_load_npz_decomp` reads it. `pack_object_array(items)` builds the 1-D object arrays the schema uses.
 
 ### Main entry points
 

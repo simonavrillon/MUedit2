@@ -1,9 +1,4 @@
-import {
-  API_BASE,
-  COLORS,
-  DECOMPOSITION_EXTENSIONS,
-  RAW_SIGNAL_EXTENSIONS,
-} from "../config.js";
+import { API_BASE, COLORS } from "../config.js";
 import { createApiClient } from "../api/client.js";
 import { buildDecomposeParams } from "../decomp/params.js";
 import { els } from "./dom.js";
@@ -12,7 +7,6 @@ import {
   applySessionInfoToDom as applySessionInfoToDomController,
   renderBidsAutoInfo as renderBidsAutoInfoController,
   renderBidsMuscleFields as renderBidsMuscleFieldsController,
-  resetBidsEntityDefaults,
   applyParticipantFields,
 } from "../view/bids-renderer.js";
 import {
@@ -366,15 +360,6 @@ qcStage = createQcStageService({
   setStatus: ui.setStatus,
   updateProgress: ui.updateProgress,
   setUploadLoading: fileSession.setUploadLoading,
-  showUnsupportedUploadFormatError:
-    fileSession.showUnsupportedUploadFormatError,
-  clearUploadFormatError: fileSession.clearUploadFormatError,
-  isSupportedSignalFile: fileSession.isSupportedSignalFile,
-  detectLandingFileType: fileSession.detectLandingFileType,
-  rawAndDecompositionExtensions: {
-    raw: RAW_SIGNAL_EXTENSIONS,
-    decomposition: DECOMPOSITION_EXTENSIONS,
-  },
   ensureDiscardMasks,
   populateGridTabs: () => ui.populateGridTabs(),
   getCurrentGrid,
@@ -384,7 +369,6 @@ qcStage = createQcStageService({
   nextFrame,
   updateStartAvailability,
   renderMuExplorer: () => runStage.renderMuExplorer(),
-  resetBidsEntityDefaults: (fileName) => resetBidsEntityDefaults(els, fileName),
   applyPreviewMetadata: (data) => {
     if (els.fsamp) {
       const fs = Number(data.fsamp);
@@ -438,21 +422,12 @@ const layoutStage = createLayoutStageService({
   initLayoutResizePolicy: ui.initLayoutResizePolicy,
 });
 
-function handleLandingFile(file) {
-  return qcStage.handleLandingFile(file, (inputFile) =>
-    editStage.handleDecompositionFile(inputFile),
-  );
-}
-
 function wireEvents() {
   layoutStage.ensureSettingsToggleIcon();
 
   setupImportEvents({
     els,
     state,
-    clearUploadFormatError: fileSession.clearUploadFormatError,
-    setUploadLoading: fileSession.setUploadLoading,
-    handleLandingFile,
     handleNativeDialogOpen: importStage.handleNativeDialogOpen,
     setStatus: ui.setStatus,
     showWorkspace: ui.showWorkspace,

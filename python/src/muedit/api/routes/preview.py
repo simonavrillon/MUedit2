@@ -4,13 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, File, UploadFile
+from fastapi import APIRouter
 from fastapi.responses import Response
 
 from muedit.api.contracts import success_payload
 from muedit.api.schemas import PathPayload, QcAutoPayload, QcWindowPayload
 from muedit.api.services.preview_service import (
-    build_preview,
     build_preview_from_path,
     get_qc_window,
     run_auto_qc_on_token,
@@ -23,12 +22,6 @@ router = APIRouter(prefix="/api/v1")
 def health() -> dict[str, Any]:
     """Health probe used by local tooling and deployment checks."""
     return success_payload({"status": "ok"})
-
-
-@router.post("/preview")
-async def preview(file: UploadFile = File(...)) -> dict[str, Any]:
-    """Build downsampled preview/QC metadata from an uploaded signal file."""
-    return success_payload(await build_preview(file))
 
 
 @router.post("/preview-by-path")

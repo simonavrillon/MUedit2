@@ -45,13 +45,13 @@ The user selects a signal file (raw EMG or saved decomposition). The app detects
 ```
 User clicks #browseSignalBtn
   -> importStage.handleNativeDialogOpen()
-     -> api.openFileDialog()        POST /dialog/open-file
+     -> api.openFileDialog()        GET /dialog/open-file
      -> detectLandingFileType(name)
         ├─ "raw"           -> qcStage.handleRawFilePath(path, name)
         │                      -> requestPreview({ filepath: path })  POST /preview-by-path
         │                      -> showWorkspace() -> switchStage("qc")
         ├─ "decomposition"  -> editStage.loadDecompositionForEditByPath(path)
-        │                      -> api.editLoad({ filepath: path })   POST /edit/load-by-path
+        │                      -> api.editLoadByPath(path)   POST /edit/load-by-path
         │                      -> showWorkspace() -> switchStage("edit")
         └─ "ambiguous_mat"  -> try raw first (silent),
                                fall back to decomposition on failure
@@ -104,7 +104,7 @@ Each tab click calls `setCurrentGrid(state, idx)` then `renderChannelQC()` and `
 | `qc-cell` (dynamic) | Clickable button per channel | Toggle discard mask on/off for that channel |
 | `qc-mini` (dynamic) | Mini canvas per channel | Shows per-channel trace |
 
-Discarded channels render in warning color and are excluded downstream. Bad channels are auto-detected from `metadata.bad_channels_per_grid`.
+Discarded channels render in warning color and are excluded downstream. Initial masks are seeded from `metadata.bad_channels_per_grid` when the loader provides it (BIDS `channels.tsv` status); otherwise all channels start kept.
 
 #### Automatic QC Button
 
@@ -177,7 +177,7 @@ Artifact windows are visually shaded on the EMG overview. They are OR'd into the
 | `duplicatesthresh` | number input | 0.3 | Duplicate spike threshold |
 | `peelOffToggle` | pill toggle (off) | off | Peel-off on/off |
 | `peelOffWindow` | number input | 25 | Peel-off window (ms) — hidden unless peel-off is on |
-| `postprocessMode` | select (windowed, full_trace, adaptive) | "windowed" | Post-processing mode |
+| `postprocessMode` | select (windowed, full-trace, adaptive) | "windowed" | Post-processing mode |
 | `postprocessModeHint` | text | — | Hint text for selected mode |
 | `silToggle` | pill toggle (locked ON) | on | SIL filter (always on, cannot be turned off) |
 | `silValue` | number input | 0.9 | SIL threshold |
@@ -189,7 +189,7 @@ Artifact windows are visually shaded on the EMG overview. They are OR'd into the
 | Mode | Label | Hint |
 |---|---|---|
 | `windowed` | Windowed | "Filters applied inside each analysis window only. Pulse trains are zero outside the ROI." |
-| `full_trace` | Full trace | "Filters dewhitened and applied across the whole recording, so units extend beyond the ROI." |
+| `full-trace` | Full trace | "Filters dewhitened and applied across the whole recording, so units extend beyond the ROI." |
 | `adaptive` | Adaptive | "Separation vectors and whitening track the signal batch by batch across the whole recording." (beta) |
 
 ### Flow
@@ -220,7 +220,6 @@ User clicks "Decompose Signal" (#startBtn)
 | Endpoint | When | Purpose |
 |---|---|---|
 | `POST /preview-by-path` | On file load (native dialog) | Fetch preview metadata |
-| `POST /preview` | On file load (browser upload, legacy) | Fetch preview metadata |
 | `POST /qc/window` | On initial render, grid tab switch, ROI change | Fetch QC channel traces |
 | `POST /qc/auto` | On "Automatic QC" button click | Run auto QC: detect bad channels + artifact regions |
 
@@ -256,14 +255,17 @@ User clicks "Decompose Signal"
      3. switchStage("run")
      4. setParameters(state, buildParams())
      5. Build FormData:
-        - upload_token (or raw file)
+        - upload_token (required)
         - params (JSON)
         - persist_output = "false"
         - discard_channels (JSON)
         - rois (JSON)
+        - artifact_regions (JSON)
         - project, bids_entities, bids_export = "true"
         - full_preview = "true"
      6. api.decomposeStream(formData, 15min timeout)
+        - on an upload_token error: POST /preview-by-path with state.file.path
+          to mint a fresh token, then retry once (masks/ROIs are kept)
      7. Stream NDJSON reader loop:
         - each line -> handleStreamMessage(msg)
           - msg.pct?       -> updateProgress(pct, message, stage)
@@ -338,7 +340,7 @@ Loading a `.npz` file from the Import stage skips QC and Decompose, going straig
 
 ```
 Import (.npz file) -> editStage.loadDecompositionForEditByPath(path)
-  -> api.editLoad({ filepath })   POST /edit/load-by-path
+  -> api.editLoadByPath(filepath)   POST /edit/load-by-path
   -> populate state.edit.*
   -> showWorkspace() -> switchStage("edit")
   -> renderEditExplorer()

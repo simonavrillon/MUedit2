@@ -4,10 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
 
-from muedit.api.config import DATA_ROOT
 from muedit.api.contracts import success_payload
 from muedit.api.schemas import (
     EditDeduplicatePayload,
@@ -24,8 +23,6 @@ from muedit.api.services.editing_service import (
     delete_dr,
     delete_spikes,
     flag_mu,
-    load_decomposition,
-    load_decomposition_binary,
     load_decomposition_binary_from_path,
     load_decomposition_from_path,
     remove_duplicates_service,
@@ -35,21 +32,6 @@ from muedit.api.services.editing_service import (
 )
 
 router = APIRouter(prefix="/api/v1")
-
-
-@router.get("/config")
-async def get_config() -> dict[str, Any]:
-    """Return server-side configuration needed by the frontend."""
-    return success_payload({"data_root": str(DATA_ROOT)})
-
-
-@router.post("/edit/load", response_model=None)
-async def load_decomposition_endpoint(request: Request, file: UploadFile = File(...)) -> dict[str, Any] | Response:
-    """Load a decomposition upload for interactive edit mode."""
-    wants_binary = request.headers.get("x-muedit-binary", "1") != "0"
-    if wants_binary:
-        return await load_decomposition_binary(file)
-    return success_payload(await load_decomposition(file))
 
 
 @router.post("/edit/load-by-path", response_model=None)

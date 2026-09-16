@@ -108,19 +108,15 @@ export async function runDecomposition(deps) {
   updateStartAvailability();
   switchStage("run");
   setParameters(state, buildParams());
+  setMuPreviewData(state, [], [], []);
+  setLastRunDownloadKey(state, "");
 
   setStatus("Running decomposition...", "muted");
   updateProgress(5, "Starting decomposition");
 
-  // Build payload once per request attempt so retries can switch upload strategy
-  // without mutating shared FormData instances.
-  const buildRunFormData = (useToken = true) => {
+  const buildRunFormData = () => {
     const formData = new FormData();
-    if (useToken && state.uploadToken) {
-      formData.append("upload_token", state.uploadToken);
-    } else {
-      formData.append("file", state.file);
-    }
+    formData.append("upload_token", state.uploadToken || "");
 
     formData.append("params", JSON.stringify(buildParams()));
     formData.append("persist_output", "false");
@@ -157,24 +153,18 @@ export async function runDecomposition(deps) {
   try {
     let response;
     try {
-      // Preferred path: reuse upload token from preview to avoid re-uploading the raw file.
-      response = await api.decomposeStream(
-        buildRunFormData(true),
-        15 * 60 * 1000,
-      );
+      response = await api.decomposeStream(buildRunFormData(), 15 * 60 * 1000);
     } catch (err) {
       const message = String(err?.message || "");
-      if (state.uploadToken && message.includes("upload_token")) {
-        // Token can expire after backend restart/session loss; retry once with full file upload.
-        setUploadToken(state, null);
-        updateProgress(5, "Session expired, retrying with file upload...");
-        response = await api.decomposeStream(
-          buildRunFormData(false),
-          15 * 60 * 1000,
-        );
-      } else {
-        throw err;
-      }
+      const sourcePath = state.file?.path;
+      if (!message.includes("upload_token") || !sourcePath) throw err;
+      setUploadToken(state, null);
+      updateProgress(5, "Session expired, reloading file...");
+      const preview = await api.fetchPreviewByPath(sourcePath);
+      if (!preview?.upload_token) throw err;
+      setUploadToken(state, preview.upload_token);
+      updateProgress(5, "Starting decomposition");
+      response = await api.decomposeStream(buildRunFormData(), 15 * 60 * 1000);
     }
 
     if (!response.body) {
@@ -185,8 +175,6 @@ export async function runDecomposition(deps) {
     const decoder = new TextDecoder();
     let buffer = "";
 
-    // Backend streams one JSON object per line. Keep the trailing partial line in `buffer`
-    // until the next chunk arrives to avoid parse errors on split frames.
     let malformedEvents = 0;
     while (true) {
       const { value, done } = await reader.read();
@@ -294,8 +282,6 @@ function applyPreviewData(deps, preview, options = {}) {
     setMuscle(state, muscle);
   }
   if (!skipMuData) {
-    // Preview messages may deliver MU fields incrementally; update each slice
-    // independently while preserving previously populated slices.
     const newPulseTrains =
       pulse_trains_full && pulse_trains_full.length
         ? pulse_trains_full
@@ -367,9 +353,6 @@ export function handleStreamMessage(deps, msg) {
     emgCanvasId,
   } = deps;
 
-  // Set when the "done" event arrives before binary preview hydration has
-  // populated state.muPulseTrains. The hydration callback checks this flag
-  // and triggers the deferred auto-save once MU data is available.
   let pendingAutoSave = false;
 
   if (msg.stage === "error") {
@@ -407,8 +390,6 @@ export function handleStreamMessage(deps, msg) {
     };
 
     if (msg.preview.preview_binary_token && api) {
-      // Fast path: render immediate non-MU preview fields from stream event, then hydrate
-      // heavy MU arrays asynchronously using the token endpoint.
       const previewNoToken = { ...msg.preview };
       delete previewNoToken.preview_binary_token;
       applyPreviewData(
@@ -426,9 +407,6 @@ export function handleStreamMessage(deps, msg) {
             commonPreviewDeps,
             normalizePreviewPayload(previewPayload),
           );
-          // The "done" event may arrive before binary hydration populates
-          // state.muPulseTrains. When that happens the auto-save is deferred
-          // until hydration completes here.
           if (pendingAutoSave) {
             renderMuExplorer();
             void autoSaveRunDecomposition?.();
@@ -481,8 +459,6 @@ export function handleStreamMessage(deps, msg) {
       renderMuExplorer();
       void autoSaveRunDecomposition?.();
     } else {
-      // Binary preview: MU data not yet hydrated — defer auto-save until
-      // hydrateBinaryDecomposePreview completes.
       pendingAutoSave = true;
     }
     setStatus("Complete", "success");

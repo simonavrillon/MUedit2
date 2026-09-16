@@ -41,7 +41,7 @@ FilterUpdateResult: TypeAlias = tuple[np.ndarray | None, SpikeTimes]
 | Remove outliers | `/edit/remove-outliers` | spikes | no | rate > mean + z*sigma | `remove_outliers()` | `remove_discharge_rate_outliers()` |
 | Remove duplicates | `/edit/remove-duplicates` | all MUs | no | lag overlap | `remove_duplicates_service()` | `_dedup()` -> `rem_duplicates()` |
 | Flag MU | `/edit/flag-mu` | metadata | no | — | `flag_mu()` | — |
-| Load decomposition | `/edit/load` | — | no | — | `load_decomposition()` | `load_decomposition_file()` |
+| Load decomposition | `/edit/load-by-path` | — | no | — | `load_decomposition_from_path()` | `load_decomposition_file()` |
 | Save edits | `/edit/save` | — | no | — | `save_edits()` | NPZ save + BIDS export |
 
 ---
@@ -287,8 +287,8 @@ Full save pipeline:
 5. Optional: remove flagged MUs if `remove_flagged=True`
 6. Optional: deduplicate if `remove_duplicates=True` via `_dedup()`
 7. Build pulse trains from distimes via `build_pulse_trains_from_distimes()`
-8. Build artifact mask from `payload.artifact_regions` via `_build_manual_artifact_mask()`; fall back to cached signal context mask if no manual regions
-9. Save NPZ via `_save_npz_with_app_schema()` (includes `artifact_mask` extra) to BIDS derivatives layout
+8. Build artifact mask from `payload.artifact_regions` via `build_manual_artifact_mask()`; fall back to cached signal context mask if no manual regions
+9. Save NPZ via `decomposition_file.save_decomposition_npz()` (includes `artifact_mask` extra) to BIDS derivatives layout
 10. Write editlog JSON via `save_editlog()` (mu_uids, edit_history, artifact_times)
 11. Write participants.tsv via `write_bids_dataset_description()`
 12. Export BIDS MU derivatives via `export_bids_mu_derivatives()`
@@ -298,23 +298,22 @@ Returns: `{saved: bool, path: str, bids_emg_paths?: dict, bids_deriv_paths?: dic
 
 ---
 
-## 11. Load Decomposition (`load_decomposition`)
+## 11. Load Decomposition (`load_decomposition_from_path`)
 
 ```python
-def load_decomposition(file: UploadFile) -> dict[str, Any]
 def load_decomposition_from_path(filepath: str) -> dict[str, Any]
 ```
 
 Load pipeline:
-1. Save upload to temp (if file) or use path directly
+1. Use the server-side path directly (there is no upload variant)
 2. Call `_init_loaded_decomp(filepath, file_label)`:
    - `load_decomposition_file(filepath)` -> normalized dict
    - `load_decomposition_signal_context(filepath)` -> raw EMG context
    - Store signal context in cache via `_store_edit_signal_context()` -> `edit_signal_token`
-3. For path-based loads: enrich with BIDS sidecar metadata (grid names, muscles, fsamp from channels.tsv; participant + hardware metadata from sidecars; editlog JSON with mu_uids, edit_history, artifact_times)
+3. Enrich with BIDS sidecar metadata (grid names, muscles, fsamp from channels.tsv; participant + hardware metadata from sidecars; editlog JSON with mu_uids, edit_history, artifact_times)
 4. Return JSON-safe dict via `make_json_safe()`
 
-Binary variant (`load_decomposition_binary`): encodes as MELD f32 binary if 2-D `pulse_trains_full` exists, falls back to JSON.
+Binary variant (`load_decomposition_binary_from_path`): encodes as MELD f32 binary if 2-D `pulse_trains_full` exists, falls back to JSON.
 
 ---
 

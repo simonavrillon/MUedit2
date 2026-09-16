@@ -24,7 +24,7 @@ export function renderMuExplorer(deps, model) {
     model.pulse || [],
     model.color,
     model.spikes || [],
-    model.selectionOverlay || [],
+    [],
     (model.pulse || []).length,
     model.view,
     model.markerVals || [],

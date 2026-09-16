@@ -161,7 +161,7 @@ Methods: `to_dict()`
 | `app_factory.py` | Construct FastAPI app, configure CORS, register exception handlers |
 | `routes/__init__.py` | Register all routers on the app |
 | `routes/preview.py` | File preview, QC window, on-demand auto-QC, health check |
-| `routes/decompose.py` | Synchronous + streaming decomposition |
+| `routes/decompose.py` | Streaming decomposition + binary preview fetch |
 | `routes/editing.py` | All edit endpoints (load, save, filter update, spike/artifact ops) |
 | `routes/dialog.py` | Native file-open dialog (macOS AppleScript / tkinter) |
 | `services/preview_service.py` | Preview building, QC window binary encoding, on-demand auto-QC |
@@ -173,7 +173,7 @@ Methods: `to_dict()`
 | `contracts.py` | `success_payload()` response envelope |
 | `binary.py` | `pack_json_f32_payload()` binary wire format packer |
 | `cache.py` | In-memory TTL cache (4 caches, thread-safe, budget-based eviction) |
-| `common.py` | JSON parsing, param building, serialization, temp file management |
+| `common.py` | JSON parsing, param building, serialization, path checks |
 | `config.py` | `DATA_ROOT`, `resolve_bids_root()` |
 | `errors.py` | Error envelope, exception handlers |
 
@@ -188,7 +188,7 @@ Methods: `to_dict()`
 | `postprocess.py` | Filter application, dedup, export, NPZ save |
 | `adaptive_batch.py` | Online adaptive post-processing (bidirectional) |
 | `preview.py` | Downsampled preview payload builder |
-| `io.py` | Decomposition file load/save (NPZ + MAT v5/v7.3) |
+| `decomposition_file.py` | Decomposition file load/save (NPZ schema + MAT v5/v7.3) |
 | `types.py` | `DecompositionParameters` + step output dataclasses |
 
 ### `io/` — File I/O
@@ -200,7 +200,7 @@ Methods: `to_dict()`
 | `bids.py` | BIDS EMG export (EDF/BDF + sidecars + derivatives) |
 | `_bids_reader.py` | BIDS EMG reading via pyedflib + channels.tsv |
 | `_intan.py` | Intan RHD loader (3 save layouts: traditional, per-channel, per-signal-type) |
-| `_mat.py` | MATLAB .mat v5 (scipy) + v7.3 (h5py/HDF5) loader |
+| `mat.py` | MATLAB .mat v5 (scipy) + v7.3 (h5py/HDF5) loader |
 | `_otb.py` | OT Bioelettronica OTB+ and OTB4 archive loaders |
 
 ### `signal/` — Signal Processing

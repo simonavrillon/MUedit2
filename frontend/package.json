@@ -2,5 +2,9 @@
   "name": "muedit-frontend",
   "private": true,
   "version": "2.1.0",
-  "type": "module"
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "lint": "eslint ."
+  }
 }

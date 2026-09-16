@@ -26,7 +26,7 @@ All loaders return the same dict structure:
 
 | Extension | Loader | Source Module |
 |---|---|---|
-| `.mat` | `load_mat` | `_mat.py` |
+| `.mat` | `load_mat` | `mat.py` |
 | `.otb+` | `load_otb_plus` | `_otb.py` |
 | `.otb4` | `load_otb4` | `_otb.py` |
 | `.bdf` | `load_bids_signal` | `_bids_reader.py` |
@@ -51,14 +51,14 @@ All loaders return the same dict structure:
 | `load_signal` | `(filepath) -> dict[str, Any]` | Load and normalize signal via `SignalImport.to_dict()` |
 | `clone_signal` | `(signal) -> dict[str, Any]` | Deep-clone signal via `SignalImport.from_mapping().clone()` |
 
-### MATLAB `.mat` (`_mat.py`)
+### MATLAB `.mat` (`mat.py`)
 
 ```python
 def load_mat(filepath: str) -> dict[str, Any]
 ```
 Tries `scipy.io.loadmat` (MAT v5) first; if HDF5 (v7.3), falls back to `_load_mat73_signal`. Expects a `signal` struct with fields: `data`, `fsamp`, `gridname`, `muscle`, `auxiliary`, `auxiliaryname`, `device_name`. Detects and rejects decomposition files (pulse train + discharge time fields) loaded as raw signals.
 
-Key helpers: `_parse_text`, `_parse_text_list`, `_parse_numeric_array`, `_mat73_read` (recursive HDF5), `_align_to_n_samples`, `_has_decomposition_markers`, `_load_mat73_signal`.
+Key helpers: `_parse_text`, `parse_text_list` (public), `_parse_numeric_array`, `mat73_read` (recursive HDF5, public), `_align_to_n_samples`, `_has_decomposition_markers`, `_load_mat73_signal`.
 
 ### Intan RHD (`_intan.py`)
 
@@ -296,12 +296,12 @@ Identifies defective channels across 7 criteria: flat, saturated, quantized, noi
 ### Functions
 
 ```python
-def detect_bad_channels(data, fsamp, coordinates=None, config=None) -> np.ndarray
+def _detect_bad_channels(data, fsamp, coordinates=None, config=None) -> np.ndarray
 ```
-Returns `(n_channels,)` bool mask. Thin wrapper around `channel_qc_diagnostics(...).mask`.
+Returns `(n_channels,)` bool mask. Thin wrapper around `_channel_qc_diagnostics(...).mask`.
 
 ```python
-def channel_qc_diagnostics(data, fsamp, coordinates=None, config=None) -> ChannelQCMetrics
+def _channel_qc_diagnostics(data, fsamp, coordinates=None, config=None) -> ChannelQCMetrics
 ```
 Full-featured detector returning metrics + reasons. Computes all 7 criteria and OR-combines into the mask.
 
@@ -322,7 +322,7 @@ Full-featured detector returning metrics + reasons. Computes all 7 criteria and 
 ```python
 def detect_bad_channels_per_grid(data, fsamp, grid_channel_counts, grid_coordinates=None, config=None) -> list[np.ndarray]
 ```
-Runs `detect_bad_channels` per grid; returns list of per-grid masks.
+Runs `_detect_bad_channels` per grid; returns list of per-grid masks.
 
 ---
 
@@ -346,7 +346,7 @@ Detects artifact-contaminated sample regions (transient noise) from filtered mul
 | `min_gap_ms` | `int` | `20` | Closing bridge length (ms) |
 
 ```python
-def detect_artifact_mask(data, fsamp, config=None) -> np.ndarray
+def _detect_artifact_mask(data, fsamp, config=None) -> np.ndarray
 ```
 One-grid detection. Returns `(n_samples,)` bool.
 

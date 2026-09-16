@@ -6,7 +6,7 @@ This worktree maps every function/symbol in the backend to one of three categori
 - **App-internal** — called by other backend modules but not directly by the user
 - **Extension API** — exported but no internal callers (intentional extension points)
 
-Use this to trace what the user can reach and identify dead code (see `07-dead-code-candidates.md`).
+Use this to trace what the user can reach.
 
 ---
 
@@ -18,7 +18,6 @@ Use this to trace what the user can reach and identify dead code (see `07-dead-c
 |---|---|---|
 | `preview_router` | User-exposed | `include_routers()` |
 | `GET /health` | User-exposed | HTTP |
-| `POST /preview` | User-exposed | HTTP |
 | `POST /preview-by-path` | User-exposed | HTTP |
 | `POST /qc/window` | User-exposed | HTTP |
 
@@ -27,7 +26,6 @@ Use this to trace what the user can reach and identify dead code (see `07-dead-c
 | Symbol | Category | Reachable via |
 |---|---|---|
 | `decompose_router` | User-exposed | `include_routers()` |
-| `POST /decompose` | User-exposed | HTTP |
 | `POST /decompose_stream` | User-exposed | HTTP |
 | `GET /decompose_preview/{token}` | User-exposed | HTTP |
 
@@ -36,8 +34,6 @@ Use this to trace what the user can reach and identify dead code (see `07-dead-c
 | Symbol | Category | Reachable via |
 |---|---|---|
 | `editing_router` | User-exposed | `include_routers()` |
-| `GET /config` | User-exposed | HTTP |
-| `POST /edit/load` | User-exposed | HTTP |
 | `POST /edit/load-by-path` | User-exposed | HTTP |
 | `POST /edit/save` | User-exposed | HTTP |
 | `POST /edit/update-filter` | User-exposed | HTTP |
@@ -62,21 +58,19 @@ Use this to trace what the user can reach and identify dead code (see `07-dead-c
 
 | Symbol | Category | Reachable via |
 |---|---|---|
-| `build_preview(file)` | App-internal | `POST /preview` route |
 | `build_preview_from_path(path)` | App-internal | `POST /preview-by-path` route |
 | `get_qc_window(payload)` | App-internal | `POST /qc/window` route |
-| `_build_preview_core(filepath)` | App-internal | Called by `build_preview`/`build_preview_from_path` |
+| `_build_preview_core(filepath)` | App-internal | Called by `build_preview_from_path` |
 | `_encode_qc_raw_f32(...)` | App-internal | Called by `get_qc_window` |
-| `_decomp_artifact_error(field)` | App-internal | Called by `build_preview` |
+| `_decomp_artifact_error(field)` | App-internal | Called by `build_preview_from_path` |
 
 ### `services/decompose_service.py`
 
 | Symbol | Category | Reachable via |
 |---|---|---|
-| `run_decomposition_once(...)` | App-internal | `POST /decompose` route |
 | `decomposition_event_stream(...)` | App-internal | `POST /decompose_stream` route |
 | `fetch_decompose_preview_binary(token)` | App-internal | `GET /decompose_preview/{token}` route |
-| `resolve_decompose_input(...)` | App-internal | Called by decompose routes |
+| `resolve_decompose_input(upload_token)` | App-internal | Called by decompose_stream route; returns `(run_path, preloaded_signal)` |
 | `parse_stream_options(...)` | App-internal | Called by decompose_stream route |
 | `_as_f32_matrix(value)` | App-internal | Called by `_encode_decompose_preview_f32` |
 | `_encode_decompose_preview_f32(preview)` | App-internal | Called by `decomposition_event_stream` |
@@ -85,8 +79,6 @@ Use this to trace what the user can reach and identify dead code (see `07-dead-c
 
 | Symbol | Category | Reachable via |
 |---|---|---|
-| `load_decomposition(file)` | App-internal | `POST /edit/load` route |
-| `load_decomposition_binary(file)` | App-internal | `POST /edit/load` route (binary) |
 | `load_decomposition_from_path(path)` | App-internal | `POST /edit/load-by-path` route |
 | `load_decomposition_binary_from_path(path)` | App-internal | `POST /edit/load-by-path` route (binary) |
 | `save_edits(payload)` | App-internal | `POST /edit/save` route |
@@ -155,7 +147,7 @@ Use this to trace what the user can reach and identify dead code (see `07-dead-c
 | `errors.http_exception_handler` | App-internal | Registered on app |
 | `errors.validation_exception_handler` | App-internal | Registered on app |
 | `errors.unhandled_exception_handler` | App-internal | Registered on app |
-| `config.DATA_ROOT` | App-internal | Used by `GET /config`, `resolve_bids_root` |
+| `config.DATA_ROOT` | App-internal | Used by `resolve_bids_root`, editing service |
 | `config.resolve_bids_root()` | App-internal | Called by decompose/edit services |
 | `common.build_params()` | App-internal | Called by decompose service |
 | `common.make_json_safe()` | App-internal | Called by many services |
@@ -163,10 +155,7 @@ Use this to trace what the user can reach and identify dead code (see `07-dead-c
 | `common.parse_discard_channels()` | App-internal | Called by decompose routes |
 | `common.parse_rois()` | App-internal | Called by decompose routes |
 | `common.parse_json_object()` | App-internal | Called by decompose routes |
-| `common.safe_unlink()` | App-internal | Called by many services |
-| `common.save_upload_to_temp()` | App-internal | Called by preview/editing services |
 | `common.parse_entity_label()` | App-internal | Called by editing services |
-| `common.serialize_preview()` | App-internal | Called by decompose service |
 | `common.summarize_result()` | App-internal | Called by decompose service |
 | `common._coerce_param_value()` | App-internal | Called by `build_params` |
 | `cache._store_upload_signal()` | App-internal | Called by preview service |
@@ -191,14 +180,15 @@ Use this to trace what the user can reach and identify dead code (see `07-dead-c
 
 | Symbol | Category | Reachable via |
 |---|---|---|
-| `run_decomposition()` | User-exposed | `muedit.__init__`, CLI, API `/decompose` |
+| `run_decomposition()` | User-exposed | `muedit.__init__`, CLI, API `/decompose_stream` |
 | `DecompositionParameters` | User-exposed | `muedit.__init__`, `muedit.decomp.__init__` |
 | `load_step()` | App-internal | Called by `run_decomposition` |
 | `preprocess_step()` | App-internal | Called by `run_decomposition` |
 | `decompose_step()` | App-internal | Called by `run_decomposition` |
 | `postprocess_step()` | App-internal | Called by `run_decomposition` |
 | `export_step()` | App-internal | Called by `run_decomposition` |
-| `select_roi_interactively()` | User-exposed | CLI `--manual-roi` |
+| `select_roi_interactively()` | User-exposed | CLI `--manual-roi` (imports matplotlib lazily) |
+| `build_manual_artifact_mask()` | App-internal | Called by `preprocess_step`, editing service save |
 | `batch_process_filters()` | App-internal | Called by `postprocess_step` |
 | `rem_duplicates()` | App-internal | Called by `postprocess_step`, editing service |
 | `compute_silhouette()` | App-internal | Called by `decompose_step` |
@@ -217,7 +207,9 @@ Use this to trace what the user can reach and identify dead code (see `07-dead-c
 | `normalize_distimes()` | App-internal | Called by editing service |
 | `build_pulse_trains_from_distimes()` | App-internal | Called by editing service |
 | `save_editlog()` | App-internal | Called by editing service |
-| `first_non_none()` | App-internal | Called by `decomp/io.py` internals |
+| `save_decomposition_npz()` | App-internal | Called by `export_step`, editing service save — owns the `.npz` schema |
+| `pack_object_array()` | App-internal | Called by `export_step`, `save_decomposition_npz` |
+| `first_non_none()` | App-internal | Called by `decomp/decomposition_file.py` internals |
 | All `_`-prefixed functions | App-internal | Internal helpers |
 
 ---
@@ -257,10 +249,10 @@ Use this to trace what the user can reach and identify dead code (see `07-dead-c
 | `demean()` | User-exposed | `muedit.signal.__init__` |
 | `notch_signals()` | User-exposed | `muedit.signal.__init__`, pipeline |
 | `format_hdemg_signal()` | User-exposed | `muedit.signal.__init__`, pipeline, loaders |
-| `detect_bad_channels()` | App-internal | Called by QC pipeline (not in `__all__`) |
+| `_detect_bad_channels()` | App-internal | Called by QC pipeline (not in `__all__`) |
 | `detect_bad_channels_per_grid()` | App-internal | Called by QC pipeline |
-| `channel_qc_diagnostics()` | App-internal | Called by `detect_bad_channels` |
-| `detect_artifact_mask()` | App-internal | Called by `detect_artifact_masks` |
+| `_channel_qc_diagnostics()` | App-internal | Called by `_detect_bad_channels` |
+| `_detect_artifact_mask()` | App-internal | Called by `detect_artifact_masks` |
 | `detect_artifact_masks()` | App-internal | Called by QC pipeline |
 | `extend_signal()` | App-internal | Called by `decompose_step`, `operations.py` |
 | `signed_square()` | App-internal | Called by `decompose_step`, `operations.py` |
@@ -272,7 +264,7 @@ Use this to trace what the user can reach and identify dead code (see `07-dead-c
 | `get_grid_electrode_metadata()` | App-internal | Called by `export_bids_emg` |
 | `ArtifactMaskConfig` | App-internal | Used by artifact mask functions |
 | `ChannelQCConfig` | App-internal | Used by channel QC functions |
-| `ChannelQCMetrics` | App-internal | Returned by `channel_qc_diagnostics` |
+| `ChannelQCMetrics` | App-internal | Returned by `_channel_qc_diagnostics` |
 | `GridSpec` | App-internal | Used by `format_hdemg_signal` |
 | All `_`-prefixed functions | App-internal | Internal helpers |
 
@@ -321,7 +313,7 @@ Use this to trace what the user can reach and identify dead code (see `07-dead-c
 | Symbol | Category | Reachable via |
 |---|---|---|
 | `SignalImport` | User-exposed | Used by `io.factory`, `cache`, `io.loaders` |
-| `LoadedDecomposition` | App-internal | Used by `decomp.io` |
+| `LoadedDecomposition` | App-internal | Used by `decomp.decomposition_file` |
 | `DecompositionSignalExport` | App-internal | Used by `decomp.postprocess.export_step` |
 | `DecompositionExport` | App-internal | Used by `decomp.postprocess.export_step` |
 | `_as_2d_float_array()` | App-internal | Called by `SignalImport.from_mapping` |

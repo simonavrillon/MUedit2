@@ -35,14 +35,4 @@ export const GRID_COLORS = [
   "#2ca02c",
 ];
 
-export const RAW_SIGNAL_EXTENSIONS = [
-  ".mat",
-  ".otb+",
-  ".otb4",
-  ".bdf",
-  ".edf",
-  ".rhd",
-];
-export const DECOMPOSITION_EXTENSIONS = [".npz"];
-
 export const UNIFORM_PULSE_COLOR = GRID_COLORS[1];

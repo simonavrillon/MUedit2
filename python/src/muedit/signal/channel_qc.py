@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ChannelQCConfig:
-    """Tunable parameters for :func:`detect_bad_channels`."""
+    """Tunable parameters for :func:`_detect_bad_channels`."""
 
     flat_rms_ratio: float = 0.10
     flat_abs_floor: float = 1e-8
@@ -38,7 +38,7 @@ class ChannelQCConfig:
 
 @dataclass
 class ChannelQCMetrics:
-    """Per-channel diagnostic metrics from :func:`channel_qc_diagnostics`."""
+    """Per-channel diagnostic metrics from :func:`_channel_qc_diagnostics`."""
 
     mask: np.ndarray
     rms: np.ndarray
@@ -51,17 +51,17 @@ class ChannelQCMetrics:
     reasons: list[str]
 
 
-def detect_bad_channels(
+def _detect_bad_channels(
     data: np.ndarray,
     fsamp: float,
     coordinates: np.ndarray | None = None,
     config: ChannelQCConfig | None = None,
 ) -> np.ndarray:
     """Detect bad channels in one grid's filtered signal."""
-    return channel_qc_diagnostics(data, fsamp, coordinates, config).mask
+    return _channel_qc_diagnostics(data, fsamp, coordinates, config).mask
 
 
-def channel_qc_diagnostics(
+def _channel_qc_diagnostics(
     data: np.ndarray,
     fsamp: float,
     coordinates: np.ndarray | None = None,
@@ -301,7 +301,7 @@ def detect_bad_channels_per_grid(
         coords = None
         if grid_coordinates is not None and grid_idx < len(grid_coordinates):
             coords = grid_coordinates[grid_idx]
-        mask = detect_bad_channels(grid_data, fsamp, coords, config)
+        mask = _detect_bad_channels(grid_data, fsamp, coords, config)
         per_grid_masks.append(mask)
         ch_idx += n_ch
 

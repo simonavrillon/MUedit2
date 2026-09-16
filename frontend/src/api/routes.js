@@ -7,7 +7,6 @@ export const routes = {
   qcWindow: "/qc/window",
   qcAuto: "/qc/auto",
   previewByPath: "/preview-by-path",
-  preview: "/preview",
   decomposeStream: "/decompose_stream",
   decomposePreview: (token) =>
     `/decompose_preview/${encodeURIComponent(token)}`,
@@ -18,7 +17,6 @@ export const routes = {
   editRemoveDuplicates: "/edit/remove-duplicates",
   editFlagMu: "/edit/flag-mu",
   editLoadByPath: "/edit/load-by-path",
-  editLoad: "/edit/load",
   dialogOpenFile: "/dialog/open-file",
   health: "/health",
 };

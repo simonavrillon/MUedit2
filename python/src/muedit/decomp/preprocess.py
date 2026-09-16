@@ -7,7 +7,6 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-import matplotlib.pyplot as plt
 import numpy as np
 
 from muedit.decomp.types import DecompositionParameters, LoadStepOutput, PreprocessStepOutput
@@ -27,6 +26,8 @@ logger = logging.getLogger(__name__)
 
 def select_roi_interactively(data: np.ndarray, fsamp: float) -> tuple[int, int]:
     """Display a plot and let the user click ROI start/end times."""
+    import matplotlib.pyplot as plt
+
     logger.info("Select the start and end of the analysis window on the plot.")
 
     ds_factor = 10 if data.shape[1] <= 1_000_000 else 100
@@ -300,7 +301,7 @@ def load_step(
     )
 
 
-def _build_manual_artifact_mask(
+def build_manual_artifact_mask(
     artifact_regions: list[tuple[int, int]] | None,
     n_samples: int,
 ) -> np.ndarray | None:
@@ -417,7 +418,7 @@ def preprocess_step(
                     i + 1, int(auto_bad.sum()), int(discard_channels[i].sum()),
                 )
 
-    manual_mask = _build_manual_artifact_mask(artifact_regions, data.shape[1])
+    manual_mask = build_manual_artifact_mask(artifact_regions, data.shape[1])
     if manual_mask is not None:
         artifact_mask = manual_mask if artifact_mask is None else (artifact_mask | manual_mask)
         logger.info(

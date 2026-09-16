@@ -27,14 +27,6 @@ export function createFileSessionService(deps) {
     els.uploadFormatError.classList.remove("hidden");
   }
 
-  function isSupportedSignalFile(file, extensions) {
-    const name = (file?.name || "").toLowerCase();
-    return (
-      extensions.raw.some((ext) => name.endsWith(ext)) ||
-      extensions.decomposition.some((ext) => name.endsWith(ext))
-    );
-  }
-
   function detectLandingFileType(file) {
     const name = (file?.name || "").toLowerCase();
     if (name.endsWith(".otb+") || name.endsWith(".otb4")) return "raw";
@@ -92,8 +84,6 @@ export function createFileSessionService(deps) {
       ),
       placement_scheme_description:
         String(els.bidsPlacementDescription?.value || "").trim() || null,
-      task_description:
-        String(els.bidsTaskDescription?.value || "").trim() || null,
     };
   }
 
@@ -123,8 +113,6 @@ export function createFileSessionService(deps) {
       els.bidsPlacementDescription?.value || "",
     ).trim();
     if (placementDesc) entities.placement_scheme_description = placementDesc;
-    const taskDescription = String(els.bidsTaskDescription?.value || "").trim();
-    if (taskDescription) entities.task_description = taskDescription;
 
     const age = String(els.bidsParticipantAge?.value || "").trim();
     const sex = String(els.bidsParticipantSex?.value || "").trim();
@@ -150,7 +138,6 @@ export function createFileSessionService(deps) {
     collectBidsEntities,
     clearUploadFormatError,
     showUnsupportedUploadFormatError,
-    isSupportedSignalFile,
     detectLandingFileType,
     setUploadLoading,
   };

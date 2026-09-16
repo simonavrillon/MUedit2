@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from fastapi import HTTPException, UploadFile
+from fastapi import HTTPException
 from fastapi.responses import Response
 
 from muedit.api.cache import (
@@ -18,8 +18,7 @@ from muedit.api.cache import (
 from muedit.api.common import (
     make_json_safe,
     parse_entity_label,
-    safe_unlink,
-    save_upload_to_temp,
+    require_existing_path,
 )
 from muedit.api.schemas import QcAutoPayload, QcWindowPayload
 from muedit.api.services.bids_helpers import (
@@ -27,7 +26,7 @@ from muedit.api.services.bids_helpers import (
     read_bids_sidecar_meta,
 )
 from muedit.decomp.preview import downsample_vector
-from muedit.io.factory import clone_signal, load_signal
+from muedit.io.factory import clone_signal, get_loader, load_signal
 from muedit.signal.downsample import (
     PREVIEW_MOVING_AVG_MS,
     moving_average_ms,
@@ -71,7 +70,7 @@ def _encode_qc_raw_f32(
 def _build_preview_core(filepath: str) -> dict[str, Any]:
     """Load signal, preprocess EMG grids, cache QC data, and build UI preview payload."""
     loaded_signal = load_signal(filepath)
-    upload_token = _store_upload_signal(loaded_signal)
+    upload_token = _store_upload_signal(loaded_signal, source_path=filepath)
     signal = clone_signal(loaded_signal)
     data = signal["data"]
     fsamp = float(signal["fsamp"])
@@ -142,21 +141,15 @@ def _decomp_artifact_error(field: str) -> HTTPException:
     )
 
 
-async def build_preview(file: UploadFile) -> dict[str, Any]:
-    """Build preview payload from uploaded file contents."""
-    tmp_path = await save_upload_to_temp(file)
-    try:
-        return _build_preview_core(tmp_path)
-    except (OSError, ValueError) as exc:
-        if "contains decomposition fields" in str(exc):
-            raise _decomp_artifact_error("file") from exc
-        raise
-    finally:
-        safe_unlink(tmp_path)
-
-
 def build_preview_from_path(filepath: str) -> dict[str, Any]:
     """Build preview payload from a file path already available on disk."""
+    require_existing_path(filepath)
+    try:
+        get_loader(filepath)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400, detail={"field": "path", "reason": str(exc)}
+        ) from exc
     try:
         result = _build_preview_core(filepath)
     except (OSError, ValueError) as exc:
@@ -184,7 +177,7 @@ def get_qc_window(payload: QcWindowPayload) -> Response:
             status_code=400,
             detail={
                 "field": "upload_token",
-                "reason": "Missing or expired QC cache; request /api/v1/preview first",
+                "reason": "Missing or expired QC cache; request /api/v1/preview-by-path first",
             },
         )
 
@@ -272,7 +265,7 @@ def run_auto_qc_on_token(payload: QcAutoPayload) -> dict[str, Any]:
             status_code=400,
             detail={
                 "field": "upload_token",
-                "reason": "Missing or expired QC cache; request /api/v1/preview first",
+                "reason": "Missing or expired QC cache; request /api/v1/preview-by-path first",
             },
         )
 

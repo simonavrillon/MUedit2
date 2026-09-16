@@ -3,15 +3,12 @@
 from __future__ import annotations
 
 import json
-import os
-import tempfile
 from pathlib import Path
 from typing import Any
 
 import numpy as np
-from fastapi import HTTPException, UploadFile
+from fastapi import HTTPException
 
-from muedit.api.cache import UPLOAD_CHUNK_SIZE
 from muedit.decomp.types import DecompositionParameters
 
 
@@ -113,14 +110,6 @@ def parse_json_object(raw: str | None, field_name: str) -> dict | None:
     return parsed
 
 
-def safe_unlink(path: str) -> None:
-    """Best-effort file removal without propagating OS errors."""
-    try:
-        os.unlink(path)
-    except OSError:
-        pass
-
-
 def _coerce_param_value(current: Any, value: Any) -> Any:
     """Coerce a JSON override value to match the type of the existing param.
 
@@ -201,16 +190,15 @@ def make_json_safe(value: Any) -> Any:
     return value
 
 
-async def save_upload_to_temp(file: UploadFile) -> str:
-    """Persist uploaded file to a temporary path and return that path."""
-    extension = os.path.splitext(file.filename or "")[1]
-    with tempfile.NamedTemporaryFile(delete=False, suffix=extension) as tmp:
-        while True:
-            chunk = await file.read(UPLOAD_CHUNK_SIZE)
-            if not chunk:
-                break
-            tmp.write(chunk)
-    return tmp.name
+def require_existing_path(path: str, field: str = "path") -> Path:
+    """Return ``path`` as a Path, raising HTTP 404 when nothing exists there."""
+    resolved = Path(path)
+    if not resolved.exists():
+        raise HTTPException(
+            status_code=404,
+            detail={"field": field, "reason": f"File not found: {path}"},
+        )
+    return resolved
 
 
 
@@ -225,31 +213,6 @@ def parse_entity_label(file_label: str) -> str:
         while stem.endswith(suffix):
             stem = stem[: -len(suffix)]
     return stem
-
-
-def serialize_preview(result: dict[str, Any]) -> dict[str, Any]:
-    """Extract and normalize preview payload from decomposition result object."""
-    preview = result.get("preview", {})
-    distime = preview.get("distime", [])
-    return {
-        "mean_abs": preview.get("mean_abs", []),
-        "pulse_trains": preview.get("pulse_trains", []),
-        "pulse_trains_full": preview.get("pulse_trains_full", []),
-        "distime": [list(map(int, d)) for d in distime],
-        "distime_all": [list(map(int, d)) for d in preview.get("distime_all", distime)],
-        "pulse_trains_all": preview.get("pulse_trains_all", []),
-        "mu_grid_index": preview.get("mu_grid_index", []),
-        "fsamp": preview.get("fsamp"),
-        "grid_mean_abs": preview.get("grid_mean_abs", []),
-        "grid_names": preview.get("grid_names", []),
-        "total_samples": preview.get("total_samples"),
-        "channel_means": preview.get("channel_means", []),
-        "coordinates": preview.get("coordinates", []),
-        "metadata": preview.get("metadata", {}),
-        "muscle": preview.get("muscle", []),
-        "auxiliary": preview.get("auxiliary"),
-        "auxiliary_names": preview.get("auxiliaryname", []),
-    }
 
 
 def summarize_result(

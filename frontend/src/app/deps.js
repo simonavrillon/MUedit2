@@ -1,6 +1,10 @@
 /**
  * Shared dependency contracts for setup/orchestrator modules.
  * These typedefs make dependency injection explicit and keep module boundaries stable.
+ *
+ * Inside each create*Service factory, feature functions receive one shared
+ * context bag (`ctx`): the factory's own deps spread together with its local
+ * helpers. Features destructure only the keys they use.
  */
 
 /**
@@ -28,6 +32,9 @@
  * @property {Function} updateStartAvailability
  * @property {Function} renderAuxiliaryChannels
  * @property {Function} renderMuExplorer
+ * @property {Function} [runAutoQc]
+ * @property {Function} [toggleArtifactMode]
+ * @property {Function} [removeLastArtifact]
  */
 
 /**
@@ -36,6 +43,7 @@
  * @property {Object} state
  * @property {Function} bindEditCanvas
  * @property {Function} bindEditDrCanvas
+ * @property {Function} bindEditTimeline
  * @property {Function} renderEditExplorer
  * @property {Function} runEditAction
  * @property {Function} saveEditedFile
@@ -49,6 +57,7 @@
  * @property {Function} setEditMode
  * @property {Function} refreshEditModeButtons
  * @property {Function} handleKeyboardNavigation
+ * @property {Function} applyLabeledToggle
  */
 
 /**
@@ -89,7 +98,6 @@ export {};
  * @property {Function} getBidsMuscleNames
  * @property {Function} clearUploadFormatError
  * @property {Function} showUnsupportedUploadFormatError
- * @property {Function} isSupportedSignalFile
  * @property {Function} detectLandingFileType
  * @property {Function} setUploadLoading
  */
@@ -100,13 +108,14 @@ export {};
  * @property {Function} renderAuxiliaryChannels
  * @property {Function} requestQcGridWindow
  * @property {Function} requestPreview
- * @property {Function} handleRawFile
- * @property {Function} handleLandingFile
  * @property {Function} handleRawFilePath
  * @property {Function} renderChannelQC
  * @property {Function} enableRoiSelection
  * @property {Function} refreshVisuals
  * @property {Function} syncRois
+ * @property {Function} runAutoQc
+ * @property {Function} toggleArtifactMode
+ * @property {Function} removeLastArtifact
  */
 
 /**
@@ -133,6 +142,7 @@ export {};
  * @property {Function} renderInstantaneousDr
  * @property {Function} bindEditCanvas
  * @property {Function} bindEditDrCanvas
+ * @property {Function} bindEditTimeline
  * @property {Function} requestRoiEdit
  * @property {Function} requestFilterUpdate
  * @property {Function} updateMuFilter
@@ -148,5 +158,4 @@ export {};
  * @property {Function} saveEditedFile
  * @property {Function} loadDecompositionForEdit
  * @property {Function} loadDecompositionForEditByPath
- * @property {Function} handleDecompositionFile
  */

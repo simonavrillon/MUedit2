@@ -6,15 +6,15 @@
     <title>MUedit</title>
     <link rel="icon" href="data:," />
     <link rel="shortcut icon" href="data:," />
-    <link rel="stylesheet" href="css/tokens.css?v=62" />
-    <link rel="stylesheet" href="css/base.css?v=62" />
-    <link rel="stylesheet" href="css/stages/landing.css?v=62" />
-    <link rel="stylesheet" href="css/stages/workspace.css?v=62" />
-    <link rel="stylesheet" href="css/stages/run.css?v=62" />
-    <link rel="stylesheet" href="css/stages/qc.css?v=62" />
-    <link rel="stylesheet" href="css/stages/edit.css?v=62" />
-    <link rel="stylesheet" href="css/stages/import.css?v=62" />
-    <link rel="stylesheet" href="css/responsive.css?v=62" />
+    <link rel="stylesheet" href="css/tokens.css?v=63" />
+    <link rel="stylesheet" href="css/base.css?v=63" />
+    <link rel="stylesheet" href="css/stages/landing.css?v=63" />
+    <link rel="stylesheet" href="css/stages/workspace.css?v=63" />
+    <link rel="stylesheet" href="css/stages/run.css?v=63" />
+    <link rel="stylesheet" href="css/stages/qc.css?v=63" />
+    <link rel="stylesheet" href="css/stages/edit.css?v=63" />
+    <link rel="stylesheet" href="css/stages/import.css?v=63" />
+    <link rel="stylesheet" href="css/responsive.css?v=63" />
   </head>
 
   <body>
@@ -73,6 +73,12 @@
               <span class="step-chip-label">Edit</span>
             </button>
           </div>
+          <span
+            id="status"
+            class="status-pill app-status"
+            role="status"
+            aria-live="polite"
+          ></span>
         </div>
 
         <section class="landing" id="landing">
@@ -378,7 +384,7 @@
                   <label for="postprocessMode">Post-processing</label>
                   <select id="postprocessMode">
                     <option value="windowed" selected>Windowed</option>
-                    <option value="full_trace">Full trace</option>
+                    <option value="full-trace">Full trace</option>
                     <option value="adaptive">Adaptive</option>
                   </select>
                 </div>
@@ -897,6 +903,6 @@
       </main>
     </div>
 
-    <script type="module" src="app.js?v=62"></script>
+    <script type="module" src="app.js?v=63"></script>
   </body>
 </html>

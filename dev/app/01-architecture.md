@@ -22,7 +22,7 @@ initializeApp():
   2. ui.updateStepAvailability()          # disable run/edit steps if no file
   3. ui.updateWorkflowStepper("import")  # highlight "Import" chip
   4. els.browseSignalBtn.disabled = true # block until backend responds
-  5. ui.setStatus("Connecting to backend...")
+  5. ui.setStatus("Connecting to backend...")   # #status pill, top-right of header
   6. await waitForBackend(api.healthUrl())
      ├─ success → enable browse button, clear status
      └─ failure → "Backend unreachable — please restart the app"
@@ -71,7 +71,7 @@ Each stage follows a dual-export pattern:
 ```
 ┌─────────────────────────────────────────────────────┐
 │  Factory: createXxxStageService(deps)                │
-│    - Destructures deps, defines closures             │
+│    - Defines closures, builds one `ctx` bag          │
 │    - Returns bag of methods                          │
 │    - Called once at module load (container.js)       │
 └─────────────────────────────────────────────────────┘
@@ -83,6 +83,20 @@ Each stage follows a dual-export pattern:
 └─────────────────────────────────────────────────────┘
 ```
 
+### The shared context bag (`ctx`)
+
+Inside `createQcStageService`, `createRunStageService`, `createEditStageService` and `createUiService`, every feature function receives the same object:
+
+```js
+const ctx = { ...deps, renderEditExplorer, requestRoiEdit, /* local helpers */ };
+const removeOutliers = () => removeOutliersFeature(ctx);
+```
+
+`ctx` is built just before the factory's `return`, after every helper is defined; helpers only read it when called. Feature functions (`editing/operations.js`, `app/services/editing-service.js`, `view/*.js`, `signal/qc.js`, `decomp/run.js`, `navigation.js`, `layout.js`) destructure only the keys they use, so the superset is safe. Two rules keep it that way:
+
+- A feature must not give a dependency a default value in its destructuring, and optional dependencies (checked with `if (dep)` / `dep?.()`) must be supplied by every factory whose features rely on them.
+- A few features expect a dependency under a different name; the bag carries both: `refreshVisualsFn` (qc), `handleStreamMessageFn` and `onSaved` (run).
+
 ### `deps.js` — JSDoc typedef contracts
 
 Defines explicit interfaces for each setup deps bundle:
@@ -90,20 +104,20 @@ Defines explicit interfaces for each setup deps bundle:
 | Typedef | Fields |
 |---|---|
 | `ImportSetupDeps` | els, state, handleNativeDialogOpen, setStatus, showWorkspace, switchStage, updateWorkflowStepper |
-| `RunSetupDeps` | els, state, runDecomposition, enableRoiSelection, syncRois, refreshVisuals, setupToggle, setupLockedOnToggle, toggleConditional, updateStartAvailability, renderAuxiliaryChannels, renderMuExplorer |
-| `EditSetupDeps` | els, state, bindEditCanvas, bindEditDrCanvas, renderEditExplorer, runEditAction, saveEditedFile, resetCurrentMuEdits, updateMuFilter, removeOutliers, flagMuForDeletion, duplicateMu, removeDuplicateMus, restoreEditBackup, setEditMode, refreshEditModeButtons, handleKeyboardNavigation |
+| `RunSetupDeps` | els, state, runDecomposition, enableRoiSelection, syncRois, refreshVisuals, setupToggle, setupLockedOnToggle, toggleConditional, updateStartAvailability, renderAuxiliaryChannels, renderMuExplorer, runAutoQc?, toggleArtifactMode?, removeLastArtifact? |
+| `EditSetupDeps` | els, state, bindEditCanvas, bindEditDrCanvas, bindEditTimeline, renderEditExplorer, runEditAction, saveEditedFile, resetCurrentMuEdits, updateMuFilter, removeOutliers, flagMuForDeletion, duplicateMu, removeDuplicateMus, restoreEditBackup, setEditMode, refreshEditModeButtons, handleKeyboardNavigation, applyLabeledToggle |
 | `LayoutSetupDeps` | els, toggleSettingsOpen, setSettingsOpen, initLayoutResizePolicy |
-| `UiService` | 20 methods (setStatus, setEditStatus, setRunPhase, updateProgress, updateWorkflowStepper, updateStepAvailability, setSettingsOpen, toggleSettingsOpen, ensureSettingsToggleIcon, initLayoutResizePolicy, scheduleLayoutRerender, showWorkspace, switchStage, setupToggle, setupLockedOnToggle, toggleConditional, isToggleOn, runEditAction) |
-| `FileSessionService` | getBidsProject, getBidsMuscleNames, clearUploadFormatError, showUnsupportedUploadFormatError, isSupportedSignalFile, detectLandingFileType, setUploadLoading |
-| `QcStageService` | 14 methods |
+| `UiService` | setStatus, setEditStatus, setRunPhase, updateProgress, updateWorkflowStepper, updateStepAvailability, setSettingsOpen, toggleSettingsOpen, ensureSettingsToggleIcon, initLayoutResizePolicy, scheduleLayoutRerender, showWorkspace, switchStage, setupToggle, setupLockedOnToggle, toggleConditional, isToggleOn, runEditAction |
+| `FileSessionService` | getBidsProject, getBidsMuscleNames, clearUploadFormatError, showUnsupportedUploadFormatError, detectLandingFileType, setUploadLoading |
+| `QcStageService` | 12 methods |
 | `RunStageService` | 6 methods |
-| `EditStageService` | 26 methods |
+| `EditStageService` | 28 methods |
 
 ### Wiring Topology
 
 ```
                     ┌─────────┐
-                    │ config  │  API_BASE, COLORS, extensions
+                    │ config  │  API_BASE, COLORS
                     └────┬────┘
                          │
               ┌──────────┼──────────┐
@@ -170,7 +184,7 @@ loadDecompositionForEditByPath: (...args) => editStage.loadDecompositionForEditB
   // Run stage (directly on global state)
   muPulseTrains, muDistimes, muGridIndex,
   currentMuGrid, currentMu,
-  runView, muSelectionRange,
+  runView,
   runDownloadInFlight, lastRunDownloadKey,
 
   // Edit stage (nested slice)
@@ -253,13 +267,13 @@ Stages do **not** have `init`/`enter`/`exit`/`destroy` methods. Instead:
 | Factory | File | Returns |
 |---|---|---|
 | `createImportStageService` | import-stage.js | `{ handleNativeDialogOpen }` |
-| `createQcStageService` | qc-stage.js | 14 methods |
+| `createQcStageService` | qc-stage.js | 12 methods |
 | `createRunStageService` | run-stage.js | 6 methods |
-| `createEditStageService` | edit-stage.js | 26 methods |
+| `createEditStageService` | edit-stage.js | 28 methods |
 | `createLayoutStageService` | layout-stage.js | 4 methods |
-| `createUiService` | services/ui.js | 20 methods |
-| `createFileSessionService` | file-session.js | 10 methods |
-| `createApiClient` | api/client.js | 12 methods |
+| `createUiService` | services/ui.js | 21 methods |
+| `createFileSessionService` | file-session.js | 9 methods |
+| `createApiClient` | api/client.js | 11 methods |
 
 ### Per-stage setup functions (event wiring)
 

@@ -16,14 +16,7 @@ import {
 } from "./layout.js";
 
 export function createUiService(deps) {
-  const {
-    els,
-    state,
-    renderChannelQC,
-    refreshVisuals,
-    renderEditExplorer,
-    setSelectedGrid,
-  } = deps;
+  const { els } = deps;
 
   function setStatus(text, tone = "muted") {
     setStatusController(els, text, tone);
@@ -35,13 +28,9 @@ export function createUiService(deps) {
     els.editStatus.dataset.tone = tone;
   }
 
-  function updateWorkflowStepper(targetStage) {
-    updateWorkflowStepperController({ els, state }, targetStage);
-  }
-
-  function updateStepAvailability() {
-    updateStepAvailabilityController({ els, state });
-  }
+  const updateWorkflowStepper = (targetStage) =>
+    updateWorkflowStepperController(ctx, targetStage);
+  const updateStepAvailability = () => updateStepAvailabilityController(ctx);
 
   function setRunPhase(pct, message = "", stage = "") {
     if (!els.runPhase) return;
@@ -83,60 +72,29 @@ export function createUiService(deps) {
     }
   }
 
-  function rerenderPlotsForLayout() {
-    rerenderPlotsForLayoutController({
-      state,
-      renderChannelQC,
-      refreshVisuals,
-      renderEditExplorer,
-    });
-  }
-
-  function scheduleLayoutRerender(delay = 90) {
-    scheduleLayoutRerenderController({ rerenderPlotsForLayout }, delay);
-  }
-
-  function initLayoutResizePolicy() {
-    initLayoutResizePolicyController({ els, scheduleLayoutRerender });
-  }
-
-  function setSettingsOpen(open) {
-    setSettingsOpenController({ els, scheduleLayoutRerender }, open);
-  }
-
-  function toggleSettingsOpen() {
-    toggleSettingsOpenController({ els, setSettingsOpen });
-  }
-
-  function ensureSettingsToggleIcon() {
+  const rerenderPlotsForLayout = () => rerenderPlotsForLayoutController(ctx);
+  const scheduleLayoutRerender = (delay = 90) =>
+    scheduleLayoutRerenderController(ctx, delay);
+  const initLayoutResizePolicy = () => initLayoutResizePolicyController(ctx);
+  const setSettingsOpen = (open) => setSettingsOpenController(ctx, open);
+  const toggleSettingsOpen = () => toggleSettingsOpenController(ctx);
+  const ensureSettingsToggleIcon = () =>
     ensureSettingsToggleIconController(els);
-  }
+  const switchStage = (target) => switchStageController(ctx, target);
+  const populateGridTabs = () => populateGridTabsController(ctx);
+  const showWorkspace = (options = {}) => showWorkspaceController(ctx, options);
 
-  function switchStage(target) {
-    switchStageController(
-      {
-        state,
-        els,
-        setSettingsOpen,
-        setStatus,
-        updateStepAvailability,
-        updateWorkflowStepper,
-        scheduleLayoutRerender,
-      },
-      target,
-    );
-  }
-
-  function populateGridTabs() {
-    populateGridTabsController({ els, state, setSelectedGrid });
-  }
-
-  function showWorkspace(options = {}) {
-    showWorkspaceController(
-      { els, state, setSettingsOpen, switchStage, populateGridTabs },
-      options,
-    );
-  }
+  const ctx = {
+    ...deps,
+    setStatus,
+    updateStepAvailability,
+    updateWorkflowStepper,
+    rerenderPlotsForLayout,
+    scheduleLayoutRerender,
+    setSettingsOpen,
+    switchStage,
+    populateGridTabs,
+  };
 
   function applyToggle(btn, on) {
     if (!btn) return;

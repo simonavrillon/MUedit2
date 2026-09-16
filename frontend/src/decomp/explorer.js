@@ -55,9 +55,6 @@ export function buildRunMuExplorerModel(deps) {
     !state.runView || (pulse && state.runView.end > pulse.length)
       ? { start: 0, end: pulse.length || 0 }
       : null;
-  const selectionOverlay = state.muSelectionRange
-    ? [state.muSelectionRange]
-    : [];
   const metaText =
     pulse && pulse.length ? `${spikes?.length || 0} discharge times` : "";
   const color = UNIFORM_PULSE_COLOR;
@@ -69,7 +66,6 @@ export function buildRunMuExplorerModel(deps) {
     spikes,
     view: nextView || view,
     nextView,
-    selectionOverlay,
     metaText,
     color,
     markerVals,

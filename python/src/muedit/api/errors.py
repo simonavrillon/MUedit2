@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException
 
 
 def error_payload(code: str, message: str, detail: Any = None) -> dict[str, Any]:
@@ -18,7 +19,7 @@ def error_payload(code: str, message: str, detail: Any = None) -> dict[str, Any]
 
 
 async def http_exception_handler(_: Request, exc: Exception) -> JSONResponse:
-    """Translate FastAPI HTTPException into project error envelope."""
+    """Translate HTTPException (FastAPI's or Starlette's routing 404/405) into the envelope."""
     if not isinstance(exc, HTTPException):
         return await unhandled_exception_handler(_, exc)
     detail = exc.detail
@@ -30,6 +31,7 @@ async def http_exception_handler(_: Request, exc: Exception) -> JSONResponse:
             message=message,
             detail=detail if not isinstance(detail, str) else None,
         ),
+        headers=getattr(exc, "headers", None),
     )
 
 

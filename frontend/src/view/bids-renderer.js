@@ -113,7 +113,6 @@ export function applySessionInfoToDom(els, payload) {
   if (els.bidsPowerlineFreq) els.bidsPowerlineFreq.value = "50";
   if (els.bidsManufacturer) els.bidsManufacturer.value = "";
   if (els.bidsDeviceModel) els.bidsDeviceModel.value = "";
-  if (els.bidsTaskDescription) els.bidsTaskDescription.value = "";
   if (els.bidsParticipantAge) els.bidsParticipantAge.value = "";
   if (els.bidsParticipantSex) els.bidsParticipantSex.value = "";
   if (els.bidsParticipantHandedness) els.bidsParticipantHandedness.value = "";

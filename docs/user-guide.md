@@ -12,6 +12,8 @@ Import signal  →  Quality Check / Region Of Interest  →  Decompose  →  Edi
 
 Each step is represented by a button in the top navigation bar. Steps unlock progressively as data becomes available.
 
+App-wide messages (connecting to the backend, errors, save confirmations) appear at the top right of the navigation bar; hover over a shortened message to read it in full. Edit-stage messages appear under the edit toolbar.
+
 ---
 
 ## Step 1 — Import
@@ -292,4 +294,6 @@ so you can confirm the dataset is fully compliant before distribution.
 | Update Filter fails | Ensure the **Project** field is set and the original EMG file is accessible |
 | Save fails | Check the **Project** field is set — output is written to `data/<project>/` |
 | Port already in use | Set `MUEDIT_BACKEND_PORT` / `MUEDIT_FRONTEND_PORT` to free ports before launching |
+| "Backend unreachable — please restart the app" | The Python backend is not running or crashed; stop and relaunch `scripts/run_MUedit.sh` |
+| "Session expired, reloading file..." during a run | The backend lost its cached copy of the signal (e.g. after a restart); MUedit reloads the file from its original path and retries once. If the file was moved, reopen it |
 | Browser does not open | Navigate manually to `http://localhost:8080` (or the port shown in the terminal) |

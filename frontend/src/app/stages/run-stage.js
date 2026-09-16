@@ -23,37 +23,7 @@ import {
 } from "../../decomp/params.js";
 
 export function createRunStageService(deps) {
-  const {
-    state,
-    els,
-    api,
-    drawSeries,
-    drawGridOverlay,
-    getSuggestedNpzName,
-    persistNpzBySaveTarget,
-    getBidsProject,
-    getBidsMuscleNames,
-    collectBidsEntities,
-    buildParams,
-    updateStartAvailability,
-    switchStage,
-    setStatus,
-    updateProgress,
-    setProgressText,
-    setNwindows,
-    emgCanvasId,
-    ensureDiscardMasks,
-    renderChannelQC,
-    getCurrentGrid,
-    requestQcGridWindow,
-    showWorkspace,
-    renderBidsAutoInfo,
-    renderBidsMuscleFields,
-    populateAuxSelector,
-    renderAuxiliaryChannels,
-    enableRoiSelection,
-    loadDecompositionForEditByPath,
-  } = deps;
+  const { state, els, drawSeries, loadDecompositionForEditByPath } = deps;
 
   function getMuIndicesForGrid(gridIdx) {
     return getRunMuIndicesForGrid(state, gridIdx);
@@ -92,59 +62,17 @@ export function createRunStageService(deps) {
     renderMuExplorerController({ els, drawSeries }, model);
   }
 
-  function autoSaveRunDecomposition() {
-    return autoSaveRunDecompositionFeature({
-      state,
-      getSuggestedNpzName,
-      persistNpzBySaveTarget,
-      getBidsMuscleNames,
-      setStatus,
-      onSaved: loadDecompositionForEditByPath || null,
-    });
-  }
+  const autoSaveRunDecomposition = () => autoSaveRunDecompositionFeature(ctx);
+  const handleStreamMessage = (msg) => handleStreamMessageFeature(ctx, msg);
+  const runDecomposition = () => runDecompositionFeature(ctx);
 
-  function handleStreamMessage(msg) {
-    return handleStreamMessageFeature(
-      {
-        state,
-        api,
-        setStatus,
-        updateProgress,
-        setProgressText,
-        ensureDiscardMasks,
-        renderChannelQC,
-        getCurrentGrid,
-        requestQcGridWindow,
-        drawGridOverlay,
-        showWorkspace,
-        renderMuExplorer,
-        renderBidsAutoInfo,
-        renderBidsMuscleFields,
-        populateAuxSelector,
-        renderAuxiliaryChannels,
-        enableRoiSelection,
-        autoSaveRunDecomposition,
-        setNwindows,
-        emgCanvasId,
-      },
-      msg,
-    );
-  }
-
-  function runDecomposition() {
-    return runDecompositionFeature({
-      state,
-      api,
-      getBidsProject,
-      collectBidsEntities,
-      buildParams,
-      updateStartAvailability,
-      switchStage,
-      setStatus,
-      updateProgress,
-      handleStreamMessageFn: handleStreamMessage,
-    });
-  }
+  const ctx = {
+    ...deps,
+    renderMuExplorer,
+    autoSaveRunDecomposition,
+    handleStreamMessageFn: handleStreamMessage,
+    onSaved: loadDecompositionForEditByPath || null,
+  };
 
   return {
     getMuIndicesForGrid,

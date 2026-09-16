@@ -42,7 +42,7 @@ def _parse_text(value: Any) -> str:
     return str(value).strip()
 
 
-def _parse_text_list(value: Any) -> list[str]:
+def parse_text_list(value: Any) -> list[str]:
     if value is None:
         return []
     if isinstance(value, (str, bytes)):
@@ -55,7 +55,7 @@ def _parse_text_list(value: Any) -> list[str]:
         if value.dtype == object:
             out: list[str] = []
             for item in value.flatten().tolist():
-                out.extend(_parse_text_list(item))
+                out.extend(parse_text_list(item))
             return out
         if value.dtype.kind in {"S", "U", "i", "u"}:
             text = _parse_text(value)
@@ -64,7 +64,7 @@ def _parse_text_list(value: Any) -> list[str]:
     if isinstance(value, (list, tuple)):
         out: list[str] = []
         for item in value:
-            out.extend(_parse_text_list(item))
+            out.extend(parse_text_list(item))
         return out
     text = _parse_text(value)
     return [text] if text else []
@@ -81,9 +81,9 @@ def _parse_numeric_array(value: Any, *, default_cols: int = 0) -> np.ndarray:
     return arr
 
 
-def _mat73_read(node: h5py.Dataset | h5py.Group, h5file: h5py.File) -> Any:
+def mat73_read(node: h5py.Dataset | h5py.Group, h5file: h5py.File) -> Any:
     if isinstance(node, h5py.Group):
-        return {key: _mat73_read(node[key], h5file) for key in node.keys()}
+        return {key: mat73_read(node[key], h5file) for key in node.keys()}
 
     raw = node[()]
     if isinstance(raw, bytes):
@@ -99,7 +99,7 @@ def _mat73_read(node: h5py.Dataset | h5py.Group, h5file: h5py.File) -> Any:
         values: list[Any] = []
         for ref in refs:
             if isinstance(ref, h5py.Reference) and ref:
-                values.append(_mat73_read(h5file[ref], h5file))
+                values.append(mat73_read(h5file[ref], h5file))
             else:
                 values.append(ref)
         if arr.size == 1:
@@ -145,7 +145,7 @@ def _load_mat73_signal(path: str) -> dict[str, Any]:
         _raise_if_decomposition_signal_fields(set(signal_group.keys()))
 
         def read_field(name: str, default: Any = None) -> Any:
-            return _mat73_read(signal_group[name], h5f) if name in signal_group else default
+            return mat73_read(signal_group[name], h5f) if name in signal_group else default
 
         data = _parse_numeric_array(read_field("data"))
         # MATLAB v7.3 (HDF5) stores 2D arrays transposed (column-major).
@@ -170,10 +170,10 @@ def _load_mat73_signal(path: str) -> dict[str, Any]:
         return {
             "data": data,
             "fsamp": fsamp,
-            "gridname": _parse_text_list(read_field("gridname")),
-            "muscle": _parse_text_list(read_field("muscle")),
+            "gridname": parse_text_list(read_field("gridname")),
+            "muscle": parse_text_list(read_field("muscle")),
             "auxiliary": auxiliary,
-            "auxiliaryname": _parse_text_list(read_field("auxiliaryname")),
+            "auxiliaryname": parse_text_list(read_field("auxiliaryname")),
             "metadata": {
                 "device_name": device_name,
                 "software_versions": "MATLAB",
@@ -206,13 +206,13 @@ def load_mat(filepath: str) -> dict[str, Any]:
             n_samples = data.shape[1] if data is not None else 0
             signal["data"] = data
             signal["fsamp"] = get_attr(signal_struct, "fsamp")
-            signal["gridname"] = _parse_text_list(get_attr(signal_struct, "gridname"))
-            signal["muscle"] = _parse_text_list(get_attr(signal_struct, "muscle"))
+            signal["gridname"] = parse_text_list(get_attr(signal_struct, "gridname"))
+            signal["muscle"] = parse_text_list(get_attr(signal_struct, "muscle"))
             device_name = get_attr(signal_struct, "device_name", None)
             signal["auxiliary"] = get_attr(
                 signal_struct, "auxiliary", np.zeros((0, n_samples))
             )
-            signal["auxiliaryname"] = _parse_text_list(
+            signal["auxiliaryname"] = parse_text_list(
                 get_attr(signal_struct, "auxiliaryname")
             )
             signal["metadata"] = {

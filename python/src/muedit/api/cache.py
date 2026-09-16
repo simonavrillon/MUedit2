@@ -10,12 +10,11 @@ from typing import Any
 
 import numpy as np
 
-from muedit.decomp.io import LOADER_BIDS_META_KEYS
+from muedit.decomp.decomposition_file import LOADER_BIDS_META_KEYS
 from muedit.models import SignalImport
 
 logger = logging.getLogger(__name__)
 
-UPLOAD_CHUNK_SIZE = 1024 * 1024
 UPLOAD_CACHE_TTL_SEC = 20 * 60
 UPLOAD_CACHE_MAX_ITEMS = 3
 EDIT_SIGNAL_CONTEXT_TTL_SEC = 12 * 60 * 60
@@ -106,14 +105,15 @@ def _evict_to_budget_locked(
             )
 
 
-def _store_upload_signal(signal: dict[str, Any]) -> str:
-    """Store uploaded signal snapshot and return short-lived token."""
+def _store_upload_signal(signal: dict[str, Any], source_path: str | None = None) -> str:
+    """Store uploaded signal snapshot (and the file it came from) and return a token."""
     token = uuid.uuid4().hex
     cloned = _clone_signal(signal)
     with _CACHE_LOCK:
         _purge_expired_caches_locked()
         _UPLOAD_SESSION_CACHE[token] = {
             "signal": cloned,
+            "source_path": source_path,
             "qc": None,
             "nbytes": _signal_nbytes(cloned),
             "expires_at": time.time() + UPLOAD_CACHE_TTL_SEC,
@@ -125,6 +125,15 @@ def _store_upload_signal(signal: dict[str, Any]) -> str:
             protect=token,
         )
     return token
+
+
+def _get_upload_source_path(token: str | None) -> str | None:
+    """Return the on-disk path the upload for ``token`` was loaded from, if known."""
+    if not token:
+        return None
+    with _CACHE_LOCK:
+        entry = _UPLOAD_SESSION_CACHE.get(token)
+        return entry.get("source_path") if entry else None
 
 
 def _get_upload_signal(token: str | None) -> dict[str, Any] | None:

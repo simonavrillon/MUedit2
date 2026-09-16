@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from fastapi import HTTPException, UploadFile
+from fastapi import HTTPException
 from fastapi.responses import Response
 
 from muedit.api.binary import pack_json_f32_payload
@@ -19,8 +19,7 @@ from muedit.api.cache import (
 from muedit.api.common import (
     make_json_safe,
     parse_entity_label,
-    safe_unlink,
-    save_upload_to_temp,
+    require_existing_path,
 )
 from muedit.api.config import DATA_ROOT, resolve_bids_root
 from muedit.api.schemas import (
@@ -49,15 +48,15 @@ from muedit.api.services.edit_helpers import (
     _pad_grid_names,
 )
 from muedit.decomp.algorithm import DEDUP_JITTER, DEDUP_MAXLAG_RATIO, rem_duplicates
-from muedit.decomp.io import (
+from muedit.decomp.decomposition_file import (
     build_pulse_trains_from_distimes,
     load_decomposition_file,
     load_decomposition_signal_context,
     normalize_distimes,
+    save_decomposition_npz,
     save_editlog,
 )
-from muedit.decomp.postprocess import _save_npz_with_app_schema
-from muedit.decomp.preprocess import _build_manual_artifact_mask
+from muedit.decomp.preprocess import build_manual_artifact_mask
 from muedit.decomp.types import DEFAULT_PEEL_OFF_WIN_SEC
 from muedit.editing.operations import (
     add_artifact_in_roi,
@@ -85,14 +84,6 @@ def _init_loaded_decomp(filepath: str, file_label: str) -> dict[str, Any]:
         loaded["edit_signal_token"] = _store_edit_signal_context(signal_ctx, file_label)
     loaded["file_label"] = file_label
     return loaded
-
-
-async def load_decomposition(file: UploadFile) -> dict[str, Any]:
-    tmp_path = await save_upload_to_temp(file)
-    try:
-        return make_json_safe(_init_loaded_decomp(tmp_path, file.filename))
-    finally:
-        safe_unlink(tmp_path)
 
 
 def _encode_edit_load_f32(loaded: dict[str, Any]) -> bytes | None:
@@ -123,12 +114,15 @@ def _wrap_edit_load_binary(loaded: dict[str, Any]) -> Response | dict[str, Any]:
     )
 
 
-async def load_decomposition_binary(file: UploadFile) -> Response | dict[str, Any]:
-    loaded = await load_decomposition(file)
-    return _wrap_edit_load_binary(loaded)
-
-
 def load_decomposition_from_path(filepath: str) -> dict[str, Any]:
+    if require_existing_path(filepath).suffix.lower() not in {".npz", ".mat"}:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "field": "path",
+                "reason": "Unsupported decomposition format. Expected .mat or .npz",
+            },
+        )
     file_label = Path(filepath).name
     loaded = _init_loaded_decomp(filepath, file_label)
 
@@ -387,7 +381,7 @@ def save_edits(payload: EditSavePayload) -> dict[str, Any]:
             regions.append((int(pair[0]), int(pair[1])))
         except (TypeError, ValueError):
             continue
-    artifact_mask = _build_manual_artifact_mask(regions, total_samples)
+    artifact_mask = build_manual_artifact_mask(regions, total_samples)
     if artifact_mask is None:
         ctx_for_mask = _get_edit_signal_context(
             payload.edit_signal_token
@@ -397,7 +391,7 @@ def save_edits(payload: EditSavePayload) -> dict[str, Any]:
             if isinstance(cached_mask, np.ndarray) and cached_mask.size == total_samples:
                 artifact_mask = np.asarray(cached_mask, dtype=bool)
 
-    _save_npz_with_app_schema(
+    save_decomposition_npz(
         out_path,
         pulse_trains=pulse_trains,
         distimes=distimes,

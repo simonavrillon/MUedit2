@@ -6,6 +6,8 @@
 
 /**
  * The three post-processing routes, in the order they appear in the selector.
+ * Keys match `POSTPROCESS_MODES` in `python/src/muedit/decomp/types.py` and the
+ * CLI's `--postprocess` choices.
  *
  * They are mutually exclusive on the backend: `postprocess_step` checks
  * `use_adaptive` first and only falls through to the `full_trace` branch when
@@ -18,7 +20,7 @@ export const POSTPROCESS_MODES = {
     hint: "Filters applied inside each analysis window only. Pulse trains are zero outside the ROI.",
     flags: { use_adaptive: 0, full_trace: 0 },
   },
-  full_trace: {
+  "full-trace": {
     label: "Full trace",
     hint: "Filters dewhitened and applied across the whole recording, so units extend beyond the ROI.",
     flags: { use_adaptive: 0, full_trace: 1 },

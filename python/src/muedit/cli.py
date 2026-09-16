@@ -117,7 +117,7 @@ def run_decomposition_cli(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--sil-thr",
         type=float,
-        default=0.88,
+        default=_DEFAULT_PARAMS.sil_thr,
         help="SIL threshold (app setting: SIL threshold).",
     )
     parser.add_argument(
@@ -166,21 +166,8 @@ def run_decomposition_cli(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--postprocess",
         choices=sorted(POSTPROCESS_MODES),
-        default=None,
-        help=(
-            "Post-processing route (app setting: Post-processing). "
-            f"Default: {DEFAULT_POSTPROCESS_MODE}. Mutually exclusive with the "
-            "legacy --use-adaptive/--full-trace flags."
-        ),
-    )
-    parser.add_argument(
-        "--use-adaptive",
-        action=argparse.BooleanOptionalAction,
-        default=None,
-        help=(
-            "Deprecated alias for --postprocess adaptive; "
-            "cannot be combined with --full-trace or --postprocess."
-        ),
+        default=DEFAULT_POSTPROCESS_MODE,
+        help="Post-processing route (app setting: Post-processing).",
     )
     parser.add_argument(
         "--adapt-batch-ms",
@@ -231,15 +218,6 @@ def run_decomposition_cli(argv: list[str] | None = None) -> None:
         help="Inertia weight for centroid EMA update (higher = slower adaptation).",
     )
     parser.add_argument(
-        "--full-trace",
-        action=argparse.BooleanOptionalAction,
-        default=None,
-        help=(
-            "Deprecated alias for --postprocess full-trace; "
-            "cannot be combined with --use-adaptive or --postprocess."
-        ),
-    )
-    parser.add_argument(
         "--auto-mask-artifacts",
         action=argparse.BooleanOptionalAction,
         default=False,
@@ -275,29 +253,7 @@ def run_decomposition_cli(argv: list[str] | None = None) -> None:
     if args.roi and args.rois:
         parser.error("Use either --roi or --rois, not both.")
 
-    legacy_used = args.use_adaptive is not None or args.full_trace is not None
-    if args.postprocess is not None and legacy_used:
-        parser.error(
-            "Use --postprocess or the legacy --use-adaptive/--full-trace flags, "
-            "not both."
-        )
-    if args.use_adaptive and args.full_trace:
-        parser.error(
-            "--use-adaptive and --full-trace select different post-processing "
-            "routes and cannot be combined; use --postprocess adaptive or "
-            "--postprocess full-trace."
-        )
-    if args.postprocess is not None:
-        mode = args.postprocess
-    elif args.use_adaptive:
-        mode = "adaptive"
-    elif args.full_trace:
-        mode = "full-trace"
-    else:
-        mode = DEFAULT_POSTPROCESS_MODE
-    postprocess_flags = POSTPROCESS_MODES[mode]
-    args.use_adaptive = postprocess_flags["use_adaptive"]
-    args.full_trace = postprocess_flags["full_trace"]
+    postprocess_flags = POSTPROCESS_MODES[args.postprocess]
     if args.bids_metadata and args.bids_metadata_file:
         parser.error("Use either --bids-metadata or --bids-metadata-file, not both.")
     if (args.bids_metadata or args.bids_metadata_file) and not args.bids_root:
@@ -310,7 +266,7 @@ def run_decomposition_cli(argv: list[str] | None = None) -> None:
         parser.error("--peel-off-window-ms must be > 0.")
     if args.adapt_batch_ms <= 0:
         parser.error("--adapt-batch-ms must be > 0.")
-    if args.use_adaptive and args.adapt_batch_ms > _DEFAULT_PARAMS.edges_sec * 1000:
+    if postprocess_flags["use_adaptive"] and args.adapt_batch_ms > _DEFAULT_PARAMS.edges_sec * 1000:
         parser.error(
             f"--adapt-batch-ms must be <= {_DEFAULT_PARAMS.edges_sec * 1000:.0f} "
             f"(edges_sec * 1000) when adaptive mode is enabled; larger batches "
