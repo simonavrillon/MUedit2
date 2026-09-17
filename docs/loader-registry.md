@@ -22,7 +22,7 @@ Loader dispatch is registry-based in `python/src/muedit/io/factory.py`:
 - `register_loader(ext, loader, overwrite=False)` — register/override an extension
 - `get_loader(filepath)` — resolve the loader for a path (or a BIDS/Intan recording directory)
 - `supported_extensions()` — list registered extensions
-- `load_signal(filepath)` — load and normalize to the internal mapping shape
+- `load_signal(filepath)` — load a file and return a `SignalImport`
 
 > The `LoaderFactory` class facade was removed in v2; call the module-level
 > functions above directly.
@@ -31,7 +31,9 @@ Loader dispatch is registry-based in `python/src/muedit/io/factory.py`:
 
 1. Create `python/src/muedit/io/_yourformat.py`.
    - Input: `filepath: str`
-   - Return: `dict` compatible with `SignalImport.from_mapping(...)` or `SignalImport`
+   - Return: a `SignalImport`, preferably built with `SignalImport.build(data=..., fsamp=..., ...)`
+     so the shared type coercion applies. A plain `dict` with the same keys also works;
+     `load_signal` converts it with `SignalImport.from_mapping(...)`.
 
 2. Re-export the loader from `python/src/muedit/io/loaders.py`:
    ```python

@@ -31,6 +31,8 @@ from typing import Any
 
 import numpy as np
 
+from muedit.models import SignalImport
+
 #: ``(detected_index, reference_index, precision, sensitivity, roa, lag)``.
 Match = tuple[int, int, float, float, float, int]
 
@@ -223,13 +225,12 @@ def discharge_times(result: dict[str, Any]) -> list[np.ndarray]:
     return [np.asarray(d) for d in result["signal"]["Dischargetimes"]]
 
 
-def build_signal_dict(sim: dict[str, Any]) -> dict[str, Any]:
-    """Wrap parsed simulation data in a ``load_signal``-compatible dict."""
-    return {
-        "data": sim["data"],
-        "fsamp": sim["fsamp"],
-        "gridname": ["GR08MM1305"],
-        "muscle": ["simulated"],
-        "auxiliary": np.zeros((0, sim["data"].shape[1])),
-        "auxiliaryname": [],
-    }
+def build_signal(sim: dict[str, Any]) -> SignalImport:
+    """Wrap parsed simulation data in a ``SignalImport``, as ``load_signal`` returns."""
+    return SignalImport(
+        data=sim["data"],
+        fsamp=float(sim["fsamp"]),
+        gridname=["GR08MM1305"],
+        muscle=["simulated"],
+        auxiliary=np.zeros((0, sim["data"].shape[1])),
+    )

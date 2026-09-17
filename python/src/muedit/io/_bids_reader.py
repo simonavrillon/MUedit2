@@ -10,6 +10,7 @@ from typing import Any
 
 import numpy as np
 
+from muedit.models import SignalImport
 from muedit.signal.grid import format_hdemg_signal
 
 
@@ -132,8 +133,8 @@ def load_bids_emg_grid(
     return data, fsamp, selection.bad_mask
 
 
-def load_bids_signal(filepath: str) -> dict[str, Any]:
-    """Load a BIDS EMG recording (BDF/EDF + sidecars) into MUedit signal dict format."""
+def load_bids_signal(filepath: str) -> SignalImport:
+    """Load a BIDS EMG recording (BDF/EDF + sidecars) as a ``SignalImport``."""
     emg_path = Path(filepath)
 
     if emg_path.is_dir():
@@ -311,12 +312,12 @@ def load_bids_signal(filepath: str) -> dict[str, Any]:
         "instructions": bids_sidecar.get("Instructions"),
     }
 
-    return {
-        "data": data,
-        "fsamp": fsamp,
-        "gridname": grid_type_names,
-        "muscle": grid_muscles,
-        "auxiliary": auxiliary,
-        "auxiliaryname": aux_names,
-        "metadata": metadata,
-    }
+    return SignalImport.build(
+        data=data,
+        fsamp=fsamp,
+        gridname=grid_type_names,
+        muscle=grid_muscles,
+        auxiliary=auxiliary,
+        auxiliaryname=aux_names,
+        metadata=metadata,
+    )

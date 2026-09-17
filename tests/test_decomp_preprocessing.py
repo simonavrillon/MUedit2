@@ -15,12 +15,11 @@ loaded from ``data/Novecento.otb4`` (6x HD08MM1305 grids, 384 channels,
 
 from __future__ import annotations
 
-from typing import Any
-
 import numpy as np
 import pytest
 
 from muedit.decomp.algorithm import pca_extended_signal, whiten_extended_signal
+from muedit.models import SignalImport
 from muedit.signal.decomp_primitives import extend_signal
 from muedit.signal.filters import bandpass_signals, notch_signals
 
@@ -37,7 +36,7 @@ _BP_LOW, _BP_HIGH = 20.0, 500.0
 class TestFiltering:
     """Validate the bandpass + notch filters applied in the preprocess step."""
 
-    def test_bandpass_on_real_emg(self, novecento_emg: dict[str, Any]) -> None:
+    def test_bandpass_on_real_emg(self, novecento_emg: SignalImport) -> None:
         """Surface bandpass (20-500 Hz) on real Novecento EMG.
 
         Asserts the bandpass: (a) preserves the (channels, samples) layout,
@@ -46,8 +45,8 @@ class TestFiltering:
         share drops, and (d) leaves a signal with comparable in-band variance
         — i.e. the EMG content survives the filter.
         """
-        data = novecento_emg["data"]
-        fsamp = novecento_emg["fsamp"]  # 2000 Hz
+        data = novecento_emg.data
+        fsamp = novecento_emg.fsamp  # 2000 Hz
 
         # Use the first grid (64 channels) to keep the test light.
         grid0 = data[:64, :].copy()
@@ -95,7 +94,7 @@ class TestFiltering:
             f"filtered variance too small vs raw: {var_filt:.2e} vs {var_raw:.2e}"
         )
 
-    def test_notch_on_real_emg(self, novecento_emg: dict[str, Any]) -> None:
+    def test_notch_on_real_emg(self, novecento_emg: SignalImport) -> None:
         """FFT-based notch on real Novecento EMG.
 
         Asserts the notch: (a) preserves layout, (b) returns a real-valued,
@@ -104,8 +103,8 @@ class TestFiltering:
         ~50 Hz spectral chunk) so it targets whatever narrowband interference is
         present rather than a fixed mains frequency.
         """
-        data = novecento_emg["data"]
-        fsamp = novecento_emg["fsamp"]
+        data = novecento_emg.data
+        fsamp = novecento_emg.fsamp
 
         grid0 = data[:64, :].copy()
         filtered = notch_signals(grid0, fsamp)
@@ -138,10 +137,10 @@ class TestConvolutiveSphering:
     """Validate extend -> PCA -> whiten, the convolutive-sphering stage."""
 
     @pytest.fixture()
-    def grid0_window(self, novecento_emg: dict[str, Any]) -> np.ndarray:
+    def grid0_window(self, novecento_emg: SignalImport) -> np.ndarray:
         """First grid (64 channels), 10 s of samples -- enough for stable PCA."""
-        data = novecento_emg["data"]
-        fsamp = novecento_emg["fsamp"]
+        data = novecento_emg.data
+        fsamp = novecento_emg.fsamp
         n = int(10.0 * fsamp)
         return data[:64, :n].copy()
 

@@ -306,12 +306,24 @@ def load_decomposition_from_path(filepath: str) -> dict[str, Any]
 
 Load pipeline:
 1. Use the server-side path directly (there is no upload variant)
-2. Call `_init_loaded_decomp(filepath, file_label)`:
-   - `load_decomposition_file(filepath)` -> normalized dict
-   - `load_decomposition_signal_context(filepath)` -> raw EMG context
-   - Store signal context in cache via `_store_edit_signal_context()` -> `edit_signal_token`
-3. Enrich with BIDS sidecar metadata (grid names, muscles, fsamp from channels.tsv; participant + hardware metadata from sidecars; editlog JSON with mu_uids, edit_history, artifact_times)
-4. Return JSON-safe dict via `make_json_safe()`
+2. `load_decomposition_file(filepath)` -> `LoadedDecomposition`, wrapped in an `EditLoadResult`
+3. `load_decomposition_signal_context(filepath)` -> `EditSignalContext`, stored via
+   `_store_edit_signal_context()` -> `EditLoadResult.edit_signal_token`
+4. Enrich from BIDS: grid names, muscles and fsamp from channels.tsv update the
+   decomposition; participant + hardware fields go to `sidecar_meta`; the editlog JSON
+   sets `mu_uids`, `edit_history`, `artifact_times`
+5. Return `make_json_safe(result.to_dict())`
+
+`EditLoadResult` (in `editing_service.py`):
+
+| Field | Type | In the JSON when |
+|---|---|---|
+| `decomposition` | `LoadedDecomposition` | Always (its fields are merged at top level) |
+| `file_label` | `str` | Always |
+| `edit_signal_token` | `str \| None` | The file embeds raw EMG |
+| `project` | `str \| None` | The file sits in a BIDS tree |
+| `mu_uids`, `edit_history`, `artifact_times` | `list \| None` | The editlog JSON provides them |
+| `sidecar_meta` | `dict[str, Any]` | Merged at top level (participant + hardware fields) |
 
 Binary variant (`load_decomposition_binary_from_path`): encodes as MELD f32 binary if 2-D `pulse_trains_full` exists, falls back to JSON.
 
@@ -321,7 +333,7 @@ Binary variant (`load_decomposition_binary_from_path`): encodes as MELD f32 bina
 
 | Function | Description |
 |---|---|
-| `_expected_grid_count(loaded)` | Derives expected grid count from loaded decomposition |
+| `_expected_grid_count(decomp: LoadedDecomposition)` | Grid count implied by names, muscles and MU-to-grid indices |
 | `_pad_grid_names(names, expected_count, fallback)` | Pads/truncates grid names to expected count |
 | `_normalize_muscle_names(raw)` | Normalizes muscle-name payload to clean list of non-empty strings |
 | `_normalize_flagged(raw, nmu)` | Coerces flagged list to `nmu` length, padding with `False` |

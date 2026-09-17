@@ -16,7 +16,8 @@ from muedit.io.bids import (
     resolve_bids_emg_path,
     write_bids_dataset_description,
 )
-from muedit.io.factory import clone_signal, load_signal
+from muedit.io.factory import load_signal
+from muedit.models import BoolArray, FloatArray, IntArray, SignalImport
 from muedit.signal.filters import bandpass_signals, notch_signals
 from muedit.signal.grid import format_hdemg_signal
 from muedit.signal.qc_pipeline import run_auto_qc
@@ -24,7 +25,7 @@ from muedit.signal.qc_pipeline import run_auto_qc
 logger = logging.getLogger(__name__)
 
 
-def select_roi_interactively(data: np.ndarray, fsamp: float) -> tuple[int, int]:
+def select_roi_interactively(data: FloatArray, fsamp: float) -> tuple[int, int]:
     """Display a plot and let the user click ROI start/end times."""
     import matplotlib.pyplot as plt
 
@@ -82,7 +83,7 @@ def select_roi_interactively(data: np.ndarray, fsamp: float) -> tuple[int, int]:
 
 
 def _resolve_roi_list(
-    data: np.ndarray,
+    data: FloatArray,
     fsamp: float,
     duration: float | None,
     manual_roi: bool,
@@ -150,10 +151,10 @@ def _build_coordinates_plateau(ngrid: int, roi_list: list[tuple[int, int]]) -> l
 
 
 def _apply_grid_notch_filters(
-    data: np.ndarray,
+    data: FloatArray,
     fsamp: float,
     grid_names: list[str],
-    coordinates: list[np.ndarray],
+    coordinates: list[FloatArray],
 ) -> None:
     """Apply notch filtering in-place to each grid's channels."""
     ch_idx = 0
@@ -166,10 +167,10 @@ def _apply_grid_notch_filters(
 
 
 def _apply_grid_bandpass_filters(
-    data: np.ndarray,
+    data: FloatArray,
     fsamp: float,
     grid_names: list[str],
-    coordinates: list[np.ndarray],
+    coordinates: list[FloatArray],
     emg_type: list[int],
 ) -> None:
     """Apply bandpass filtering in-place to each grid's channels using the grid's EMG type."""
@@ -193,16 +194,16 @@ def _export_raw_emg_bids(
     bids_root: str | None,
     bids_entities: dict[str, Any] | None,
     bids_metadata: dict[str, Any] | None,
-    data: np.ndarray,
+    data: FloatArray,
     fsamp: float,
     grid_names: list[str],
-    coordinates: list[np.ndarray],
-    discard_channels: list[np.ndarray],
+    coordinates: list[FloatArray],
+    discard_channels: list[IntArray],
     ied: list[float],
     loader_meta: dict[str, Any],
     derived_bids_metadata: dict[str, Any],
     default_target_muscle: str | None,
-    signal: dict[str, Any],
+    signal: SignalImport,
 ) -> None:
     """Export the raw (unfiltered) EMG and sidecars to a BIDS-compatible layout."""
     if not bids_root:
@@ -248,8 +249,8 @@ def _export_raw_emg_bids(
         gain=loader_meta.get("gains"),
         low_cutoff=loader_meta.get("emg_hpf"),
         high_cutoff=loader_meta.get("emg_lpf"),
-        aux_data=signal.get("auxiliary"),
-        aux_names=signal.get("auxiliaryname"),
+        aux_data=signal.auxiliary,
+        aux_names=signal.auxiliaryname,
         aux_gain=loader_meta.get("aux_gains"),
         aux_low_cutoff=loader_meta.get("aux_hpf"),
         aux_high_cutoff=loader_meta.get("aux_lpf"),
@@ -283,32 +284,30 @@ def _export_raw_emg_bids(
 def load_step(
     filepath: str,
     file_label: str | None,
-    preloaded_signal: dict[str, Any] | None,
+    preloaded_signal: SignalImport | None,
     progress_cb: Callable[[str, dict[str, Any]], None] | None,
 ) -> LoadStepOutput:
-    """Load input signal data from disk or a provided preloaded mapping."""
+    """Load input signal data from disk, or copy a preloaded signal."""
     filename = file_label or Path(filepath).name
     logger.info("Processing %s...", filename)
     if progress_cb:
         progress_cb("start", {"message": "Loading signal", "pct": 5, "file": filename})
 
-    signal = (
-        clone_signal(preloaded_signal) if preloaded_signal is not None else load_signal(filepath)
-    )
-    logger.info("Loaded data: %s, Fs=%s", signal["data"].shape, signal["fsamp"])
+    signal = preloaded_signal.clone() if preloaded_signal is not None else load_signal(filepath)
+    logger.info("Loaded data: %s, Fs=%s", signal.data.shape, signal.fsamp)
     return LoadStepOutput(
         full_path=filepath,
         filename=filename,
         signal=signal,
-        data=signal["data"],
-        fsamp=float(signal["fsamp"]),
+        data=signal.data,
+        fsamp=signal.fsamp,
     )
 
 
 def build_manual_artifact_mask(
     artifact_regions: list[tuple[int, int]] | None,
     n_samples: int,
-) -> np.ndarray | None:
+) -> BoolArray | None:
     """Rasterize user-drawn ``(start, end)`` sample ranges into a boolean mask."""
     if not artifact_regions or n_samples <= 0:
         return None
@@ -340,7 +339,7 @@ def preprocess_step(
     """Apply channel formatting, filtering, ROI selection, and optional BIDS raw export."""
     data = np.array(loaded.data, dtype=np.float64, copy=True)
     raw_data = np.array(data, copy=True)
-    grid_names = loaded.signal.get("gridname") or []
+    grid_names = loaded.signal.gridname
     if not grid_names:
         raise ValueError(
             "Signal has no grid name. Set signal.gridname to a name present in "
@@ -360,11 +359,11 @@ def preprocess_step(
     _apply_grid_notch_filters(data, loaded.fsamp, grid_names, coordinates)
     _apply_grid_bandpass_filters(data, loaded.fsamp, grid_names, coordinates, emg_type)
 
-    muscles = loaded.signal.get("muscle") or []
-    loader_meta = loaded.signal.get("metadata") or {}
-    default_target_muscle = next((m for m in muscles if isinstance(m, str) and m.strip()), None)
+    muscles = loaded.signal.muscle
+    loader_meta = loaded.signal.metadata
+    default_target_muscle = next((m for m in muscles if m.strip()), None)
     derived_bids_metadata: dict[str, Any] = {}
-    if muscles and any(isinstance(m, str) and m for m in muscles):
+    if any(muscles):
         derived_bids_metadata["Muscles"] = muscles
 
     _export_raw_emg_bids(
@@ -401,8 +400,8 @@ def preprocess_step(
     )
     ngrid = len(grid_names)
 
-    artifact_mask: np.ndarray | None = None
-    bad_channel_masks: list[np.ndarray] | None = None
+    artifact_mask: BoolArray | None = None
+    bad_channel_masks: list[BoolArray] | None = None
     if params.auto_mask_artifacts:
         grid_channel_counts = [c.shape[0] for c in coordinates]
         qc_result = run_auto_qc(

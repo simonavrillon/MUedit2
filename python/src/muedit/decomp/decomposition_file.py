@@ -13,7 +13,7 @@ import numpy as np
 import scipy.io
 
 from muedit.io.mat import mat73_read, parse_text_list
-from muedit.models import LoadedDecomposition
+from muedit.models import EditSignalContext, LoadedDecomposition
 
 logger = logging.getLogger(__name__)
 
@@ -522,8 +522,8 @@ def _shift_distimes(values: list[list[int]], shift: int, limit: int) -> list[lis
     return shifted
 
 
-def load_decomposition_file(filepath: str) -> dict[str, Any]:
-    """Load a decomposition file (.npz or .mat) into API-ready normalized output."""
+def load_decomposition_file(filepath: str) -> LoadedDecomposition:
+    """Load a decomposition file (.npz or .mat) and normalize it for editing."""
     ext = Path(filepath).suffix.lower()
 
     if ext == ".npz":
@@ -567,7 +567,7 @@ def load_decomposition_file(filepath: str) -> dict[str, Any]:
 
     pulse_trains_full = [list(map(float, row)) for row in pulse_matrix.tolist()]
 
-    loaded = LoadedDecomposition(
+    return LoadedDecomposition(
         pulse_trains_full=pulse_trains_full,
         distime_all=distimes,
         fsamp=d.fsamp,
@@ -579,7 +579,6 @@ def load_decomposition_file(filepath: str) -> dict[str, Any]:
         muscle=d.muscles,
         sil=d.sil,
     )
-    return loaded.to_dict()
 
 
 def _parse_emgmask_cells(raw: Any) -> list[np.ndarray]:
@@ -669,7 +668,7 @@ def _parse_signal_ied(raw: Any) -> list[float] | None:
     return arr.tolist() if arr.size else None
 
 
-def _load_npz_signal_context(filepath: str) -> dict[str, Any] | None:
+def _load_npz_signal_context(filepath: str) -> EditSignalContext | None:
     """Extract raw EMG + artifact mask from a MUedit NPZ decomposition save."""
     data = np.load(filepath, allow_pickle=True)
     emg_raw = data.get("emg_data")
@@ -704,21 +703,17 @@ def _load_npz_signal_context(filepath: str) -> dict[str, Any] | None:
     if emg is None and artifact_mask is None:
         return None
 
-    ctx: dict[str, Any] = {
-        "data": emg if emg is not None else np.zeros((0, 0), dtype=float),
-        "fsamp": fsamp,
-        "grid_names": grid_names,
-        "emgmask": emgmask,
-        "coordinates": coordinates,
-        "ied": None,
-        "aux_data": None,
-        "aux_names": [],
-        "artifact_mask": artifact_mask,
-    }
-    return ctx
+    return EditSignalContext(
+        data=emg if emg is not None else np.zeros((0, 0), dtype=float),
+        fsamp=fsamp or 0.0,
+        grid_names=grid_names,
+        emgmask=emgmask,
+        coordinates=coordinates,
+        artifact_mask=artifact_mask,
+    )
 
 
-def load_decomposition_signal_context(filepath: str) -> dict[str, Any] | None:
+def load_decomposition_signal_context(filepath: str) -> EditSignalContext | None:
     """Best-effort extraction of raw EMG context embedded in decomposition files."""
     ext = Path(filepath).suffix.lower()
 
@@ -801,17 +796,14 @@ def load_decomposition_signal_context(filepath: str) -> dict[str, Any] | None:
     meta_raw = signal.get("metadata") or top.get("metadata") or {}
     meta = meta_raw if isinstance(meta_raw, dict) else {}
 
-    ctx: dict[str, Any] = {
-        "data": data_arr,
-        "fsamp": fsamp,
-        "grid_names": grid_names,
-        "emgmask": emgmask,
-        "coordinates": coordinates,
-        "ied": ied,
-        "aux_data": aux_data,
-        "aux_names": aux_names,
-    }
-    for key in LOADER_BIDS_META_KEYS:
-        if key in meta:
-            ctx[key] = meta[key]
-    return ctx
+    return EditSignalContext(
+        data=data_arr,
+        fsamp=fsamp or 0.0,
+        grid_names=grid_names,
+        emgmask=emgmask,
+        coordinates=coordinates,
+        ied=ied,
+        aux_data=aux_data,
+        aux_names=aux_names,
+        loader_meta={key: meta[key] for key in LOADER_BIDS_META_KEYS if key in meta},
+    )

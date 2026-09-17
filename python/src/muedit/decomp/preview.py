@@ -6,9 +6,11 @@ from typing import Any
 
 import numpy as np
 
+from muedit.models import FloatArray, IntArray, SignalImport
+
 
 def downsample_vector(
-    vector: np.ndarray, source_fs: float, target_fs: float = 1000.0
+    vector: FloatArray, source_fs: float, target_fs: float = 1000.0
 ) -> list[float]:
     """Decimate a 1-D array from source_fs to target_fs by integer slicing."""
     if vector.size == 0:
@@ -23,15 +25,15 @@ def downsample_vector(
 
 
 def build_preview_payload(
-    signal: dict[str, Any],
-    data: np.ndarray,
+    signal: SignalImport,
+    data: FloatArray,
     fsamp: float,
-    pulse_t: np.ndarray,
-    distime: list[np.ndarray],
+    pulse_t: FloatArray,
+    distime: list[IntArray],
     grid_names: list[str],
     roi_list: list[tuple[int, int]],
-    discard_channels: list[np.ndarray],
-    coordinates: list[np.ndarray],
+    discard_channels: list[IntArray],
+    coordinates: list[FloatArray],
     mu_grid_index: list[int],
     loader_meta: dict[str, Any],
     muscles: list[str],
@@ -41,7 +43,7 @@ def build_preview_payload(
     preview_signal = np.mean(np.abs(data), axis=0)
     pulse_preview: list[list[float]] = []
     pulse_preview_all: list[list[float]] = []
-    pulse_full_all: np.ndarray | list[list[float]] = []
+    pulse_full_all: FloatArray | list[list[float]] = []
     distime_lists: list[list[int]] = []
 
     if pulse_t.size > 0:
@@ -70,15 +72,10 @@ def build_preview_payload(
         "mu_grid_index": mu_grid_index,
         "metadata": loader_meta,
         "muscle": muscles,
-        "auxiliary": (
-            [
-                downsample_vector(signal["auxiliary"][i, :], fsamp)
-                for i in range(signal["auxiliary"].shape[0])
-            ]
-            if signal.get("auxiliary") is not None and signal["auxiliary"].size > 0
-            else []
-        ),
-        "auxiliaryname": signal.get("auxiliaryname"),
+        "auxiliary": [downsample_vector(row, fsamp) for row in signal.auxiliary]
+        if signal.auxiliary.size > 0
+        else [],
+        "auxiliaryname": signal.auxiliaryname,
     }
 
     ch_idx_tmp = 0

@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 
 import numpy as np
 from fastapi import HTTPException
 
-from muedit.decomp.types import DecompositionParameters
+from muedit.decomp.types import ContrastFunc, DecompositionParameters
 
 
 def parse_json(raw: str | None, field_name: str) -> Any:
@@ -154,6 +154,15 @@ def build_params(raw: str | None) -> DecompositionParameters:
                     },
                 ) from exc
 
+    contrast_funcs = get_args(ContrastFunc)
+    if base.contrast_func not in contrast_funcs:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "field": "contrast_func",
+                "reason": f"contrast_func must be one of {', '.join(contrast_funcs)}",
+            },
+        )
     if base.adapt_batch_ms <= 0:
         raise HTTPException(
             status_code=400,

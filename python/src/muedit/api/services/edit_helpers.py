@@ -2,26 +2,17 @@
 
 from __future__ import annotations
 
-import contextlib
 from typing import Any
 
 import numpy as np
 
+from muedit.models import LoadedDecomposition
 
-def _expected_grid_count(loaded: dict[str, Any]) -> int:
-    count = 0
-    grid_names = loaded.get("grid_names")
-    if isinstance(grid_names, list):
-        count = max(count, len(grid_names))
-    muscles = loaded.get("muscle")
-    if isinstance(muscles, list):
-        count = max(count, len(muscles))
-    mu_grid_index = loaded.get("mu_grid_index")
-    if isinstance(mu_grid_index, list) and mu_grid_index:
-        # Non-numeric indices: fall back to the other counts.
-        with contextlib.suppress(TypeError, ValueError):
-            count = max(count, int(max(mu_grid_index)) + 1)
-    return max(1, count)
+
+def _expected_grid_count(decomp: LoadedDecomposition) -> int:
+    """Number of grids implied by the names, muscles and MU-to-grid indices."""
+    from_index = max(decomp.mu_grid_index) + 1 if decomp.mu_grid_index else 0
+    return max(1, len(decomp.grid_names), len(decomp.muscle), from_index)
 
 
 def _pad_grid_names(names: list[str], expected_count: int, fallback: list[str]) -> list[str]:

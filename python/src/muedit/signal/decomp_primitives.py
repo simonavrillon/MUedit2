@@ -6,12 +6,14 @@ import numpy as np
 from scipy.cluster.vq import ClusterError, kmeans2
 from scipy.signal import find_peaks
 
+from muedit.models import FloatArray, IntArray
+
 KMEANS_ITER: int = 10
 DECOMP_MIN_ISI_SEC: float = 0.02
 POSTPROC_MIN_ISI_SEC: float = 0.005
 
 
-def extend_signal(signal: np.ndarray, exfactor: int, samples_first: bool = False) -> np.ndarray:
+def extend_signal(signal: FloatArray, exfactor: int, samples_first: bool = False) -> FloatArray:
     """Delay-embedding channel extension used by convolutive source separation."""
     if samples_first:
         if exfactor <= 1:
@@ -35,17 +37,17 @@ def extend_signal(signal: np.ndarray, exfactor: int, samples_first: bool = False
     return esample
 
 
-def signed_square(x: np.ndarray) -> np.ndarray:
+def signed_square(x: FloatArray) -> FloatArray:
     """Signed-squared nonlinearity ``x * |x|`` used to build pulse trains."""
     return x * np.abs(x)
 
 
 def find_refractory_peaks(
-    signal: np.ndarray,
+    signal: FloatArray,
     fsamp: float,
     min_isi_sec: float = DECOMP_MIN_ISI_SEC,
     **kwargs: object,
-) -> np.ndarray:
+) -> IntArray:
     """Peak picking with a refractory-distance constraint."""
     distance = int(np.round(fsamp * min_isi_sec))
     peaks, _ = find_peaks(signal, distance=distance, **kwargs)
@@ -53,12 +55,12 @@ def find_refractory_peaks(
 
 
 def split_by_amplitude(
-    values: np.ndarray,
-    peaks: np.ndarray,
+    values: FloatArray,
+    peaks: IntArray,
     kmeans_iter: int = KMEANS_ITER,
     missing: str = "raise",
     seed: int = 0,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[IntArray, FloatArray, IntArray]:
     """Split peak amplitudes into low/high clusters and return the high ones."""
     try:
         centroids, labels = kmeans2(
@@ -74,7 +76,7 @@ def split_by_amplitude(
     return high_indices, centroids, labels
 
 
-def isi_cov(spikes: np.ndarray, fsamp: float, fallback: float = np.nan) -> float:
+def isi_cov(spikes: IntArray, fsamp: float, fallback: float = np.nan) -> float:
     """Coefficient of variation of inter-spike intervals."""
     spikes = np.asarray(spikes)
     if spikes.size < 2:

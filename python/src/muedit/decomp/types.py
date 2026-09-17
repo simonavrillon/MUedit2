@@ -3,19 +3,26 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal, TypeAlias
 
-import numpy as np
+from muedit.models import BoolArray, FloatArray, IntArray, SignalImport
 
 DEFAULT_NBEXTCHAN: int = 1000
 DEFAULT_PEEL_OFF_WIN_SEC: float = 0.025
-POSTPROCESS_MODES: dict[str, dict[str, bool]] = {
+
+ContrastFunc: TypeAlias = Literal["skew", "kurtosis", "logcosh"]
+"""FastICA contrast function applied in the fixed-point iteration."""
+
+PostprocessMode: TypeAlias = Literal["windowed", "full-trace", "adaptive"]
+"""Post-processing route; must match POSTPROCESS_MODES in the frontend."""
+
+POSTPROCESS_MODES: dict[PostprocessMode, dict[str, bool]] = {
     "windowed": {"use_adaptive": False, "full_trace": False},
     "full-trace": {"use_adaptive": False, "full_trace": True},
     "adaptive": {"use_adaptive": True, "full_trace": False},
 }
 
-DEFAULT_POSTPROCESS_MODE: str = "windowed"
+DEFAULT_POSTPROCESS_MODE: PostprocessMode = "windowed"
 
 
 @dataclass
@@ -31,7 +38,7 @@ class DecompositionParameters:
     duplicatesbgrids: bool = False
     nbextchan: int = DEFAULT_NBEXTCHAN
     edges_sec: float = 0.2
-    contrast_func: str = "skew"
+    contrast_func: ContrastFunc = "skew"
     sil_thr: float = 0.9
     cov_thr: float = 0.5
     peel_off_win: float = DEFAULT_PEEL_OFF_WIN_SEC
@@ -55,8 +62,8 @@ class LoadStepOutput:
 
     full_path: str
     filename: str
-    signal: dict[str, Any]
-    data: np.ndarray
+    signal: SignalImport
+    data: FloatArray
     fsamp: float
 
 
@@ -64,40 +71,40 @@ class LoadStepOutput:
 class PreprocessStepOutput:
     """Filtered signal and grid metadata ready for ICA decomposition."""
 
-    signal: dict[str, Any]
-    data: np.ndarray
+    signal: SignalImport
+    data: FloatArray
     fsamp: float
     grid_names: list[str]
-    coordinates: list[np.ndarray]
+    coordinates: list[FloatArray]
     ied: list[float]
-    discard_channels: list[np.ndarray]
+    discard_channels: list[IntArray]
     muscles: list[str]
     loader_meta: dict[str, Any]
     roi_list: list[tuple[int, int]]
     ngrid: int
     coordinates_plateau: list[int]
-    artifact_mask: np.ndarray | None = None
-    bad_channel_masks: list[np.ndarray] | None = None
+    artifact_mask: BoolArray | None = None
+    bad_channel_masks: list[BoolArray] | None = None
 
 
 @dataclass
 class DecomposeStepOutput:
     """ICA filters and per-window SIL scores produced by the decompose step."""
 
-    mu_filters: dict[int, np.ndarray]
-    whiten_mat: dict[int, np.ndarray]
+    mu_filters: dict[int, FloatArray]
+    whiten_mat: dict[int, FloatArray]
     coordinates_plateau: list[int]
     sil_by_window: dict[int, list[float]]
     mu_grid_index: list[int]
-    win_means: dict[int, np.ndarray]
+    win_means: dict[int, FloatArray]
 
 
 @dataclass
 class PostprocessStepOutput:
     """Deduplicated pulse trains and discharge times after post-processing."""
 
-    pulse_t: np.ndarray
-    distime: list[np.ndarray]
+    pulse_t: FloatArray
+    distime: list[IntArray]
     mu_grid_index: list[int]
     sil_by_window: dict[int, list[float]]
     sil: list[float]

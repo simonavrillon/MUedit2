@@ -5,10 +5,12 @@ from __future__ import annotations
 import numpy as np
 from scipy.signal import decimate
 
+from muedit.models import FloatArray
+
 PREVIEW_MOVING_AVG_MS: float = 25.0
 
 
-def raw_series_at_fs(series: np.ndarray, source_fs: float, target_fs: float) -> list[float]:
+def raw_series_at_fs(series: FloatArray, source_fs: float, target_fs: float) -> list[float]:
     """Downsample a raw series from source_fs to target_fs with an FIR anti-alias filter."""
     x = np.asarray(series, dtype=np.float32).reshape(-1)
     if x.size == 0:
@@ -22,7 +24,7 @@ def raw_series_at_fs(series: np.ndarray, source_fs: float, target_fs: float) -> 
     return y.astype(float).tolist()
 
 
-def moving_average_ms(series: np.ndarray, fsamp: float, window_ms: float) -> np.ndarray:
+def moving_average_ms(series: FloatArray, fsamp: float, window_ms: float) -> FloatArray:
     """Compute moving average with window size specified in milliseconds."""
     x = np.asarray(series, dtype=np.float32).reshape(-1)
     if x.size == 0 or fsamp <= 0 or window_ms <= 0:

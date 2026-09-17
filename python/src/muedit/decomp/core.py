@@ -20,6 +20,7 @@ from muedit.decomp.algorithm import (
     whiten_extended_signal,
 )
 from muedit.decomp.types import DecomposeStepOutput, DecompositionParameters, PreprocessStepOutput
+from muedit.models import FloatArray, IntArray
 from muedit.signal.decomp_primitives import DECOMP_MIN_ISI_SEC, isi_cov
 from muedit.signal.filters import demean
 
@@ -37,9 +38,9 @@ def decompose_step(
     total_windows = prep.ngrid * nwindows
 
     coordinates_plateau = list(prep.coordinates_plateau)
-    mu_filters: dict[int, np.ndarray] = {}
-    whiten_mat: dict[int, np.ndarray] = {}
-    win_means: dict[int, np.ndarray] = {}
+    mu_filters: dict[int, FloatArray] = {}
+    whiten_mat: dict[int, FloatArray] = {}
+    win_means: dict[int, FloatArray] = {}
 
     ch_idx = 0
     sil_by_window: dict[int, list[float]] = {}
@@ -84,7 +85,7 @@ def decompose_step(
                 coordinates_plateau[win_global * 2 + 1] -= edge_samples
 
             win_artifact = False
-            clean_cols: slice | np.ndarray = slice(None)
+            clean_cols: slice | IntArray = slice(None)
             win_clean = None
             if prep.artifact_mask is not None:
                 win_mask_raw = np.asarray(prep.artifact_mask[start:end], dtype=bool)
@@ -118,7 +119,7 @@ def decompose_step(
             consumed = np.zeros(x.shape[1] if use_activity_init else 0, dtype=bool)
 
             for j in range(params.niter):
-                w = rng.standard_normal(x.shape[0])
+                w: FloatArray = rng.standard_normal(int(x.shape[0]))
 
                 if use_activity_init:
                     act_ind = np.sum(x * x, axis=0)
@@ -162,7 +163,7 @@ def decompose_step(
                     if w_final_norm > 0:
                         w_final = w_final / w_final_norm
                     filter_matrix[:, j] = w_final
-                    w_basis = w_final - basis[:, :j] @ (basis[:, :j].T @ w_final)
+                    w_basis: FloatArray = w_final - basis[:, :j] @ (basis[:, :j].T @ w_final)
                     w_basis_norm = np.linalg.norm(w_basis)
                     w_basis = w_basis / w_basis_norm if w_basis_norm > 1e-12 else w
                     basis[:, j] = w_basis

@@ -11,6 +11,7 @@ from muedit.decomp.core import decompose_step
 from muedit.decomp.postprocess import export_step, postprocess_step
 from muedit.decomp.preprocess import load_step, preprocess_step
 from muedit.decomp.types import DecompositionParameters
+from muedit.models import SignalImport
 
 
 def run_decomposition(
@@ -28,7 +29,7 @@ def run_decomposition(
     bids_metadata: dict[str, Any] | None = None,
     file_label: str | None = None,
     include_full_preview: bool = False,
-    preloaded_signal: dict[str, Any] | None = None,
+    preloaded_signal: SignalImport | None = None,
     artifact_regions: list[tuple[int, int]] | None = None,
 ) -> tuple[dict[str, Any], str]:
     """Execute the full load → preprocess → decompose → postprocess pipeline."""

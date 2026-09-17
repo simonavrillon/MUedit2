@@ -9,6 +9,7 @@ from typing import Any
 import numpy as np
 
 from muedit.adapt_decomp.config import Config
+from muedit.models import BoolArray, FloatArray, IntArray
 from muedit.signal.decomp_primitives import (
     POSTPROC_MIN_ISI_SEC,
     extend_signal,
@@ -21,10 +22,10 @@ _DEFAULT_CONFIG = Config()
 
 
 def _compute_calibration_stats(
-    w_sig: np.ndarray,
-    mu_filters: np.ndarray,
+    w_sig: FloatArray,
+    mu_filters: FloatArray,
     fsamp: float,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[FloatArray, FloatArray]:
     """Project the whitened calibration signal through MU filters and derive spike centroids."""
     n_mu = mu_filters.shape[1]
     ipts_calib = w_sig.T @ mu_filters
@@ -48,16 +49,16 @@ def _compute_calibration_stats(
 
 
 def _run_one_pass(
-    emg_seg: np.ndarray,
-    emg_calib: np.ndarray,
-    whiten_mat: np.ndarray,
-    mu_filters: np.ndarray,
-    base_centr: np.ndarray,
-    spikes_centr: np.ndarray,
+    emg_seg: FloatArray,
+    emg_calib: FloatArray,
+    whiten_mat: FloatArray,
+    mu_filters: FloatArray,
+    base_centr: FloatArray,
+    spikes_centr: FloatArray,
     ex_factor: int,
     config: Config,
-    artifact_mask: np.ndarray | None = None,
-) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
+    artifact_mask: BoolArray | None = None,
+) -> tuple[FloatArray, IntArray, dict[str, Any]]:
     """Run adaptive decomposition on a single EMG segment and return ipts, spikes, and losses."""
     from muedit.adapt_decomp.adaptation import run_adaptive_decomposition
 
@@ -76,15 +77,15 @@ def _run_one_pass(
 
 
 def _run_adapt_decomp_bidirectional(
-    grid_data_g: np.ndarray,
-    win_data_g: np.ndarray,
-    whiten_mat: np.ndarray,
-    mu_filters: np.ndarray,
-    w_sig: np.ndarray,
+    grid_data_g: FloatArray,
+    win_data_g: FloatArray,
+    whiten_mat: FloatArray,
+    mu_filters: FloatArray,
+    w_sig: FloatArray,
     calib_start: int,
     config: Config,
-    artifact_mask: np.ndarray | None = None,
-) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
+    artifact_mask: BoolArray | None = None,
+) -> tuple[FloatArray, IntArray, dict[str, Any]]:
     """Run adaptive decomposition forward from calib_start and, if needed, backward over the pre-calibration segment."""
     base_centr, spikes_centr = _compute_calibration_stats(w_sig, mu_filters, config.fsamp)
 
@@ -193,16 +194,16 @@ def _run_adapt_decomp_bidirectional(
 
 
 def adaptive_batch_process(
-    mu_filters_by_window: dict[int, np.ndarray],
-    w_sig_by_window: dict[int, np.ndarray] | Callable[[int], np.ndarray],
-    win_data: dict[int, np.ndarray] | Callable[[int], np.ndarray],
-    whiten_mats: dict[int, np.ndarray],
-    grid_data: dict[int, np.ndarray],
+    mu_filters_by_window: dict[int, FloatArray],
+    w_sig_by_window: dict[int, FloatArray] | Callable[[int], FloatArray],
+    win_data: dict[int, FloatArray] | Callable[[int], FloatArray],
+    whiten_mats: dict[int, FloatArray],
+    grid_data: dict[int, FloatArray],
     coordinates: list[int],
     ltime: int,
     fsamp: float,
     nwindows_per_grid: int,
-    win_means_by_window: dict[int, np.ndarray] | None = None,
+    win_means_by_window: dict[int, FloatArray] | None = None,
     batch_ms: int = _DEFAULT_CONFIG.batch_ms,
     adapt_wh: bool = _DEFAULT_CONFIG.adapt_wh,
     adapt_sv: bool = _DEFAULT_CONFIG.adapt_sv,
@@ -212,8 +213,8 @@ def adaptive_batch_process(
     cov_alpha: float = _DEFAULT_CONFIG.cov_alpha,
     spike_prev_weight: int = _DEFAULT_CONFIG.spike_prev_weight,
     compute_loss: bool = _DEFAULT_CONFIG.compute_loss,
-    artifact_mask: np.ndarray | None = None,
-) -> tuple[np.ndarray, list[np.ndarray], dict[int, dict[str, Any]]]:
+    artifact_mask: BoolArray | None = None,
+) -> tuple[FloatArray, list[IntArray], dict[int, dict[str, Any]]]:
     """Apply adaptive post-processing across all decomposition windows and grids."""
     config = Config(
         fsamp=int(fsamp),
@@ -233,7 +234,7 @@ def adaptive_batch_process(
         return np.array([]), [], {}
 
     pulse_t = np.zeros((total_mus, ltime), dtype=np.float64)
-    distime: list[np.ndarray] = []
+    distime: list[IntArray] = []
     mu_nb = 0
     all_losses: dict[int, dict[str, Any]] = {}
 

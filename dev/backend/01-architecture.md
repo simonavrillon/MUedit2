@@ -77,7 +77,7 @@ __all__ = [
 | Package | Exports |
 |---|---|
 | `muedit.decomp` | `DecompositionParameters`, `run_decomposition` |
-| `muedit.io` | `LoaderFn`, `clone_signal`, `get_loader`, `load_signal`, `register_loader`, `supported_extensions` |
+| `muedit.io` | `LoaderFn`, `get_loader`, `load_signal`, `register_loader`, `supported_extensions` |
 | `muedit.signal` | `bandpass_signals`, `demean`, `format_hdemg_signal`, `notch_signals`, `run_auto_qc`, `QCPipelineResult` |
 | `muedit.editing` | `FilterUpdateResult`, `SpikeTimes`, `add_artifact_in_roi`, `add_spikes_in_roi`, `delete_artifacts_in_roi`, `delete_high_discharge_rate_spikes_in_roi`, `delete_spikes_in_roi`, `remove_discharge_rate_outliers`, `update_motor_unit_filter_window` |
 | `muedit.adapt_decomp` | `AdaptiveDecomp`, `Config`, `run_adaptive_decomposition` |
@@ -89,23 +89,55 @@ __all__ = [
 
 All models are `@dataclass`.
 
+### Array types
+Named NumPy array types shared by the signal-processing code. They fix the
+element type only; shapes are documented by parameter names and docstrings.
+
+| Alias | Definition | Used for |
+|---|---|---|
+| `FloatArray` | `NDArray[np.floating[Any]]` | EMG samples, pulse trains, filters, whitening matrices, coordinates |
+| `IntArray` | `NDArray[np.integer[Any]]` | Discharge times, peaks, spike rasters, 0/1 discard flags |
+| `BoolArray` | `NDArray[np.bool_]` | Artifact masks, bad-channel masks |
+
 ### `SignalImport`
-Raw EMG signal + metadata loaded from a recording file.
+Raw EMG signal + metadata loaded from a recording file. `load_signal()` returns
+it, and it is passed as-is through the pipeline and the upload cache.
 
 | Field | Type | Default |
 |---|---|---|
-| `data` | `np.ndarray` | (required) |
+| `data` | `FloatArray` | (required) |
 | `fsamp` | `float` | (required) |
 | `gridname` | `list[str]` | `[]` |
 | `muscle` | `list[str]` | `[]` |
-| `auxiliary` | `np.ndarray` | `np.zeros((0, 0))` |
+| `auxiliary` | `FloatArray` | `np.zeros((0, 0))` |
 | `auxiliaryname` | `list[str]` | `[]` |
 | `metadata` | `dict[str, Any]` | `{}` |
 
-Methods: `from_mapping(payload)`, `clone()`, `to_dict()`
+Methods: `from_mapping(payload)` (normalizes loader dicts), `clone()`, `to_dict()`, `nbytes` (property)
+
+### `EditSignalContext`
+Raw EMG embedded in a decomposition file (`.mat`/`.npz`), built by
+`load_decomposition_signal_context()` and held in the API edit cache for
+filter updates and BIDS export.
+
+| Field | Type | Default |
+|---|---|---|
+| `data` | `FloatArray` | (required); `(0, 0)` when the file holds only a mask |
+| `fsamp` | `float` | (required); `0.0` when unknown |
+| `grid_names` | `list[str]` | `[]` |
+| `emgmask` | `list[IntArray]` | `[]` (per grid, 1 = discarded) |
+| `coordinates` | `list[FloatArray]` | `[]` |
+| `ied` | `list[float] \| None` | `None` |
+| `aux_data` | `FloatArray \| None` | `None` |
+| `aux_names` | `list[str]` | `[]` |
+| `artifact_mask` | `BoolArray \| None` | `None` |
+| `loader_meta` | `dict[str, Any]` | `{}` (the `LOADER_BIDS_META_KEYS` the file recorded) |
+
+Methods: `compact_copy()` (independent copy, EMG/aux as float32), `nbytes` (property)
 
 ### `LoadedDecomposition`
-Decomposition state loaded from `.npz`/`.mat` for editing.
+Decomposition state loaded from `.npz`/`.mat` for editing. Returned by
+`load_decomposition_file()`; the editing service wraps it in `EditLoadResult`.
 
 | Field | Type | Default |
 |---|---|---|
@@ -195,7 +227,7 @@ Methods: `to_dict()`
 
 | Component | Responsibility |
 |---|---|
-| `factory.py` | Loader registry, dispatch by extension, `load_signal()`, `clone_signal()` |
+| `factory.py` | Loader registry, dispatch by extension, `load_signal()` |
 | `loaders.py` | Thin re-export of all 5 format loaders |
 | `bids.py` | BIDS EMG export (EDF/BDF + sidecars + derivatives) |
 | `_bids_reader.py` | BIDS EMG reading via pyedflib + channels.tsv |

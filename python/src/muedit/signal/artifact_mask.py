@@ -9,6 +9,8 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.ndimage import binary_closing, binary_dilation, maximum_filter1d, median_filter
 
+from muedit.models import BoolArray, FloatArray, IntArray
+
 logger = logging.getLogger(__name__)
 
 _MAD_TO_STD: float = 1.4826
@@ -31,11 +33,11 @@ class ArtifactMaskConfig:
 
 
 def _baselines(
-    x: np.ndarray,
+    x: FloatArray,
     fsamp: float,
     cfg: ArtifactMaskConfig,
-    cols: np.ndarray | None,
-) -> Iterator[tuple[np.ndarray, np.ndarray]]:
+    cols: IntArray | None,
+) -> Iterator[tuple[FloatArray, FloatArray]]:
     """Yield ``(median, sigma)`` for each baseline, broadcastable to ``x[..., cols]``."""
     med = np.median(x, axis=-1, keepdims=True)
     sigma = _MAD_TO_STD * np.median(np.abs(x - med), axis=-1, keepdims=True)
@@ -56,13 +58,13 @@ def _baselines(
 
 
 def _exceeds(
-    x: np.ndarray,
+    x: FloatArray,
     fsamp: float,
     cfg: ArtifactMaskConfig,
     z_thr: float,
     amp_ratio: float | None,
-    cols: np.ndarray | None = None,
-) -> np.ndarray:
+    cols: IntArray | None = None,
+) -> BoolArray:
     """Flag ``x[..., cols]`` values anomalous against every baseline of ``x``."""
     xs = x if cols is None else x[..., cols]
     out = np.ones(xs.shape, dtype=bool)
@@ -75,10 +77,10 @@ def _exceeds(
 
 
 def _detect_artifact_mask(
-    data: np.ndarray,
+    data: FloatArray,
     fsamp: float,
     config: ArtifactMaskConfig | None = None,
-) -> np.ndarray:
+) -> BoolArray:
     """Detect a boolean artifact mask for one grid's filtered signal."""
     cfg = config or ArtifactMaskConfig()
     n_samples = data.shape[1] if data.ndim == 2 else 0
@@ -119,14 +121,14 @@ def _detect_artifact_mask(
 
 
 def detect_artifact_masks(
-    data: np.ndarray,
+    data: FloatArray,
     fsamp: float,
     grid_channel_counts: list[int],
     config: ArtifactMaskConfig | None = None,
-) -> tuple[list[np.ndarray], np.ndarray]:
+) -> tuple[list[BoolArray], BoolArray]:
     """Detect artifact masks per grid and return per-grid + global masks."""
     n_samples = data.shape[1]
-    per_grid_masks: list[np.ndarray] = []
+    per_grid_masks: list[BoolArray] = []
     global_mask = np.zeros(n_samples, dtype=bool)
 
     ch_idx = 0

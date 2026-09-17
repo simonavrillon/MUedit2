@@ -29,6 +29,7 @@ from muedit.decomp.decomposition_file import (
 )
 from muedit.decomp.preprocess import build_manual_artifact_mask, preprocess_step
 from muedit.decomp.types import DecompositionParameters, LoadStepOutput, PreprocessStepOutput
+from muedit.models import SignalImport
 from muedit.signal.filters import bandpass_signals
 from muedit.signal.qc_pipeline import QCPipelineResult
 
@@ -48,15 +49,13 @@ def _raw_emg(n_grids: int = 1, seed: int = 0) -> np.ndarray:
 
 
 def _loaded(data: np.ndarray, grids: list[str]) -> LoadStepOutput:
-    signal = {
-        "data": data,
-        "fsamp": FSAMP,
-        "gridname": grids,
-        "muscle": ["ta"] * len(grids),
-        "auxiliary": np.zeros((0, data.shape[1])),
-        "auxiliaryname": [],
-        "metadata": {},
-    }
+    signal = SignalImport(
+        data=data,
+        fsamp=FSAMP,
+        gridname=grids,
+        muscle=["ta"] * len(grids),
+        auxiliary=np.zeros((0, data.shape[1])),
+    )
     return LoadStepOutput(
         full_path="synthetic.mat",
         filename="synthetic.mat",
@@ -278,8 +277,8 @@ class TestNpzArtifactMask:
         )
         ctx = load_decomposition_signal_context(str(path))
         assert ctx is not None
-        np.testing.assert_array_equal(ctx["data"], emg)
-        assert ctx["fsamp"] == FSAMP
-        assert ctx["grid_names"] == [GRID]
-        np.testing.assert_array_equal(ctx["artifact_mask"], mask)
-        assert len(ctx["emgmask"]) == 1
+        np.testing.assert_array_equal(ctx.data, emg)
+        assert ctx.fsamp == FSAMP
+        assert ctx.grid_names == [GRID]
+        np.testing.assert_array_equal(ctx.artifact_mask, mask)
+        assert len(ctx.emgmask) == 1

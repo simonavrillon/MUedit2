@@ -13,6 +13,7 @@ from muedit.decomp.algorithm import (
     whiten_extended_signal,
 )
 from muedit.decomp.types import DEFAULT_NBEXTCHAN, DEFAULT_PEEL_OFF_WIN_SEC
+from muedit.models import BoolArray, FloatArray, IntArray
 from muedit.signal.decomp_primitives import (
     POSTPROC_MIN_ISI_SEC,
     find_refractory_peaks,
@@ -22,11 +23,11 @@ from muedit.signal.decomp_primitives import (
 from muedit.signal.filters import bandpass_signals
 
 SpikeTimes: TypeAlias = list[int]
-FilterUpdateResult: TypeAlias = tuple[np.ndarray | None, SpikeTimes]
+FilterUpdateResult: TypeAlias = tuple[FloatArray | None, SpikeTimes]
 
 
 def _recompute_spikes_in_window(
-    emg: np.ndarray,
+    emg: FloatArray,
     spike_times: SpikeTimes,
     fsamp: float,
     start: int,
@@ -38,7 +39,7 @@ def _recompute_spikes_in_window(
     use_peeloff: bool = False,
     artifact_times: SpikeTimes | None = None,
     lock_spikes: bool = False,
-    artifact_mask: np.ndarray | None = None,
+    artifact_mask: BoolArray | None = None,
 ) -> FilterUpdateResult:
     """Recompute motor-unit pulse train and spikes within a visible time window."""
     if emg.size == 0 or start >= end:
@@ -66,7 +67,7 @@ def _recompute_spikes_in_window(
     ex_factor = max(1, ex_factor)
     e_sig = extend_signal(window_emg, ex_factor)
 
-    win_artifact_mask: np.ndarray | None = None
+    win_artifact_mask: BoolArray | None = None
     if artifact_mask is not None:
         wm = artifact_mask[start:end]
         if wm.size == (end - start) and wm.any():
@@ -155,8 +156,8 @@ def _recompute_spikes_in_window(
 
 
 def update_motor_unit_filter_window(
-    emg: np.ndarray,
-    emg_mask: np.ndarray,
+    emg: FloatArray,
+    emg_mask: IntArray,
     spike_times: SpikeTimes,
     fsamp: float,
     start: int,
@@ -168,7 +169,7 @@ def update_motor_unit_filter_window(
     use_peeloff: bool = False,
     artifact_times: SpikeTimes | None = None,
     lock_spikes: bool = False,
-    artifact_mask: np.ndarray | None = None,
+    artifact_mask: BoolArray | None = None,
 ) -> FilterUpdateResult:
     """Update a motor-unit pulse train and spikes inside a time window."""
     emg_sel = emg[emg_mask == 0, :] if emg_mask.size else emg
@@ -191,7 +192,7 @@ def update_motor_unit_filter_window(
 
 
 def add_spikes_in_roi(
-    pulse: np.ndarray,
+    pulse: FloatArray,
     spike_times: SpikeTimes,
     fsamp: float,
     x_start: int,
@@ -210,7 +211,7 @@ def add_spikes_in_roi(
 
 
 def add_artifact_in_roi(
-    pulse: np.ndarray,
+    pulse: FloatArray,
     artifact_times: SpikeTimes,
     fsamp: float,
     x_start: int,
@@ -229,7 +230,7 @@ def add_artifact_in_roi(
 
 
 def delete_spikes_in_roi(
-    pulse: np.ndarray,
+    pulse: FloatArray,
     spike_times: SpikeTimes,
     x_start: int,
     x_end: int,
@@ -254,7 +255,7 @@ def delete_spikes_in_roi(
 
 
 def delete_artifacts_in_roi(
-    pulse: np.ndarray,
+    pulse: FloatArray,
     artifact_times: SpikeTimes,
     x_start: int,
     x_end: int,
@@ -279,7 +280,7 @@ def delete_artifacts_in_roi(
 
 
 def delete_high_discharge_rate_spikes_in_roi(
-    pulse: np.ndarray,
+    pulse: FloatArray,
     spike_times: SpikeTimes,
     fsamp: float,
     x_start: int,
@@ -312,7 +313,7 @@ def delete_high_discharge_rate_spikes_in_roi(
 
 
 def remove_discharge_rate_outliers(
-    pulse: np.ndarray,
+    pulse: FloatArray,
     spike_times: SpikeTimes,
     fsamp: float,
     z_factor: float = 3.0,

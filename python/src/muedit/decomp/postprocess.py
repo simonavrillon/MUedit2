@@ -27,26 +27,26 @@ from muedit.decomp.types import (
     PostprocessStepOutput,
     PreprocessStepOutput,
 )
-from muedit.models import DecompositionExport, DecompositionSignalExport
+from muedit.models import DecompositionExport, DecompositionSignalExport, FloatArray, IntArray
 from muedit.signal.filters import demean
 
 logger = logging.getLogger(__name__)
 
 
 def _remove_duplicates_by_grid(
-    pulse_t: np.ndarray,
-    distime: list[np.ndarray],
+    pulse_t: FloatArray,
+    distime: list[IntArray],
     mu_grid_index: list[int],
     ngrid: int,
     params: DecompositionParameters,
     fsamp: float,
-) -> tuple[np.ndarray, list[np.ndarray], list[int], list[int]]:
+) -> tuple[FloatArray, list[IntArray], list[int], list[int]]:
     """Remove duplicate motor units within each grid and optionally across grids."""
     if len(distime) == 0:
         return np.array([]), [], [], []
 
     filtered_pulses = []
-    filtered_distime: list[np.ndarray] = []
+    filtered_distime: list[IntArray] = []
     filtered_grid_index: list[int] = []
     global_indices: list[int] = []
     logger.info("Removing duplicates...")
@@ -101,8 +101,8 @@ def _reconstruct_window_signal(
     prep: PreprocessStepOutput,
     params: DecompositionParameters,
     win_global: int,
-    whiten_mat: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray]:
+    whiten_mat: FloatArray,
+) -> tuple[FloatArray, FloatArray]:
     """Recompute ``(win_data, w_sig)`` for one window from ``prep.data`` + ``whiten_mat``."""
     nwindows = len(prep.roi_list)
     grid_idx = win_global // max(1, nwindows)
@@ -139,11 +139,11 @@ def _make_window_reconstructors(
     prep: PreprocessStepOutput,
     params: DecompositionParameters,
     decomposed: DecomposeStepOutput,
-) -> tuple[Callable[[int], np.ndarray], Callable[[int], np.ndarray]]:
+) -> tuple[Callable[[int], FloatArray], Callable[[int], FloatArray]]:
     """Return ``(get_win_data, get_w_sig)`` callables with a one-window cache."""
-    cache: dict[int, tuple[np.ndarray, np.ndarray]] = {}
+    cache: dict[int, tuple[FloatArray, FloatArray]] = {}
 
-    def _get(nwin: int) -> tuple[np.ndarray, np.ndarray]:
+    def _get(nwin: int) -> tuple[FloatArray, FloatArray]:
         if nwin not in cache:
             cache.clear()
             cache[nwin] = _reconstruct_window_signal(
@@ -151,10 +151,10 @@ def _make_window_reconstructors(
             )
         return cache[nwin]
 
-    def get_win_data(nwin: int) -> np.ndarray:
+    def get_win_data(nwin: int) -> FloatArray:
         return _get(nwin)[0]
 
-    def get_w_sig(nwin: int) -> np.ndarray:
+    def get_w_sig(nwin: int) -> FloatArray:
         return _get(nwin)[1]
 
     return get_win_data, get_w_sig
@@ -176,7 +176,7 @@ def postprocess_step(
     get_win_data, get_w_sig = _make_window_reconstructors(prep, params, decomposed)
 
     if params.use_adaptive:
-        grid_data: dict[int, np.ndarray] = {}
+        grid_data: dict[int, FloatArray] = {}
         ch_idx_g = 0
         for i in range(prep.ngrid):
             mask = np.array(prep.discard_channels[i]).astype(int)
@@ -208,11 +208,11 @@ def postprocess_step(
             artifact_mask=prep.artifact_mask,
         )
     else:
-        build_full_extended: Callable[[int], np.ndarray] | None = None
+        build_full_extended: Callable[[int], FloatArray] | None = None
         window_to_grid: dict[int, int] | None = None
         if params.full_trace:
             ch_idx_g = 0
-            keep_idx_by_grid: dict[int, np.ndarray] = {}
+            keep_idx_by_grid: dict[int, IntArray] = {}
             ch_offset_by_grid: dict[int, int] = {}
             ex_factor_by_grid: dict[int, int] = {}
             for i in range(prep.ngrid):
@@ -225,7 +225,7 @@ def postprocess_step(
                 ch_offset_by_grid[i] = ch_idx_g
                 ch_idx_g += n_ch_g
 
-            def _build_full_extended(grid_idx: int) -> np.ndarray:
+            def _build_full_extended(grid_idx: int) -> FloatArray:
                 grid_raw = prep.data[ch_offset_by_grid[grid_idx] + keep_idx_by_grid[grid_idx], :]
                 return extend_signal(grid_raw, ex_factor_by_grid[grid_idx])
 

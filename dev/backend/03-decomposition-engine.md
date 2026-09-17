@@ -34,7 +34,7 @@ def run_decomposition(
     bids_metadata: dict[str, Any] | None = None,
     file_label: str | None = None,
     include_full_preview: bool = False,
-    preloaded_signal: dict[str, Any] | None = None,
+    preloaded_signal: SignalImport | None = None,
     artifact_regions: list[tuple[int, int]] | None = None,
 ) -> tuple[dict[str, Any], str]
 ```
@@ -92,15 +92,15 @@ POSTPROCESS_MODES = {
 |---|---|
 | `full_path` | `str` |
 | `filename` | `str` |
-| `signal` | `dict[str, Any]` |
-| `data` | `np.ndarray` |
+| `signal` | `SignalImport` |
+| `data` | `FloatArray` |
 | `fsamp` | `float` |
 
 ### `PreprocessStepOutput`
 | Field | Type |
 |---|---|
-| `signal` | `dict[str, Any]` |
-| `data` | `np.ndarray` |
+| `signal` | `SignalImport` |
+| `data` | `FloatArray` |
 | `fsamp` | `float` |
 | `grid_names` | `list[str]` |
 | `coordinates` | `list[np.ndarray]` |
@@ -141,7 +141,7 @@ POSTPROCESS_MODES = {
 ```python
 def load_step(filepath, file_label, preloaded_signal, progress_cb) -> LoadStepOutput
 ```
-Loads input signal from disk via `load_signal(filepath)` or clones a preloaded signal dict via `clone_signal()`.
+Loads input signal from disk via `load_signal(filepath)` or copies a preloaded `SignalImport` via `.clone()`.
 
 ---
 
@@ -344,12 +344,12 @@ Owns the app `.npz` schema: `save_decomposition_npz(out_path, pulse_trains, dist
 ### Main entry points
 
 ```python
-def load_decomposition_file(filepath: str) -> dict[str, Any]
+def load_decomposition_file(filepath: str) -> LoadedDecomposition
 ```
-Loads `.npz` or `.mat` decomposition file into API-ready normalized output via `LoadedDecomposition.to_dict()`. Handles 1-based MATLAB discharge-time convention (shifts by -1).
+Loads a `.npz` or `.mat` decomposition file into a normalized `LoadedDecomposition`. Handles 1-based MATLAB discharge-time convention (shifts by -1).
 
 ```python
-def load_decomposition_signal_context(filepath: str) -> dict[str, Any] | None
+def load_decomposition_signal_context(filepath: str) -> EditSignalContext | None
 ```
 Best-effort extraction of raw EMG context embedded in decomposition files. Returns dict with `data`, `fsamp`, `grid_names`, `emgmask`, `artifact_mask`, `coordinates`, `ied`, `aux_data`, `aux_names`, and BIDS metadata keys.
 

@@ -86,20 +86,14 @@ def get_loader(filepath: str | Path) -> LoaderFn:
     return loader
 
 
-def load_signal(filepath: str) -> dict[str, Any]:
-    """Load a raw signal file and normalize it to the internal mapping shape."""
+def load_signal(filepath: str) -> SignalImport:
+    """Load a raw signal file with the loader registered for its extension."""
     loader_fn = get_loader(filepath)
-    return _as_signal_import(loader_fn(str(filepath))).to_dict()
-
-
-def clone_signal(signal: dict[str, Any]) -> dict[str, Any]:
-    """Deep-copy a signal mapping through validated model serialization."""
-    return SignalImport.from_mapping(signal).clone().to_dict()
+    return _as_signal_import(loader_fn(str(filepath)))
 
 
 __all__ = [
     "LoaderFn",
-    "clone_signal",
     "get_loader",
     "load_signal",
     "register_loader",

@@ -24,6 +24,8 @@ import numpy as np
 import pytest
 import scipy.io
 
+from muedit.models import SignalImport
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = REPO_ROOT / "data"
 
@@ -98,11 +100,11 @@ def novecento_otb4_file() -> Path:
 
 
 @pytest.fixture(scope="session")
-def novecento_emg(novecento_otb4_file: Path) -> dict[str, Any]:
-    """Loaded Novecento signal dict — 384 channels (6x HD08MM1305), 2000 Hz.
+def novecento_emg(novecento_otb4_file: Path) -> SignalImport:
+    """Loaded Novecento signal — 384 channels (6x HD08MM1305), 2000 Hz.
 
     Session-scoped so the 215 MB OTB4 archive is parsed only once across the
-    preprocessing tests.  Returns the full ``load_signal`` dict so individual
+    preprocessing tests.  Returns the full ``load_signal`` result so individual
     tests can slice grids, channels, or sample windows as needed.
     """
     from muedit.io import load_signal
@@ -137,9 +139,9 @@ def real_emg_mat_file(decomp_mat_file: Path, tmp_path_factory: pytest.TempPathFa
     ctx = load_decomposition_signal_context(str(decomp_mat_file))
     assert ctx is not None, "decomp mat did not yield an embedded signal context"
 
-    fsamp = float(ctx["fsamp"])
+    fsamp = ctx.fsamp
     n_samples = int(round(_REAL_EMG_SECONDS * fsamp))
-    data = np.asarray(ctx["data"])[:64, :n_samples]  # grid 0 (HD08MM1305)
+    data = ctx.data[:64, :n_samples]  # grid 0 (HD08MM1305)
 
     signal = {
         "data": data,

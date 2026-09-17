@@ -8,6 +8,7 @@ from dataclasses import replace as dc_replace
 
 import numpy as np
 
+from muedit.models import BoolArray, FloatArray
 from muedit.signal.artifact_mask import (
     ArtifactMaskConfig,
     detect_artifact_masks,
@@ -24,15 +25,15 @@ logger = logging.getLogger(__name__)
 class QCPipelineResult:
     """Output of :func:`run_auto_qc`."""
 
-    artifact_mask: np.ndarray
-    bad_channel_masks: list[np.ndarray]
+    artifact_mask: BoolArray
+    bad_channel_masks: list[BoolArray]
 
 
 def run_auto_qc(
-    data: np.ndarray,
+    data: FloatArray,
     fsamp: float,
     grid_channel_counts: list[int],
-    grid_coordinates: list[np.ndarray] | None = None,
+    grid_coordinates: list[FloatArray] | None = None,
     artifact_config: ArtifactMaskConfig | None = None,
     channel_qc_config: ChannelQCConfig | None = None,
 ) -> QCPipelineResult:
@@ -108,15 +109,15 @@ def run_auto_qc(
 
 
 def _select_kept_channels(
-    data: np.ndarray,
+    data: FloatArray,
     grid_channel_counts: list[int],
-    bad_channel_masks: list[np.ndarray],
-    grid_coordinates: list[np.ndarray] | None,
-) -> tuple[np.ndarray, list[int], list[np.ndarray] | None]:
+    bad_channel_masks: list[BoolArray],
+    grid_coordinates: list[FloatArray] | None,
+) -> tuple[FloatArray, list[int], list[FloatArray] | None]:
     """Build a data array containing only kept channels per grid."""
-    kept_slices: list[np.ndarray] = []
+    kept_slices: list[FloatArray] = []
     kept_counts: list[int] = []
-    kept_coords: list[np.ndarray] | None = [] if grid_coordinates is not None else None
+    kept_coords: list[FloatArray] | None = [] if grid_coordinates is not None else None
 
     ch_idx = 0
     for grid_idx, (n_ch, bad) in enumerate(
@@ -136,9 +137,9 @@ def _select_kept_channels(
 
 
 def _exclude_samples(
-    data: np.ndarray,
-    exclude_mask: np.ndarray,
-) -> np.ndarray:
+    data: FloatArray,
+    exclude_mask: BoolArray,
+) -> FloatArray:
     """Drop excluded columns so channel QC only sees valid samples."""
     if not exclude_mask.any() or exclude_mask.all():
         return data

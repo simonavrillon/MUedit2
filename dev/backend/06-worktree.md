@@ -90,7 +90,7 @@ Use this to trace what the user can reach.
 | `remove_outliers(payload)` | App-internal | `POST /edit/remove-outliers` route |
 | `remove_duplicates_service(payload)` | App-internal | `POST /edit/remove-duplicates` route |
 | `flag_mu(payload)` | App-internal | `POST /edit/flag-mu` route |
-| `_init_loaded_decomp(filepath, file_label)` | App-internal | Called by load functions |
+| `EditLoadResult` | App-internal | Built by `load_decomposition_from_path` |
 | `_encode_edit_load_f32(loaded)` | App-internal | Called by binary load functions |
 | `_wrap_edit_load_binary(loaded)` | App-internal | Called by binary load functions |
 | `_dedup(...)` | App-internal | Called by `save_edits`/`remove_duplicates_service` |
@@ -113,7 +113,7 @@ Use this to trace what the user can reach.
 
 | Symbol | Category | Reachable via |
 |---|---|---|
-| `_expected_grid_count(loaded)` | App-internal | Called by `save_edits` |
+| `_expected_grid_count(decomp)` | App-internal | Called by `load_decomposition_from_path` |
 | `_pad_grid_names(names, expected, fallback)` | App-internal | Called by `save_edits` |
 | `_normalize_muscle_names(raw)` | App-internal | Called by `save_edits` |
 | `_normalize_flagged(raw, nmu)` | App-internal | Called by `save_edits` |
@@ -167,11 +167,8 @@ Use this to trace what the user can reach.
 | `cache._store_edit_signal_context()` | App-internal | Called by editing service |
 | `cache._get_edit_signal_context()` | App-internal | Called by editing service |
 | `cache._get_edit_signal_context_by_label()` | App-internal | Called by editing service |
-| `cache._clone_signal()` | App-internal | Called by cache store functions |
 | `cache._purge_expired_caches_locked()` | App-internal | Called by cache operations |
-| `cache._array_nbytes()` | App-internal | Called by eviction |
-| `cache._signal_nbytes()` | App-internal | Called by eviction |
-| `cache._qc_nbytes()` | App-internal | Called by eviction |
+| `cache.QCSignal` | App-internal | Returned by `_get_qc_signal`; used by preview service |
 | `cache._evict_to_budget_locked()` | App-internal | Called by cache store functions |
 
 ---
@@ -219,7 +216,6 @@ Use this to trace what the user can reach.
 | Symbol | Category | Reachable via |
 |---|---|---|
 | `load_signal()` | User-exposed | `muedit.__init__`, `muedit.io.__init__`, pipeline |
-| `clone_signal()` | User-exposed | `muedit.io.__init__`, pipeline |
 | `get_loader()` | User-exposed | `muedit.io.__init__` |
 | `register_loader()` | Extension API | `muedit.__init__`, `muedit.io.__init__` (no internal callers) |
 | `supported_extensions()` | User-exposed | `muedit.io.__init__` |
@@ -312,7 +308,9 @@ Use this to trace what the user can reach.
 
 | Symbol | Category | Reachable via |
 |---|---|---|
-| `SignalImport` | User-exposed | Used by `io.factory`, `cache`, `io.loaders` |
+| `SignalImport` | User-exposed | Returned by `load_signal`; used by `decomp`, `cache`, API services |
+| `FloatArray`, `IntArray`, `BoolArray` | App-internal | Array annotations in `signal`, `decomp`, `editing` |
+| `EditSignalContext` | App-internal | Built by `decomp.decomposition_file`; cached and read by the editing service |
 | `LoadedDecomposition` | App-internal | Used by `decomp.decomposition_file` |
 | `DecompositionSignalExport` | App-internal | Used by `decomp.postprocess.export_step` |
 | `DecompositionExport` | App-internal | Used by `decomp.postprocess.export_step` |

@@ -15,6 +15,7 @@ import numpy as np
 import pytest
 
 from muedit.api import cache
+from muedit.models import EditSignalContext, SignalImport
 
 
 class FakeClock:
@@ -50,13 +51,13 @@ def clock(monkeypatch: pytest.MonkeyPatch) -> FakeClock:
     return fake
 
 
-def _signal(n_channels: int = 4, n_samples: int = 100, fill: float = 1.0) -> dict:
-    return {
-        "data": np.full((n_channels, n_samples), fill, dtype=np.float64),
-        "fsamp": 2000.0,
-        "gridname": ["GR08MM1305"],
-        "muscle": ["TA"],
-    }
+def _signal(n_channels: int = 4, n_samples: int = 100, fill: float = 1.0) -> SignalImport:
+    return SignalImport(
+        data=np.full((n_channels, n_samples), fill, dtype=np.float64),
+        fsamp=2000.0,
+        gridname=["GR08MM1305"],
+        muscle=["TA"],
+    )
 
 
 def _store(clock: FakeClock, **kwargs: Any) -> str:
@@ -73,14 +74,14 @@ class TestUploadSignal:
     def test_round_trip_returns_independent_copy(self, clock: FakeClock) -> None:
         signal = _signal()
         token = cache._store_upload_signal(signal, source_path="/data/rec.otb+")
-        signal["data"][:] = 0  # caller mutation must not reach the cache
+        signal.data[:] = 0  # caller mutation must not reach the cache
         first = cache._get_upload_signal(token)
         assert first is not None
-        np.testing.assert_array_equal(first["data"], np.ones((4, 100)))
-        first["data"][:] = 0
+        np.testing.assert_array_equal(first.data, np.ones((4, 100)))
+        first.data[:] = 0
         again = cache._get_upload_signal(token)
         assert again is not None
-        assert again["data"].min() == 1
+        assert again.data.min() == 1
         assert cache._get_upload_source_path(token) == "/data/rec.otb+"
 
     @pytest.mark.parametrize("token", [None, "", "unknown"])
@@ -129,7 +130,7 @@ class TestQcSignal:
             data=np.ones((6, n_samples)),
             fsamp=2000.0,
             grid_names=["A", "B"],
-            discard_channels=[np.zeros(4), np.zeros(2)],
+            discard_channels=[np.zeros(4, dtype=int), np.zeros(2, dtype=int)],
         )
 
     def test_round_trip(self, clock: FakeClock) -> None:
@@ -137,9 +138,9 @@ class TestQcSignal:
         self._attach(token)
         qc = cache._get_qc_signal(token)
         assert qc is not None
-        assert qc["data"].dtype == np.float32
-        assert qc["channel_offsets"] == [0, 4]
-        assert qc["grid_names"] == ["A", "B"]
+        assert qc.data.dtype == np.float32
+        assert qc.channel_offsets == [0, 4]
+        assert qc.grid_names == ["A", "B"]
 
     def test_data_view_is_read_only(self, clock: FakeClock) -> None:
         token = _store(clock)
@@ -147,7 +148,7 @@ class TestQcSignal:
         qc = cache._get_qc_signal(token)
         assert qc is not None
         with pytest.raises(ValueError):
-            qc["data"][0, 0] = 5
+            qc.data[0, 0] = 5
 
     def test_without_qc_returns_none(self, clock: FakeClock) -> None:
         token = _store(clock)
@@ -176,18 +177,18 @@ class TestDecompPreviewBinary:
 # ── edit signal context cache + label index ──────────────────────────────────
 
 
-def _context(fill: float = 1.0) -> dict:
-    return {
-        "data": np.full((4, 50), fill, dtype=np.float64),
-        "fsamp": 2048,
-        "grid_names": ["G1"],
-        "emgmask": [np.zeros(4)],
-        "coordinates": [np.zeros((4, 2))],
-        "aux_data": np.ones((1, 50)),
-        "aux_names": ["Force"],
-        "artifact_mask": np.zeros(50, dtype=bool),
-        "manufacturer": "OTBioelettronica",
-    }
+def _context(fill: float = 1.0) -> EditSignalContext:
+    return EditSignalContext(
+        data=np.full((4, 50), fill, dtype=np.float64),
+        fsamp=2048.0,
+        grid_names=["G1"],
+        emgmask=[np.zeros(4, dtype=int)],
+        coordinates=[np.zeros((4, 2))],
+        aux_data=np.ones((1, 50)),
+        aux_names=["Force"],
+        artifact_mask=np.zeros(50, dtype=bool),
+        loader_meta={"manufacturer": "OTBioelettronica"},
+    )
 
 
 class TestEditSignalContext:
@@ -197,22 +198,21 @@ class TestEditSignalContext:
         by_label = cache._get_edit_signal_context_by_label(" rec_decomp.npz ")
         for ctx in (by_token, by_label):
             assert ctx is not None
-            assert ctx["data"].dtype == np.float32
-            assert ctx["fsamp"] == 2048.0
-            assert ctx["aux_names"] == ["Force"]
-            assert ctx["manufacturer"] == "OTBioelettronica"
-            assert set(cache.LOADER_BIDS_META_KEYS) <= set(ctx)
+            assert ctx.data.dtype == np.float32
+            assert ctx.fsamp == 2048.0
+            assert ctx.aux_names == ["Force"]
+            assert ctx.loader_meta == {"manufacturer": "OTBioelettronica"}
 
     def test_returned_arrays_are_copies(self, clock: FakeClock) -> None:
         token = cache._store_edit_signal_context(_context())
         ctx = cache._get_edit_signal_context(token)
         assert ctx is not None
-        ctx["data"][:] = 0
-        ctx["emgmask"][0][:] = 1
+        ctx.data[:] = 0
+        ctx.emgmask[0][:] = 1
         again = cache._get_edit_signal_context(token)
         assert again is not None
-        assert again["data"].min() == 1
-        assert again["emgmask"][0].sum() == 0
+        assert again.data.min() == 1
+        assert again.emgmask[0].sum() == 0
 
     def test_keeps_one_context_and_prunes_stale_label(self, clock: FakeClock) -> None:
         first = cache._store_edit_signal_context(_context(), file_label="a.npz")
@@ -226,7 +226,7 @@ class TestEditSignalContext:
         assert "a.npz" not in cache._EDIT_SIGNAL_LABEL_INDEX
         ctx = cache._get_edit_signal_context_by_label("b.npz")
         assert ctx is not None
-        assert ctx["data"].max() == 2
+        assert ctx.data.max() == 2
 
     def test_expiry_purges_label_index(self, clock: FakeClock) -> None:
         cache._store_edit_signal_context(_context(), file_label="a.npz")

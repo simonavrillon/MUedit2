@@ -157,12 +157,12 @@ def test_all_three_layouts_recover_the_same_channels(synthetic_layouts: dict[str
         name: load_intan(str(path), grid_names=_GRID) for name, path in synthetic_layouts.items()
     }
     for name, sig in loaded.items():
-        assert sig["metadata"]["intan_layout"] == name
-        assert sig["data"].shape == (_N_PORTS * _N_CH, _N_SAMPLES), name
-        assert sig["fsamp"] == _FSAMP, name
-        assert sig["gridname"] == [_GRID] * _N_PORTS, name
+        assert sig.metadata["intan_layout"] == name
+        assert sig.data.shape == (_N_PORTS * _N_CH, _N_SAMPLES), name
+        assert sig.fsamp == _FSAMP, name
+        assert sig.gridname == [_GRID] * _N_PORTS, name
         # Channel identity and scaling must agree exactly across layouts.
-        np.testing.assert_allclose(sig["data"], expected, rtol=0, atol=1e-12, err_msg=name)
+        np.testing.assert_allclose(sig.data, expected, rtol=0, atol=1e-12, err_msg=name)
 
 
 def test_layouts_agree_on_auxiliary_and_digital(synthetic_layouts: dict[str, Path]) -> None:
@@ -170,18 +170,16 @@ def test_layouts_agree_on_auxiliary_and_digital(synthetic_layouts: dict[str, Pat
 
     for name, path in synthetic_layouts.items():
         sig = load_intan(str(path), grid_names=_GRID)
-        assert sig["auxiliaryname"] == ["A-AUX1", "B-AUX1", "DIGITAL-IN-01"], name
+        assert sig.auxiliaryname == ["A-AUX1", "B-AUX1", "DIGITAL-IN-01"], name
         # Auxiliary inputs are volts; the digital line stays a 0/1 flag.
-        np.testing.assert_allclose(sig["auxiliary"][2], digital[0], atol=1e-12, err_msg=name)
+        np.testing.assert_allclose(sig.auxiliary[2], digital[0], atol=1e-12, err_msg=name)
         if name == "per_channel":
             # Only this layout stores auxiliary at the full amplifier rate; the
             # others repeat each quarter-rate sample, so compare on that grid.
-            np.testing.assert_allclose(
-                sig["auxiliary"][0], aux[0] * 37.4e-6, atol=1e-12, err_msg=name
-            )
+            np.testing.assert_allclose(sig.auxiliary[0], aux[0] * 37.4e-6, atol=1e-12, err_msg=name)
         else:
             np.testing.assert_allclose(
-                sig["auxiliary"][0, ::4], aux[0, ::4] * 37.4e-6, atol=1e-12, err_msg=name
+                sig.auxiliary[0, ::4], aux[0, ::4] * 37.4e-6, atol=1e-12, err_msg=name
             )
 
 
@@ -192,8 +190,8 @@ def test_grid_names_resolve_from_sidecar(synthetic_layouts: dict[str, Path]) -> 
         json.dumps({"gridname": [_GRID, _GRID], "muscle": ["ta", "gm"]})
     )
     sig = load_signal(str(directory))
-    assert sig["gridname"] == [_GRID, _GRID]
-    assert sig["muscle"] == ["ta", "gm"]
+    assert sig.gridname == [_GRID, _GRID]
+    assert sig.muscle == ["ta", "gm"]
 
 
 def test_unknown_grid_raises_actionable_error(synthetic_layouts: dict[str, Path]) -> None:

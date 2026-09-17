@@ -36,6 +36,7 @@ import pytest
 
 from muedit.decomp.pipeline import run_decomposition
 from muedit.decomp.types import DecompositionParameters
+from muedit.models import SignalImport
 from muedit.signal.decomp_primitives import POSTPROC_MIN_ISI_SEC
 from tests._metrics_helpers import central_roi, discharge_times
 from tests._report import describe, record
@@ -57,14 +58,14 @@ _MIN_MU_COUNT = 5
 
 
 @pytest.fixture(scope="session")
-def novecento_roi(novecento_emg: dict[str, Any]) -> tuple[int, int]:
+def novecento_roi(novecento_emg: SignalImport) -> tuple[int, int]:
     """Central 10 s ROI of the Novecento recording (where the contraction is)."""
-    return central_roi(novecento_emg["data"], float(novecento_emg["fsamp"]), _ROI_WIDTH_SEC)
+    return central_roi(novecento_emg.data, float(novecento_emg.fsamp), _ROI_WIDTH_SEC)
 
 
 @pytest.fixture(scope="session")
 def decomp_results(
-    novecento_otb4_file: Path, novecento_emg: dict[str, Any], novecento_roi: tuple[int, int]
+    novecento_otb4_file: Path, novecento_emg: SignalImport, novecento_roi: tuple[int, int]
 ) -> dict[str, Any]:
     """Run the full pipeline twice (peel-off on and off) on real Novecento EMG.
 

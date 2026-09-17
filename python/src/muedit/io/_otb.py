@@ -15,6 +15,7 @@ from typing import Any
 import numpy as np
 import xmltodict
 
+from muedit.models import SignalImport
 from muedit.signal.grid import format_hdemg_signal
 
 
@@ -362,7 +363,7 @@ def _parse_otb4_generic(tmpdir: str, track_list: list[dict[str, Any]]) -> _OTB4C
     )
 
 
-def load_otb_plus(filepath: str) -> dict[str, Any]:
+def load_otb_plus(filepath: str) -> SignalImport:
     """Load OTB+ archive (.otb+/.zip) and normalize channels/metadata."""
     with tempfile.TemporaryDirectory() as tmpdir:
         if filepath.endswith(".zip"):
@@ -643,18 +644,18 @@ def load_otb_plus(filepath: str) -> dict[str, Any]:
             "software_filters": "n/a",
         }
 
-        return {
-            "data": signal_data,
-            "fsamp": sample_freq,
-            "gridname": unique_grids,
-            "muscle": unique_muscles,
-            "auxiliary": auxiliary,
-            "auxiliaryname": aux_names,
-            "metadata": metadata,
-        }
+        return SignalImport.build(
+            data=signal_data,
+            fsamp=sample_freq,
+            gridname=unique_grids,
+            muscle=unique_muscles,
+            auxiliary=auxiliary,
+            auxiliaryname=aux_names,
+            metadata=metadata,
+        )
 
 
-def load_otb4(filepath: str) -> dict[str, Any]:
+def load_otb4(filepath: str) -> SignalImport:
     """Load OTB4 archives and normalize EMG/aux channels into MUedit format."""
     with tempfile.TemporaryDirectory() as tmpdir:
         if zipfile.is_zipfile(filepath):
@@ -736,12 +737,11 @@ def load_otb4(filepath: str) -> dict[str, Any]:
             "software_filters": "n/a",
         }
 
-        return {
-            "data": _sanitize_array(ch.grid_data),
-            "fsamp": float(ch.fs_out),
-            "gridname": refined_grid_names,
-            "muscle": [],
-            "auxiliary": _sanitize_array(ch.auxiliary),
-            "auxiliaryname": ch.auxiliary_names,
-            "metadata": metadata,
-        }
+        return SignalImport.build(
+            data=_sanitize_array(ch.grid_data),
+            fsamp=float(ch.fs_out),
+            gridname=refined_grid_names,
+            auxiliary=_sanitize_array(ch.auxiliary),
+            auxiliaryname=ch.auxiliary_names,
+            metadata=metadata,
+        )

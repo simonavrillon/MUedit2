@@ -26,7 +26,7 @@ from muedit.api.services.bids_helpers import (
     read_bids_sidecar_meta,
 )
 from muedit.decomp.preview import downsample_vector
-from muedit.io.factory import clone_signal, get_loader, load_signal
+from muedit.io.factory import get_loader, load_signal
 from muedit.signal.downsample import (
     PREVIEW_MOVING_AVG_MS,
     moving_average_ms,
@@ -69,13 +69,14 @@ def _encode_qc_raw_f32(
 
 def _build_preview_core(filepath: str) -> dict[str, Any]:
     """Load signal, preprocess EMG grids, cache QC data, and build UI preview payload."""
-    loaded_signal = load_signal(filepath)
-    upload_token = _store_upload_signal(loaded_signal, source_path=filepath)
-    signal = clone_signal(loaded_signal)
-    data = signal["data"]
-    fsamp = float(signal["fsamp"])
+    signal = load_signal(filepath)
+    # The cache stores its own copy, so filtering ``signal.data`` in place below
+    # leaves the cached raw signal untouched.
+    upload_token = _store_upload_signal(signal, source_path=filepath)
+    data = signal.data
+    fsamp = signal.fsamp
 
-    grid_names = signal.get("gridname", ["Default"])
+    grid_names = signal.gridname
     coordinates, _, discard_channels, emg_type = format_hdemg_signal(grid_names)
 
     ch_idx = 0
@@ -116,17 +117,12 @@ def _build_preview_core(filepath: str) -> dict[str, Any]:
             "fsamp": fsamp,
             "channel_means": channel_means,
             "coordinates": [coords.tolist() for coords in coordinates],
-            "metadata": signal.get("metadata", {}),
-            "muscle": signal.get("muscle", []),
-            "auxiliary": (
-                [
-                    downsample_vector(signal["auxiliary"][i, :], fsamp)
-                    for i in range(signal["auxiliary"].shape[0])
-                ]
-                if signal.get("auxiliary") is not None and signal["auxiliary"].size > 0
-                else []
-            ),
-            "auxiliary_names": signal.get("auxiliaryname", []),
+            "metadata": signal.metadata,
+            "muscle": signal.muscle,
+            "auxiliary": [downsample_vector(row, fsamp) for row in signal.auxiliary]
+            if signal.auxiliary.size > 0
+            else [],
+            "auxiliary_names": signal.auxiliaryname,
         }
     )
 
@@ -185,10 +181,10 @@ def get_qc_window(payload: QcWindowPayload) -> Response:
     target_fs = payload.target_fs
     channel_index_raw = payload.channel_index
 
-    data = cached["data"]
-    fsamp = float(cached["fsamp"])
-    offsets: list[int] = cached["channel_offsets"]
-    masks: list[np.ndarray] = cached["discard_channels"]
+    data = cached.data
+    fsamp = cached.fsamp
+    offsets = cached.channel_offsets
+    masks = cached.discard_channels
 
     if grid_index < 0 or grid_index >= len(offsets):
         raise HTTPException(status_code=400, detail="grid_index out of range")
@@ -267,13 +263,13 @@ def run_auto_qc_on_token(payload: QcAutoPayload) -> dict[str, Any]:
             },
         )
 
-    fsamp = float(cached["fsamp"])
-    grid_names = list(cached["grid_names"])
+    fsamp = cached.fsamp
+    grid_names = cached.grid_names
     coordinates, _, _, _ = format_hdemg_signal(grid_names)
     grid_channel_counts = [int(c.shape[0]) for c in coordinates]
     total_declared = sum(grid_channel_counts)
 
-    data = np.asarray(cached["data"], dtype=np.float64)
+    data = np.asarray(cached.data, dtype=np.float64)
     if total_declared > data.shape[0]:
         raise HTTPException(
             status_code=400,

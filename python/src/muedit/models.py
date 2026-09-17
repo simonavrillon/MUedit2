@@ -2,13 +2,27 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Any, cast
+from typing import Any, TypeAlias, cast
 
 import numpy as np
+from numpy.typing import NDArray
+
+# Named array types. They fix the element type only; NumPy annotations cannot
+# express shapes, so parameter names and docstrings still say what the axes are.
+
+FloatArray: TypeAlias = NDArray[np.floating[Any]]
+"""Real-valued data: EMG samples, pulse trains, separation filters, whitening matrices."""
+
+IntArray: TypeAlias = NDArray[np.integer[Any]]
+"""Integer data: sample indices (discharge times, peaks), spike rasters, 0/1 discard flags."""
+
+BoolArray: TypeAlias = NDArray[np.bool_]
+"""Boolean masks: artifact samples, bad channels."""
 
 
-def _as_2d_float_array(value: Any) -> np.ndarray:
+def _as_2d_float_array(value: Any) -> FloatArray:
     """Cast value to a 2-D float64 NumPy array, reshaping 1-D input to (1, n)."""
     arr = np.asarray(value, dtype=float)
     if arr.ndim == 1:
@@ -18,7 +32,16 @@ def _as_2d_float_array(value: Any) -> np.ndarray:
     return arr
 
 
-def _ensure_channel_matrix(value: Any, n_samples: int) -> np.ndarray:
+def _as_name_list(value: str | Iterable[Any] | None) -> list[str]:
+    """Normalize a name or sequence of names to a list of strings."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    return [str(x) for x in value]
+
+
+def _ensure_channel_matrix(value: Any, n_samples: int) -> FloatArray:
     """Return a (n_channels, n_samples) float matrix, zero-padding or truncating as needed."""
     if value is None:
         return np.zeros((0, n_samples), dtype=float)
@@ -37,50 +60,73 @@ def _ensure_channel_matrix(value: Any, n_samples: int) -> np.ndarray:
 class SignalImport:
     """Raw EMG signal and associated metadata as loaded from a recording file."""
 
-    data: np.ndarray
+    data: FloatArray
     fsamp: float
     gridname: list[str] = field(default_factory=list)
     muscle: list[str] = field(default_factory=list)
-    auxiliary: np.ndarray = field(default_factory=lambda: np.zeros((0, 0), dtype=float))
+    auxiliary: FloatArray = field(default_factory=lambda: np.zeros((0, 0), dtype=float))
     auxiliaryname: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_mapping(cls, payload: dict[str, Any]) -> SignalImport:
-        """Construct a SignalImport from a plain dictionary with type coercion and defaults."""
-        data = _as_2d_float_array(payload.get("data", np.zeros((0, 0), dtype=float)))
-        n_samples = int(data.shape[1]) if data.ndim == 2 else 0
-        fsamp_raw = payload.get("fsamp", 0.0)
-        fsamp = float(fsamp_raw) if fsamp_raw is not None else 0.0
+    def build(
+        cls,
+        *,
+        data: Any,
+        fsamp: Any = 0.0,
+        gridname: str | Iterable[Any] | None = None,
+        muscle: str | Iterable[Any] | None = None,
+        auxiliary: Any = None,
+        auxiliaryname: str | Iterable[Any] | None = None,
+        metadata: Any = None,
+    ) -> SignalImport:
+        """Construct from raw loader values, coercing types and filling defaults.
 
-        gridname = payload.get("gridname")
-        gridname = [] if gridname is None else gridname
-        muscle = payload.get("muscle")
-        muscle = [] if muscle is None else muscle
-        auxiliaryname = payload.get("auxiliaryname")
-        auxiliaryname = [] if auxiliaryname is None else auxiliaryname
-        if isinstance(gridname, str):
-            gridname = [gridname]
-        if isinstance(muscle, str):
-            muscle = [muscle]
-        if isinstance(auxiliaryname, str):
-            auxiliaryname = [auxiliaryname]
-        metadata_raw = payload.get("metadata")
-        metadata = cast(dict[str, Any], metadata_raw) if isinstance(metadata_raw, dict) else {}
-
+        ``data`` becomes a 2-D float array (a 1-D input is one channel), a missing
+        ``fsamp`` becomes 0.0, a single name becomes a one-item list, and
+        ``auxiliary`` is padded or truncated to the EMG sample count.
+        """
+        data_arr = _as_2d_float_array(data)
+        n_samples = int(data_arr.shape[1]) if data_arr.ndim == 2 else 0
         return cls(
-            data=data,
-            fsamp=fsamp,
-            gridname=[str(x) for x in list(gridname)],
-            muscle=[str(x) for x in list(muscle)],
-            auxiliary=_ensure_channel_matrix(payload.get("auxiliary"), n_samples),
-            auxiliaryname=[str(x) for x in list(auxiliaryname)],
-            metadata=dict(metadata),
+            data=data_arr,
+            fsamp=float(fsamp) if fsamp is not None else 0.0,
+            gridname=_as_name_list(gridname),
+            muscle=_as_name_list(muscle),
+            auxiliary=_ensure_channel_matrix(auxiliary, n_samples),
+            auxiliaryname=_as_name_list(auxiliaryname),
+            metadata=dict(cast(dict[str, Any], metadata)) if isinstance(metadata, dict) else {},
+        )
+
+    @classmethod
+    def from_mapping(cls, payload: dict[str, Any]) -> SignalImport:
+        """Construct from a loader dictionary; see :meth:`build` for the coercion rules."""
+        return cls.build(
+            data=payload.get("data", np.zeros((0, 0), dtype=float)),
+            fsamp=payload.get("fsamp", 0.0),
+            gridname=payload.get("gridname"),
+            muscle=payload.get("muscle"),
+            auxiliary=payload.get("auxiliary"),
+            auxiliaryname=payload.get("auxiliaryname"),
+            metadata=payload.get("metadata"),
         )
 
     def clone(self) -> SignalImport:
-        """Return a deep copy of this instance with independent NumPy array copies."""
-        return SignalImport.from_mapping(self.to_dict())
+        """Return a copy with independent arrays, lists and top-level metadata."""
+        return SignalImport(
+            data=self.data.copy(),
+            fsamp=self.fsamp,
+            gridname=list(self.gridname),
+            muscle=list(self.muscle),
+            auxiliary=self.auxiliary.copy(),
+            auxiliaryname=list(self.auxiliaryname),
+            metadata=dict(self.metadata),
+        )
+
+    @property
+    def nbytes(self) -> int:
+        """Resident size of the EMG and auxiliary arrays."""
+        return int(self.data.nbytes + self.auxiliary.nbytes)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialise to a plain dictionary suitable for JSON or cache storage."""
@@ -93,6 +139,65 @@ class SignalImport:
             "auxiliaryname": list(self.auxiliaryname),
             "metadata": dict(self.metadata),
         }
+
+
+def _optional_nbytes(value: np.ndarray | None) -> int:
+    return int(value.nbytes) if value is not None else 0
+
+
+@dataclass
+class EditSignalContext:
+    """Raw EMG embedded in a decomposition file, kept for editing and BIDS export.
+
+    Built by ``load_decomposition_signal_context`` and held in the API edit cache.
+    """
+
+    data: FloatArray  # (n_channels, n_samples); (0, 0) when the file holds only a mask
+    fsamp: float  # 0.0 when the file does not record it
+    grid_names: list[str] = field(default_factory=list)
+    emgmask: list[IntArray] = field(default_factory=list)  # per grid, 1 = discarded channel
+    coordinates: list[FloatArray] = field(default_factory=list)  # per grid, (n_channels, 2)
+    ied: list[float] | None = None  # per-grid inter-electrode distance, mm
+    aux_data: FloatArray | None = None  # (n_aux, n_samples)
+    aux_names: list[str] = field(default_factory=list)
+    artifact_mask: BoolArray | None = None  # (n_samples,)
+    # Loader BIDS fields (decomposition_file.LOADER_BIDS_META_KEYS) the file recorded.
+    loader_meta: dict[str, Any] = field(default_factory=dict)
+
+    def compact_copy(self) -> EditSignalContext:
+        """Return an independent copy with EMG and auxiliary data as float32.
+
+        Empty auxiliary data and artifact masks become ``None``.
+        """
+        aux = self.aux_data
+        mask = self.artifact_mask
+        return EditSignalContext(
+            data=(
+                np.array(self.data, dtype=np.float32)
+                if self.data.size
+                else np.zeros((0, 0), dtype=np.float32)
+            ),
+            fsamp=float(self.fsamp),
+            grid_names=list(self.grid_names),
+            emgmask=[np.array(m, dtype=int) for m in self.emgmask],
+            coordinates=[np.array(c, dtype=float) for c in self.coordinates],
+            ied=list(self.ied) if self.ied is not None else None,
+            aux_data=np.array(aux, dtype=np.float32) if aux is not None and aux.size else None,
+            aux_names=list(self.aux_names),
+            artifact_mask=np.array(mask, dtype=bool) if mask is not None and mask.size else None,
+            loader_meta=dict(self.loader_meta),
+        )
+
+    @property
+    def nbytes(self) -> int:
+        """Resident size of all arrays in the context."""
+        return (
+            int(self.data.nbytes)
+            + _optional_nbytes(self.aux_data)
+            + _optional_nbytes(self.artifact_mask)
+            + sum(int(m.nbytes) for m in self.emgmask)
+            + sum(int(c.nbytes) for c in self.coordinates)
+        )
 
 
 @dataclass
@@ -130,10 +235,10 @@ class LoadedDecomposition:
 class DecompositionSignalExport:
     """EMG signal paired with its decomposition output."""
 
-    data: np.ndarray
+    data: FloatArray
     fsamp: float
-    pulse_t: np.ndarray
-    discharge_times: list[np.ndarray]
+    pulse_t: FloatArray
+    discharge_times: list[IntArray]
 
     def to_dict(self) -> dict[str, Any]:
         """Serialise to a dictionary using MATLAB-compatible key names."""
@@ -157,8 +262,8 @@ class DecompositionExport:
     parameters: dict[str, Any]
     grid_names: list[str]
     sil: list[float]
-    discard_channels: list[np.ndarray]
-    coordinates: list[np.ndarray]
+    discard_channels: list[IntArray]
+    coordinates: list[FloatArray]
     mu_grid_index: list[int]
     preview: dict[str, Any]
 

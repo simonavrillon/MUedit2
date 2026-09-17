@@ -11,6 +11,7 @@ from typing import Any
 
 import numpy as np
 
+from muedit.models import SignalImport
 from muedit.signal.grid import format_hdemg_signal
 
 _RHD_MAGIC = 0xC6912702
@@ -508,8 +509,8 @@ def load_intan(
     filepath: str,
     grid_names: str | list[str] | None = None,
     muscles: str | list[str] | None = None,
-) -> dict[str, Any]:
-    """Load an Intan RHD recording into the MUedit signal dictionary format."""
+) -> SignalImport:
+    """Load an Intan RHD recording as a ``SignalImport``."""
     rec = _resolve_recording(filepath)
     header = rec.header
     if not header.enabled_channels(_AMPLIFIER):
@@ -590,12 +591,12 @@ def load_intan(
         "electrode_impedances": [c.impedance_magnitude for c in amp_channels],
     }
 
-    return {
-        "data": data,
-        "fsamp": float(header.fsamp),
-        "gridname": resolved_grids,
-        "muscle": resolved_muscles,
-        "auxiliary": auxiliary if auxiliary.size else np.zeros((0, n_samples), dtype=np.float64),
-        "auxiliaryname": aux_names,
-        "metadata": metadata,
-    }
+    return SignalImport.build(
+        data=data,
+        fsamp=float(header.fsamp),
+        gridname=resolved_grids,
+        muscle=resolved_muscles,
+        auxiliary=auxiliary if auxiliary.size else np.zeros((0, n_samples), dtype=np.float64),
+        auxiliaryname=aux_names,
+        metadata=metadata,
+    )

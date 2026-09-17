@@ -27,7 +27,7 @@ from muedit.signal.decomp_primitives import POSTPROC_MIN_ISI_SEC
 from tests._metrics_helpers import (
     Match,
     best_per_detected,
-    build_signal_dict,
+    build_signal,
     discharge_times,
     restrict_reference_to_roi,
     score_pairs,
@@ -99,7 +99,7 @@ def sim_decomp_results(simulation_loaded: dict[int, dict[str, Any]]) -> dict[int
             roi=_SIM_ROI,
             params=params,
             save_npz=False,
-            preloaded_signal=build_signal_dict(sim),
+            preloaded_signal=build_signal(sim),
         )
         results[pct] = result
     return results

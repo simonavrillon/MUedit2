@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import json
 import logging
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -72,18 +73,41 @@ from muedit.io.bids import (
     export_bids_mu_derivatives,
     write_bids_dataset_description,
 )
+from muedit.models import LoadedDecomposition
 from muedit.signal.grid import format_hdemg_signal
 
 logger = logging.getLogger(__name__)
 
 
-def _init_loaded_decomp(filepath: str, file_label: str) -> dict[str, Any]:
-    loaded = load_decomposition_file(filepath)
-    signal_ctx = load_decomposition_signal_context(filepath)
-    if signal_ctx:
-        loaded["edit_signal_token"] = _store_edit_signal_context(signal_ctx, file_label)
-    loaded["file_label"] = file_label
-    return loaded
+@dataclass
+class EditLoadResult:
+    """What ``/edit/load-by-path`` returns: a decomposition plus its edit session."""
+
+    decomposition: LoadedDecomposition
+    file_label: str
+    edit_signal_token: str | None = None  # set when the file embeds the raw EMG
+    project: str | None = None  # BIDS project folder, when the file sits in one
+    # Restored from the ``.json`` edit log saved next to the decomposition.
+    mu_uids: list[Any] | None = None
+    edit_history: list[Any] | None = None
+    artifact_times: list[Any] | None = None
+    # Participant and hardware fields from the BIDS sidecars.
+    sidecar_meta: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        """JSON payload: the decomposition fields plus the session fields that are set."""
+        out = self.decomposition.to_dict()
+        out["file_label"] = self.file_label
+        session = {
+            "edit_signal_token": self.edit_signal_token,
+            "project": self.project,
+            "mu_uids": self.mu_uids,
+            "edit_history": self.edit_history,
+            "artifact_times": self.artifact_times,
+        }
+        out.update({key: value for key, value in session.items() if value is not None})
+        out.update(self.sidecar_meta)
+        return out
 
 
 def _encode_edit_load_f32(loaded: dict[str, Any]) -> bytes | None:
@@ -124,15 +148,19 @@ def load_decomposition_from_path(filepath: str) -> dict[str, Any]:
             },
         )
     file_label = Path(filepath).name
-    loaded = _init_loaded_decomp(filepath, file_label)
+    decomp = load_decomposition_file(filepath)
+    result = EditLoadResult(decomposition=decomp, file_label=file_label)
+    signal_ctx = load_decomposition_signal_context(filepath)
+    if signal_ctx:
+        result.edit_signal_token = _store_edit_signal_context(signal_ctx, file_label)
 
     bids_root = _infer_bids_root_from_decomp_path(filepath)
     if bids_root is not None:
         try:
             rel = bids_root.relative_to(DATA_ROOT)
-            loaded["project"] = rel.parts[0] if rel.parts else ""
+            result.project = rel.parts[0] if rel.parts else ""
         except ValueError:
-            loaded["project"] = ""
+            result.project = ""
         try:
             entity_label = parse_entity_label(file_label)
             subject, session = _parse_subject_session_from_entity_label(entity_label)
@@ -145,18 +173,17 @@ def load_decomposition_from_path(filepath: str) -> dict[str, Any]:
                 channels_path = emg_dir / f"{entity_label}_emg_channels.tsv"  # backward compat
             if channels_path.exists():
                 grid_names, muscles, fsamp = _read_bids_channels_sidecar(channels_path)
-                expected_count = _expected_grid_count(loaded)
+                expected_count = _expected_grid_count(decomp)
                 if grid_names:
-                    loaded["grid_names"] = _pad_grid_names(
-                        grid_names, expected_count, loaded.get("grid_names") or []
+                    decomp.grid_names = _pad_grid_names(
+                        grid_names, expected_count, decomp.grid_names
                     )
                 if muscles:
-                    loaded["muscle"] = muscles
+                    decomp.muscle = muscles
                 if fsamp and fsamp > 0:
-                    loaded["fsamp"] = fsamp
+                    decomp.fsamp = fsamp
 
-            # Enrich with participant + hardware metadata from BIDS sidecars.
-            loaded.update(read_bids_sidecar_meta(bids_root, entity_label))
+            result.sidecar_meta = read_bids_sidecar_meta(bids_root, entity_label)
 
         except (ValueError, OSError, csv.Error, KeyError):
             pass  # best-effort; I/O and parse errors are non-fatal
@@ -167,15 +194,15 @@ def load_decomposition_from_path(filepath: str) -> dict[str, Any]:
             with editlog_path.open("r", encoding="utf-8") as fh:
                 editlog = json.load(fh)
             if isinstance(editlog.get("mu_uids"), list):
-                loaded["mu_uids"] = editlog["mu_uids"]
+                result.mu_uids = editlog["mu_uids"]
             if isinstance(editlog.get("history"), list):
-                loaded["edit_history"] = editlog["history"]
+                result.edit_history = editlog["history"]
             if isinstance(editlog.get("artifact_times"), list):
-                loaded["artifact_times"] = editlog["artifact_times"]
+                result.artifact_times = editlog["artifact_times"]
         except (OSError, ValueError, KeyError):
             pass  # best-effort; missing or corrupt editlog is non-fatal
 
-    return make_json_safe(loaded)
+    return make_json_safe(result.to_dict())
 
 
 def load_decomposition_binary_from_path(filepath: str) -> Response | dict[str, Any]:
@@ -226,16 +253,15 @@ def _export_bids_from_mat_context(
 
     entities = _parse_all_bids_entities(entity_label)
     try:
-        aux_data = ctx.get("aux_data")
-        aux_names = ctx.get("aux_names") or None
+        meta = ctx.loader_meta
         paths = export_bids_emg(
-            data=ctx["data"],
-            fsamp=float(fsamp or ctx["fsamp"]),
-            grid_names=ctx["grid_names"] or grid_names,
-            coordinates=ctx.get("coordinates") or [],
-            discard_channels=ctx["emgmask"],
+            data=ctx.data,
+            fsamp=float(fsamp or ctx.fsamp),
+            grid_names=ctx.grid_names or grid_names,
+            coordinates=ctx.coordinates,
+            discard_channels=ctx.emgmask,
             bids_root=bids_root,
-            ied=ctx.get("ied"),
+            ied=ctx.ied,
             subject=entities["sub"] or "01",
             task=entities["task"] or "task",
             run=entities["run"],
@@ -245,28 +271,28 @@ def _export_bids_from_mat_context(
             target_muscle=muscle_names
             if len(muscle_names) > 1
             else (muscle_names[0] if muscle_names else None),
-            aux_data=aux_data if isinstance(aux_data, np.ndarray) and aux_data.size > 0 else None,
-            aux_names=aux_names if aux_names else None,
+            aux_data=ctx.aux_data,
+            aux_names=ctx.aux_names or None,
             # User-editable fields take priority; fall back to loader ctx, then hardcoded default
-            manufacturer=manufacturer or ctx.get("manufacturer"),
-            manufacturers_model_name=manufacturers_model_name or ctx.get("device_name"),
-            powerline_freq=powerline_freq or ctx.get("powerline_freq") or 50.0,
+            manufacturer=manufacturer or meta.get("manufacturer"),
+            manufacturers_model_name=manufacturers_model_name or meta.get("device_name"),
+            powerline_freq=powerline_freq or meta.get("powerline_freq") or 50.0,
             placement_scheme=placement_scheme or "ChannelSpecific",
             placement_scheme_description=placement_scheme_description,
             task_description=task_description,
             software_versions=software_versions,
             # Loader-only fields — taken directly from ctx
-            units=ctx.get("units") or "uV",
-            hardware_filters=ctx.get("hardware_filters"),
-            gain=ctx.get("gains"),
-            low_cutoff=ctx.get("emg_hpf"),
-            high_cutoff=ctx.get("emg_lpf"),
-            aux_gain=ctx.get("aux_gains"),
-            aux_low_cutoff=ctx.get("aux_hpf"),
-            aux_high_cutoff=ctx.get("aux_lpf"),
-            aux_units=ctx.get("aux_units"),
-            recording_type=ctx.get("recording_type") or "continuous",
-            software_filters=ctx.get("software_filters"),
+            units=meta.get("units") or "uV",
+            hardware_filters=meta.get("hardware_filters"),
+            gain=meta.get("gains"),
+            low_cutoff=meta.get("emg_hpf"),
+            high_cutoff=meta.get("emg_lpf"),
+            aux_gain=meta.get("aux_gains"),
+            aux_low_cutoff=meta.get("aux_hpf"),
+            aux_high_cutoff=meta.get("aux_lpf"),
+            aux_units=meta.get("aux_units"),
+            recording_type=meta.get("recording_type") or "continuous",
+            software_filters=meta.get("software_filters"),
         )
         return {k: str(v) for k, v in paths.items()}
     except Exception:  # noqa: BLE001
@@ -375,9 +401,9 @@ def save_edits(payload: EditSavePayload) -> dict[str, Any]:
             payload.edit_signal_token
         ) or _get_edit_signal_context_by_label(file_label)
         if ctx_for_mask is not None:
-            cached_mask = ctx_for_mask.get("artifact_mask")
-            if isinstance(cached_mask, np.ndarray) and cached_mask.size == total_samples:
-                artifact_mask = np.asarray(cached_mask, dtype=bool)
+            cached_mask = ctx_for_mask.artifact_mask
+            if cached_mask is not None and cached_mask.size == total_samples:
+                artifact_mask = cached_mask
 
     save_decomposition_npz(
         out_path,
@@ -494,7 +520,7 @@ def update_filter(payload: EditFilterPayload) -> dict[str, Any]:
                 status_code=400,
                 detail="No BIDS EMG available. Reload decomposition MAT and retry filter update.",
             )
-        data = np.asarray(ctx.get("data"), dtype=float)
+        data = np.asarray(ctx.data, dtype=float)
         if data.size == 0:
             raise HTTPException(
                 status_code=400,
@@ -506,10 +532,10 @@ def update_filter(payload: EditFilterPayload) -> dict[str, Any]:
             raise HTTPException(status_code=400, detail="Invalid cached EMG context")
         if data.shape[0] > data.shape[1]:
             data = data.T
-        fsamp_val = float(ctx.get("fsamp") or 0.0)
+        fsamp_val = ctx.fsamp
         if fsamp_val <= 0:
             raise HTTPException(status_code=400, detail="Missing fsamp in MAT signal context")
-        grid_names = ctx.get("grid_names") or ["Grid 1"]
+        grid_names = ctx.grid_names or ["Grid 1"]
         coordinates, _, _, _ = format_hdemg_signal(grid_names)
         if grid_index < 0 or grid_index >= len(coordinates):
             raise HTTPException(status_code=400, detail="grid_index out of range")
@@ -520,7 +546,7 @@ def update_filter(payload: EditFilterPayload) -> dict[str, Any]:
         emg = data[ch_offset : ch_offset + n_ch, :]
         fsamp = fsamp_val
 
-        raw_masks = ctx.get("emgmask") or []
+        raw_masks = ctx.emgmask
         cell = raw_masks[grid_index] if grid_index < len(raw_masks) else np.array([], dtype=int)
         cell_arr = np.asarray(cell, dtype=int).flatten()
         if cell_arr.size == n_ch and np.all(np.isin(cell_arr, [0, 1])):
@@ -547,9 +573,7 @@ def update_filter(payload: EditFilterPayload) -> dict[str, Any]:
         file_label
     )
     if ctx_for_mask is not None:
-        am = ctx_for_mask.get("artifact_mask")
-        if isinstance(am, np.ndarray) and am.size > 0:
-            artifact_mask = am
+        artifact_mask = ctx_for_mask.artifact_mask
 
     bids_emg_offset = view_start if emg_is_presliced else 0
     if view_start - bids_emg_offset < 0 or view_end - bids_emg_offset > emg.shape[1]:

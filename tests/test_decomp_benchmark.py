@@ -45,10 +45,11 @@ from muedit.decomp.core import decompose_step
 from muedit.decomp.postprocess import postprocess_step
 from muedit.decomp.preprocess import load_step, preprocess_step
 from muedit.decomp.types import DecompositionParameters
+from muedit.models import SignalImport
 from tests._metrics_helpers import (
     Match,
     active_reference_count,
-    build_signal_dict,
+    build_signal,
     filter_to_roi,
     greedy_one_to_one,
     restrict_reference_to_roi,
@@ -137,7 +138,7 @@ def _log_result(dataset: str, params: DecompositionParameters, results: dict[str
 
 
 def _prepare(
-    path: str, signal: dict[str, Any], roi: tuple[int, int], params: DecompositionParameters
+    path: str, signal: SignalImport, roi: tuple[int, int], params: DecompositionParameters
 ) -> Any:
     loaded = load_step(path, None, signal, None)
     return preprocess_step(
@@ -210,7 +211,7 @@ def real_reference() -> dict[str, Any]:
 @pytest.fixture(scope="session")
 def real_benchmark(
     novecento_otb4_file: Path,
-    novecento_emg: dict[str, Any],
+    novecento_emg: SignalImport,
     real_reference: dict[str, Any],
 ) -> dict[str, dict[str, Any]]:
     p = real_reference["params"]
@@ -248,7 +249,7 @@ def sim_benchmarks(
     benchmarks: dict[int, dict[str, dict[str, Any]]] = {}
     for pct, sim in simulation_loaded.items():
         base = DecompositionParameters(niter=_SIM_NITER, peel_off_enabled=True)
-        prep = _prepare("simulated", build_signal_dict(sim), _SIM_ROI, base)
+        prep = _prepare("simulated", build_signal(sim), _SIM_ROI, base)
         gt = sim["gt_spike_times"]
         gt_in_roi = restrict_reference_to_roi(gt, _SIM_ROI)
         n_ref = active_reference_count(gt, _SIM_ROI)

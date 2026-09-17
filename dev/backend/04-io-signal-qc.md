@@ -6,21 +6,26 @@ Covers the file loading layer, signal filtering, grid geometry inference, and th
 
 ## File Loading (`io/`)
 
-### Signal Dict Shape
+### Loader Output
 
-All loaders return the same dict structure:
+All built-in loaders return a `SignalImport` (see `models.py`), built with
+`SignalImport.build(...)`, which applies the shared coercion rules:
 
 ```python
-{
-    "data": np.ndarray,          # (n_channels, n_samples) float, EMG channels
-    "fsamp": float,               # sampling frequency in Hz
-    "gridname": list[str],        # electrode grid model names
-    "muscle": list[str],           # target muscle labels
-    "auxiliary": np.ndarray,      # (n_aux, n_samples) auxiliary channels
-    "auxiliaryname": list[str],    # auxiliary channel labels
-    "metadata": dict[str, Any],    # device, filters, coordinates, IEDs, etc.
-}
+SignalImport.build(
+    data=...,           # -> FloatArray (n_channels, n_samples); 1-D input is one channel
+    fsamp=...,          # -> float; None becomes 0.0
+    gridname=...,       # -> list[str]; a single name becomes a one-item list
+    muscle=...,         # -> list[str]
+    auxiliary=...,      # -> FloatArray (n_aux, n_samples), padded/truncated to data
+    auxiliaryname=...,  # -> list[str]
+    metadata=...,       # -> dict[str, Any] (device, filters, coordinates, IEDs, ...)
+)
 ```
+
+Loaders registered with `register_loader` may still return a plain dict with these
+keys; `load_signal` converts it with `SignalImport.from_mapping`, which applies the
+same rules.
 
 ### Loader Registry (`factory.py`)
 
@@ -48,13 +53,12 @@ All loaders return the same dict structure:
 | `register_loader` | `(ext, loader, *, overwrite=False) -> None` | Register a custom loader |
 | `supported_extensions` | `() -> tuple[str, ...]` | List supported extensions |
 | `get_loader` | `(filepath) -> LoaderFn` | Resolve loader for a path |
-| `load_signal` | `(filepath) -> dict[str, Any]` | Load and normalize signal via `SignalImport.to_dict()` |
-| `clone_signal` | `(signal) -> dict[str, Any]` | Deep-clone signal via `SignalImport.from_mapping().clone()` |
+| `load_signal` | `(filepath) -> SignalImport` | Load a signal and normalize loader output to `SignalImport` |
 
 ### MATLAB `.mat` (`mat.py`)
 
 ```python
-def load_mat(filepath: str) -> dict[str, Any]
+def load_mat(filepath: str) -> SignalImport
 ```
 Tries `scipy.io.loadmat` (MAT v5) first; if HDF5 (v7.3), falls back to `_load_mat73_signal`. Expects a `signal` struct with fields: `data`, `fsamp`, `gridname`, `muscle`, `auxiliary`, `auxiliaryname`, `device_name`. Detects and rejects decomposition files (pulse train + discharge time fields) loaded as raw signals.
 
@@ -63,7 +67,7 @@ Key helpers: `_parse_text`, `parse_text_list` (public), `_parse_numeric_array`, 
 ### Intan RHD (`_intan.py`)
 
 ```python
-def load_intan(filepath: str, grid_names=None, muscles=None) -> dict[str, Any]
+def load_intan(filepath: str, grid_names=None, muscles=None) -> SignalImport
 ```
 Accepts a recording directory, its `info.rhd`, or a single-file `.rhd`. Supports three save layouts:
 - **traditional**: `.rhd` file contains header + data blocks
@@ -77,19 +81,19 @@ Key structures: `_IntanChannel`, `_IntanHeader` (with `enabled_channels()`, `sam
 ### OT Bioelettronica (`_otb.py`)
 
 ```python
-def load_otb_plus(filepath: str) -> dict[str, Any]
+def load_otb_plus(filepath: str) -> SignalImport
 ```
 Loads OTB+ archives (`.otb+` tar or `.zip`). Extracts to temp dir, parses XML metadata (device name, sample frequency, AD bits, adapter/channel tree), reads `.sig` binary (int16 or int32), applies device-specific ADC-to-mV scaling for: `QUATTROCENTO`, `QUATTRO`, `DUE`, `DUE+`, `QUATTRO+`, `SESSANTAQUATTRO`, `SESSANTAQUATTRO+`, `SYNCSTATION`, and a generic fallback.
 
 ```python
-def load_otb4(filepath: str) -> dict[str, Any]
+def load_otb4(filepath: str) -> SignalImport
 ```
 Loads OTB4 archives (`.zip` or `.tar`). Extracts, finds `Tracks_000.xml`, parses `ArrayOfTrackInfo`, dispatches to `_parse_otb4_novecento` or `_parse_otb4_generic` based on device field. Refines grid names from `OriginalSensor` in `StringsDescriptions`. Sanitizes arrays (NaN/Inf replacement).
 
 ### BIDS EMG Reading (`_bids_reader.py`)
 
 ```python
-def load_bids_signal(filepath: str) -> dict[str, Any]
+def load_bids_signal(filepath: str) -> SignalImport
 ```
 Accepts a `.bdf`/`.edf` file path or directory containing one. Reads:
 - `*_emg.json` sidecar -> fsamp, device_name, hardware_filters, round-trip metadata

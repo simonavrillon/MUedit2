@@ -243,17 +243,33 @@ Thread-safe (single `threading.Lock`), TTL-based, with budget-driven eviction (m
 
 | Function | Description |
 |---|---|
-| `_store_upload_signal(signal) -> token` | Store signal, return UUID token |
-| `_get_upload_signal(token) -> dict \| None` | Get cloned signal, refresh TTL on hit |
+| `_store_upload_signal(signal: SignalImport) -> token` | Store a copy of the signal, return UUID token |
+| `_get_upload_signal(token) -> SignalImport \| None` | Get a copy of the signal, refresh TTL on hit |
 | `_store_qc_signal(token, data, fsamp, grid_names, discard_channels)` | Attach QC arrays to upload session |
-| `_get_qc_signal(token) -> dict \| None` | Get QC arrays (read-only view) |
+| `_get_qc_signal(token) -> QCSignal \| None` | Get QC arrays (`data` is a read-only view) |
 | `_store_decomp_preview_binary(payload) -> token` | Store binary preview blob |
 | `_get_decomp_preview_binary(token) -> bytes \| None` | Get binary preview |
-| `_store_edit_signal_context(context, file_label) -> token` | Store raw signal context, index by label |
-| `_get_edit_signal_context(token) -> dict \| None` | Get cloned context |
-| `_get_edit_signal_context_by_label(file_label) -> dict \| None` | Resolve context by label |
+| `_store_edit_signal_context(context: EditSignalContext, file_label) -> token` | Store a float32 copy of the context, index by label |
+| `_get_edit_signal_context(token) -> EditSignalContext \| None` | Get a copy of the context |
+| `_get_edit_signal_context_by_label(file_label) -> EditSignalContext \| None` | Resolve context by label |
 
-Signal cloning uses `SignalImport.from_mapping().clone()` to avoid shared mutable arrays.
+Upload signals are copied with `SignalImport.clone()` on store and on read, and
+edit contexts with `EditSignalContext.compact_copy()`, so callers never share
+arrays with the cache.
+
+Each cache holds a small entry dataclass (`_UploadEntry`, `_PreviewBinaryEntry`,
+`_EditContextEntry`) with an `expires_at` time and an `nbytes` property, which
+`_evict_to_budget_locked` uses for the item and byte budgets.
+
+`QCSignal` (defined in `cache.py`):
+
+| Field | Type | Notes |
+|---|---|---|
+| `data` | `FloatArray` | float32, `(n_channels, n_samples)` |
+| `fsamp` | `float` | |
+| `grid_names` | `list[str]` | |
+| `channel_offsets` | `list[int]` | First row of each grid in `data` |
+| `discard_channels` | `list[IntArray]` | Per grid, 1 = discarded |
 
 ---
 

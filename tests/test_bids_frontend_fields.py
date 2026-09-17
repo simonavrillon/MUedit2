@@ -38,6 +38,7 @@ from starlette.testclient import TestClient
 from muedit.decomp.preprocess import preprocess_step
 from muedit.decomp.types import DecompositionParameters, LoadStepOutput
 from muedit.io import load_signal
+from muedit.models import EditSignalContext, SignalImport
 from muedit.signal.grid import format_hdemg_signal
 
 # ---------------------------------------------------------------------------
@@ -199,8 +200,8 @@ def _muscles_by_group(channels: list[dict[str, str]]) -> dict[str, str]:
 
 
 @pytest.fixture(scope="module")
-def otb4_signal(otb4_file: Path) -> dict[str, Any]:
-    """Loaded OTB4 signal dict — the same object the preview/import route yields."""
+def otb4_signal(otb4_file: Path) -> SignalImport:
+    """Loaded OTB4 signal — the same object the preview/import route yields."""
     return load_signal(str(otb4_file))
 
 
@@ -229,30 +230,29 @@ def api_client(bids_data_root: Path) -> TestClient:
 
 
 @pytest.fixture()
-def edit_signal_token(otb4_signal: dict[str, Any]) -> str:
+def edit_signal_token(otb4_signal: SignalImport) -> str:
     """Cache a raw-signal context exactly as the edit-load route does."""
     from muedit.api.cache import _store_edit_signal_context
 
     sig = otb4_signal
-    coordinates, ied, discard_channels, _ = format_hdemg_signal(sig["gridname"])
-    ctx = {
-        "data": sig["data"],
-        "fsamp": float(sig["fsamp"]),
-        "grid_names": sig["gridname"],
-        "coordinates": coordinates,
-        "emgmask": discard_channels,
-        "ied": ied,
-        "aux_data": sig["auxiliary"] if sig["auxiliary"].size else None,
-        "aux_names": sig["auxiliaryname"] or None,
-        "manufacturer": sig["metadata"].get("manufacturer"),
-        "device_name": sig["metadata"].get("device_name"),
-        "powerline_freq": 50,
-        "gains": sig["metadata"].get("gains"),
-        "emg_hpf": sig["metadata"].get("emg_hpf"),
-        "emg_lpf": sig["metadata"].get("emg_lpf"),
-        "hardware_filters": sig["metadata"].get("hardware_filters"),
-        "units": sig["metadata"].get("units"),
-    }
+    coordinates, ied, discard_channels, _ = format_hdemg_signal(sig.gridname)
+    meta_keys = ("manufacturer", "device_name", "gains", "emg_hpf", "emg_lpf")
+    ctx = EditSignalContext(
+        data=sig.data,
+        fsamp=sig.fsamp,
+        grid_names=sig.gridname,
+        coordinates=coordinates,
+        emgmask=discard_channels,
+        ied=ied,
+        aux_data=sig.auxiliary,
+        aux_names=sig.auxiliaryname,
+        loader_meta={
+            **{key: sig.metadata.get(key) for key in meta_keys},
+            "powerline_freq": 50,
+            "hardware_filters": sig.metadata.get("hardware_filters"),
+            "units": sig.metadata.get("units"),
+        },
+    )
     return _store_edit_signal_context(ctx, file_label="Quattrocento.otb4")
 
 
@@ -262,7 +262,7 @@ def edit_signal_token(otb4_signal: dict[str, Any]) -> str:
 
 
 def test_decompose_bids_export_before_decomposition_writes_all_frontend_fields(
-    otb4_signal: dict[str, Any], tmp_path: Path
+    otb4_signal: SignalImport, tmp_path: Path
 ) -> None:
     """``preprocess_step`` writes the BIDS tree *before* ICA; every frontend
     ``bids_entities`` field must land in the sidecars."""
@@ -273,8 +273,8 @@ def test_decompose_bids_export_before_decomposition_writes_all_frontend_fields(
         full_path="Quattrocento.otb4",
         filename="Quattrocento.otb4",
         signal=sig,
-        data=sig["data"],
-        fsamp=float(sig["fsamp"]),
+        data=sig.data,
+        fsamp=float(sig.fsamp),
     )
     # This is the exact call the decompose route makes to export raw BIDS;
     # it runs before decompose_step, so no ICA executes here.
@@ -334,7 +334,7 @@ def test_decompose_bids_export_before_decomposition_writes_all_frontend_fields(
 
 def test_edit_save_route_writes_all_frontend_bids_fields(
     api_client: TestClient,
-    otb4_signal: dict[str, Any],
+    otb4_signal: SignalImport,
     edit_signal_token: str,
     bids_data_root: Path,
 ) -> None:
@@ -346,9 +346,9 @@ def test_edit_save_route_writes_all_frontend_bids_fields(
     sig = otb4_signal
     project = "testproj"
     payload = _frontend_edit_save_payload(
-        total_samples=sig["data"].shape[1],
-        fsamp=float(sig["fsamp"]),
-        grid_names=sig["gridname"],
+        total_samples=sig.data.shape[1],
+        fsamp=float(sig.fsamp),
+        grid_names=sig.gridname,
         edit_signal_token=edit_signal_token,
         project=project,
     )

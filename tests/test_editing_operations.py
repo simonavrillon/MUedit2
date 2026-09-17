@@ -525,6 +525,7 @@ class TestUpdateFilterRoute:
     def ctx_token(self, synthetic_mu: dict[str, np.ndarray]) -> Callable[..., str]:
         """Cache a 64-channel GR08MM1305 context with the MU on the first 32 channels."""
         from muedit.api.cache import _store_edit_signal_context
+        from muedit.models import EditSignalContext
 
         rng = np.random.default_rng(7)
         data = np.vstack(
@@ -536,14 +537,13 @@ class TestUpdateFilterRoute:
 
         def store(artifact_mask: np.ndarray | None = None) -> str:
             return _store_edit_signal_context(
-                {
-                    "data": data,
-                    "fsamp": FSAMP,
-                    "grid_names": ["GR08MM1305"],
-                    "emgmask": [np.zeros(64, dtype=int)],
-                    "coordinates": [],
-                    "artifact_mask": artifact_mask,
-                }
+                EditSignalContext(
+                    data=data,
+                    fsamp=FSAMP,
+                    grid_names=["GR08MM1305"],
+                    emgmask=[np.zeros(64, dtype=int)],
+                    artifact_mask=artifact_mask,
+                )
             )
 
         return store

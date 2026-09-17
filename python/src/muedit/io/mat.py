@@ -8,6 +8,8 @@ import h5py
 import numpy as np
 import scipy.io
 
+from muedit.models import SignalImport
+
 
 def _parse_text(value: Any) -> str:
     if value is None:
@@ -130,7 +132,7 @@ def _raise_if_decomposition_signal_fields(field_names: set[str]) -> None:
         )
 
 
-def _load_mat73_signal(path: str) -> dict[str, Any]:
+def _load_mat73_signal(path: str) -> SignalImport:
     with h5py.File(path, "r") as h5f:
         if "signal" not in h5f:
             raise ValueError("Key 'signal' not found in MAT file.")
@@ -162,14 +164,14 @@ def _load_mat73_signal(path: str) -> dict[str, Any]:
 
         device_name = _parse_text(read_field("device_name")) or None
 
-        return {
-            "data": data,
-            "fsamp": fsamp,
-            "gridname": parse_text_list(read_field("gridname")),
-            "muscle": parse_text_list(read_field("muscle")),
-            "auxiliary": auxiliary,
-            "auxiliaryname": parse_text_list(read_field("auxiliaryname")),
-            "metadata": {
+        return SignalImport.build(
+            data=data,
+            fsamp=fsamp,
+            gridname=parse_text_list(read_field("gridname")),
+            muscle=parse_text_list(read_field("muscle")),
+            auxiliary=auxiliary,
+            auxiliaryname=parse_text_list(read_field("auxiliaryname")),
+            metadata={
                 "device_name": device_name,
                 "software_versions": "MATLAB",
                 "hardware_filters": None,
@@ -177,16 +179,15 @@ def _load_mat73_signal(path: str) -> dict[str, Any]:
                 "recording_type": "continuous",
                 "software_filters": "n/a",
             },
-        }
+        )
 
 
-def load_mat(filepath: str) -> dict[str, Any]:
-    """Load legacy MATLAB signal struct into MUedit signal dictionary format."""
+def load_mat(filepath: str) -> SignalImport:
+    """Load a MATLAB ``signal`` struct (v5 or v7.3) as a ``SignalImport``."""
     try:
         mat = scipy.io.loadmat(filepath, struct_as_record=False, squeeze_me=True)
         if "signal" in mat:
             signal_struct = mat["signal"]
-            signal = {}
             field_names = set()
             if hasattr(signal_struct, "_fieldnames"):
                 field_names = set(signal_struct._fieldnames or [])
@@ -199,19 +200,18 @@ def load_mat(filepath: str) -> dict[str, Any]:
 
             data = get_attr(signal_struct, "data")
             n_samples = data.shape[1] if data is not None else 0
-            signal["data"] = data
-            signal["fsamp"] = get_attr(signal_struct, "fsamp")
-            signal["gridname"] = parse_text_list(get_attr(signal_struct, "gridname"))
-            signal["muscle"] = parse_text_list(get_attr(signal_struct, "muscle"))
-            device_name = get_attr(signal_struct, "device_name", None)
-            signal["auxiliary"] = get_attr(signal_struct, "auxiliary", np.zeros((0, n_samples)))
-            signal["auxiliaryname"] = parse_text_list(get_attr(signal_struct, "auxiliaryname"))
-            signal["metadata"] = {
-                "device_name": device_name,
-                "software_versions": "MATLAB",
-            }
-
-            return signal
+            return SignalImport.build(
+                data=data,
+                fsamp=get_attr(signal_struct, "fsamp"),
+                gridname=parse_text_list(get_attr(signal_struct, "gridname")),
+                muscle=parse_text_list(get_attr(signal_struct, "muscle")),
+                auxiliary=get_attr(signal_struct, "auxiliary", np.zeros((0, n_samples))),
+                auxiliaryname=parse_text_list(get_attr(signal_struct, "auxiliaryname")),
+                metadata={
+                    "device_name": get_attr(signal_struct, "device_name", None),
+                    "software_versions": "MATLAB",
+                },
+            )
         raise ValueError("Key 'signal' not found in MAT file.")
     except NotImplementedError as exc:
         if "matlab v7.3" not in str(exc).lower() and not h5py.is_hdf5(filepath):

@@ -31,6 +31,7 @@ from muedit.api.common import (
     summarize_result,
 )
 from muedit.decomp.pipeline import run_decomposition
+from muedit.models import SignalImport
 
 
 def _as_f32_matrix(value: Any) -> np.ndarray:
@@ -80,7 +81,7 @@ def decomposition_event_stream(
     bids_entities: dict | None = None,
     bids_metadata: dict | None = None,
     include_full_preview: bool = False,
-    preloaded_signal: dict[str, Any] | None = None,
+    preloaded_signal: SignalImport | None = None,
     binary_preview: bool = False,
     artifact_regions: list[tuple[int, int]] | None = None,
 ) -> Iterator[str]:
@@ -176,7 +177,7 @@ def decomposition_event_stream(
 
 def resolve_decompose_input(
     upload_token: str | None,
-) -> tuple[str, dict[str, Any]]:
+) -> tuple[str, SignalImport]:
     """Resolve an upload token into ``(run_path, preloaded_signal)``."""
     preloaded_signal = _get_upload_signal(upload_token)
     if preloaded_signal is None:

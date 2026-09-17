@@ -2,7 +2,7 @@
 
 Every format is held to the same contract:
 
-1. ``load_signal`` returns a dict that ``SignalImport`` accepts, with the
+1. ``load_signal`` returns a ``SignalImport`` with the
    expected channel count, grids, sampling rate and loader metadata;
 2. the declared grids resolve in the electrode catalogue and fit the data
    matrix, which is what ``preprocess_step`` needs to decompose it;
@@ -121,7 +121,7 @@ FORMATS = {
     scope="module",
     params=[pytest.param(name, marks=pytest.mark.data) for name in FORMATS],
 )
-def recording(request: pytest.FixtureRequest) -> tuple[Format, dict[str, Any]]:
+def recording(request: pytest.FixtureRequest) -> tuple[Format, SignalImport]:
     """Each sample recording, loaded once per module."""
     fmt = FORMATS[request.param]
     path = request.getfixturevalue(fmt.fixture)
@@ -133,9 +133,8 @@ def _read_tsv(path: Path) -> list[dict[str, str]]:
         return list(csv.DictReader(f, delimiter="\t"))
 
 
-def test_loads_expected_recording(recording: tuple[Format, dict[str, Any]]) -> None:
-    fmt, sig = recording
-    si = SignalImport.from_mapping(sig)
+def test_loads_expected_recording(recording: tuple[Format, SignalImport]) -> None:
+    fmt, si = recording
 
     assert si.data.shape[0] == fmt.n_channels
     assert si.data.shape[1] > 0 and si.data.dtype == np.float64
@@ -153,33 +152,33 @@ def test_loads_expected_recording(recording: tuple[Format, dict[str, Any]]) -> N
         assert si.metadata[key] == expected, key
 
 
-def test_grids_fit_the_data(recording: tuple[Format, dict[str, Any]]) -> None:
+def test_grids_fit_the_data(recording: tuple[Format, SignalImport]) -> None:
     """The grid geometry ``preprocess_step`` derives covers the loaded channels."""
     _, sig = recording
-    coordinates, ied, discard, emg_types = format_hdemg_signal(sig["gridname"])
-    n_grid = len(sig["gridname"])
+    coordinates, ied, discard, emg_types = format_hdemg_signal(sig.gridname)
+    n_grid = len(sig.gridname)
     assert len(coordinates) == len(ied) == len(discard) == len(emg_types) == n_grid
     for coords, mask, spacing in zip(coordinates, discard, ied, strict=True):
         assert np.asarray(coords).shape == (len(mask), 2)
         assert spacing > 0
-    assert sum(len(m) for m in discard) <= sig["data"].shape[0]
+    assert sum(len(m) for m in discard) <= sig.data.shape[0]
 
 
-def test_bids_export_round_trip(recording: tuple[Format, dict[str, Any]], tmp_path: Path) -> None:
+def test_bids_export_round_trip(recording: tuple[Format, SignalImport], tmp_path: Path) -> None:
     fmt, sig = recording
-    md = sig["metadata"]
+    md = sig.metadata
     if fmt.bids_metadata:
         assert set(_BIDS_METADATA_KEYS) <= set(md)
-        assert len(md["coordinates"]) == len(sig["gridname"])
-        assert len(md["gains"]) == sig["data"].shape[0]
+        assert len(md["coordinates"]) == len(sig.gridname)
+        assert len(md["gains"]) == sig.data.shape[0]
 
-    data = sig["data"][:, :_EXPORT_SAMPLES]
-    aux = sig["auxiliary"][:, :_EXPORT_SAMPLES]
-    coordinates, ied, discard, _ = format_hdemg_signal(sig["gridname"])
+    data = sig.data[:, :_EXPORT_SAMPLES]
+    aux = sig.auxiliary[:, :_EXPORT_SAMPLES]
+    coordinates, ied, discard, _ = format_hdemg_signal(sig.gridname)
     out = export_bids_emg(
         data,
-        sig["fsamp"],
-        sig["gridname"],
+        sig.fsamp,
+        sig.gridname,
         coordinates,
         discard,
         tmp_path,
@@ -192,19 +191,19 @@ def test_bids_export_round_trip(recording: tuple[Format, dict[str, Any]], tmp_pa
         powerline_freq=md.get("powerline_freq", 50.0),
         gain=md.get("gains"),
         units=md.get("units") or "uV",
-        target_muscle=sig["muscle"] or None,
+        target_muscle=sig.muscle or None,
         low_cutoff=md.get("emg_hpf"),
         high_cutoff=md.get("emg_lpf"),
         hardware_filters=md.get("hardware_filters") or "n/a",
         aux_data=aux if aux.size else None,
-        aux_names=sig["auxiliaryname"] or None,
+        aux_names=sig.auxiliaryname or None,
         aux_units=md.get("aux_units"),
     )
 
     for key in ("edf", "emg_json", "channels_tsv", "electrodes_tsv"):
         assert out[key].exists(), key
     emg_json = json.loads(out["emg_json"].read_text())
-    assert float(emg_json["SamplingFrequency"]) == sig["fsamp"]
+    assert float(emg_json["SamplingFrequency"]) == sig.fsamp
     assert int(emg_json["EMGChannelCount"]) == data.shape[0]
 
     rows = _read_tsv(out["channels_tsv"])
@@ -215,10 +214,10 @@ def test_bids_export_round_trip(recording: tuple[Format, dict[str, Any]], tmp_pa
 
     reloaded = load_signal(str(out["edf"]))
     # EDF/BDF stores whole data records, so the tail is padded to a full record.
-    assert reloaded["data"].shape[0] == data.shape[0]
-    assert data.shape[1] <= reloaded["data"].shape[1] < data.shape[1] + sig["fsamp"]
-    assert reloaded["fsamp"] == sig["fsamp"]
-    assert reloaded["gridname"] == sig["gridname"]
+    assert reloaded.data.shape[0] == data.shape[0]
+    assert data.shape[1] <= reloaded.data.shape[1] < data.shape[1] + sig.fsamp
+    assert reloaded.fsamp == sig.fsamp
+    assert reloaded.gridname == sig.gridname
 
 
 @pytest.mark.data
@@ -227,21 +226,12 @@ def test_load_decomposition_mat(decomp_mat_file: Path) -> None:
     from muedit.decomp.decomposition_file import load_decomposition_file
 
     loaded = load_decomposition_file(str(decomp_mat_file))
-    assert {
-        "pulse_trains_full",
-        "distime_all",
-        "fsamp",
-        "grid_names",
-        "mu_grid_index",
-        "total_samples",
-        "parameters",
-        "muscle",
-    } <= set(loaded)
-    n_mu = len(loaded["distime_all"])
+    n_mu = len(loaded.distime_all)
     assert n_mu == 54
-    assert len(loaded["pulse_trains_full"]) == len(loaded["mu_grid_index"]) == n_mu
-    assert loaded["fsamp"] == 2000.0
-    for dt in loaded["distime_all"]:
+    assert len(loaded.pulse_trains_full) == len(loaded.mu_grid_index) == n_mu
+    assert loaded.fsamp == 2000.0
+    assert loaded.total_samples > 0
+    for dt in loaded.distime_all:
         arr = np.asarray(dt)
         assert arr.dtype.kind in {"i", "u"}
         assert arr.size == 0 or arr.min() >= 0

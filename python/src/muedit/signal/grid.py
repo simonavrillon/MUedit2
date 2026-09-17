@@ -7,6 +7,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from muedit.models import FloatArray, IntArray
+
 logger = logging.getLogger(__name__)
 
 
@@ -18,7 +20,7 @@ class GridSpec:
     fill in every field — no other file needs to change.
     """
 
-    channel_map: np.ndarray  # 2-D layout; 0 = no electrode at that position
+    channel_map: IntArray  # 2-D layout; 0 = no electrode at that position
     nbelectrodes: int  # total active electrode count
     ied: float  # inter-electrode distance in mm
     emg_type: int  # 1 = surface HD-EMG, 2 = intramuscular
@@ -315,12 +317,12 @@ def _find_spec(grid_name: str) -> GridSpec | None:
 def format_hdemg_signal(
     grid_names: list[str],
     discard_overrides: list[list[int]] | None = None,
-) -> tuple[list[np.ndarray], list[float], list[np.ndarray], list[int]]:
+) -> tuple[list[FloatArray], list[float], list[IntArray], list[int]]:
     """Infer grid geometry and channel masks for HD-EMG recordings."""
-    coordinates = []
-    ied = []
-    discard_channels_vec = []
-    emg_type = []
+    coordinates: list[FloatArray] = []
+    ied: list[float] = []
+    discard_channels_vec: list[IntArray] = []
+    emg_type: list[int] = []
 
     for i, grid_name in enumerate(grid_names):
         spec = _find_spec(grid_name)

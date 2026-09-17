@@ -56,6 +56,7 @@ from muedit.decomp.types import (
     PostprocessStepOutput,
     PreprocessStepOutput,
 )
+from muedit.models import SignalImport
 from muedit.signal.decomp_primitives import POSTPROC_MIN_ISI_SEC
 from tests._metrics_helpers import central_roi
 from tests._report import record
@@ -78,15 +79,15 @@ _DEDUP_OFF_THRESH = 2.0
 
 
 @pytest.fixture(scope="session")
-def novecento_roi_local(novecento_emg: dict[str, Any]) -> tuple[int, int]:
+def novecento_roi_local(novecento_emg: SignalImport) -> tuple[int, int]:
     """Central 10 s ROI of the Novecento recording (where the contraction is)."""
-    return central_roi(novecento_emg["data"], float(novecento_emg["fsamp"]), _ROI_WIDTH_SEC)
+    return central_roi(novecento_emg.data, float(novecento_emg.fsamp), _ROI_WIDTH_SEC)
 
 
 @pytest.fixture(scope="session")
 def postprocess_variants(
     novecento_otb4_file: Path,
-    novecento_emg: dict[str, Any],
+    novecento_emg: SignalImport,
     novecento_roi_local: tuple[int, int],
 ) -> dict[str, Any]:
     """Decompose once, then re-run post-processing for each branch x dedup state.

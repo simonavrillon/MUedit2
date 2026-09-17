@@ -8,6 +8,7 @@ import logging
 import os
 import sys
 from pathlib import Path
+from typing import get_args
 
 import uvicorn
 
@@ -19,6 +20,7 @@ from muedit.decomp.types import (
     DEFAULT_PEEL_OFF_WIN_SEC,
     DEFAULT_POSTPROCESS_MODE,
     POSTPROCESS_MODES,
+    ContrastFunc,
     DecompositionParameters,
 )
 
@@ -141,7 +143,7 @@ def run_decomposition_cli(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--contrast-func",
         type=str,
-        choices=["skew", "kurtosis", "logcosh"],
+        choices=get_args(ContrastFunc),
         default=_DEFAULT_PARAMS.contrast_func,
         help="FastICA contrast function (app setting: Contrast func).",
     )

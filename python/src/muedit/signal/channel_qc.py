@@ -8,6 +8,8 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.ndimage import uniform_filter1d
 
+from muedit.models import BoolArray, FloatArray, IntArray
+
 logger = logging.getLogger(__name__)
 
 
@@ -40,31 +42,31 @@ class ChannelQCConfig:
 class ChannelQCMetrics:
     """Per-channel diagnostic metrics from :func:`_channel_qc_diagnostics`."""
 
-    mask: np.ndarray
-    rms: np.ndarray
-    snr: np.ndarray
-    sat_frac: np.ndarray
-    n_unique: np.ndarray
-    mean_neighbor_corr: np.ndarray
-    max_win_ratio: np.ndarray
-    max_loss_run: np.ndarray
+    mask: BoolArray
+    rms: FloatArray
+    snr: FloatArray
+    sat_frac: FloatArray
+    n_unique: IntArray
+    mean_neighbor_corr: FloatArray
+    max_win_ratio: FloatArray
+    max_loss_run: IntArray
     reasons: list[str]
 
 
 def _detect_bad_channels(
-    data: np.ndarray,
+    data: FloatArray,
     fsamp: float,
-    coordinates: np.ndarray | None = None,
+    coordinates: FloatArray | None = None,
     config: ChannelQCConfig | None = None,
-) -> np.ndarray:
+) -> BoolArray:
     """Detect bad channels in one grid's filtered signal."""
     return _channel_qc_diagnostics(data, fsamp, coordinates, config).mask
 
 
 def _channel_qc_diagnostics(
-    data: np.ndarray,
+    data: FloatArray,
     fsamp: float,
-    coordinates: np.ndarray | None = None,
+    coordinates: FloatArray | None = None,
     config: ChannelQCConfig | None = None,
 ) -> ChannelQCMetrics:
     """Compute per-channel QC metrics and a bad-channel mask for one grid."""
@@ -109,7 +111,7 @@ def _channel_qc_diagnostics(
     if can_check_quant:
         quantized = (n_unique < cfg.quant_max_unique_frac * n_samples) & nonzero_range
 
-    mean_corr = np.ones(n_ch)
+    mean_corr: FloatArray = np.ones(n_ch)
     noisy = np.zeros(n_ch, dtype=bool)
     can_check_noisy = coordinates is not None and n_ch > 1 and med_rms >= cfg.noisy_abs_floor
     if can_check_noisy and coordinates is not None:
@@ -222,10 +224,10 @@ def _channel_qc_diagnostics(
 
 
 def _estimate_snr(
-    data: np.ndarray,
+    data: FloatArray,
     fsamp: float,
     win_ms: int,
-) -> np.ndarray:
+) -> FloatArray:
     """Estimate per-channel SNR (dB) via activity-sparse segmentation."""
     n_ch, n_samples = data.shape
     win_samples = int(fsamp * win_ms / 1000)
@@ -253,10 +255,10 @@ def _estimate_snr(
 
 
 def _mean_neighbor_correlation(
-    data: np.ndarray,
-    coordinates: np.ndarray,
+    data: FloatArray,
+    coordinates: FloatArray,
     neighbor_dist: float,
-) -> np.ndarray:
+) -> FloatArray:
     """Mean Pearson correlation of each channel with its spatial neighbours."""
     n_ch = data.shape[0]
     corr = _safe_correlation(data)
@@ -275,7 +277,7 @@ def _mean_neighbor_correlation(
     return mean_corr
 
 
-def _safe_correlation(data: np.ndarray) -> np.ndarray:
+def _safe_correlation(data: FloatArray) -> FloatArray:
     """Pearson correlation matrix with NaN-safe handling."""
     std = data.std(axis=1)
     with np.errstate(invalid="ignore", divide="ignore"):
@@ -289,14 +291,14 @@ def _safe_correlation(data: np.ndarray) -> np.ndarray:
 
 
 def detect_bad_channels_per_grid(
-    data: np.ndarray,
+    data: FloatArray,
     fsamp: float,
     grid_channel_counts: list[int],
-    grid_coordinates: list[np.ndarray] | None = None,
+    grid_coordinates: list[FloatArray] | None = None,
     config: ChannelQCConfig | None = None,
-) -> list[np.ndarray]:
+) -> list[BoolArray]:
     """Detect bad channels per grid."""
-    per_grid_masks: list[np.ndarray] = []
+    per_grid_masks: list[BoolArray] = []
     ch_idx = 0
     for grid_idx, n_ch in enumerate(grid_channel_counts):
         grid_data = data[ch_idx : ch_idx + n_ch, :]

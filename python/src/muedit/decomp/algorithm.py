@@ -8,6 +8,8 @@ from collections.abc import Callable
 import numpy as np
 from scipy.linalg import eigh, inv
 
+from muedit.decomp.types import ContrastFunc
+from muedit.models import BoolArray, FloatArray, IntArray
 from muedit.signal.decomp_primitives import (
     DECOMP_MIN_ISI_SEC,
     POSTPROC_MIN_ISI_SEC,
@@ -44,7 +46,7 @@ __all__ = [
 ]
 
 
-def pca_extended_signal(signal: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def pca_extended_signal(signal: FloatArray) -> tuple[FloatArray, FloatArray]:
     """Estimate PCA basis/eigenvalues for extended signal whitening."""
     cov_matrix = np.cov(signal, bias=True)
     eigenvalues, eigenvectors = eigh(cov_matrix)
@@ -74,10 +76,10 @@ def pca_extended_signal(signal: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 
 
 def whiten_extended_signal(
-    signal: np.ndarray,
-    eigenvectors: np.ndarray,
-    eigenvalues_diag: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray]:
+    signal: FloatArray,
+    eigenvectors: FloatArray,
+    eigenvalues_diag: FloatArray,
+) -> tuple[FloatArray, FloatArray]:
     """Whiten extended signal and return the whitening matrix."""
     inv_sqrt_d = inv(np.sqrt(eigenvalues_diag))
 
@@ -88,12 +90,12 @@ def whiten_extended_signal(
 
 
 def fixed_point_alg(
-    w: np.ndarray,
-    x: np.ndarray,
-    basis: np.ndarray,
+    w: FloatArray,
+    x: FloatArray,
+    basis: FloatArray,
     maxiter: int,
-    contrast_func: str,
-) -> np.ndarray:
+    contrast_func: ContrastFunc,
+) -> FloatArray:
     """Run one-unit FastICA fixed-point iterations with orthogonalization."""
     k = 0
     delta = 1.0
@@ -135,22 +137,22 @@ def fixed_point_alg(
     return w
 
 
-def _pulse_train(w: np.ndarray, x: np.ndarray) -> np.ndarray:
+def _pulse_train(w: FloatArray, x: FloatArray) -> FloatArray:
     """Project source and apply signed-squared nonlinearity."""
     wtx = w.T @ x
     return signed_square(wtx).flatten()
 
 
-def _detect_peaks(icasig: np.ndarray, fsamp: float) -> np.ndarray:
+def _detect_peaks(icasig: FloatArray, fsamp: float) -> IntArray:
     """Detect candidate spikes with refractory-distance peak picking."""
     return find_refractory_peaks(icasig, fsamp, min_isi_sec=_MIN_ISI_SEC)
 
 
 def get_spikes(
-    w: np.ndarray,
-    x: np.ndarray,
+    w: FloatArray,
+    x: FloatArray,
     fsamp: float,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[FloatArray, IntArray]:
     """Estimate spike times from one source using k-means amplitude split."""
     icasig = _pulse_train(w, x)
     spikes = _detect_peaks(icasig, fsamp)
@@ -168,11 +170,11 @@ def get_spikes(
 
 
 def minimize_isi_covariance(
-    w: np.ndarray,
-    x: np.ndarray,
+    w: FloatArray,
+    x: FloatArray,
     cov: float,
     fsamp: float,
-) -> tuple[np.ndarray, np.ndarray, float]:
+) -> tuple[FloatArray, IntArray, float]:
     """Refine separating vector by minimizing ISI coefficient of variation."""
     cov_last = cov + 0.1
     spikes = np.array([], dtype=int)
@@ -207,10 +209,10 @@ def minimize_isi_covariance(
 
 
 def compute_silhouette(
-    x: np.ndarray,
-    w: np.ndarray,
+    x: FloatArray,
+    w: FloatArray,
     fsamp: float,
-) -> tuple[np.ndarray, np.ndarray, float]:
+) -> tuple[FloatArray, IntArray, float]:
     """Compute silhouette-like separability score for detected spikes."""
     icasig = _pulse_train(w, x)
     spikes = _detect_peaks(icasig, fsamp)
@@ -234,11 +236,11 @@ def compute_silhouette(
 
 
 def subtract_mu_waveforms(
-    x: np.ndarray,
-    spikes: np.ndarray,
+    x: FloatArray,
+    spikes: IntArray,
     fsamp: float,
     win: float,
-) -> np.ndarray:
+) -> FloatArray:
     """Subtract averaged MU waveform estimate from multichannel signal."""
     window_l = int(np.round(win * fsamp))
     n_cols = x.shape[1]
@@ -260,17 +262,17 @@ def subtract_mu_waveforms(
 
 
 def batch_process_filters(
-    mu_filters_by_window: dict[int, np.ndarray],
-    whitened_windows: dict[int, np.ndarray] | Callable[[int], np.ndarray],
+    mu_filters_by_window: dict[int, FloatArray],
+    whitened_windows: dict[int, FloatArray] | Callable[[int], FloatArray],
     coordinates: list[int],
     ltime: int,
     fsamp: float,
-    whiten_mat_by_window: dict[int, np.ndarray] | None = None,
-    build_full_extended: Callable[[int], np.ndarray] | None = None,
+    whiten_mat_by_window: dict[int, FloatArray] | None = None,
+    build_full_extended: Callable[[int], FloatArray] | None = None,
     window_to_grid: dict[int, int] | None = None,
-    win_means_by_window: dict[int, np.ndarray] | None = None,
-    artifact_mask: np.ndarray | None = None,
-) -> tuple[np.ndarray, list[np.ndarray]]:
+    win_means_by_window: dict[int, FloatArray] | None = None,
+    artifact_mask: BoolArray | None = None,
+) -> tuple[FloatArray, list[IntArray]]:
     """Apply MU filters across windows and reconstruct pulse trains/spike times."""
     total_mus = 0
     for nwin in mu_filters_by_window:
@@ -288,7 +290,7 @@ def batch_process_filters(
 
     use_full = build_full_extended is not None and whiten_mat_by_window is not None
     cur_grid: int | None = None
-    raw_ext: np.ndarray | None = None
+    raw_ext: FloatArray | None = None
 
     for nwin in sorted_wins:
         filters = mu_filters_by_window[nwin]
@@ -356,14 +358,14 @@ def batch_process_filters(
 
 
 def rem_duplicates(
-    pulse_t: np.ndarray,
-    distime: list[np.ndarray],
-    distime_ref: list[np.ndarray] | None,
+    pulse_t: FloatArray,
+    distime: list[IntArray],
+    distime_ref: list[IntArray] | None,
     maxlag: int,
     jitter: float,
     tol: float,
     fsamp: float,
-) -> tuple[np.ndarray, list[np.ndarray], list[int]]:
+) -> tuple[FloatArray, list[IntArray], list[int]]:
     """Remove duplicated motor units based on lag-aware spike-train overlap."""
 
     if distime_ref is None:
@@ -374,7 +376,7 @@ def rem_duplicates(
     n_mus = pulse_t.shape[0]
     l_sig = pulse_t.shape[1]
 
-    jittered_distimes: list[np.ndarray] = []
+    jittered_distimes: list[IntArray] = []
     kept_indices: list[int] = []
 
     for i in range(n_mus):
@@ -392,8 +394,8 @@ def rem_duplicates(
         else:
             jittered_distimes.append(np.array([]))
 
-    kept_pulses: list[np.ndarray] = []
-    kept_distimes: list[np.ndarray] = []
+    kept_pulses: list[FloatArray] = []
+    kept_distimes: list[IntArray] = []
     active_mus = np.ones(n_mus, dtype=bool)
 
     lag_gate = 0.2
