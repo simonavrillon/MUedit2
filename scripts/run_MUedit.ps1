@@ -6,25 +6,39 @@ $RootDir     = Split-Path $PSScriptRoot -Parent
 $BackendDir  = Join-Path $RootDir 'python'
 $FrontendDir = Join-Path $RootDir 'frontend'
 
+# `uv run` syncs the locked environment and executes inside it, so the app
+# launches from a bare checkout with no activation step.  Falling back to a
+# plain `python` keeps the script working inside an already-activated
+# environment (conda, venv) and when uv is not installed.
+if ((Get-Command uv -ErrorAction SilentlyContinue) -and ($env:MUEDIT_NO_UV -ne '1')) {
+    $PyExe  = 'uv'
+    $PyArgs = @('run', '--project', $RootDir, 'python')
+} else {
+    $PyExe  = 'python'
+    $PyArgs = @()
+}
+
 $env:PYTHONPATH           = "$BackendDir\src" + $(if ($env:PYTHONPATH) { ";$env:PYTHONPATH" } else { '' })
 $env:MUEDIT_HOST          = if ($env:MUEDIT_HOST) { $env:MUEDIT_HOST } else { '0.0.0.0' }
 $env:MUEDIT_PORT          = if ($env:MUEDIT_BACKEND_PORT) { $env:MUEDIT_BACKEND_PORT } else { '8000' }
 $env:MUEDIT_FRONTEND_PORT = if ($env:MUEDIT_FRONTEND_PORT) { $env:MUEDIT_FRONTEND_PORT } else { '8080' }
 $env:MUEDIT_OPEN_BROWSER  = if ($env:MUEDIT_OPEN_BROWSER) { $env:MUEDIT_OPEN_BROWSER } else { '1' }
 
+# The unary comma keeps $PyArgs a single array argument instead of being
+# unrolled into separate positional parameters by -ArgumentList.
 $BackendJob = Start-Job -ScriptBlock {
-    param($dir, $pythonpath)
+    param($dir, $pythonpath, $exe, $pyargs)
     $env:PYTHONPATH = $pythonpath
     Set-Location $dir
-    python -m muedit.cli api
-} -ArgumentList $BackendDir, $env:PYTHONPATH
+    & $exe @pyargs -m muedit.cli api
+} -ArgumentList $BackendDir, $env:PYTHONPATH, $PyExe, (, $PyArgs)
 Write-Host "Backend started (Job $($BackendJob.Id)) on :$($env:MUEDIT_PORT)"
 
 $FrontendJob = Start-Job -ScriptBlock {
-    param($dir, $port)
+    param($dir, $port, $exe, $pyargs)
     Set-Location $dir
-    python -m http.server $port
-} -ArgumentList $FrontendDir, $env:MUEDIT_FRONTEND_PORT
+    & $exe @pyargs -m http.server $port
+} -ArgumentList $FrontendDir, $env:MUEDIT_FRONTEND_PORT, $PyExe, (, $PyArgs)
 Write-Host "Frontend started (Job $($FrontendJob.Id)) on :$($env:MUEDIT_FRONTEND_PORT)"
 
 if ($env:MUEDIT_OPEN_BROWSER -eq '1') {

@@ -32,23 +32,24 @@ For Intan RHD input, point to the `.rhd` file (traditional single-file layout) o
 
 ## Requirements
 
-- Python 3.11+
-- Conda (Anaconda or Miniconda)
+- [uv](https://docs.astral.sh/uv/) — installs its own Python, so no system
+  Python is needed:
+  ```bash
+  # macOS / Linux
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  # Windows (PowerShell)
+  powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+  ```
 
 ## Quick Start
 
-1. Create and activate the conda environment:
+1. Create the environment from the lockfile (installs Python 3.12, every
+   dependency and MUedit itself, in one step):
 ```bash
-conda env create -f environment.yml
-conda activate MUedit
+uv sync
 ```
 
-2. Install MUedit in editable mode:
-```bash
-pip install -e .
-```
-
-3. Launch the app from the repository root:
+2. Launch the app from the repository root:
 
 macOS / Linux:
 ```bash
@@ -88,9 +89,49 @@ With MUedit running:
 curl http://localhost:8000/api/v1/health
 ```
 
+## Development
+
+Install the dev tooling (pytest, mypy, ruff, pre-commit) alongside the runtime
+dependencies, then enable the commit hooks:
+
+```bash
+uv sync --extra dev
+uv run pre-commit install
+```
+
+Common tasks — `uv run` executes inside the project environment, so nothing
+needs activating:
+
+```bash
+uv run pytest              # full suite (needs recordings under data/)
+uv run pytest -m "not data"  # the tier CI runs, no recordings required
+uv run mypy
+uv run ruff check . && uv run ruff format .
+```
+
+Optional extras: `--extra notebook` (JupyterLab for `notebooks/`) and
+`--extra research` (Optuna). Combine them, e.g. `uv sync --extra dev --extra notebook`.
+
+`uv.lock` pins the full transitive dependency graph and is committed, so every
+machine and CI resolve identical versions. After editing dependencies in
+`pyproject.toml`, run `uv lock` and commit the result; CI runs with `--locked`
+and fails if the two have drifted. To move a pinned dependency deliberately:
+
+```bash
+uv lock --upgrade-package numpy
+```
+
+> **Migrating from conda:** `environment.yml` is deprecated and kept for one
+> release so in-flight work is not disrupted. It is no longer tested in CI and
+> will be removed; `uv sync` reproduces the same package versions it pinned.
+> `deno`, used only by the BIDS validation cell in
+> `notebooks/bids_dataset_metadata.ipynb`, is not a Python package and is now
+> installed separately (that notebook explains how).
+
 ## Troubleshooting
 
-- `python: command not found` — activate the conda env before launching.
+- `python: command not found` — run `uv sync` first; the launcher scripts
+  pick up the project environment automatically, with no activation step.
 - Port already in use — set `MUEDIT_BACKEND_PORT` / `MUEDIT_FRONTEND_PORT` to free ports.
 - Browser does not open automatically — open `http://localhost:8080` manually.
 

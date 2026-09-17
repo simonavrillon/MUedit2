@@ -5,6 +5,16 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 BACKEND_DIR="$ROOT_DIR/python"
 FRONTEND_DIR="$ROOT_DIR/frontend"
 
+# `uv run` syncs the locked environment and executes inside it, so the app
+# launches from a bare checkout with no activation step.  Falling back to a
+# plain `python` keeps the script working inside an already-activated
+# environment (conda, venv) and when uv is not installed.
+if command -v uv >/dev/null 2>&1 && [[ "${MUEDIT_NO_UV:-0}" != "1" ]]; then
+  PY=(uv run --project "$ROOT_DIR" python)
+else
+  PY=(python)
+fi
+
 export PYTHONPATH="$BACKEND_DIR/src:${PYTHONPATH:-}"
 export MUEDIT_HOST="${MUEDIT_HOST:-0.0.0.0}"
 export MUEDIT_PORT="${MUEDIT_BACKEND_PORT:-8000}"
@@ -12,12 +22,12 @@ export MUEDIT_FRONTEND_PORT="${MUEDIT_FRONTEND_PORT:-8080}"
 export MUEDIT_OPEN_BROWSER="${MUEDIT_OPEN_BROWSER:-1}"
 
 cd "$BACKEND_DIR"
-python -m muedit.cli api &
+"${PY[@]}" -m muedit.cli api &
 BACK_PID=$!
 echo "Backend started (PID $BACK_PID) on :$MUEDIT_PORT"
 
 cd "$FRONTEND_DIR"
-python -m http.server "$MUEDIT_FRONTEND_PORT" 2>/dev/null &
+"${PY[@]}" -m http.server "$MUEDIT_FRONTEND_PORT" 2>/dev/null &
 FRONT_PID=$!
 echo "Frontend started (PID $FRONT_PID) on :$MUEDIT_FRONTEND_PORT"
 
@@ -29,7 +39,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 if [[ "$MUEDIT_OPEN_BROWSER" == "1" ]]; then
-  python - <<PY
+  "${PY[@]}" - <<PY
 import urllib.request, time, sys, os, webbrowser
 
 backend_port  = os.environ.get("MUEDIT_PORT", "8000")

@@ -19,42 +19,28 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v10
         with:
-          python-version: "3.12"
-      # Pinned so a new ruff release cannot reformat the tree underneath us.
-      - run: pip install ruff==0.15.16
-      - run: ruff check --output-format=github .
-      - run: ruff format --check .
+          enable-cache: true
+      # ruff is pinned in pyproject.toml's dev extra and resolved through
+      # uv.lock, so a new ruff release cannot reformat the tree underneath us.
+      - run: uv run --locked --extra dev ruff check --output-format=github .
+      - run: uv run --locked --extra dev ruff format --check .
 
   python:
     name: Python · mypy + pytest
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        # Login shell so the conda env is active in every step.
-        shell: bash -el {0}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/cache@v4
+      - uses: astral-sh/setup-uv@v10
         with:
-          path: ~/conda_pkgs_dir
-          key: conda-${{ runner.os }}-${{ hashFiles('environment.yml') }}
-          restore-keys: conda-${{ runner.os }}-
-      # environment.yml is the documented runtime, so CI tests the same pinned
-      # versions developers run locally.
-      - uses: conda-incubator/setup-miniconda@v3
-        with:
-          environment-file: environment.yml
-          activate-environment: MUedit
-          python-version: "3.12"
-          miniforge-version: latest
-          conda-remove-defaults: true
-      - name: Install muedit and dev tools
-        run: |
-          pip install -e . --no-deps
-          pip install "pytest>=8.3" "pytest-cov>=6.0" "httpx>=0.27" "mypy==2.3.1" types-PyYAML
-      - run: mypy
+          enable-cache: true
+      # --locked fails if uv.lock has drifted from pyproject.toml, so a
+      # dependency edit that skipped `uv lock` cannot reach main.  The lock
+      # pins the full transitive graph, so CI runs the exact versions a
+      # developer gets from `uv sync`.
+      - run: uv sync --locked --extra dev
+      - run: uv run mypy
       # Runners have no recordings under data/, so the data tier is deselected.
       # MUEDIT_REQUIRE_DATA turns any remaining missing-file skip into a
       # failure, which catches a data-dependent test the marker missed.
@@ -64,7 +50,7 @@ jobs:
           # Safety net: should a benchmark test escape the marker, it writes
           # here instead of the committed leaderboard.
           MUEDIT_BENCHMARK_LEADERBOARD: ${{ runner.temp }}/leaderboard.json
-        run: pytest -m "not data" --cov=muedit --cov-report=term-missing:skip-covered
+        run: uv run pytest -m "not data" --cov=muedit --cov-report=term-missing:skip-covered
 
   frontend:
     name: Frontend · eslint + prettier + node --test (Node ${{ matrix.node }})
