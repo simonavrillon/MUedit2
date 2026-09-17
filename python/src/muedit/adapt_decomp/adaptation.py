@@ -153,11 +153,16 @@ class AdaptiveDecomp:
                 batch_mask = self.artifact_mask[seg_start:seg_end]
                 batch_artifact = bool(batch_mask.any())
 
+            # Before _whiten, which updates the whitening in place: the padding
+            # must be projected with the same matrix as the batch it flanks.
+            edges = self._edge_ipts(seg_start, seg_end, n_samples)
+
             if batch_artifact:
                 whitened_batch = self.whitening @ self.emg_extended[seg_start:seg_end].T
                 ipts_batch = self._separate(whitened_batch)
-                ipts_sq = signed_square(ipts_batch)
-                spikes_batch = self._detect_spikes(ipts_sq, update_centroids=False)
+                spikes_batch = self._detect_spikes_with_context(
+                    ipts_batch, edges, update_centroids=False
+                )
                 spikes_batch[batch_mask] = 0
                 if wh_losses is not None and sv_losses is not None and total_losses is not None:
                     wh_losses[batch_idx] = np.nan
@@ -166,8 +171,9 @@ class AdaptiveDecomp:
             else:
                 whitened_batch = self._whiten(self.emg_extended[seg_start:seg_end])
                 ipts_batch = self._separate(whitened_batch)
-                ipts_sq = signed_square(ipts_batch)
-                spikes_batch = self._detect_spikes(ipts_sq, update_centroids=True)
+                spikes_batch = self._detect_spikes_with_context(
+                    ipts_batch, edges, update_centroids=True
+                )
 
                 if wh_losses is not None and sv_losses is not None and total_losses is not None:
                     kl = self._kl_divergence()
@@ -190,8 +196,12 @@ class AdaptiveDecomp:
             start_idx = n_batches * batch_size
             whitened_batch = self.whitening @ self.emg_extended[start_idx:].T
             ipts_batch = (self.sep_vectors @ whitened_batch).T
-            ipts_sq = signed_square(ipts_batch)
-            spikes_batch = self._detect_spikes(ipts_sq, update_centroids=True)
+            # The trailing edge is the end of the signal, so only the leading
+            # sample can be recovered here.
+            edges = self._edge_ipts(start_idx, n_samples, n_samples)
+            spikes_batch = self._detect_spikes_with_context(
+                ipts_batch, edges, update_centroids=True
+            )
             if self.artifact_mask is not None:
                 rm = self.artifact_mask[start_idx:]
                 spikes_batch[rm] = 0
@@ -233,9 +243,48 @@ class AdaptiveDecomp:
         """Project whitened signal through separation vectors."""
         return (self.sep_vectors @ whitened_signal).T
 
-    def _detect_spikes(self, ipts_squared: np.ndarray, update_centroids: bool = True) -> np.ndarray:
+    def _edge_ipts(
+        self, seg_start: int, seg_end: int, n_samples: int
+    ) -> tuple[np.ndarray | None, np.ndarray | None]:
+        """Project the samples flanking a batch, for peak-picking context only."""
+        # find_peaks needs a lower neighbour on both sides, so a discharge on the
+        # first or last sample of a batch is invisible to a pass seeing only that batch.
+        lo = (
+            self._separate(self.whitening @ self.emg_extended[seg_start - 1 : seg_start].T)
+            if seg_start > 0
+            else None
+        )
+        hi = (
+            self._separate(self.whitening @ self.emg_extended[seg_end : seg_end + 1].T)
+            if seg_end < n_samples
+            else None
+        )
+        return lo, hi
+
+    def _detect_spikes_with_context(
+        self,
+        ipts_batch: np.ndarray,
+        edges: tuple[np.ndarray | None, np.ndarray | None],
+        update_centroids: bool = True,
+    ) -> np.ndarray:
+        """Detect spikes on a batch padded with its flanking samples."""
+        lo, hi = edges
+        parts = [part for part in (lo, ipts_batch, hi) if part is not None]
+        ipts_sq = signed_square(np.concatenate(parts, axis=0))
+        start = 0 if lo is None else lo.shape[0]
+        stop = start + ipts_batch.shape[0]
+        spikes = self._detect_spikes(ipts_sq, update_centroids=update_centroids, core=(start, stop))
+        return spikes[start:stop]
+
+    def _detect_spikes(
+        self,
+        ipts_squared: np.ndarray,
+        update_centroids: bool = True,
+        core: tuple[int, int] | None = None,
+    ) -> np.ndarray:
         """Spike detection with amplitude-bounded peak finding and midpoint threshold."""
         spikes = np.zeros(ipts_squared.shape, dtype=np.int32)
+        core_lo, core_hi = core if core is not None else (0, ipts_squared.shape[0])
 
         for unit_idx in range(self.n_motor_units):
             min_h = float(self.base_centr[unit_idx] / self.config.spike_height_mult)
@@ -255,8 +304,13 @@ class AdaptiveDecomp:
             spikes[peak_indices, unit_idx] = labels
 
             if update_centroids and self.config.adapt_sd:
+                # Padding peaks steer the refractory gate, but skewing the
+                # centroids with them would change the adaptation itself.
+                in_core = (peak_indices >= core_lo) & (peak_indices < core_hi)
+                peak_values = peak_values[in_core]
+                labels = labels[in_core]
                 n_spikes = int(labels.sum())
-                n_non_spikes = len(peak_indices) - n_spikes
+                n_non_spikes = len(peak_values) - n_spikes
                 if n_spikes > 0:
                     spike_centroid = np.mean(peak_values[labels.astype(bool)])
                     self.spikes_centr[unit_idx] = (

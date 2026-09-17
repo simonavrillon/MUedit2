@@ -1,16 +1,4 @@
-"""Loader tests on the real sample recordings, one row per supported format.
-
-Every format is held to the same contract:
-
-1. ``load_signal`` returns a ``SignalImport`` with the
-   expected channel count, grids, sampling rate and loader metadata;
-2. the declared grids resolve in the electrode catalogue and fit the data
-   matrix, which is what ``preprocess_step`` needs to decompose it;
-3. the loaded variables are enough for ``export_bids_emg`` to write a valid
-   BIDS-EMG tree, and that tree loads back through ``load_signal``.
-
-The recordings are git-ignored, so every row carries the ``data`` marker.
-"""
+"""Loader tests on the real sample recordings, one row per supported format."""
 
 from __future__ import annotations
 
@@ -28,10 +16,10 @@ from muedit.io.bids import export_bids_emg
 from muedit.models import SignalImport
 from muedit.signal.grid import format_hdemg_signal
 
-# Samples kept for the BIDS export; the full recordings take seconds to write.
-_EXPORT_SAMPLES = 20_000
+# Not a whole number of seconds at any fixture's sample rate: EDF/BDF stores
+# whole data records, so only a ragged count proves the reader trims the padding.
+_EXPORT_SAMPLES = 19_700
 
-# Metadata keys the BIDS-aware loaders populate for ``export_bids_emg``.
 _BIDS_METADATA_KEYS = (
     "device_name",
     "manufacturer",
@@ -52,10 +40,10 @@ class Format:
     fixture: str
     n_channels: int
     fsamp: float
-    grids: list[str] | int  # exact names, or just the grid count
-    n_muscles: int | None  # None: not checked
+    grids: list[str] | int
+    n_muscles: int | None
     metadata: dict[str, Any] = field(default_factory=dict)
-    bids_metadata: bool = True  # loader fills the BIDS round-trip keys
+    bids_metadata: bool = True
 
 
 FORMATS = {
@@ -65,7 +53,7 @@ FORMATS = {
         2000.0,
         ["HD08MM1305"] * 6,
         n_muscles=None,
-        metadata={"bids_entity_label": "sub-1_ses-1_task-trapezoid_run-1"},
+        metadata={"bids_entity_label": "sub-1_ses-1_task-triangle_run-1"},
     ),
     "otb+": Format(
         "otb_plus_file",
@@ -84,7 +72,7 @@ FORMATS = {
         128,
         2048.0,
         ["GR04MM1305"] * 2,
-        n_muscles=0,  # the format does not store muscle labels
+        n_muscles=0,
         metadata={
             "manufacturer": "OT Bioelettronica",
             "device_name": "Quattrocento",
@@ -213,9 +201,8 @@ def test_bids_export_round_trip(recording: tuple[Format, SignalImport], tmp_path
         assert written == [float(g) for g in md["gains"]]
 
     reloaded = load_signal(str(out["edf"]))
-    # EDF/BDF stores whole data records, so the tail is padded to a full record.
     assert reloaded.data.shape[0] == data.shape[0]
-    assert data.shape[1] <= reloaded.data.shape[1] < data.shape[1] + sig.fsamp
+    assert reloaded.data.shape[1] == data.shape[1]
     assert reloaded.fsamp == sig.fsamp
     assert reloaded.gridname == sig.gridname
 

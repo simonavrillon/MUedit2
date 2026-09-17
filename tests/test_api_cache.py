@@ -1,9 +1,4 @@
-"""Direct tests for the API caches (``muedit.api.cache``).
-
-Covers copy-on-read, expiry, TTL refresh on access, eviction by item count and
-by resident bytes, and the edit-signal label index. Time is driven by a fake
-clock so expiry is deterministic.
-"""
+"""Direct tests for the API caches (``muedit.api.cache``)."""
 
 from __future__ import annotations
 
@@ -74,7 +69,7 @@ class TestUploadSignal:
     def test_round_trip_returns_independent_copy(self, clock: FakeClock) -> None:
         signal = _signal()
         token = cache._store_upload_signal(signal, source_path="/data/rec.otb+")
-        signal.data[:] = 0  # caller mutation must not reach the cache
+        signal.data[:] = 0
         first = cache._get_upload_signal(token)
         assert first is not None
         np.testing.assert_array_equal(first.data, np.ones((4, 100)))
@@ -220,7 +215,6 @@ class TestEditSignalContext:
         second = cache._store_edit_signal_context(_context(2.0), file_label="b.npz")
         assert list(cache._EDIT_SIGNAL_CONTEXT_CACHE) == [second]
         assert cache._get_edit_signal_context(first) is None
-        # The label still points at the evicted token until it is looked up.
         assert cache._EDIT_SIGNAL_LABEL_INDEX["a.npz"] == first
         assert cache._get_edit_signal_context_by_label("a.npz") is None
         assert "a.npz" not in cache._EDIT_SIGNAL_LABEL_INDEX

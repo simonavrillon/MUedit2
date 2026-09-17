@@ -1,18 +1,4 @@
-"""Shared fixtures for the I/O test suite.
-
-The EMG data files under ``data/`` are git-ignored (see ``.gitignore``:
-``*.bdf``, ``*.mat``, ``*.otb+``, ``*.otb4``, ``*.npz`` and ``data/*/``), so a
-fresh checkout does not contain them.  These fixtures resolve the local sample
-files and skip the tests that need them when the files are absent, so the suite
-runs on machines that hold the data and skips cleanly everywhere else.
-
-Every test that depends on one of those fixtures is marked ``data``
-automatically (see ``pytest_collection_modifyitems``), so CI can deselect the
-whole tier with ``-m "not data"`` instead of reporting a green run full of
-skips.  Set ``MUEDIT_REQUIRE_DATA=1`` to turn a missing file into a failure:
-locally that proves a full run really exercised the recordings, and in CI it
-catches a data-dependent test that slipped past the marker.
-"""
+"""Shared fixtures for the I/O test suite."""
 
 from __future__ import annotations
 
@@ -65,7 +51,7 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
 def bdf_file() -> Path:
     """Small BIDS-EMG BDF recording (64 MiB, 6x HD08MM1305 grids)."""
     return require_sample(
-        DATA_DIR / "Test" / "sub-1" / "ses-1" / "emg" / "sub-1_ses-1_task-trapezoid_run-1_emg.bdf"
+        DATA_DIR / "Test" / "sub-1" / "ses-1" / "emg" / "sub-1_ses-1_task-triangle_run-1_emg.bdf"
     )
 
 
@@ -101,12 +87,7 @@ def novecento_otb4_file() -> Path:
 
 @pytest.fixture(scope="session")
 def novecento_emg(novecento_otb4_file: Path) -> SignalImport:
-    """Loaded Novecento signal — 384 channels (6x HD08MM1305), 2000 Hz.
-
-    Session-scoped so the 215 MB OTB4 archive is parsed only once across the
-    preprocessing tests.  Returns the full ``load_signal`` result so individual
-    tests can slice grids, channels, or sample windows as needed.
-    """
+    """Loaded Novecento signal — 384 channels (6x HD08MM1305), 2000 Hz."""
     from muedit.io import load_signal
 
     return load_signal(str(novecento_otb4_file))
@@ -120,20 +101,7 @@ _REAL_EMG_SECONDS = 5.0
 
 @pytest.fixture(scope="session")
 def real_emg_mat_file(decomp_mat_file: Path, tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """A pure-signal ``.mat`` carrying genuine EMG from the Novecento recording.
-
-    The only ``.mat`` files in the repo are OT-Bioelettronica *decomposition*
-    artifacts, and ``load_mat`` deliberately refuses files whose ``signal``
-    struct also holds pulse trains + discharge times.  This fixture extracts
-    the real EMG embedded in ``Novecento.otb4_decomp.mat`` (via the supported
-    ``load_decomposition_signal_context`` path), drops the decomposition
-    markers, and writes a plain MATLAB v5 signal struct so ``load_mat`` can
-    read it.
-
-    A single 64-channel grid (HD08MM1305) is kept so the struct round-trips
-    through the v5 loader and ``SignalImport.from_mapping`` (which use
-    ``or []`` coercion that is ambiguous for multi-element arrays).
-    """
+    """A pure-signal ``.mat`` carrying genuine EMG from the Novecento recording."""
     from muedit.decomp.decomposition_file import load_decomposition_signal_context
 
     ctx = load_decomposition_signal_context(str(decomp_mat_file))
@@ -141,7 +109,7 @@ def real_emg_mat_file(decomp_mat_file: Path, tmp_path_factory: pytest.TempPathFa
 
     fsamp = ctx.fsamp
     n_samples = int(round(_REAL_EMG_SECONDS * fsamp))
-    data = ctx.data[:64, :n_samples]  # grid 0 (HD08MM1305)
+    data = ctx.data[:64, :n_samples]
 
     signal = {
         "data": data,
@@ -157,9 +125,7 @@ def real_emg_mat_file(decomp_mat_file: Path, tmp_path_factory: pytest.TempPathFa
     return out
 
 
-# ---------------------------------------------------------------------------
-# Simulated HD-EMG with ground-truth spike trains
-# ---------------------------------------------------------------------------
+# ── Simulated HD-EMG with ground-truth spike trains ──────────────────────────
 
 #: Excitation levels (% max) for the simulated surface EMG datasets.  Each
 #: file is a MATLAB v7.3 (HDF5) struct with ``signal.data`` (monopolar EMG,
@@ -180,27 +146,15 @@ def simulation_mat_files() -> dict[int, Path]:
 
 
 def _load_simulation_mat(path: Path) -> dict[str, Any]:
-    """Load a simulated-EMG HDF5 .mat and extract EMG data + ground-truth spikes.
-
-    The .mat stores ``signal.data`` as (samples, channels) = (122 880, 65):
-    64 monopolar electrodes of a GR08MM1305 grid plus one extra channel that
-    the pipeline ignores (the grid catalogue declares 64 channels).  We
-    transpose to the (channels, samples) layout the pipeline expects and keep
-    the first 64 channels.
-
-    ``signal.spikes`` is a (122 880, 150) binary matrix — one column per
-    simulated motor unit.  We convert it to a list of spike sample indices
-    per MU so the tests can match decomposition output against ground truth.
-    """
+    """Load a simulated-EMG HDF5 .mat and extract EMG data + ground-truth spikes."""
     import h5py
 
     with h5py.File(str(path), "r") as f:
         sig = f["signal"]
         fsamp = float(sig["fsamp"][0, 0])
-        data = sig["data"][:].T[:64, :]  # (64, 122880)
-        spikes = sig["spikes"][:]  # (122880, 150)
+        data = sig["data"][:].T[:64, :]
+        spikes = sig["spikes"][:]
 
-    # Binary spike train -> list of sample indices per MU
     gt_spike_times = [np.where(spikes[:, mu] > 0)[0] for mu in range(spikes.shape[1])]
 
     return {
@@ -218,23 +172,11 @@ def simulation_loaded(simulation_mat_files: dict[int, Path]) -> dict[int, dict[s
     return {pct: _load_simulation_mat(path) for pct, path in simulation_mat_files.items()}
 
 
-# ---------------------------------------------------------------------------
-# Measurement reporting
-# ---------------------------------------------------------------------------
+# ── Measurement reporting ────────────────────────────────────────────────────
 
 
 def pytest_terminal_summary(terminalreporter: Any) -> None:
-    """Print the quantitative measurement tables and write them as CSVs.
-
-    Several decomposition properties (peel-off yield, dedup removal, agreement
-    with ground truth, benchmark accuracy) are stochastic: real in expectation,
-    but not guaranteed on any single seed/ROI.  Rather than assert
-    a threshold on them, the tests record them via ``tests._report`` and this
-    hook surfaces the numbers.
-
-    Written to the terminal reporter (not ``print``) so the tables appear even
-    on a passing run with output capture on.
-    """
+    """Print the quantitative measurement tables and write them as CSVs."""
     from tests import _report
 
     if not any(_report.tables().values()):

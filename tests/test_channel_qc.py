@@ -1,8 +1,4 @@
-"""Tests for the automatic bad-channel detector (:mod:`muedit.signal.channel_qc`).
-
-Each fault is injected into one channel of a clean synthetic grid, so the
-expected flag and reason are known.
-"""
+"""Tests for the automatic bad-channel detector (:mod:`muedit.signal.channel_qc`)."""
 
 from __future__ import annotations
 
@@ -25,7 +21,7 @@ from tests._synthetic_emg import (
     grid_coords,
 )
 
-CH = 30  # channel that receives the fault
+CH = 30
 
 
 def _flat(data: np.ndarray) -> None:
@@ -129,8 +125,8 @@ def test_all_flat_grid_is_not_flagged() -> None:
 
 def test_per_grid_masks_use_grid_local_indices() -> None:
     data = np.vstack([correlated_emg(seed=100), correlated_emg(seed=101)])
-    data[5] = 1e-12  # grid 0, channel 5
-    data[N_CHANNELS + 6] = 1e-12  # grid 1, channel 6
+    data[5] = 1e-12
+    data[N_CHANNELS + 6] = 1e-12
     masks = detect_bad_channels_per_grid(
         data, FSAMP, [N_CHANNELS, N_CHANNELS], [grid_coords(), grid_coords()]
     )

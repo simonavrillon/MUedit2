@@ -120,7 +120,7 @@ known-first-party = ["muedit", "tests"]
 
 [tool.mypy]
 python_version = "3.11"
-files = ["python/src/muedit"]
+files = ["python/src/muedit", "tests"]
 mypy_path = "python/src"
 explicit_package_bases = true
 warn_unused_configs = true

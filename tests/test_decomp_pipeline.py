@@ -1,30 +1,4 @@
-"""End-to-end decomposition pipeline tests on real HD-EMG data.
-
-Exercises the core offline decomposition pipeline on real data loaded from
-``data/Novecento.otb4`` (6x HD08MM1305 grids, 384 channels, 2000 Hz):
-
-1. **FastICA** (:func:`muedit.decomp.algorithm.fixed_point_alg`) -- the
-   one-unit fixed-point iteration that extracts a separating vector per source.
-2. **Minimum CoV ISI** (:func:`muedit.decomp.algorithm.minimize_isi_covariance`)
-   -- refinement of the separator by iteratively re-averaging spike-triggered
-   windows until the coefficient of variation of inter-spike intervals stops
-   decreasing.
-3. **Peel-off** (:func:`muedit.decomp.algorithm.subtract_mu_waveforms`) --
-   subtraction of each accepted motor unit's averaged waveform from the
-   working signal so subsequent iterations can expose new, smaller sources.
-
-These three stages run *inside* :func:`muedit.decomp.core.decompose_step`; the
-tests drive them through the public :func:`muedit.decomp.pipeline.run_decomposition`
-entry point so the full load -> preprocess -> decompose -> postprocess chain is
-exercised exactly as the CLI and API invoke it.
-
-The decomposition targets the **central 10 s window** of the 28.7 s recording
-(samples 18 700–38 700), where the contraction peak resides.  The tests are
-gated on the presence of the 215 MB sample archive and skip cleanly when it is
-absent (see ``conftest.require_sample``).  The two pipeline variants (peel-off
-on/off) are computed once in a session-scoped fixture so individual test
-methods assert on cached results.
-"""
+"""End-to-end decomposition pipeline tests on real HD-EMG data."""
 
 from __future__ import annotations
 
@@ -52,9 +26,7 @@ _ROI_WIDTH_SEC = 10.0
 _MIN_MU_COUNT = 5
 
 
-# ---------------------------------------------------------------------------
-# Session-scoped pipeline results
-# ---------------------------------------------------------------------------
+# ── Session-scoped pipeline results ──────────────────────────────────────────
 
 
 @pytest.fixture(scope="session")
@@ -67,15 +39,7 @@ def novecento_roi(novecento_emg: SignalImport) -> tuple[int, int]:
 def decomp_results(
     novecento_otb4_file: Path, novecento_emg: SignalImport, novecento_roi: tuple[int, int]
 ) -> dict[str, Any]:
-    """Run the full pipeline twice (peel-off on and off) on real Novecento EMG.
-
-    Returns a dict with keys ``"on"`` and ``"off"``, each mapping to the
-    ``run_decomposition`` result dict.  ``save_npz=False`` keeps the run from
-    writing the ~MB artefact next to the sample archive.  ``preloaded_signal``
-    reuses the session-scoped parsed signal so the 215 MB archive is decoded
-    only once.  The decomposition targets the central 10 s window (the
-    contraction peak) via ``roi``.
-    """
+    """Run the full pipeline twice (peel-off on and off) on real Novecento EMG."""
     results: dict[str, Any] = {}
     for label, peel in (("off", False), ("on", True)):
         params = DecompositionParameters(niter=_NITER, peel_off_enabled=peel)
@@ -90,9 +54,7 @@ def decomp_results(
     return results
 
 
-# ---------------------------------------------------------------------------
-# Pipeline structure & output validity
-# ---------------------------------------------------------------------------
+# ── Pipeline structure & output validity ─────────────────────────────────────
 
 
 class TestDecompositionStructure:
@@ -124,9 +86,7 @@ class TestDecompositionStructure:
         assert np.isfinite(pulse_t).all()
 
 
-# ---------------------------------------------------------------------------
-# FastICA + min-CoV-ISI quality of detected motor units
-# ---------------------------------------------------------------------------
+# ── FastICA + min-CoV-ISI quality of detected motor units ────────────────────
 
 
 class TestMotorUnitQuality:
@@ -155,13 +115,10 @@ class TestMotorUnitQuality:
         for i, d in enumerate(discharge_times(result)):
             if d.size == 0:
                 continue
-            # Sorted ascending (peak picker returns ordered indices).
             assert np.all(np.diff(d) >= 0), f"MU {i}: discharge times not sorted"
-            # Within the full signal.
             assert d.min() >= 0 and d.max() < n_samples, (
                 f"MU {i}: discharge times out of [0, {n_samples})"
             )
-            # Refractory distance enforced by find_refractory_peaks.
             if d.size >= 2:
                 min_isi = int(np.diff(d).min())
                 assert min_isi >= refractory, (
@@ -169,30 +126,14 @@ class TestMotorUnitQuality:
                 )
 
 
-# ---------------------------------------------------------------------------
-# Peel-off
-# ---------------------------------------------------------------------------
+# ── Peel-off ─────────────────────────────────────────────────────────────────
 
 
 class TestPeelOff:
     """Validate that peel-off source subtraction exposes additional motor units."""
 
     def test_measure_peel_off_yield(self, decomp_results: dict[str, Any]) -> None:
-        """Record how many extra motor units peel-off exposed.
-
-        Peel-off subtracts each accepted MU's waveform so later iterations can
-        reach smaller sources, and it does yield more units *in expectation* --
-        but FastICA is a randomized fixed-point search, so on any single ROI and
-        seed the realized difference can be zero without anything being wrong.
-        Asserting a strict inequality here turns that into a red build that
-        reports only "not greater", with no magnitude and no trend.
-
-        So the yield is recorded rather than asserted; inspect
-        ``reports/peel_off.csv`` (delta, and the SIL distribution of each run)
-        to judge whether peel-off is still earning its cost.  What is asserted
-        is only the deterministic floor: both configurations produced units at
-        all.
-        """
+        """Record how many extra motor units peel-off exposed."""
         dt_off = discharge_times(decomp_results["off"])
         dt_on = discharge_times(decomp_results["on"])
         n_off, n_on = len(dt_off), len(dt_on)

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import get_args
+from typing import Any, cast, get_args
 
 import pytest
 from fastapi import HTTPException
@@ -21,4 +21,5 @@ def test_unknown_contrast_func_rejected() -> None:
     with pytest.raises(HTTPException) as exc_info:
         build_params(json.dumps({"contrast_func": "skwe"}))
     assert exc_info.value.status_code == 400
-    assert exc_info.value.detail["field"] == "contrast_func"
+    detail = cast(dict[str, Any], exc_info.value.detail)
+    assert detail["field"] == "contrast_func"

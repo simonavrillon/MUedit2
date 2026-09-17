@@ -1,29 +1,4 @@
-"""Shared spike-train agreement metrics for the decomposition test modules.
-
-``test_decomp_simulation`` and ``test_decomp_benchmark`` both match decomposed
-motor units against a reference spike train (simulated ground truth for the
-former, manually edited derivatives for the latter) using the metrics from the
-reference MATLAB pipeline (``checkduplicates.m`` in MUdict): cross-correlation
-to estimate the global lag, a jitter-expanded intersection for TP counting, and
-RoA = TP / (TP + FP + FN).
-
-These helpers used to live as verbatim copies in both modules, and the copies
-drifted: the benchmark grew a greedy one-to-one assignment with an RoA floor
-while the simulation copy kept a plain per-MU argmax, so the two modules could
-report different matches for the same spike trains.  The scoring is shared here;
-the *assignment policy* stays an explicit choice at each call site:
-
-* :func:`best_per_detected` -- each detected MU takes its highest-RoA reference,
-  with no floor and no exclusivity (several detected MUs may claim the same
-  reference, and a poor best-match is still reported).  Used by
-  ``test_decomp_simulation``.
-* :func:`greedy_one_to_one` -- pairs are assigned by descending RoA, each MU
-  claimed at most once, and only pairs above an RoA floor are kept.  Used by
-  ``test_decomp_benchmark``.
-
-Both consume the candidate list from :func:`score_pairs`, so the metric itself
-can no longer diverge between modules.
-"""
+"""Shared spike-train agreement metrics for the decomposition test modules."""
 
 from __future__ import annotations
 
@@ -37,42 +12,21 @@ from muedit.models import SignalImport
 Match = tuple[int, int, float, float, float, int]
 
 
-# ---------------------------------------------------------------------------
-# Core metrics -- adapted from MUdict/lib/checkduplicates.m
-# ---------------------------------------------------------------------------
+# ── Core metrics -- adapted from MUdict/lib/checkduplicates.m ────────────────
 
 
 def find_lag(detected: np.ndarray, gt: np.ndarray, max_lag: int) -> int:
-    """Estimate the global lag between two spike trains via cross-correlation.
-
-    For every candidate lag in ``[-max_lag, max_lag]`` the shifted ``detected``
-    train is scored by how many of its spikes land exactly on a ``gt`` spike;
-    the best-scoring lag wins, ties resolved toward the most negative lag.
-
-    A positive return means ``detected`` fires later than ``gt``; the caller
-    subtracts the lag to align the detected train with the reference.
-
-    Scoring is done with a single ``(n_lags, n_detected)`` membership test
-    rather than a Python set lookup per lag, which is ~10x faster on realistic
-    trains (600 spikes, 201 lags) and matters because the callers score every
-    detected MU against every reference MU.
-    """
+    """Estimate the global lag between two spike trains via cross-correlation."""
     if detected.size < 2 or gt.size < 2:
         return 0
     lags = np.arange(-max_lag, max_lag + 1)
-    # shifted[i, j] = detected[j] - lags[i]
     shifted = np.asarray(detected, dtype=np.int64)[None, :] - lags[:, None]
     overlaps = np.isin(shifted, np.asarray(gt, dtype=np.int64)).sum(axis=1)
     return int(lags[int(np.argmax(overlaps))])
 
 
 def count_matches(detected: np.ndarray, gt: np.ndarray, tol: int) -> int:
-    """Count detected spikes matching a reference spike within ``tol`` samples.
-
-    Each detected spike is counted at most once.  ``gt`` must be sorted
-    ascending; the nearest reference spikes on either side of the insertion
-    point are the only ones that can fall within ``tol``.
-    """
+    """Count detected spikes matching a reference spike within ``tol`` samples."""
     detected = np.asarray(detected, dtype=np.int64)
     gt = np.asarray(gt, dtype=np.int64)
     if detected.size == 0 or gt.size == 0:
@@ -93,14 +47,9 @@ def compute_metrics(
     jitter: int,
     max_lag: int,
 ) -> tuple[int, float, float, float, int]:
-    """Return ``(tp, precision, sensitivity, roa, lag)`` for one MU pair.
-
-    - **Precision** = TP / (TP + FP) -- fraction of detected spikes that match.
-    - **Sensitivity** = TP / (TP + FN) -- fraction of reference spikes recovered.
-    - **RoA** = TP / (TP + FP + FN) -- Jaccard index (as in ``checkduplicates.m``).
-    """
+    """Return ``(tp, precision, sensitivity, roa, lag)`` for one MU pair."""
     lag = find_lag(detected, ref, max_lag)
-    d_shifted = detected - lag  # align detected with the reference
+    d_shifted = detected - lag
     tp = count_matches(d_shifted, ref, jitter)
     fp = detected.size - tp
     fn = ref.size - tp
@@ -110,9 +59,7 @@ def compute_metrics(
     return tp, prec, sens, roa, lag
 
 
-# ---------------------------------------------------------------------------
-# Candidate scoring + assignment policies
-# ---------------------------------------------------------------------------
+# ── Candidate scoring + assignment policies ──────────────────────────────────
 
 
 def score_pairs(
@@ -123,12 +70,7 @@ def score_pairs(
     max_lag: int,
     ref_indices: list[int] | None = None,
 ) -> list[Match]:
-    """Score every (detected, reference) pair, in detected-then-reference order.
-
-    Detected MUs with fewer than 2 spikes are skipped (no meaningful lag can be
-    estimated).  ``ref_indices`` restricts which reference MUs are considered;
-    it defaults to those with at least one spike.
-    """
+    """Score every (detected, reference) pair, in detected-then-reference order."""
     if ref_indices is None:
         ref_indices = [i for i, d in enumerate(reference) if d.size > 0]
 
@@ -145,13 +87,7 @@ def score_pairs(
 
 
 def best_per_detected(candidates: list[Match]) -> list[Match]:
-    """Give every detected MU its highest-RoA reference, without exclusivity.
-
-    No RoA floor is applied, so a detected MU with no genuine counterpart still
-    appears in the output paired with whatever scored least badly.  Two detected
-    MUs may claim the same reference.  Ties are resolved toward the first
-    reference scored.
-    """
+    """Give every detected MU its highest-RoA reference, without exclusivity."""
     best: dict[int, Match] = {}
     for match in candidates:
         det_idx, roa = match[0], match[4]
@@ -162,17 +98,7 @@ def best_per_detected(candidates: list[Match]) -> list[Match]:
 
 
 def greedy_one_to_one(candidates: list[Match], roa_threshold: float) -> list[Match]:
-    """Greedily select one-to-one matches from all candidate pairs.
-
-    Pairs are sorted by descending RoA and assigned in order, skipping any pair
-    whose detected *or* reference MU has already been claimed.  This enforces a
-    strict one-to-one assignment -- no two detected MUs map to the same
-    reference MU and vice versa -- so the metrics are not inflated by
-    near-duplicate units that slipped past the pipeline's internal dedup.
-
-    Only pairs with RoA above ``roa_threshold`` are kept; the rest are discarded
-    after the assignment so the reported metrics reflect genuine agreement only.
-    """
+    """Greedily select one-to-one matches from all candidate pairs."""
     ordered = sorted(candidates, key=lambda m: m[4], reverse=True)
     claimed_det: set[int] = set()
     claimed_ref: set[int] = set()
@@ -184,14 +110,11 @@ def greedy_one_to_one(candidates: list[Match], roa_threshold: float) -> list[Mat
         claimed_ref.add(ref_idx)
         if roa > roa_threshold:
             matches.append((det_idx, ref_idx, prec, sens, roa, lag))
-    # Preserve the detected-MU index order in the output for readability.
     matches.sort(key=lambda m: m[0])
     return matches
 
 
-# ---------------------------------------------------------------------------
-# ROI / signal shaping shared by the decomposition test modules
-# ---------------------------------------------------------------------------
+# ── ROI / signal shaping shared by the decomposition test modules ────────────
 
 
 def central_roi(data: np.ndarray, fsamp: float, width_sec: float) -> tuple[int, int]:

@@ -54,6 +54,28 @@ def find_refractory_peaks(
     return peaks
 
 
+def enforce_refractory(
+    spikes: IntArray,
+    values: FloatArray,
+    fsamp: float,
+    min_isi_sec: float = POSTPROC_MIN_ISI_SEC,
+) -> IntArray:
+    """Thin an already-sorted spike train to respect the refractory period."""
+    distance = int(np.round(fsamp * min_isi_sec))
+    if spikes.size < 2 or distance <= 0:
+        return spikes
+
+    kept: list[int] = [int(spikes[0])]
+    for raw in spikes[1:]:
+        spike = int(raw)
+        if spike - kept[-1] < distance:
+            if values[spike] > values[kept[-1]]:
+                kept[-1] = spike
+        else:
+            kept.append(spike)
+    return np.asarray(kept, dtype=int)
+
+
 def split_by_amplitude(
     values: FloatArray,
     peaks: IntArray,

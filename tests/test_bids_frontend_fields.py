@@ -1,34 +1,10 @@
-"""Frontend → backend BIDS field-passing tests for the two export routes.
-
-The webapp has two BIDS-exporting routes, each fed by fields the user populates
-in the frontend:
-
-1. **Decomposition route** — ``POST /api/v1/decompose_stream``. The frontend
-   builds a ``bids_entities`` JSON object in
-   ``frontend/src/app/services/file-session.js`` (``collectBidsEntities``) and
-   sends it as a form field alongside ``project`` and ``bids_export``. The
-   backend writes the raw EMG + sidecars *before* running any ICA, inside
-   ``decomp/preprocess.py``'s ``preprocess_step`` → ``_export_raw_emg_bids``.
-
-2. **Interactive editing route** — ``POST /api/v1/edit/save``. The frontend
-   assembles a JSON ``EditSavePayload`` in
-   ``frontend/src/app/services/editing-service.js`` (``saveEditedFile``) and
-   merges the BIDS save fields from
-   ``frontend/src/app/services/file-session.js`` (``getBidsSaveFields``) and
-   the recomputed ``entity_label`` in ``frontend/src/app/container.js``
-   (``persistNpzBySaveTarget``). The backend's ``save_edits`` re-exports the
-   raw EMG via ``_export_bids_from_mat_context`` using a cached signal context.
-
-These tests validate that every field the frontend populates survives the
-trip to the backend and lands, unchanged, in the written BIDS sidecars —
-*without* running a decomposition (route 1 exports in the preprocess step, by
-design, before ICA).
-"""
+"""Frontend → backend BIDS field-passing tests for the two export routes."""
 
 from __future__ import annotations
 
 import csv
 import json
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -41,12 +17,6 @@ from muedit.io import load_signal
 from muedit.models import EditSignalContext, SignalImport
 from muedit.signal.grid import format_hdemg_signal
 
-# ---------------------------------------------------------------------------
-# Frontend payload mirrors. These reproduce, in Python, the exact objects the
-# frontend builds for each route so the tests assert the real wire contract.
-# ---------------------------------------------------------------------------
-
-#: Frontend DOM values the user fills in (shared by both routes' BIDS panels).
 FRONTEND_BIDS_INPUTS: dict[str, Any] = {
     "subject": "07",
     "task": "stairs",
@@ -68,11 +38,7 @@ FRONTEND_BIDS_INPUTS: dict[str, Any] = {
 
 
 def _frontend_decompose_bids_entities() -> dict[str, Any]:
-    """Mirror ``collectBidsEntities`` (file-session.js:101-142).
-
-    The decompose route sends all BIDS info inside the single ``bids_entities``
-    form field; there is no separate ``bids_metadata`` field from the frontend.
-    """
+    """Mirror ``collectBidsEntities`` (file-session.js:101-142)."""
     return {
         "subject": FRONTEND_BIDS_INPUTS["subject"],
         "task": FRONTEND_BIDS_INPUTS["task"],
@@ -112,14 +78,8 @@ def _frontend_edit_save_payload(
     edit_signal_token: str,
     project: str,
 ) -> dict[str, Any]:
-    """Mirror the merged ``editSave`` body (saveEditedFile + persistNpzBySaveTarget).
-
-    Base payload fields come from ``state.edit.*`` (editing-service.js:514-537);
-    BIDS save fields come from ``getBidsSaveFields`` (file-session.js:67-97);
-    ``entity_label`` is recomputed by ``persistNpzBySaveTarget`` (container.js).
-    """
+    """Mirror the merged ``editSave`` body (saveEditedFile + persistNpzBySaveTarget)."""
     return {
-        # base payload (state.edit.*)
         "distimes": [[100, 5000, 9000], [300, 7000]],
         "total_samples": total_samples,
         "fsamp": fsamp,
@@ -130,9 +90,7 @@ def _frontend_edit_save_payload(
         "file_label": "Quattrocento_edited.npz",
         "edit_signal_token": edit_signal_token,
         "software_versions": FRONTEND_BIDS_INPUTS["software_versions"],
-        # recomputed by persistNpzBySaveTarget
         "entity_label": _frontend_entity_label(),
-        # getBidsSaveFields()
         "project": project,
         "participant_meta": {
             "age": FRONTEND_BIDS_INPUTS["participant_age"],
@@ -145,15 +103,9 @@ def _frontend_edit_save_payload(
         "placement_scheme": FRONTEND_BIDS_INPUTS["placement_scheme"],
         "placement_scheme_description": FRONTEND_BIDS_INPUTS["placement_scheme_description"],
         "task_description": FRONTEND_BIDS_INPUTS["task_description"],
-        # keep the full set of MUs (don't drop flagged/duplicates) for determinism
         "remove_flagged": False,
         "remove_duplicates": False,
     }
-
-
-# ---------------------------------------------------------------------------
-# Sidecar parsing helpers
-# ---------------------------------------------------------------------------
 
 
 def _read_emg_json(bids_root: Path) -> dict[str, Any]:
@@ -183,20 +135,13 @@ def _emg_row(bids_root: Path) -> Path:
 
 
 def _muscles_by_group(channels: list[dict[str, str]]) -> dict[str, str]:
-    """Map channels.tsv ``group`` (Grid1, Grid2, ...) → target_muscle, EMG rows only.
-
-    ``group`` is the unique per-grid key (two grids may share a ``grid_name``)."""
+    """Map channels.tsv ``group`` (Grid1, Grid2, ...) → target_muscle, EMG rows only."""
     groups: dict[str, str] = {}
     for r in channels:
         if r["type"] != "EMG":
             continue
         groups.setdefault(r["group"], r["target_muscle"])
     return groups
-
-
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture(scope="module")
@@ -217,7 +162,7 @@ def bids_data_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
 
 
 @pytest.fixture()
-def api_client(bids_data_root: Path) -> TestClient:
+def api_client(bids_data_root: Path) -> Iterator[TestClient]:
     """FastAPI TestClient with all v1 routers mounted."""
     from fastapi import FastAPI
 
@@ -256,16 +201,10 @@ def edit_signal_token(otb4_signal: SignalImport) -> str:
     return _store_edit_signal_context(ctx, file_label="Quattrocento.otb4")
 
 
-# ===========================================================================
-# Route 1 — Decomposition BIDS export (before running the decomposition)
-# ===========================================================================
-
-
 def test_decompose_bids_export_before_decomposition_writes_all_frontend_fields(
     otb4_signal: SignalImport, tmp_path: Path
 ) -> None:
-    """``preprocess_step`` writes the BIDS tree *before* ICA; every frontend
-    ``bids_entities`` field must land in the sidecars."""
+    """``preprocess_step`` writes the BIDS tree *before* ICA; every frontend ``bids_entities`` field must land in the sidecars."""
     entities = _frontend_decompose_bids_entities()
     sig = otb4_signal
 
@@ -276,8 +215,6 @@ def test_decompose_bids_export_before_decomposition_writes_all_frontend_fields(
         data=sig.data,
         fsamp=float(sig.fsamp),
     )
-    # This is the exact call the decompose route makes to export raw BIDS;
-    # it runs before decompose_step, so no ICA executes here.
     preprocess_step(
         loaded=loaded,
         duration=None,
@@ -292,7 +229,6 @@ def test_decompose_bids_export_before_decomposition_writes_all_frontend_fields(
     )
 
     emg_json = _read_emg_json(tmp_path)
-    # subject/task/session/run → emg.json TaskName + the entity-encoded file path
     assert emg_json["TaskName"] == entities["task"]
     emg_path = _emg_row(tmp_path)
     assert f"sub-{entities['subject']}" in emg_path.name
@@ -301,35 +237,22 @@ def test_decompose_bids_export_before_decomposition_writes_all_frontend_fields(
     assert f"run-{entities['run']}" in emg_path.name
     assert emg_path.parent.name == "emg"
     assert emg_path.parent.parent.name == f"ses-{entities['session']}"
-    # powerline_freq → PowerLineFrequency
     assert emg_json["PowerLineFrequency"] == entities["powerline_freq"]
-    # manufacturer / manufacturers_model_name
     assert emg_json["Manufacturer"] == entities["manufacturer"]
     assert emg_json["ManufacturersModelName"] == entities["manufacturers_model_name"]
-    # placement_scheme + description (description only emitted for "Other")
     assert emg_json["EMGPlacementScheme"] == entities["placement_scheme"]
     assert emg_json["EMGPlacementSchemeDescription"] == entities["placement_scheme_description"]
-    # task_description
     assert emg_json["TaskDescription"] == entities["task_description"]
 
-    # target_muscle (per-grid list) → channels.tsv target_muscle column, one per
-    # grid.  Two OTB4 grids share the grid_name "GR04MM1305", so key by the
-    # unique per-grid ``group`` column (Grid1, Grid2, ...) instead of grid_name.
     channels = _read_channels(tmp_path)
     grid_muscles = _muscles_by_group(channels)
     assert list(grid_muscles.values()) == entities["target_muscle"]
 
-    # participant_meta → participants.tsv
     participants = _read_participants(tmp_path)
     row = next(r for r in participants if r["participant_id"] == f"sub-{entities['subject']}")
     assert row["age"] == entities["participant_meta"]["age"]
     assert row["sex"] == entities["participant_meta"]["sex"]
     assert row["handedness"] == entities["participant_meta"]["handedness"]
-
-
-# ===========================================================================
-# Route 2 — Interactive editing BIDS export (edit/save)
-# ===========================================================================
 
 
 def test_edit_save_route_writes_all_frontend_bids_fields(
@@ -338,11 +261,7 @@ def test_edit_save_route_writes_all_frontend_bids_fields(
     edit_signal_token: str,
     bids_data_root: Path,
 ) -> None:
-    """The full ``POST /edit/save`` HTTP path with the frontend's merged payload
-    must write BIDS sidecars echoing every frontend field.
-
-    The cached loader context says 50 Hz; the frontend sends 60 Hz, so the
-    sidecar also proves user fields win over loader metadata."""
+    """The full ``POST /edit/save`` HTTP path with the frontend's merged payload must write BIDS sidecars echoing every frontend field."""
     sig = otb4_signal
     project = "testproj"
     payload = _frontend_edit_save_payload(
@@ -365,7 +284,6 @@ def test_edit_save_route_writes_all_frontend_bids_fields(
     emg_json = _read_emg_json(bids_root)
     inputs = FRONTEND_BIDS_INPUTS
 
-    # entity_label (subject/task/session/acq/run) → file path + TaskName
     emg_path = _emg_row(bids_root)
     assert emg_path.name.startswith(f"sub-{inputs['subject']}_ses-{inputs['session']}")
     assert f"task-{inputs['task']}" in emg_path.name
@@ -373,7 +291,6 @@ def test_edit_save_route_writes_all_frontend_bids_fields(
     assert f"run-{inputs['run']}" in emg_path.name
     assert emg_json["TaskName"] == inputs["task"]
 
-    # user-editable BIDS save fields → emg.json
     assert emg_json["PowerLineFrequency"] == inputs["powerline_freq"]
     assert emg_json["Manufacturer"] == inputs["manufacturer"]
     assert emg_json["ManufacturersModelName"] == inputs["manufacturers_model_name"]
@@ -382,12 +299,10 @@ def test_edit_save_route_writes_all_frontend_bids_fields(
     assert emg_json["TaskDescription"] == inputs["task_description"]
     assert emg_json["SoftwareVersions"] == inputs["software_versions"]
 
-    # muscle → channels.tsv target_muscle (one per grid)
     channels = _read_channels(bids_root)
     grid_muscles = _muscles_by_group(channels)
     assert list(grid_muscles.values()) == inputs["muscles"]
 
-    # participant_meta → participants.tsv
     participants = _read_participants(bids_root)
     row = next(r for r in participants if r["participant_id"] == f"sub-{inputs['subject']}")
     assert row["age"] == inputs["participant_age"]

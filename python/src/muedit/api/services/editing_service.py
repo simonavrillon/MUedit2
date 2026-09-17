@@ -250,6 +250,8 @@ def _export_bids_from_mat_context(
     )
     if ctx is None:
         return None  # non-MAT source or context expired
+    if ctx.data.size == 0:
+        return None  # mask-only context has no raw EMG to export
 
     entities = _parse_all_bids_entities(entity_label)
     try:

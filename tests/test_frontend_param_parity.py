@@ -1,9 +1,4 @@
-"""Frontend decomposition defaults and mode names must match the Python owner.
-
-``muedit.decomp.types`` owns the post-processing mode vocabulary and parameter
-defaults; ``frontend/src/decomp/params.js`` and ``frontend/index.html`` carry
-copies. These checks fail when the copies drift (audit F6).
-"""
+"""Frontend decomposition defaults and mode names must match the Python owner."""
 
 from __future__ import annotations
 

@@ -1,26 +1,4 @@
-"""Validation tests for motor-unit deduplication: within-grid and cross-grid.
-
-Deduplication runs in two stages, both built on the lag-aware overlap test in
-:func:`muedit.decomp.algorithm.rem_duplicates`:
-
-1. **Within each grid** -- :func:`muedit.decomp.postprocess._remove_duplicates_by_grid`
-   calls ``rem_duplicates`` once per grid so duplicate motor units extracted from
-   the *same* grid are collapsed to a single representative (the one with the
-   lowest ISI coefficient of variation).
-2. **Between grids** -- when ``DecompositionParameters.duplicatesbgrids`` is set,
-   the survivors of every grid are stacked and ``rem_duplicates`` is run again so
-   duplicates that were extracted from *different* grids are collapsed too.
-
-The ground-truth spike trains embedded in the simulated HD-EMG datasets
-(``data/simulation_*_surface.mat_decomp.mat_edited.mat``, 150 motor units at
-10 240 Hz) give realistic, regular discharge patterns.  Each test picks a set
-of mutually-distinct ground-truth MUs as "originals" and injects controlled
-duplicates -- exact copies, lag-shifted copies, jittered copies, and spike
-subsets -- to exercise both dedup stages.
-
-The simulated ``.mat`` files are git-ignored, so the fixtures skip cleanly when
-the data is absent (handled by the ``simulation_loaded`` conftest fixture).
-"""
+"""Validation tests for motor-unit deduplication: within-grid and cross-grid."""
 
 from __future__ import annotations
 
@@ -53,9 +31,7 @@ _MIN_SPIKES, _MAX_SPIKES = 30, 120
 _SIM_PCT = 40
 
 
-# ---------------------------------------------------------------------------
-# Realistic pulse-train + duplicate construction helpers
-# ---------------------------------------------------------------------------
+# ── Realistic pulse-train + duplicate construction helpers ───────────────────
 
 
 def _gt_in_roi(sim: dict[str, Any], mu: int) -> np.ndarray:
@@ -67,14 +43,9 @@ def _gt_in_roi(sim: dict[str, Any], mu: int) -> np.ndarray:
 
 
 def _make_pulse_train(spike_times: np.ndarray, n_samples: int, fsamp: float) -> np.ndarray:
-    """Build a realistic non-negative pulse train by stamping a Gaussian MUAP at each spike.
-
-    The dedup function only reads ``pulse_t`` for its shape and to echo the kept
-    rows back, so the waveform content is cosmetic -- but using a MUAP-shaped
-    kernel keeps the test data realistic rather than a sparse 0/1 raster.
-    """
+    """Build a realistic non-negative pulse train by stamping a Gaussian MUAP at each spike."""
     pt = np.zeros(n_samples, dtype=float)
-    half = int(round(0.0025 * fsamp))  # ~2.5 ms half-width
+    half = int(round(0.0025 * fsamp))
     t = np.arange(-half, half + 1)
     kernel = np.exp(-(t**2) / (2.0 * (half / 3.0) ** 2))
     for s in np.asarray(spike_times, dtype=int):
@@ -105,12 +76,7 @@ def _subset(spikes: np.ndarray, rng: np.random.Generator, drop_frac: float) -> n
 
 
 def _jitter_match_count(a: np.ndarray, b: np.ndarray, jitter: int) -> int:
-    """Count spikes in ``b`` that fall within ``+/- jitter`` samples of an ``a`` spike.
-
-    Mirrors the jitter-expanded intersection ``rem_duplicates`` uses: a shifted
-    spike counts as a match if it lands within the per-spike jitter window of any
-    reference spike, not only on an exact sample.  Both trains must be sorted.
-    """
+    """Count spikes in ``b`` that fall within ``+/- jitter`` samples of an ``a`` spike."""
     a = np.asarray(a, dtype=int)
     b = np.asarray(b, dtype=int)
     if a.size == 0 or b.size == 0:
@@ -128,16 +94,7 @@ def _jitter_match_count(a: np.ndarray, b: np.ndarray, jitter: int) -> int:
 def _best_lag_overlap(
     a: np.ndarray, b: np.ndarray, max_lag: int, n_samples: int, jitter: int
 ) -> float:
-    """Best-lag, jitter-tolerant overlap fraction between two spike trains.
-
-    Mirrors the agreement metric at the heart of ``rem_duplicates``: for each
-    candidate lag in ``[-2*max_lag, 2*max_lag]`` shift ``b`` and count how many of
-    its spikes fall within ``+/- jitter`` of an ``a`` spike, then divide by
-    ``max(|a|, |b|)``.  A pair flagged as duplicates by ``rem_duplicates`` (exact,
-    lagged, jittered, or subset copies) scores ~1.0 here; distinct MUs score
-    low.  The jitter window is essential -- the kept representative of a group
-    can be a per-spike jittered copy, which no single global lag realigns exactly.
-    """
+    """Best-lag, jitter-tolerant overlap fraction between two spike trains."""
     a = np.asarray(a, dtype=int)
     b = np.asarray(b, dtype=int)
     if a.size == 0 or b.size == 0:
@@ -160,15 +117,7 @@ def _assert_one_survivor_per_original(
     jitter: int,
     thresh: float = 0.8,
 ) -> None:
-    """Assert the survivor set is a bijection onto the originals.
-
-    Each survivor must match exactly one original with best-lag overlap >=
-    ``thresh``, and every original must be matched exactly once -- i.e. each
-    duplicate group was collapsed to a single member near its original, and no
-    distinct original was over-merged.  The kept representative of a group is
-    the lowest-CoV member, which can be a jittered copy rather than the
-    original, so identity is verified via overlap rather than array equality.
-    """
+    """Assert the survivor set is a bijection onto the originals."""
     assert len(survivors) == len(originals), (
         f"expected {len(originals)} survivors (one per original), got {len(survivors)}"
     )
@@ -185,9 +134,7 @@ def _assert_one_survivor_per_original(
     )
 
 
-# ---------------------------------------------------------------------------
-# Session-scoped dedup datasets built from simulated ground truth
-# ---------------------------------------------------------------------------
+# ── Session-scoped dedup datasets built from simulated ground truth ──────────
 
 
 def _select_distinct_originals(
@@ -198,15 +145,7 @@ def _select_distinct_originals(
     maxlag: int,
     tol: float,
 ) -> list[int]:
-    """Greedily pick mutually-distinct ground-truth MU indices.
-
-    A candidate is only accepted if adding it to the current set leaves the
-    count returned by ``rem_duplicates`` unchanged (i.e. it is not itself a
-    duplicate of any already-selected original under ``tol``).  This guarantees
-    the originals survive dedup on their own, so any collapse in the injected
-    dataset is attributable to the injected duplicates, not to the originals
-    colliding with each other.
-    """
+    """Greedily pick mutually-distinct ground-truth MU indices."""
     candidates = [
         m
         for m in range(sim["n_total_mus"])
@@ -230,12 +169,7 @@ def _select_distinct_originals(
 
 @pytest.fixture(scope="session")
 def dedup_ctx(simulation_loaded: dict[int, dict[str, Any]]) -> dict[str, Any]:
-    """Shared context: fsamp, signal length, max-lag, and distinct original MUs.
-
-    Built once from the 40 %-excitation simulation.  The originals are selected
-    greedily so they are mutually non-duplicate; downstream fixtures inject
-    copies of them to form the duplicate sets.
-    """
+    """Shared context: fsamp, signal length, max-lag, and distinct original MUs."""
     sim = simulation_loaded[_SIM_PCT]
     fsamp = float(sim["fsamp"])
     n_samples = _SIM_ROI[1] - _SIM_ROI[0]
@@ -247,19 +181,13 @@ def dedup_ctx(simulation_loaded: dict[int, dict[str, Any]]) -> dict[str, Any]:
         "n_samples": n_samples,
         "maxlag": maxlag,
         "jitter": int(round(DEDUP_JITTER * fsamp)),
-        "originals": originals,  # GT MU indices
+        "originals": originals,
     }
 
 
 @pytest.fixture(scope="session")
 def within_grid_dataset(dedup_ctx: dict[str, Any]) -> dict[str, Any]:
-    """Within-grid duplicate set: originals + 4 injected copies each, one grid.
-
-    For each of the 5 originals we add an exact copy, a lag-shifted copy, a
-    jittered copy, and a 10 %-subset copy -- 25 MUs total, all assigned to
-    grid 0.  The 5 originals are mutually distinct, so dedup should collapse
-    each 5-member group to a single survivor, leaving exactly 5 MUs.
-    """
+    """Within-grid duplicate set: originals + 4 injected copies each, one grid."""
     sim = dedup_ctx["sim"]
     fsamp = dedup_ctx["fsamp"]
     n_samples = dedup_ctx["n_samples"]
@@ -271,10 +199,10 @@ def within_grid_dataset(dedup_ctx: dict[str, Any]) -> dict[str, Any]:
     for m in dedup_ctx["originals"]:
         o = _gt_in_roi(sim, m)
         dist.append(o.copy())
-        dist.append(o.copy())  # exact duplicate
-        dist.append(_lagged(o, 50, n_samples))  # lag-shifted duplicate
-        dist.append(_jittered(o, rng, jit, n_samples))  # jittered duplicate
-        dist.append(_subset(o, rng, 0.1))  # spike-subset duplicate
+        dist.append(o.copy())
+        dist.append(_lagged(o, 50, n_samples))
+        dist.append(_jittered(o, rng, jit, n_samples))
+        dist.append(_subset(o, rng, 0.1))
         mu_grid_index.extend([0] * 5)
 
     pulse_t = np.array([_make_pulse_train(d, n_samples, fsamp) for d in dist])
@@ -290,17 +218,7 @@ def within_grid_dataset(dedup_ctx: dict[str, Any]) -> dict[str, Any]:
 
 @pytest.fixture(scope="session")
 def between_grid_dataset(dedup_ctx: dict[str, Any]) -> dict[str, Any]:
-    """Cross-grid duplicate set: originals in grid 0, lagged copies in grid 1.
-
-    4 originals live in grid 0; a lag-shifted copy of each lives in grid 1
-    (a duplicate only detectable across grids); plus one *genuinely distinct*
-    ground-truth MU in grid 1 that must survive both dedup modes.  9 MUs total.
-
-    With ``duplicatesbgrids=False`` the per-grid pass sees no intra-grid
-    duplicates (grid 0 holds only originals, grid 1 holds only copies), so all
-    9 survive.  With ``duplicatesbgrids=True`` the cross-grid pass collapses the
-    4 lagged copies, leaving 5 survivors (4 originals + the distinct grid-1 MU).
-    """
+    """Cross-grid duplicate set: originals in grid 0, lagged copies in grid 1."""
     sim = dedup_ctx["sim"]
     fsamp = dedup_ctx["fsamp"]
     n_samples = dedup_ctx["n_samples"]
@@ -316,9 +234,9 @@ def between_grid_dataset(dedup_ctx: dict[str, Any]) -> dict[str, Any]:
         mu_grid_index.append(0)
     for m in grid0_mus:
         o = _gt_in_roi(sim, m)
-        dist.append(_lagged(o, 80, n_samples))  # cross-grid lagged duplicate
+        dist.append(_lagged(o, 80, n_samples))
         mu_grid_index.append(1)
-    dist.append(_gt_in_roi(sim, distinct_mu))  # distinct MU, not a duplicate
+    dist.append(_gt_in_roi(sim, distinct_mu))
     mu_grid_index.append(1)
 
     pulse_t = np.array([_make_pulse_train(d, n_samples, fsamp) for d in dist])
@@ -327,30 +245,22 @@ def between_grid_dataset(dedup_ctx: dict[str, Any]) -> dict[str, Any]:
         "pulse_t": pulse_t,
         "distime": dist,
         "mu_grid_index": mu_grid_index,
-        "original_trains": original_trains,  # 4 grid-0 originals + 1 distinct grid-1 MU
+        "original_trains": original_trains,
         "n_originals": 4,
-        "n_distinct": 5,  # survivors expected with cross-grid dedup on
-        "n_no_cross": 9,  # survivors expected with cross-grid dedup off
+        "n_distinct": 5,
+        "n_no_cross": 9,
     }
 
 
-# ---------------------------------------------------------------------------
-# 1. Core rem_duplicates on small synthetic spike trains
-# ---------------------------------------------------------------------------
+# ── 1. Core rem_duplicates on small synthetic spike trains ───────────────────
 
 
 class TestRemDuplicatesCore:
-    """Precise behavioural checks of ``rem_duplicates`` on crafted spike trains.
-
-    Uses small synthetic trains (no simulation data needed) so each duplicate
-    variant is unambiguous.  ``fsamp = 10240`` matches the simulation so the
-    jitter/max-lag constants resolve to the same sample windows (jit = 3,
-    maxlag = 256) used in the real-data tests.
-    """
+    """Precise behavioural checks of ``rem_duplicates`` on crafted spike trains."""
 
     FSAMP = 10240.0
     N_SAMPLES = 6000
-    MAXLAG = round(FSAMP / DEDUP_MAXLAG_RATIO)  # 256
+    MAXLAG = round(FSAMP / DEDUP_MAXLAG_RATIO)
 
     def _run(self, dist: list[np.ndarray]) -> tuple[int, list[int]]:
         pt = np.zeros((len(dist), self.N_SAMPLES))
@@ -388,8 +298,8 @@ class TestRemDuplicatesCore:
 
     def test_distinct_unit_preserved(self) -> None:
         """A low-firing, irregular MU is neither a duplicate of the regular MU nor vice-versa."""
-        a = self._regular(200, 100, 20)  # 20 spikes, period 200
-        b = np.array([250, 900, 1700, 2600, 3400, 4300, 5200], dtype=int)  # 7 irregular spikes
+        a = self._regular(200, 100, 20)
+        b = np.array([250, 900, 1700, 2600, 3400, 4300, 5200], dtype=int)
         kept, idx = self._run([a, b])
         assert kept == 2, f"distinct unit wrongly collapsed: {kept} survivors"
         assert sorted(idx) == [0, 1]
@@ -404,18 +314,16 @@ class TestRemDuplicatesCore:
 
     def test_kept_representative_is_lowest_cov(self) -> None:
         """Among a duplicate group the lowest-CoV member is the one retained."""
-        a = self._regular(200, 100, 20)  # regular, low CoV
+        a = self._regular(200, 100, 20)
         rng = np.random.default_rng(11)
         jit = int(round(DEDUP_JITTER * self.FSAMP))
-        jittery = _jittered(a, rng, jit, self.N_SAMPLES)  # jitter raises CoV
+        jittery = _jittered(a, rng, jit, self.N_SAMPLES)
         assert isi_cov(jittery, self.FSAMP) > isi_cov(a, self.FSAMP)
         _, idx = self._run([a, jittery])
         assert idx == [0], f"lowest-CoV representative not kept: {idx}"
 
 
-# ---------------------------------------------------------------------------
-# 2. Within-grid deduplication via _remove_duplicates_by_grid
-# ---------------------------------------------------------------------------
+# ── 2. Within-grid deduplication via _remove_duplicates_by_grid ──────────────
 
 
 class TestWithinGridDedup:
@@ -452,9 +360,7 @@ class TestWithinGridDedup:
         )
 
 
-# ---------------------------------------------------------------------------
-# 3. Between-grid deduplication via _remove_duplicates_by_grid
-# ---------------------------------------------------------------------------
+# ── 3. Between-grid deduplication via _remove_duplicates_by_grid ─────────────
 
 
 class TestBetweenGridDedup:
@@ -463,12 +369,7 @@ class TestBetweenGridDedup:
     def test_cross_grid_off_keeps_all(
         self, dedup_ctx: dict[str, Any], between_grid_dataset: dict[str, Any]
     ) -> None:
-        """With ``duplicatesbgrids=False`` cross-grid duplicates are *not* removed.
-
-        The per-grid pass sees no intra-grid duplicates (grid 0 holds only
-        originals, grid 1 holds only lagged copies + one distinct MU), so every
-        input MU survives.
-        """
+        """With ``duplicatesbgrids=False`` cross-grid duplicates are *not* removed."""
         params = DecompositionParameters(duplicatesthresh=_DEDUP_TOL, duplicatesbgrids=False)
         _, distime, gidx, _ = _remove_duplicates_by_grid(
             between_grid_dataset["pulse_t"],
@@ -489,12 +390,7 @@ class TestBetweenGridDedup:
     def test_cross_grid_on_collapses_duplicates(
         self, dedup_ctx: dict[str, Any], between_grid_dataset: dict[str, Any]
     ) -> None:
-        """With ``duplicatesbgrids=True`` the 4 cross-grid lagged copies collapse.
-
-        The 4 grid-0 originals each merge with their grid-1 lagged copy, leaving
-        5 survivors: 4 originals (in grid 0) + the one genuinely-distinct grid-1
-        MU that has no counterpart in grid 0.
-        """
+        """With ``duplicatesbgrids=True`` the 4 cross-grid lagged copies collapse."""
         params = DecompositionParameters(duplicatesthresh=_DEDUP_TOL, duplicatesbgrids=True)
         pulse_t, distime, gidx, _ = _remove_duplicates_by_grid(
             between_grid_dataset["pulse_t"],
@@ -514,8 +410,6 @@ class TestBetweenGridDedup:
         assert gidx.count(1) == 1, f"expected 1 grid-1 survivor (the distinct MU), got {gidx}"
         assert pulse_t.shape[0] == n_surv
 
-        # The survivors map one-to-one onto the 5 ground-truth originals
-        # (4 grid-0 originals + the distinct grid-1 MU).
         _assert_one_survivor_per_original(
             [np.asarray(d) for d in distime],
             between_grid_dataset["original_trains"],

@@ -1,11 +1,4 @@
-"""Intan RHD loading on synthetic recordings in all three save layouts.
-
-The same recording is written as "one file per channel", "one file per signal
-type" and a traditional single-file ``.rhd``; all three must recover identical
-channels.  Every channel carries a distinct offset, so any reordering (e.g.
-interleaving the two ports) shows up as a mismatch.  The real ``data/Intan``
-recording is covered by ``test_io_formats``.
-"""
+"""Intan RHD loading on synthetic recordings in all three save layouts."""
 
 from __future__ import annotations
 
@@ -19,8 +12,6 @@ import pytest
 from muedit.io import load_signal
 from muedit.io._intan import load_intan
 
-# The synthetic recordings use a 32-electrode catalogue grid on each of two
-# ports, so the fixtures exercise multi-grid assembly without large files.
 _GRID = "GR10MM0804"
 _N_CH = 32
 _N_PORTS = 2
@@ -42,8 +33,8 @@ def _channel_record(native: str, order: int, signal_type: int) -> bytes:
         _qstring(native)
         + _qstring(native)
         + struct.pack("<hhhhhh", order, order, signal_type, 1, order, 0)
-        + struct.pack("<hhhh", 0, 0, 0, 0)  # spike-scope trigger settings
-        + struct.pack("<ff", 0.0, 0.0)  # electrode impedance
+        + struct.pack("<hhhh", 0, 0, 0, 0)
+        + struct.pack("<ff", 0.0, 0.0)
     )
 
 
@@ -51,15 +42,15 @@ def _write_header(path: Path) -> None:
     """Write a version 3.0 RHD header: two amplifier ports, aux, and digital in."""
     buf = struct.pack("<Ihh", 0xC6912702, 3, 0)
     buf += struct.pack("<f", _FSAMP)
-    buf += struct.pack("<h", 1)  # DSP enabled
+    buf += struct.pack("<h", 1)
     buf += struct.pack("<ffffff", 20.0, 10.0, 500.0, 20.0, 10.0, 500.0)
-    buf += struct.pack("<h", 1)  # notch mode 1 => 50 Hz
+    buf += struct.pack("<h", 1)
     buf += struct.pack("<ff", 1000.0, 1000.0)
-    buf += _qstring("") * 3  # notes
-    buf += struct.pack("<h", 0)  # temperature sensors
-    buf += struct.pack("<h", 0)  # eval board mode
-    buf += _qstring("n/a")  # reference channel
-    buf += struct.pack("<h", _N_PORTS + 1)  # signal groups
+    buf += _qstring("") * 3
+    buf += struct.pack("<h", 0)
+    buf += struct.pack("<h", 0)
+    buf += _qstring("n/a")
+    buf += struct.pack("<h", _N_PORTS + 1)
 
     for port in ("A", "B"):
         buf += _qstring(f"Port {port}") + _qstring(port)
@@ -76,11 +67,7 @@ def _write_header(path: Path) -> None:
 
 
 def _reference_signals() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Build amplifier / aux / digital sample blocks with per-channel signatures.
-
-    Every channel carries a distinct constant offset so a layout that permutes
-    channels produces a different matrix rather than merely different noise.
-    """
+    """Build amplifier / aux / digital sample blocks with per-channel signatures."""
     rng = np.random.default_rng(7)
     amp = rng.integers(-2000, 2000, size=(_N_PORTS * _N_CH, _N_SAMPLES)).astype(np.int16)
     amp += (np.arange(_N_PORTS * _N_CH, dtype=np.int16) * 10)[:, None]
@@ -109,17 +96,12 @@ def _write_per_signal_type(
     _write_header(directory / "info.rhd")
     np.arange(_N_SAMPLES, dtype=np.int32).tofile(directory / "time.dat")
     amp.T.astype(np.int16).tofile(directory / "amplifier.dat")
-    # Auxiliary is saved at a quarter of the amplifier rate in this layout.
     aux[:, ::4].T.astype(np.uint16).tofile(directory / "auxiliary.dat")
     digital[0].astype(np.uint16).tofile(directory / "digitalin.dat")
 
 
 def _write_traditional(path: Path, amp: np.ndarray, aux: np.ndarray, digital: np.ndarray) -> None:
-    """Write a monolithic ``.rhd``: fixed-size data blocks following the header.
-
-    Amplifier samples are offset binary here (unlike the split layouts, which
-    store them signed), and auxiliary runs at a quarter rate.
-    """
+    """Write a monolithic ``.rhd``: fixed-size data blocks following the header."""
     _write_header(path)
     with open(path, "ab") as handle:
         for b in range(_N_BLOCKS):
@@ -151,7 +133,7 @@ def synthetic_layouts(tmp_path: Path) -> dict[str, Path]:
 
 def test_all_three_layouts_recover_the_same_channels(synthetic_layouts: dict[str, Path]) -> None:
     amp, _, _ = _reference_signals()
-    expected = amp.astype(np.float64) * 0.195e-3  # 0.195 uV per bit, carried in mV
+    expected = amp.astype(np.float64) * 0.195e-3
 
     loaded = {
         name: load_intan(str(path), grid_names=_GRID) for name, path in synthetic_layouts.items()
@@ -161,7 +143,6 @@ def test_all_three_layouts_recover_the_same_channels(synthetic_layouts: dict[str
         assert sig.data.shape == (_N_PORTS * _N_CH, _N_SAMPLES), name
         assert sig.fsamp == _FSAMP, name
         assert sig.gridname == [_GRID] * _N_PORTS, name
-        # Channel identity and scaling must agree exactly across layouts.
         np.testing.assert_allclose(sig.data, expected, rtol=0, atol=1e-12, err_msg=name)
 
 
@@ -171,11 +152,8 @@ def test_layouts_agree_on_auxiliary_and_digital(synthetic_layouts: dict[str, Pat
     for name, path in synthetic_layouts.items():
         sig = load_intan(str(path), grid_names=_GRID)
         assert sig.auxiliaryname == ["A-AUX1", "B-AUX1", "DIGITAL-IN-01"], name
-        # Auxiliary inputs are volts; the digital line stays a 0/1 flag.
         np.testing.assert_allclose(sig.auxiliary[2], digital[0], atol=1e-12, err_msg=name)
         if name == "per_channel":
-            # Only this layout stores auxiliary at the full amplifier rate; the
-            # others repeat each quarter-rate sample, so compare on that grid.
             np.testing.assert_allclose(sig.auxiliary[0], aux[0] * 37.4e-6, atol=1e-12, err_msg=name)
         else:
             np.testing.assert_allclose(

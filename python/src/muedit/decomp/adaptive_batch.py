@@ -12,6 +12,7 @@ from muedit.adapt_decomp.config import Config
 from muedit.models import BoolArray, FloatArray, IntArray
 from muedit.signal.decomp_primitives import (
     POSTPROC_MIN_ISI_SEC,
+    enforce_refractory,
     extend_signal,
     find_refractory_peaks,
     signed_square,
@@ -276,7 +277,12 @@ def adaptive_batch_process(
             if artifact_mask is not None:
                 pt[artifact_mask[:ltime]] = 0.0
             pulse_t[mu_nb, :] = pt
-            distime.append(np.where(spikes_out[:ltime, j] > 0)[0].astype(int))
+            # Detection is per batch, so a pair straddling a batch boundary or the
+            # backward/forward seam can still breach the refractory period.
+            spikes_j = np.where(spikes_out[:ltime, j] > 0)[0].astype(int)
+            distime.append(
+                enforce_refractory(spikes_j, pt, fsamp, min_isi_sec=config.spike_dist_ms / 1000.0)
+            )
             mu_nb += 1
 
     return pulse_t, distime, all_losses

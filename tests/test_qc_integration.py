@@ -1,15 +1,4 @@
-"""Tests for how the automatic QC pipeline is wired into the app.
-
-Covers the integration points added alongside :mod:`muedit.signal.qc_pipeline`:
-
-* ``build_manual_artifact_mask`` and the ``artifact_regions`` /
-  ``auto_mask_artifacts`` handling in ``preprocess_step``;
-* the ``POST /api/v1/qc/auto`` route and its ``_mask_to_regions`` encoder;
-* ``artifact_mask`` round-trips through NPZ decomposition files
-  (``_load_npz_decomp``, ``load_decomposition_signal_context``).
-
-Everything is synthetic; no sample data is required.
-"""
+"""Tests for how the automatic QC pipeline is wired into the app."""
 
 from __future__ import annotations
 
@@ -35,7 +24,7 @@ from muedit.signal.qc_pipeline import QCPipelineResult
 
 FSAMP = 2000.0
 N_CHANNELS = 64
-N_SAMPLES = 20_000  # 10 s @ 2000 Hz
+N_SAMPLES = 20_000
 GRID = "GR08MM1305"
 
 
@@ -82,14 +71,14 @@ def _preprocess(data: np.ndarray, grids: list[str], **kwargs: Any) -> Preprocess
     )
 
 
-# ── build_manual_artifact_mask ──────────────────────────────────────────────
+# ── build_manual_artifact_mask ───────────────────────────────────────────────
 
 
 class TestBuildManualArtifactMask:
     def test_regions_are_rasterized(self) -> None:
-        # Half-open, reversed, clipped, overlapping and non-int bounds.
-        regions = [(2, 4), (6, 5), (-5, 1), (8, 50), (3.0, "4")]
+        regions: list[Any] = [(2, 4), (6, 5), (-5, 1), (8, 50), (3.0, "4")]
         mask = build_manual_artifact_mask(regions, 10)
+        assert mask is not None
         assert mask.dtype == bool
         assert np.flatnonzero(mask).tolist() == [0, 2, 3, 5, 8, 9]
 
@@ -112,6 +101,7 @@ class TestBuildManualArtifactMask:
 class TestPreprocessArtifactMask:
     def test_manual_regions_become_mask(self) -> None:
         prep = _preprocess(_raw_emg(), [GRID], artifact_regions=[(1000, 1500), (9000, 9100)])
+        assert prep.artifact_mask is not None
         assert prep.artifact_mask.shape == (N_SAMPLES,)
         assert int(prep.artifact_mask.sum()) == 600
         assert prep.artifact_mask[1000:1500].all()
@@ -125,6 +115,8 @@ class TestPreprocessArtifactMask:
         override[40] = 1
         params = DecompositionParameters(auto_mask_artifacts=True)
         prep = _preprocess(data, [GRID], params=params, discard_overrides=[override])
+        assert prep.bad_channel_masks is not None
+        assert prep.artifact_mask is not None
         assert prep.bad_channel_masks[0][12]
         assert {12, 40} <= set(np.flatnonzero(prep.discard_channels[0]).tolist())
         assert prep.artifact_mask.shape == (N_SAMPLES,)
@@ -142,6 +134,7 @@ class TestPreprocessArtifactMask:
             grid_coordinates: list[np.ndarray] | None = None,
         ) -> QCPipelineResult:
             assert counts == [N_CHANNELS, N_CHANNELS]
+            assert grid_coordinates is not None
             assert len(grid_coordinates) == 2
             bad = [np.zeros(N_CHANNELS, bool), np.zeros(N_CHANNELS, bool)]
             bad[1][3] = True
@@ -155,6 +148,7 @@ class TestPreprocessArtifactMask:
             params=params,
             artifact_regions=[(150, 300)],
         )
+        assert prep.artifact_mask is not None
         assert np.flatnonzero(np.diff(prep.artifact_mask.astype(int))).tolist() == [99, 299]
         assert not prep.discard_channels[0].any()
         assert np.flatnonzero(prep.discard_channels[1]).tolist() == [3]
@@ -168,7 +162,9 @@ def test_mask_to_regions_round_trips() -> None:
     mask[[0, 3, 4, 5, 40, 90, 91, 99]] = True
     regions = _mask_to_regions(mask)
     assert regions == [[0, 1], [3, 6], [40, 41], [90, 92], [99, 100]]
-    np.testing.assert_array_equal(build_manual_artifact_mask(regions, 100), mask)
+    rebuilt = build_manual_artifact_mask([(s, e) for s, e in regions], 100)
+    assert rebuilt is not None
+    np.testing.assert_array_equal(rebuilt, mask)
     assert _mask_to_regions(np.zeros(4, bool)) == []
     assert _mask_to_regions(None) == []
 
@@ -206,8 +202,8 @@ def _qc_token(data: np.ndarray, grids: list[str]) -> str:
 class TestQcAutoRoute:
     def test_returns_bad_channels_and_artifact_regions(self, api_client: TestClient) -> None:
         data = _raw_emg(n_grids=2)
-        data[N_CHANNELS + 7] = 0.0  # dead electrode on grid 2
-        data[:, 10_000:10_100] += 50.0  # full-montage transient
+        data[N_CHANNELS + 7] = 0.0
+        data[:, 10_000:10_100] += 50.0
         token = _qc_token(data, [GRID, GRID])
 
         resp = api_client.post("/api/v1/qc/auto", json={"upload_token": token})
@@ -257,6 +253,7 @@ class TestNpzArtifactMask:
         path = tmp_path / "d.npz"
         _save_npz(path, {"artifact_mask": mask})
         loaded = _load_npz_decomp(str(path))
+        assert loaded.artifact_mask is not None
         np.testing.assert_array_equal(loaded.artifact_mask, mask)
         assert loaded.artifact_mask.dtype == bool
 
@@ -270,7 +267,7 @@ class TestNpzArtifactMask:
         _save_npz(
             path,
             {
-                "emg_data": emg.T,  # stored samples-first; loader must transpose
+                "emg_data": emg.T,
                 "discard_channels": pack_object_array([np.array([0, 1, 0])]),
                 "artifact_mask": mask,
             },
@@ -280,5 +277,6 @@ class TestNpzArtifactMask:
         np.testing.assert_array_equal(ctx.data, emg)
         assert ctx.fsamp == FSAMP
         assert ctx.grid_names == [GRID]
+        assert ctx.artifact_mask is not None
         np.testing.assert_array_equal(ctx.artifact_mask, mask)
         assert len(ctx.emgmask) == 1

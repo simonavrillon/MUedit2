@@ -1,17 +1,4 @@
-"""HTTP smoke tier: one FastAPI ``TestClient`` pass per live endpoint.
-
-"Live" means the routes the frontend can actually reach (``frontend/src/api/
-routes.js``; the ``editAction``/``editMode`` patterns expand to the ROI and
-update-filter routes).  Each test checks the status code and the shape of the
-response (JSON envelope keys, or the magic and header of the binary formats),
-not the numbers.  The ROI and MU-level edit actions are exercised with real
-values in ``test_editing_operations``.
-
-The app is built with ``create_app()`` so the canonical error envelope
-handlers are active, exactly as in production.  All inputs are synthetic:
-a plain MATLAB v5 signal struct and a MUedit NPZ decomposition, both written
-to a tmp dir that also serves as ``DATA_ROOT`` and the working directory.
-"""
+"""HTTP smoke tier: one FastAPI ``TestClient`` pass per live endpoint."""
 
 from __future__ import annotations
 
@@ -26,18 +13,19 @@ from typing import Any
 import numpy as np
 import pytest
 import scipy.io
+from fastapi import FastAPI
 from httpx import Response
+from starlette.routing import Route
 from starlette.testclient import TestClient
 
 from tests.conftest import REPO_ROOT
 
 FSAMP = 2000.0
 N_CHANNELS = 64
-N_SAMPLES = 6000  # 3 s @ 2000 Hz — enough for every route, fast to decompose
+N_SAMPLES = 6000
 GRID = "GR08MM1305"
 API = "/api/v1"
 
-#: Every (method, path) the frontend calls.
 LIVE_ENDPOINTS: list[tuple[str, str]] = [
     ("GET", "/health"),
     ("GET", "/dialog/open-file"),
@@ -85,7 +73,6 @@ def client(workspace: Path) -> Iterator[TestClient]:
 
     app = create_app()
     include_routers(app)
-    # Let unhandled errors reach the 500 envelope handler instead of raising.
     with TestClient(app, raise_server_exceptions=False) as c:
         yield c
 
@@ -241,10 +228,13 @@ def _unpack_mqcr(blob: bytes) -> dict[str, Any]:
 
 class TestRouteTable:
     def test_every_live_endpoint_is_registered(self, client: TestClient) -> None:
+        app = client.app
+        assert isinstance(app, FastAPI)
         registered = {
             (method, route.path)
-            for route in client.app.routes
-            for method in getattr(route, "methods", ())
+            for route in app.routes
+            if isinstance(route, Route)
+            for method in route.methods or ()
         }
         missing = [(m, API + p) for m, p in LIVE_ENDPOINTS if (m, API + p) not in registered]
         assert not missing
@@ -403,7 +393,7 @@ class TestQcWindow:
         assert resp.status_code == 200
         dec = _unpack_mqcr(resp.content)
         assert dec["channel"] == 5
-        assert dec["end"] == N_SAMPLES  # end=0 means "to the end"
+        assert dec["end"] == N_SAMPLES
         assert [idx for idx, _ in dec["channels"]] == [5]
 
     @pytest.mark.parametrize(
@@ -469,7 +459,6 @@ class TestDecomposeStream:
         } <= set(summary)
         assert summary["parameters"]["niter"] == 5
         preview = done["preview"]
-        # Heavy arrays are moved to the binary side channel by default.
         assert isinstance(preview["preview_binary_token"], str)
         assert "pulse_trains_full" not in preview
         assert "pulse_trains_all" not in preview
@@ -650,7 +639,7 @@ class TestEditSave:
         out = Path(data["path"])
         assert out.is_file() and out.suffix == ".npz"
         assert out.is_relative_to(workspace / "smoke")
-        assert out.with_suffix(".json").is_file()  # edit log
+        assert out.with_suffix(".json").is_file()
         with np.load(out, allow_pickle=True) as z:
             assert {"pulse_trains", "discharge_times", "fsamp", "artifact_mask"} <= set(z.files)
             assert int(z["artifact_mask"].sum()) == 20

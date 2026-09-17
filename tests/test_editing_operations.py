@@ -1,12 +1,4 @@
-"""Tests for the post-hoc motor-unit editing operations.
-
-Covers :mod:`muedit.editing.operations` (ROI add/delete of spikes and
-artifacts, discharge-rate cleanup, windowed filter update including the
-artifact-mask gating) and the ``/api/v1/edit/*`` routes that wrap them.
-
-All signals are synthetic so the ground truth is known and no sample data
-is required.
-"""
+"""Tests for the post-hoc motor-unit editing operations."""
 
 from __future__ import annotations
 
@@ -32,10 +24,9 @@ from muedit.editing.operations import (
 # ── Fixtures ─────────────────────────────────────────────────────────────────
 
 FSAMP = 2000.0
-N_SAMPLES = 10_000  # 5 s @ 2000 Hz
+N_SAMPLES = 10_000
 N_CHANNELS = 32
 MUAP_LEN = 20
-# Filter-update window; the recompute zeroes a 0.1 s edge on each side.
 VIEW_START, VIEW_END = 1000, 9000
 EDGE = int(round(0.1 * FSAMP))
 
@@ -105,7 +96,6 @@ class TestAddInRoi:
     def test_adds_peaks_above_threshold_inside_roi(self, op: Callable[..., list[int]]) -> None:
         pulse = _pulse_with_peaks({1000: 1.0, 1500: 0.2, 3000: 1.0})
         out = op(pulse, [500], FSAMP, 900, 2000, 0.5)
-        # 1500 is below y_min, 3000 is outside the ROI.
         assert out == [500, 1000]
 
     def test_roi_bounds_are_inclusive(self, op: Callable[..., list[int]]) -> None:
@@ -121,7 +111,6 @@ class TestAddInRoi:
         assert op(pulse, [1000], FSAMP, 0, 2000, 0.5) == [1000]
 
     def test_refractory_period_keeps_one_of_close_peaks(self, op: Callable[..., list[int]]) -> None:
-        # Peaks 5 samples apart (2.5 ms) cannot both be discharges.
         pulse = _pulse_with_peaks({1000: 1.0, 1005: 0.8})
         assert op(pulse, [], FSAMP, 0, 2000, 0.5) == [1000]
 
@@ -136,7 +125,6 @@ class TestDeleteInRoi:
     def test_deletes_only_spikes_inside_box(self, op: Callable[..., list[int]]) -> None:
         pulse = _pulse_with_peaks({100: 0.5, 200: 0.5, 300: 5.0, 900: 0.5})
         out = op(pulse, [100, 200, 300, 900], 150, 400, 0.2, 0.8)
-        # 200 is in the box; 300 is above it; 100 and 900 are outside x-range.
         assert out == [100, 300, 900]
 
     def test_y_bounds_order_is_irrelevant(self, op: Callable[..., list[int]]) -> None:
@@ -153,7 +141,6 @@ class TestDeleteInRoi:
 
 class TestDeleteHighDischargeRate:
     def test_removes_weaker_spike_of_fast_pair(self) -> None:
-        # ISI 1000 -> 2 Hz everywhere except 2000/2040 -> 50 Hz.
         spikes = [1000, 2000, 2040, 3000]
         pulse = _pulse_with_peaks({1000: 1.0, 2000: 1.0, 2040: 0.3, 3000: 1.0})
         out = delete_high_discharge_rate_spikes_in_roi(pulse, spikes, FSAMP, 1500, 2500, 20.0)
@@ -172,7 +159,7 @@ class TestDeleteHighDischargeRate:
         assert out == spikes
 
     def test_rate_below_threshold_untouched(self) -> None:
-        spikes = [2000, 2040]  # 50 Hz
+        spikes = [2000, 2040]
         pulse = _pulse_with_peaks({2000: 1.0, 2040: 0.3})
         out = delete_high_discharge_rate_spikes_in_roi(pulse, spikes, FSAMP, 0, 5000, 60.0)
         assert out == spikes
@@ -188,7 +175,6 @@ class TestDeleteHighDischargeRate:
 
 class TestRemoveDischargeRateOutliers:
     def test_removes_weaker_spike_of_outlier_pair(self) -> None:
-        # Regular 10 Hz train with one doublet (extra spike 10 ms after 4000).
         spikes = list(range(1000, 9001, 200))
         spikes.append(4020)
         heights = dict.fromkeys(spikes, 1.0)
@@ -204,7 +190,7 @@ class TestRemoveDischargeRateOutliers:
         assert remove_discharge_rate_outliers(pulse, spikes, FSAMP) == spikes
 
     def test_z_factor_controls_sensitivity(self) -> None:
-        spikes = [*range(1000, 9001, 200), 4100]  # mild 20 Hz pair
+        spikes = [*range(1000, 9001, 200), 4100]
         pulse = _pulse_with_peaks(dict.fromkeys(spikes, 1.0))
         strict = remove_discharge_rate_outliers(pulse, spikes, FSAMP, z_factor=0.5)
         lenient = remove_discharge_rate_outliers(pulse, spikes, FSAMP, z_factor=100.0)
@@ -249,7 +235,6 @@ class TestUpdateFilterWindow:
         truth = _in_view(synthetic_mu["target"])
         found = _in_view(updated)
         matched = _match_count(truth, found)
-        # No false positives (interfering MU is rejected) and good recall.
         assert matched == found.size
         assert matched >= 0.75 * truth.size
         assert updated == sorted(set(updated))
@@ -263,6 +248,7 @@ class TestUpdateFilterWindow:
 
     def test_pulse_train_edges_zeroed(self, synthetic_mu: dict[str, np.ndarray]) -> None:
         pt, _ = _update(synthetic_mu)
+        assert pt is not None
         assert not pt[:EDGE].any()
         assert not pt[-EDGE:].any()
 
@@ -278,6 +264,7 @@ class TestUpdateFilterWindow:
         pt_full, up_full = _update(synthetic_mu)
         sliced = synthetic_mu["emg"][:, VIEW_START:VIEW_END]
         pt_sl, up_sl = _update(synthetic_mu, emg=sliced, emg_offset=VIEW_START)
+        assert pt_sl is not None and pt_full is not None
         np.testing.assert_allclose(pt_sl, pt_full)
         assert up_sl == up_full
 
@@ -291,6 +278,7 @@ class TestUpdateFilterWindow:
         pt_ref, up_ref = _update(
             synthetic_mu, emg=np.delete(synthetic_mu["emg"], 3, axis=0), emg_mask=np.array([])
         )
+        assert pt_masked is not None and pt_ref is not None
         np.testing.assert_allclose(pt_masked, pt_ref)
         assert up_masked == up_ref
 
@@ -342,6 +330,7 @@ class TestUpdateFilterArtifactMask:
 
     def test_nothing_detected_inside_mask(self, synthetic_mu: dict[str, np.ndarray]) -> None:
         pt, updated = _update(synthetic_mu, artifact_mask=self._mask())
+        assert pt is not None
         local = slice(self.MASK_START - VIEW_START, self.MASK_END - VIEW_START)
         assert not pt[local].any()
         assert pt.max() > 0

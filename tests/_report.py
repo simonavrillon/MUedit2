@@ -1,31 +1,4 @@
-"""Quantitative measurement collection for the decomposition tests.
-
-Several properties of the decomposition are real *in expectation* but not on
-every individual run: peel-off usually exposes additional motor units, dedup
-usually collapses duplicates, detected units usually agree closely with ground
-truth.  FastICA is a randomized fixed-point search, so the realized value of any
-of these on one ROI with one seed can legitimately sit at zero (or below a
-quality floor) without anything being broken.
-
-Asserting a threshold on such a quantity produces a red build that says only
-"below threshold" -- no magnitude, no distribution, no trend.  So the tests
-record these as *measurements* instead: each run appends rows to the tables
-below, ``conftest`` prints them at the end of the session and writes one CSV per
-table for offline analysis.
-
-What remains an assertion is the genuinely deterministic part: spike trains
-sorted and in-bounds, refractory distances respected, counts internally
-consistent, and dedup never *increasing* the unit count.
-
-Usage::
-
-    from tests._report import record
-
-    record("peel_off", peel_off_units=n_on, no_peel_units=n_off, delta=n_on - n_off)
-
-Set ``MUEDIT_TEST_REPORT_DIR`` to control where the CSVs land (default
-``tests/reports/``); the directory is git-ignored.
-"""
+"""Quantitative measurement collection for the decomposition tests."""
 
 from __future__ import annotations
 
@@ -44,12 +17,7 @@ _CAPTIONS: dict[str, str] = {}
 
 
 def record(table: str, *, caption: str | None = None, **fields: Any) -> None:
-    """Append one measurement row to ``table``.
-
-    Rows are plain scalars (numbers or strings).  Column order follows first
-    appearance; rows missing a column render as an empty cell, so a table can
-    grow columns over time without breaking earlier rows.
-    """
+    """Append one measurement row to ``table``."""
     _TABLES.setdefault(table, []).append(dict(fields))
     if caption and table not in _CAPTIONS:
         _CAPTIONS[table] = caption
@@ -111,12 +79,7 @@ def report_dir() -> Path:
 
 
 def write_csvs() -> list[Path]:
-    """Write one CSV per collected table; returns the paths written.
-
-    Each file is overwritten per run, so a CSV always reflects the most recent
-    session rather than accumulating across runs -- keep a copy, or point
-    ``MUEDIT_TEST_REPORT_DIR`` somewhere per-run, to compare over time.
-    """
+    """Write one CSV per collected table; returns the paths written."""
     written: list[Path] = []
     if not _TABLES:
         return written
@@ -136,18 +99,11 @@ def write_csvs() -> list[Path]:
     return written
 
 
-# ---------------------------------------------------------------------------
-# Small summary helpers used by the recording call sites
-# ---------------------------------------------------------------------------
+# ── Small summary helpers used by the recording call sites ───────────────────
 
 
 def describe(values: list[float]) -> dict[str, Any]:
-    """Return count/min/median/mean/max for a list of numbers.
-
-    Returned as plain floats so the row is CSV-friendly.  An empty input yields
-    a row of ``None`` cells rather than raising, so a run that detected nothing
-    still produces a readable line.
-    """
+    """Return count/min/median/mean/max for a list of numbers."""
     import numpy as np
 
     if not values:

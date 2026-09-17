@@ -1,9 +1,4 @@
-"""Tests for the automatic QC pipeline (:mod:`muedit.signal.qc_pipeline`).
-
-The pipeline runs bad channels -> artifacts -> bad channels, excluding the
-artifact samples from the final pass so a transient artifact cannot make a
-healthy channel look bad.
-"""
+"""Tests for the automatic QC pipeline (:mod:`muedit.signal.qc_pipeline`)."""
 
 from __future__ import annotations
 
@@ -25,7 +20,7 @@ def _rest_artifact(data: np.ndarray, center: int, half_width: int, amplitude: fl
     """A brief step on every channel (random sign), like a cable movement at rest."""
     rng = np.random.default_rng(77)
     out = data.copy()
-    for ch in rng.choice(data.shape[0], size=data.shape[0], replace=False):
+    for ch in np.asarray(rng.choice(data.shape[0], size=data.shape[0], replace=False)):
         out[ch, center - half_width : center + half_width] += amplitude * rng.choice([-1, 1])
     return out
 
@@ -73,15 +68,14 @@ def test_multi_grid_reports_on_the_right_grid() -> None:
 
 
 def test_kept_channels_are_selected_per_grid() -> None:
-    # Row value encodes the global channel index so the selection is checkable.
     data = np.repeat(np.arange(10, dtype=float)[:, None], 4, axis=1)
     coords = [np.arange(8.0).reshape(4, 2), 100 + np.arange(12.0).reshape(6, 2)]
     bad = [np.ones(4, bool), np.array([1, 0, 0, 1, 0, 0], bool)]
 
     kept, counts, kept_coords = _select_kept_channels(data, [4, 6], bad, coords)
 
-    # A fully bad grid keeps its first channel so it is never empty.
     assert counts == [1, 4]
+    assert kept_coords is not None
     np.testing.assert_array_equal(kept[:, 0], [0, 5, 6, 8, 9])
     np.testing.assert_array_equal(kept_coords[0], coords[0][[0]])
     np.testing.assert_array_equal(kept_coords[1], coords[1][[1, 2, 4, 5]])

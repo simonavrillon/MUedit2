@@ -1,32 +1,4 @@
-"""Decomposition benchmark: unit count, accuracy, and duration on real + simulated data.
-
-For every dataset the expensive ICA decomposition is computed *once* and the
-three post-processing branches are re-run over the same separators, each timed
-independently:
-
-1. **Windowed** (default) -- filters applied only inside the ROI window.
-2. **Adaptive** (``use_adaptive=True``) -- :func:`adaptive_batch_process` walks
-   the full signal, adapting whitening and source vectors online.
-3. **Full trace** (``full_trace=True``) -- :func:`batch_process_filters` applies
-   the dewhitened filters over the whole extended signal.
-
-Two reference types are used:
-
-1. **Real data** (``data/Novecento.otb4``) -- the *manually edited* discharge
-   times stored in the BIDS derivatives.  The decomposition is re-run with the
-   ROI and parameters of the stored ``_decomp.npz``.  The windowed branch is
-   compared inside the ROI; the full-signal branches against the whole edited
-   reference.  Matching is pooled across grids (the grids sit over the same
-   muscle, so one physical MU can appear on several).
-2. **Simulated data** (20/40/60 % excitation) -- the ground-truth spike trains
-   in the simulation ``.mat`` files, restricted to the contraction ROI.
-
-Every run upserts an entry -- dataset, the full ``DecompositionParameters`` and
-the metrics -- into a JSON leaderboard at ``tests/benchmark_leaderboard.json``
-(override with ``MUEDIT_BENCHMARK_LEADERBOARD``).  A row with the same dataset
-and parameters is replaced, so the file is a local, git-ignored tuning history.
-The same rows are also printed in the ``benchmark`` measurement table.
-"""
+"""Decomposition benchmark: unit count, accuracy, and duration on real + simulated data."""
 
 from __future__ import annotations
 
@@ -44,7 +16,7 @@ import pytest
 from muedit.decomp.core import decompose_step
 from muedit.decomp.postprocess import postprocess_step
 from muedit.decomp.preprocess import load_step, preprocess_step
-from muedit.decomp.types import DecompositionParameters
+from muedit.decomp.types import POSTPROCESS_MODES, DecompositionParameters
 from muedit.models import SignalImport
 from tests._metrics_helpers import (
     Match,
@@ -80,19 +52,17 @@ LEADERBOARD_PATH = Path(
 )
 
 _DERIV_DIR = DATA_DIR / "Test" / "derivatives" / "muedit" / "sub-1" / "ses-1" / "decomp"
-_DECOMP_NPZ = _DERIV_DIR / "sub-1_ses-1_task-trapezoid_run-1_decomp.npz"
-_EDITED_NPZ = _DERIV_DIR / "sub-1_ses-1_task-trapezoid_run-1_edited.npz"
+_DECOMP_NPZ = _DERIV_DIR / "sub-1_ses-1_task-triangle_run-1_decomp.npz"
+_EDITED_NPZ = _DERIV_DIR / "sub-1_ses-1_task-triangle_run-1_edited.npz"
 
 _BRANCHES: tuple[tuple[str, dict[str, bool]], ...] = (
-    ("windowed", {}),
-    ("adaptive", {"use_adaptive": True}),
-    ("full_trace", {"full_trace": True}),
+    ("windowed", POSTPROCESS_MODES["windowed"]),
+    ("adaptive", POSTPROCESS_MODES["adaptive"]),
+    ("full_trace", POSTPROCESS_MODES["full-trace"]),
 )
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+# ── Helpers ──────────────────────────────────────────────────────────────────
 
 
 def _summarize(matches: list[Match], n_units: int, n_ref: int) -> dict[str, Any]:
@@ -137,8 +107,21 @@ def _log_result(dataset: str, params: DecompositionParameters, results: dict[str
     )
 
 
+def _mask_regions(mask: np.ndarray) -> list[tuple[int, int]]:
+    """Half-open ``(start, end)`` runs of ``True`` in a boolean sample mask."""
+    edges = np.diff(np.concatenate(([0], mask.astype(np.int8), [0])))
+    return [
+        (int(a), int(b))
+        for a, b in zip(np.flatnonzero(edges == 1), np.flatnonzero(edges == -1), strict=True)
+    ]
+
+
 def _prepare(
-    path: str, signal: SignalImport, roi: tuple[int, int], params: DecompositionParameters
+    path: str,
+    signal: SignalImport,
+    roi: tuple[int, int],
+    params: DecompositionParameters,
+    artifact_regions: list[tuple[int, int]] | None = None,
 ) -> Any:
     loaded = load_step(path, None, signal, None)
     return preprocess_step(
@@ -152,6 +135,7 @@ def _prepare(
         bids_root=None,
         bids_entities=None,
         bids_metadata=None,
+        artifact_regions=artifact_regions,
     )
 
 
@@ -161,11 +145,7 @@ def _run_branches(
     dataset: str,
     compare: Any,
 ) -> dict[str, dict[str, Any]]:
-    """Decompose once, then time and score each postprocess branch.
-
-    ``compare(label, distime)`` returns ``(matches, n_units, n_ref)``.
-    Returns ``{label: summary}`` for every branch.
-    """
+    """Decompose once, then time and score each postprocess branch."""
     rng = np.random.default_rng(base.random_seed)
     t0 = time.perf_counter()
     decomposed = decompose_step(prep=prep, params=base, rng=rng, progress_cb=None)
@@ -173,7 +153,7 @@ def _run_branches(
 
     out: dict[str, dict[str, Any]] = {}
     for label, mode in _BRANCHES:
-        params = replace(base, **mode)
+        params = replace(base, use_adaptive=mode["use_adaptive"], full_trace=mode["full_trace"])
         t0 = time.perf_counter()
         post = postprocess_step(prep=prep, decomposed=decomposed, params=params, progress_cb=None)
         post_sec = round(time.perf_counter() - t0, 3)
@@ -191,20 +171,23 @@ def _run_branches(
     return out
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
+# ── Fixtures ─────────────────────────────────────────────────────────────────
 
 
 @pytest.fixture(scope="session")
 def real_reference() -> dict[str, Any]:
-    """Edited discharge times (reference) + the ROI/params from the stored decomp."""
+    """Edited discharge times (reference) + the ROI/params/mask of the stored decomp."""
+    # The recording has a movement artifact after the ROI; the stored run masked
+    # it, and the full-signal branches need the same mask to stay comparable.
     edited = np.load(str(require_sample(_EDITED_NPZ)), allow_pickle=True)
     decomp = np.load(str(require_sample(_DECOMP_NPZ)), allow_pickle=True)
     return {
         "discharge_times": [np.asarray(x) for x in edited["discharge_times"]],
         "roi": tuple(int(x) for x in decomp["rois"][0]),
         "params": decomp["parameters"].item(),
+        "artifact_regions": (
+            _mask_regions(decomp["artifact_mask"]) if "artifact_mask" in decomp.files else None
+        ),
     }
 
 
@@ -225,11 +208,12 @@ def real_benchmark(
         duplicatesbgrids=True,
         random_seed=p["random_seed"],
     )
-    prep = _prepare(str(novecento_otb4_file), novecento_emg, roi, base)
+    prep = _prepare(
+        str(novecento_otb4_file), novecento_emg, roi, base, real_reference["artifact_regions"]
+    )
     ref_full = real_reference["discharge_times"]
 
     def compare(label: str, distime: list[np.ndarray]) -> Any:
-        # The windowed branch only finds spikes inside the ROI.
         ref = filter_to_roi(ref_full, roi) if label == "windowed" else ref_full
         det = filter_to_roi(distime, roi) if label == "windowed" else distime
         active = [i for i, d in enumerate(ref) if d.size >= 2]
@@ -268,9 +252,7 @@ def sim_benchmarks(
     return benchmarks
 
 
-# ---------------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------------
+# ── Tests ────────────────────────────────────────────────────────────────────
 
 
 def test_real_units_match_edited_reference(real_benchmark: dict[str, dict[str, Any]]) -> None:

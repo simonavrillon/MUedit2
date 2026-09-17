@@ -8,7 +8,7 @@ from muedit.signal.filters import bandpass_signals
 
 FSAMP = 2000.0
 N_CHANNELS = 64
-N_SAMPLES = 20_000  # 10 s @ 2000 Hz
+N_SAMPLES = 20_000
 
 
 def grid_coords() -> np.ndarray:

@@ -70,12 +70,7 @@ def _write_tsv(path: Path, header: list[str], rows: Iterable[Iterable[Any]]) -> 
 
 
 def _fmt_hz(val: Any) -> str:
-    """Format a filter frequency: round to 4 decimal places, strip trailing zeros.
-
-    Non-numeric values (e.g. the ``"n/a"`` placeholder some loaders emit when a
-    cutoff is unknown) are passed through as their string form rather than
-    raising, so recordings without real filter metadata still export.
-    """
+    """Format a filter frequency: round to 4 decimal places, strip trailing zeros."""
     try:
         num = float(val)
     except (TypeError, ValueError):
@@ -136,13 +131,7 @@ def export_bids_emg(
     software_filters: str | dict[str, Any] | None = None,
     skip_existing: bool = False,
 ) -> dict[str, Path]:
-    """Export EMG signals plus BIDS sidecars and return produced paths.
-
-    When ``skip_existing`` is True, any output file that already exists on disk
-    is left untouched and only missing files are written. This is used when the
-    source recording was itself imported from a BIDS dataset, so the original
-    signal file and sidecars are not needlessly re-encoded/overwritten.
-    """
+    """Export EMG signals plus BIDS sidecars and return produced paths."""
     pyedflib = _ensure_pyedflib()
 
     def _write_json_if_missing(path: Path, payload: dict[str, Any]) -> None:
@@ -174,10 +163,6 @@ def export_bids_emg(
     digital_max = 8388607 if use_bdf else 32767
 
     entities = build_entities(subject, task, run, session, acquisition, recording)
-    # Electrode/coordsystem files are session-scoped per BIDS-EMG: they may not
-    # carry task/acq/run (electrodes.tsv also forbids `space`, coordsystem.json
-    # forbids `run`). Using a sub[/ses] prefix avoids ENTITY_NOT_IN_RULE errors
-    # and the EXCESSIVE_*_SPECIFICITY warnings.
     session_prefix = f"sub-{subject}" + (f"_ses-{session}" if session else "")
     base_dir = bids_root / f"sub-{subject}"
     if session:
@@ -191,6 +176,8 @@ def export_bids_emg(
     channels_tsv = emg_dir / f"{entities}_channels.tsv"
 
     n_channels = data.shape[0]
+    if n_channels == 0 or data.shape[1] == 0:
+        raise ValueError(f"export_bids_emg requires non-empty data (got shape {data.shape})")
     final_data = data
     if aux_data is not None and aux_data.size > 0:
         if aux_data.ndim == 1:
@@ -207,9 +194,6 @@ def export_bids_emg(
 
     n_total_channels, n_samples = final_data.shape
 
-    # Auxiliary channel labels must be unique (BIDS requires unique channels.tsv
-    # `name` values). De-duplicate by suffixing repeats so the EDF labels and the
-    # channels.tsv rows stay in sync and valid (e.g. Quaternions, Quaternions_2).
     def _unique_labels(names: list[str] | None, count: int) -> list[str]:
         labels: list[str] = []
         seen: dict[str, int] = {}
@@ -287,7 +271,6 @@ def export_bids_emg(
         [None] * len(grid_names) if ied is None else [float(x) for x in ied]
     )
 
-    # BIDS channels.tsv placement_scheme only allows "measured" or "other"
     _ch_placement = "measured" if (placement_scheme or "").lower() == "measured" else "other"
 
     ch_idx = 0
@@ -329,7 +312,7 @@ def export_bids_emg(
                         else (target_muscle if isinstance(target_muscle, str) else "n/a")
                     ),
                     placement_scheme_per_channel or _ch_placement,
-                    "n/a",  # placement_description — free text, not auto-populated
+                    "n/a",
                     (f"{ied_mm}" if ied_mm else "n/a"),
                     grid_name,
                     (
@@ -450,16 +433,11 @@ def export_bids_emg(
         },
     )
 
-    # Space labels identify each grid's coordinate system. They live on the
-    # coordsystem.json filenames (`_space-<label>`) and in the electrodes.tsv
-    # `coordinate_system` column — never on the electrodes.tsv filename, which
-    # BIDS-EMG does not allow a `space` entity for.
     space_labels = [
         "".join(c for c in gn if c.isalnum()) or f"Grid{i + 1}" for i, gn in enumerate(grid_names)
     ]
     electrodes_tsv = emg_dir / f"{session_prefix}_electrodes.tsv"
 
-    # Per-grid electrode metadata (type, material) from the grid catalogue
     el_meta_per_grid = [get_grid_electrode_metadata(gn) for gn in grid_names]
 
     electrode_rows = []
@@ -485,10 +463,10 @@ def export_bids_emg(
                     f"{x_val:.4f}",
                     f"{y_val:.4f}",
                     z_val,
-                    space_labels[g_idx],  # must match a coordsystem.json `space` entity
+                    space_labels[g_idx],
                     el_meta["ElectrodeType"],
                     el_meta["ElectrodeMaterial"],
-                    "n/a",  # impedance — not measured
+                    "n/a",
                     f"Grid{g_idx + 1}",
                 ]
             )
@@ -504,7 +482,6 @@ def export_bids_emg(
     seen_spaces: set[str] = set()
     for g_idx, grid_name in enumerate(grid_names):
         space_label = space_labels[g_idx]
-        # One coordsystem.json per distinct space; skip duplicate grid labels.
         if space_label in seen_spaces:
             continue
         seen_spaces.add(space_label)
@@ -565,7 +542,6 @@ def export_bids_emg(
     if task_description:
         emg_json["TaskDescription"] = task_description
 
-    # Uniform amplifier gain → scalar sidecar field; per-channel gains stay in channels.tsv
     if gain is not None:
         if isinstance(gain, (int, float)):
             emg_json["Gain"] = float(gain)
@@ -574,14 +550,10 @@ def export_bids_emg(
             if len(unique_gains) == 1:
                 emg_json["Gain"] = float(next(iter(unique_gains)))
 
-    # Auto-derive electrode metadata — collapse to scalar when uniform, list when mixed
     if grid_names:
 
         def _scalar_or_omit(key: str, exclude: str | None = None) -> str | None:
-            # BIDS-EMG defines these sidecar fields as strings. When grids differ
-            # we omit the field and let the per-electrode `type`/`material`
-            # columns in electrodes.tsv carry the variation, as the spec advises.
-            vals = list(dict.fromkeys(m[key] for m in el_meta_per_grid))  # unique, order-preserving
+            vals = list(dict.fromkeys(m[key] for m in el_meta_per_grid))
             if exclude:
                 vals = [v for v in vals if v != exclude]
             if len(vals) != 1:
@@ -604,7 +576,6 @@ def export_bids_emg(
         if material is not None:
             emg_json["ElectrodeMaterial"] = material
 
-    # Write InterelectrodeDistance only when all grids share the same IED
     non_none_ieds = [v for v in ied_values if v is not None]
     if non_none_ieds and len(set(non_none_ieds)) == 1:
         emg_json["InterelectrodeDistance"] = non_none_ieds[0]
@@ -642,12 +613,7 @@ def write_bids_dataset_description(
     sex: str | None = None,
     handedness: str | None = None,
 ) -> None:
-    """Write or update dataset-level BIDS files (idempotent).
-
-    Creates ``dataset_description.json``, ``participants.tsv``,
-    ``participants.json``, and ``.bidsignore`` if they do not exist, and
-    appends / updates the row for *subject* in ``participants.tsv``.
-    """
+    """Write or update dataset-level BIDS files (idempotent)."""
     bids_root.mkdir(parents=True, exist_ok=True)
 
     desc_path = bids_root / "dataset_description.json"
@@ -715,8 +681,6 @@ def write_bids_dataset_description(
         existing.append(new_row)
 
     def _sort_key(r: dict[str, str]) -> tuple[int, int, str]:
-        # Numeric subject labels sort numerically; alphanumeric labels (e.g.
-        # "control01") sort lexically after them, never crashing the sort.
         label = (r.get("participant_id") or "").split("-")[-1]
         try:
             return (0, int(label), "")
@@ -736,14 +700,7 @@ def export_bids_mu_derivatives(
     desc: str = "decomposition",
     mu_uids: list[str] | None = None,
 ) -> dict[str, Path]:
-    """Export motor unit spike times as BIDS derivatives events.tsv.
-
-    Writes one row per spike with columns: onset, duration, sample, unit_id,
-    description.  Also creates the derivative dataset_description.json if it
-    does not exist.  The primary NPZ artefact in
-    ``derivatives/muedit/sub-XX/.../decomp/`` is kept unchanged; this file is
-    the BIDS-facing supplementary output.
-    """
+    """Export motor unit spike times as BIDS derivatives events.tsv."""
     subject, session = None, None
     for part in entities.split("_"):
         if part.startswith("sub-"):

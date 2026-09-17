@@ -35,6 +35,30 @@ def _parse_tsv_number(value: float | str | None) -> float | str:
         return str(value)
 
 
+def _declared_sample_count(sidecar: dict[str, Any], fsamp: float) -> int | None:
+    """Sample count implied by the sidecar's ``RecordingDuration``, when usable."""
+    # EDF/BDF stores whole data records, so the writer zero-pads the last one:
+    # RecordingDuration is the only record of where the signal really ends.
+    duration = sidecar.get("RecordingDuration")
+    if duration is None or fsamp <= 0:
+        return None
+    try:
+        n_samples = int(round(float(duration) * fsamp))
+    except (TypeError, ValueError):
+        return None
+    return n_samples if n_samples > 0 else None
+
+
+def _read_sidecar(emg_path: Path, entity_label: str) -> dict[str, Any]:
+    """Load the ``*_emg.json`` sidecar beside a recording, or ``{}`` if absent."""
+    json_path = emg_path.parent / f"{entity_label}_emg.json"
+    if not json_path.exists():
+        return {}
+    with json_path.open("r", encoding="utf-8") as f:
+        loaded: dict[str, Any] = json.load(f)
+    return loaded
+
+
 @dataclass
 class BidsGridSelection:
     """Selection result for one grid extracted from ``*_channels.tsv``."""
@@ -130,6 +154,11 @@ def load_bids_emg_grid(
         data = np.vstack(signals)
     finally:
         reader.close()
+
+    if read_n is None:
+        declared = _declared_sample_count(_read_sidecar(emg_path, entity_label), fsamp)
+        if declared is not None:
+            data = data[:, : max(0, declared - read_start)]
     return data, fsamp, selection.bad_mask
 
 
@@ -245,6 +274,12 @@ def load_bids_signal(filepath: str) -> SignalImport:
         edf_reader.close()
 
     n_samples = next(iter(all_data.values())).shape[0] if all_data else 0
+
+    # Drop the zero padding filling the last data record.
+    declared = _declared_sample_count(bids_sidecar, fsamp)
+    if declared is not None and 0 < declared < n_samples:
+        all_data = {ch_idx: sig[:declared] for ch_idx, sig in all_data.items()}
+        n_samples = declared
 
     grid_type_names: list[str] = []
     grid_muscles: list[str] = []
