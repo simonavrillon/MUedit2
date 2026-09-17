@@ -111,7 +111,9 @@ def _detect_artifact_mask(
 
     logger.debug(
         "Artifact mask: %d / %d samples (%.2f%%)",
-        int(mask.sum()), n_samples, 100.0 * mask.sum() / n_samples,
+        int(mask.sum()),
+        n_samples,
+        100.0 * mask.sum() / n_samples,
     )
     return mask.astype(bool)
 
@@ -138,7 +140,9 @@ def detect_artifact_masks(
         if mask.any():
             logger.info(
                 "Grid %d: %d / %d samples masked (%.2f%%)",
-                grid_idx, int(mask.sum()), n_samples,
+                grid_idx,
+                int(mask.sum()),
+                n_samples,
                 100.0 * mask.sum() / n_samples,
             )
 
@@ -146,7 +150,9 @@ def detect_artifact_masks(
     if total:
         logger.info(
             "Global artifact mask: %d / %d samples (%.2f%%)",
-            total, n_samples, 100.0 * total / n_samples,
+            total,
+            n_samples,
+            100.0 * total / n_samples,
         )
 
     return per_grid_masks, global_mask

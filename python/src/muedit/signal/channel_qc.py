@@ -86,7 +86,7 @@ def _channel_qc_diagnostics(
     x = data.astype(np.float64)
     n_samples = x.shape[1]
 
-    rms = np.sqrt(np.mean(x ** 2, axis=1))
+    rms = np.sqrt(np.mean(x**2, axis=1))
     med_rms = float(np.median(rms))
 
     flat = np.zeros(n_ch, dtype=bool)
@@ -111,20 +111,15 @@ def _channel_qc_diagnostics(
 
     mean_corr = np.ones(n_ch)
     noisy = np.zeros(n_ch, dtype=bool)
-    can_check_noisy = (
-        coordinates is not None
-        and n_ch > 1
-        and med_rms >= cfg.noisy_abs_floor
-    )
-    if can_check_noisy:
+    can_check_noisy = coordinates is not None and n_ch > 1 and med_rms >= cfg.noisy_abs_floor
+    if can_check_noisy and coordinates is not None:
         mean_corr = _mean_neighbor_correlation(x, coordinates, cfg.neighbor_dist)
         noisy = mean_corr < cfg.noisy_corr_threshold
 
     snr = np.full(n_ch, np.nan)
     low_snr = np.zeros(n_ch, dtype=bool)
-    can_check_snr = (
-        can_check_noisy
-        and n_samples >= cfg.snr_min_windows * int(fsamp * cfg.snr_win_ms / 1000)
+    can_check_snr = can_check_noisy and n_samples >= cfg.snr_min_windows * int(
+        fsamp * cfg.snr_win_ms / 1000
     )
     if can_check_snr:
         snr = _estimate_snr(x, fsamp, cfg.snr_win_ms)
@@ -132,10 +127,9 @@ def _channel_qc_diagnostics(
 
     win_inst = max(1, int(round(fsamp * cfg.instability_win_ms / 1000.0)))
     ch_abs_inst = np.abs(x.astype(np.float32))
-    ch_win = np.stack([
-        uniform_filter1d(ch_abs_inst[c], size=win_inst, mode="nearest")
-        for c in range(n_ch)
-    ])
+    ch_win = np.stack(
+        [uniform_filter1d(ch_abs_inst[c], size=win_inst, mode="nearest") for c in range(n_ch)]
+    )
     ch_win_median = np.median(ch_win, axis=1)
     ch_win_max = ch_win.max(axis=1)
     max_win_ratio = ch_win_max / np.maximum(ch_win_median, 1e-15)
@@ -152,7 +146,8 @@ def _channel_qc_diagnostics(
 
     if grid_active.any() and grid_peak > 1e-15:
         loss_min_samples = max(
-            1, int(round(fsamp * cfg.contact_loss_min_run_ms / 1000.0)),
+            1,
+            int(round(fsamp * cfg.contact_loss_min_run_ms / 1000.0)),
         )
         for c in range(n_ch):
             if ch_win_max[c] < cfg.contact_loss_active_frac * grid_peak:
@@ -194,15 +189,23 @@ def _channel_qc_diagnostics(
         logger.info(
             "Channel QC: %d / %d channels flagged (flat=%d, saturated=%d, "
             "quantized=%d, noisy=%d, low-SNR=%d, intermittent=%d, contact-loss=%d)",
-            n_bad, n_ch, int(flat.sum()), int(saturated.sum()),
-            int(quantized.sum()), int(noisy.sum()), int(low_snr.sum()),
-            int(intermittent.sum()), int(contact_loss.sum()),
+            n_bad,
+            n_ch,
+            int(flat.sum()),
+            int(saturated.sum()),
+            int(quantized.sum()),
+            int(noisy.sum()),
+            int(low_snr.sum()),
+            int(intermittent.sum()),
+            int(contact_loss.sum()),
         )
     if n_ch > 0 and n_bad / n_ch > cfg.max_bad_fraction:
         logger.warning(
             "Channel QC: %d / %d channels (%.0f%%) flagged — check thresholds "
             "or recording quality.",
-            n_bad, n_ch, 100.0 * n_bad / n_ch,
+            n_bad,
+            n_ch,
+            100.0 * n_bad / n_ch,
         )
 
     return ChannelQCMetrics(
@@ -237,10 +240,9 @@ def _estimate_snr(
 
     for ch in range(n_ch):
         x = data[ch]
-        win_powers = np.array([
-            np.mean(x[w * win_samples:(w + 1) * win_samples] ** 2)
-            for w in range(n_windows)
-        ])
+        win_powers = np.array(
+            [np.mean(x[w * win_samples : (w + 1) * win_samples] ** 2) for w in range(n_windows)]
+        )
         sorted_pow = np.sort(win_powers)
         noise_power = float(np.median(sorted_pow[:n_rest]))
         signal_power = float(np.median(sorted_pow[-n_act:]))
@@ -262,7 +264,7 @@ def _mean_neighbor_correlation(
 
     for i in range(n_ch):
         diff = coordinates - coordinates[i]
-        dist = np.sqrt((diff ** 2).sum(axis=1))
+        dist = np.sqrt((diff**2).sum(axis=1))
         neigh = np.where((dist > 0) & (dist <= neighbor_dist))[0]
         if neigh.size > 0:
             vals = corr[i, neigh]
@@ -308,7 +310,9 @@ def detect_bad_channels_per_grid(
         if mask.any():
             logger.info(
                 "Grid %d: %d / %d channels flagged",
-                grid_idx, int(mask.sum()), n_ch,
+                grid_idx,
+                int(mask.sum()),
+                n_ch,
             )
 
     return per_grid_masks

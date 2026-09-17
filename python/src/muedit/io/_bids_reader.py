@@ -19,13 +19,12 @@ def _ensure_pyedflib() -> Any:
         import pyedflib
     except ImportError as exc:
         raise ImportError(
-            "pyedflib is required for BIDS EMG (EDF/BDF). "
-            "Install it with `pip install pyedflib`."
+            "pyedflib is required for BIDS EMG (EDF/BDF). Install it with `pip install pyedflib`."
         ) from exc
     return pyedflib
 
 
-def _parse_tsv_number(value: str | None) -> float | str:
+def _parse_tsv_number(value: float | str | None) -> float | str:
     """Convert a channels.tsv cell to float, preserving ``"n/a"`` placeholders."""
     if value is None or value == "" or str(value).strip().lower() == "n/a":
         return "n/a"
@@ -35,10 +34,10 @@ def _parse_tsv_number(value: str | None) -> float | str:
         return str(value)
 
 
-
 @dataclass
 class BidsGridSelection:
     """Selection result for one grid extracted from ``*_channels.tsv``."""
+
     channel_indices: list[int]
     bad_mask: np.ndarray
 
@@ -82,9 +81,7 @@ def resolve_bids_channels_tsv(emg_path: Path, entity_label: str) -> Path:
     ]:
         if candidate.exists():
             return candidate
-    raise FileNotFoundError(
-        f"Cannot find channels.tsv for {entity_label} in {emg_path.parent}"
-    )
+    raise FileNotFoundError(f"Cannot find channels.tsv for {entity_label} in {emg_path.parent}")
 
 
 def select_grid_channels(channels_tsv: Path, grid_index: int) -> BidsGridSelection:
@@ -125,14 +122,14 @@ def load_bids_emg_grid(
     reader = pyedflib.EdfReader(str(emg_path))
     try:
         fsamp = float(reader.getSampleFrequency(selection.channel_indices[0]))
-        signals = []
-        for ch_idx in selection.channel_indices:
-            signals.append(reader.readSignal(ch_idx, start=read_start, n=read_n))
+        signals = [
+            reader.readSignal(ch_idx, start=read_start, n=read_n)
+            for ch_idx in selection.channel_indices
+        ]
         data = np.vstack(signals)
     finally:
         reader.close()
     return data, fsamp, selection.bad_mask
-
 
 
 def load_bids_signal(filepath: str) -> dict[str, Any]:

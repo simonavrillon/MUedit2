@@ -134,9 +134,7 @@ def decomposition_event_stream(
             q.put(
                 {
                     "stage": "done",
-                    "summary": make_json_safe(
-                        summarize_result(result, save_path, persist_output)
-                    ),
+                    "summary": make_json_safe(summarize_result(result, save_path, persist_output)),
                     "preview": preview_payload,
                     "pct": 100,
                     "message": "Complete",

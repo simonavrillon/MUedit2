@@ -23,21 +23,16 @@ def _parse_text(value: Any) -> str:
             return "".join(str(x) for x in value.flatten().tolist()).strip()
         if np.issubdtype(value.dtype, np.integer):
             flat = value.flatten()
-            try:
-                if flat.size > 0 and np.max(flat) < 256:
+            if flat.size > 0 and np.max(flat) < 256:
+                try:
                     return "".join(chr(int(c)) for c in flat if int(c) != 0).strip()
-            except Exception:
-                pass
-            try:
-                if value.dtype == np.uint16:
-                    return flat.tobytes().decode("utf-16-le", errors="ignore").strip("\x00").strip()
-            except Exception:
-                pass
-            try:
-                if value.dtype == np.uint32:
-                    return flat.tobytes().decode("utf-32-le", errors="ignore").strip("\x00").strip()
-            except Exception:
-                pass
+                except ValueError:
+                    pass  # negative codes: not a char array, try the wide encodings
+            # errors="ignore" means these decodes cannot raise.
+            if value.dtype == np.uint16:
+                return flat.tobytes().decode("utf-16-le", errors="ignore").strip("\x00").strip()
+            if value.dtype == np.uint32:
+                return flat.tobytes().decode("utf-32-le", errors="ignore").strip("\x00").strip()
             return ""
     return str(value).strip()
 
@@ -62,10 +57,10 @@ def parse_text_list(value: Any) -> list[str]:
             return [text] if text else []
         return [t for t in (_parse_text(item) for item in value.flatten().tolist()) if t]
     if isinstance(value, (list, tuple)):
-        out: list[str] = []
+        items: list[str] = []
         for item in value:
-            out.extend(parse_text_list(item))
-        return out
+            items.extend(parse_text_list(item))
+        return items
     text = _parse_text(value)
     return [text] if text else []
 
@@ -83,7 +78,7 @@ def _parse_numeric_array(value: Any, *, default_cols: int = 0) -> np.ndarray:
 
 def mat73_read(node: h5py.Dataset | h5py.Group, h5file: h5py.File) -> Any:
     if isinstance(node, h5py.Group):
-        return {key: mat73_read(node[key], h5file) for key in node.keys()}
+        return {key: mat73_read(node[key], h5file) for key in node}
 
     raw = node[()]
     if isinstance(raw, bytes):
@@ -194,7 +189,7 @@ def load_mat(filepath: str) -> dict[str, Any]:
             signal = {}
             field_names = set()
             if hasattr(signal_struct, "_fieldnames"):
-                field_names = set(getattr(signal_struct, "_fieldnames") or [])
+                field_names = set(signal_struct._fieldnames or [])
             _raise_if_decomposition_signal_fields(field_names)
 
             def get_attr(obj: Any, name: str, default: Any = None) -> Any:
@@ -209,20 +204,15 @@ def load_mat(filepath: str) -> dict[str, Any]:
             signal["gridname"] = parse_text_list(get_attr(signal_struct, "gridname"))
             signal["muscle"] = parse_text_list(get_attr(signal_struct, "muscle"))
             device_name = get_attr(signal_struct, "device_name", None)
-            signal["auxiliary"] = get_attr(
-                signal_struct, "auxiliary", np.zeros((0, n_samples))
-            )
-            signal["auxiliaryname"] = parse_text_list(
-                get_attr(signal_struct, "auxiliaryname")
-            )
+            signal["auxiliary"] = get_attr(signal_struct, "auxiliary", np.zeros((0, n_samples)))
+            signal["auxiliaryname"] = parse_text_list(get_attr(signal_struct, "auxiliaryname"))
             signal["metadata"] = {
                 "device_name": device_name,
                 "software_versions": "MATLAB",
             }
 
             return signal
-        else:
-            raise ValueError("Key 'signal' not found in MAT file.")
+        raise ValueError("Key 'signal' not found in MAT file.")
     except NotImplementedError as exc:
         if "matlab v7.3" not in str(exc).lower() and not h5py.is_hdf5(filepath):
             raise OSError(f"Failed to load MAT file: {exc}") from exc

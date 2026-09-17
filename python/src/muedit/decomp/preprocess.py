@@ -268,7 +268,11 @@ def _export_raw_emg_bids(
         write_bids_dataset_description(
             Path(bids_root),
             subject=entities.get("subject", "01"),
-            age=int(age_raw) if str(age_raw).strip() not in ("", "n/a", "None") else None,
+            age=(
+                int(age_raw)
+                if age_raw is not None and str(age_raw).strip() not in ("", "n/a", "None")
+                else None
+            ),
             sex=participant_meta.get("sex") or None,
             handedness=participant_meta.get("handedness") or None,
         )
@@ -402,7 +406,10 @@ def preprocess_step(
     if params.auto_mask_artifacts:
         grid_channel_counts = [c.shape[0] for c in coordinates]
         qc_result = run_auto_qc(
-            data, loaded.fsamp, grid_channel_counts, grid_coordinates=coordinates,
+            data,
+            loaded.fsamp,
+            grid_channel_counts,
+            grid_coordinates=coordinates,
         )
         artifact_mask = qc_result.artifact_mask
         bad_channel_masks = qc_result.bad_channel_masks
@@ -410,12 +417,14 @@ def preprocess_step(
         for i, auto_bad in enumerate(bad_channel_masks):
             if auto_bad.any():
                 discard_channels[i] = np.maximum(
-                    discard_channels[i].astype(int), auto_bad.astype(int),
+                    discard_channels[i].astype(int),
+                    auto_bad.astype(int),
                 )
                 logger.info(
-                    "Grid %d: auto-detected %d bad channel(s), "
-                    "%d total discarded.",
-                    i + 1, int(auto_bad.sum()), int(discard_channels[i].sum()),
+                    "Grid %d: auto-detected %d bad channel(s), %d total discarded.",
+                    i + 1,
+                    int(auto_bad.sum()),
+                    int(discard_channels[i].sum()),
                 )
 
     manual_mask = build_manual_artifact_mask(artifact_regions, data.shape[1])
@@ -423,7 +432,9 @@ def preprocess_step(
         artifact_mask = manual_mask if artifact_mask is None else (artifact_mask | manual_mask)
         logger.info(
             "Manual artifact regions: %d region(s), %d / %d samples (%.2f%%)",
-            len(artifact_regions or []), int(manual_mask.sum()), data.shape[1],
+            len(artifact_regions or []),
+            int(manual_mask.sum()),
+            data.shape[1],
             100.0 * manual_mask.sum() / max(data.shape[1], 1),
         )
 

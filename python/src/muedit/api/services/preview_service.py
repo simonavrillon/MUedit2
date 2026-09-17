@@ -147,9 +147,7 @@ def build_preview_from_path(filepath: str) -> dict[str, Any]:
     try:
         get_loader(filepath)
     except ValueError as exc:
-        raise HTTPException(
-            status_code=400, detail={"field": "path", "reason": str(exc)}
-        ) from exc
+        raise HTTPException(status_code=400, detail={"field": "path", "reason": str(exc)}) from exc
     try:
         result = _build_preview_core(filepath)
     except (OSError, ValueError) as exc:
@@ -163,7 +161,7 @@ def build_preview_from_path(filepath: str) -> dict[str, Any]:
         if bids_root is not None:
             entity_label = parse_entity_label(Path(filepath).name)
             result.update(read_bids_sidecar_meta(bids_root, entity_label))
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001, S110
         pass  # best-effort; never block the preview on sidecar errors
 
     return result
@@ -247,7 +245,7 @@ def get_qc_window(payload: QcWindowPayload) -> Response:
     )
 
 
-def _mask_to_regions(mask: np.ndarray) -> list[list[int]]:
+def _mask_to_regions(mask: np.ndarray | None) -> list[list[int]]:
     """Convert a boolean sample mask into contiguous ``[start, end)`` ranges."""
     if mask is None or not mask.any():
         return []

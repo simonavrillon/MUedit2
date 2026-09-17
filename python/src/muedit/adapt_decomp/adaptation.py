@@ -45,6 +45,7 @@ class AdaptiveDecomp:
             emg.astype(np.float32), config.ex_factor, samples_first=True
         )
 
+        self.artifact_mask: np.ndarray | None
         if artifact_mask is not None:
             n_ext_samples = self.emg_extended.shape[0]
             self.artifact_mask = np.zeros(n_ext_samples, dtype=bool)
@@ -63,9 +64,7 @@ class AdaptiveDecomp:
             self.n_extended,
         )
 
-    def _init_whitening_calibration(
-        self, emg_calib: np.ndarray, config: Config
-    ) -> None:
+    def _init_whitening_calibration(self, emg_calib: np.ndarray, config: Config) -> None:
         """Initialise whitening covariance from calibration batches and compute KL divergence stats."""
         emg_extended = extend_signal(emg_calib, config.ex_factor, samples_first=True)
         whitened_emg = emg_extended @ self.whitening.T
@@ -78,10 +77,10 @@ class AdaptiveDecomp:
         kl_divs: list[float] = []
         for start_idx in range(0, len(whitened_emg) - batch_size + 1, batch_size):
             batch = whitened_emg[start_idx : start_idx + batch_size]
+            batch_cov = np.cov(batch.T).astype(np.float32)
             self.whitening_covariance = (
-                (1 - config.cov_alpha) * self.whitening_covariance
-                + config.cov_alpha * np.cov(batch.T).astype(np.float32)
-            )
+                1 - config.cov_alpha
+            ) * self.whitening_covariance + config.cov_alpha * batch_cov
             if config.compute_loss:
                 kl = self._kl_divergence()
                 if not np.isnan(kl):
@@ -89,14 +88,12 @@ class AdaptiveDecomp:
 
         if config.compute_loss and kl_divs:
             self.kl_div_calib_mean = float(np.mean(kl_divs))
-            self.kl_div_calib_std  = float(np.std(kl_divs)) or 1.0
+            self.kl_div_calib_std = float(np.std(kl_divs)) or 1.0
         else:
             self.kl_div_calib_mean = 0.0
-            self.kl_div_calib_std  = 1.0
+            self.kl_div_calib_std = 1.0
 
-    def _init_contrast_calibration(
-        self, emg_calib: np.ndarray, config: Config
-    ) -> None:
+    def _init_contrast_calibration(self, emg_calib: np.ndarray, config: Config) -> None:
         """Compute contrast calibration stats (mean/std per MU) from the calibration segment."""
         emg_extended = extend_signal(emg_calib, config.ex_factor, samples_first=True)
         whitened = self.whitening @ emg_extended.T  # (n_extended, n_calib)
@@ -108,9 +105,9 @@ class AdaptiveDecomp:
 
         for b in range(n_batches):
             start = warmup + b * batch_size
-            end   = start + batch_size
+            end = start + batch_size
             ipts_batch = (self.sep_vectors @ whitened[:, start:end]).T  # (batch, n_mu)
-            ipts_sq    = signed_square(ipts_batch)
+            ipts_sq = signed_square(ipts_batch)
             spikes_batch = self._detect_spikes(ipts_sq, update_centroids=False)
             contrast = self._contrast_value(ipts_batch, spikes_batch)
             contrast_values.append(contrast)
@@ -118,33 +115,33 @@ class AdaptiveDecomp:
         if contrast_values:
             arr = np.stack(contrast_values, axis=0)  # (n_batches, n_mu)
             self.contrast_calib_mean = np.nanmean(arr, axis=0).astype(np.float32)
-            self.contrast_calib_std  = np.nanstd(arr,  axis=0).astype(np.float32)
+            self.contrast_calib_std = np.nanstd(arr, axis=0).astype(np.float32)
             self.contrast_calib_std[self.contrast_calib_std == 0] = 1.0
         else:
             self.contrast_calib_mean = np.zeros(self.n_motor_units, dtype=np.float32)
-            self.contrast_calib_std  = np.ones(self.n_motor_units,  dtype=np.float32)
+            self.contrast_calib_std = np.ones(self.n_motor_units, dtype=np.float32)
 
     def run(self) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
         """Process the full signal and return ipts, spikes, and per-batch losses."""
-        n_samples  = self.emg_extended.shape[0]
+        n_samples = self.emg_extended.shape[0]
         batch_size = self.config.batch_size
-        n_batches  = n_samples // batch_size
+        n_batches = n_samples // batch_size
         extension_factor = self.config.ex_factor
 
-        ipts_output   = np.zeros((n_samples, self.n_motor_units), dtype=np.float32)
+        ipts_output = np.zeros((n_samples, self.n_motor_units), dtype=np.float32)
         spikes_output = np.zeros((n_samples, self.n_motor_units), dtype=np.int32)
 
-        wh_losses:    np.ndarray | None = None
-        sv_losses:    np.ndarray | None = None
+        wh_losses: np.ndarray | None = None
+        sv_losses: np.ndarray | None = None
         total_losses: np.ndarray | None = None
         if self.config.compute_loss:
-            wh_losses    = np.full(n_batches, np.nan, dtype=np.float32)
-            sv_losses    = np.full((n_batches, self.n_motor_units), np.nan, dtype=np.float32)
+            wh_losses = np.full(n_batches, np.nan, dtype=np.float32)
+            sv_losses = np.full((n_batches, self.n_motor_units), np.nan, dtype=np.float32)
             total_losses = np.full(n_batches, np.nan, dtype=np.float32)
 
         for batch_idx in range(n_batches):
             start_idx = batch_idx * batch_size
-            end_idx   = (batch_idx + 1) * batch_size
+            end_idx = (batch_idx + 1) * batch_size
             skip = extension_factor - 1 if batch_idx == 0 else 0
 
             seg_start = start_idx + skip
@@ -162,29 +159,31 @@ class AdaptiveDecomp:
                 ipts_sq = signed_square(ipts_batch)
                 spikes_batch = self._detect_spikes(ipts_sq, update_centroids=False)
                 spikes_batch[batch_mask] = 0
-                if self.config.compute_loss:
+                if wh_losses is not None and sv_losses is not None and total_losses is not None:
                     wh_losses[batch_idx] = np.nan
                     sv_losses[batch_idx] = np.nan
                     total_losses[batch_idx] = np.nan
             else:
                 whitened_batch = self._whiten(self.emg_extended[seg_start:seg_end])
-                ipts_batch     = self._separate(whitened_batch)
-                ipts_sq        = signed_square(ipts_batch)
-                spikes_batch   = self._detect_spikes(ipts_sq, update_centroids=True)
+                ipts_batch = self._separate(whitened_batch)
+                ipts_sq = signed_square(ipts_batch)
+                spikes_batch = self._detect_spikes(ipts_sq, update_centroids=True)
 
-                if self.config.compute_loss:
-                    kl  = self._kl_divergence()
+                if wh_losses is not None and sv_losses is not None and total_losses is not None:
+                    kl = self._kl_divergence()
                     whl = self._wh_loss(kl)
                     svl = self._sv_loss(self._contrast_value(ipts_batch, spikes_batch))
-                    wh_losses[batch_idx]    = whl
-                    sv_losses[batch_idx]    = svl
-                    total_losses[batch_idx] = (0.0 if np.isnan(whl) else whl) + float(np.nansum(svl))
+                    wh_losses[batch_idx] = whl
+                    sv_losses[batch_idx] = svl
+                    total_losses[batch_idx] = (0.0 if np.isnan(whl) else whl) + float(
+                        np.nansum(svl)
+                    )
 
                 if self.config.adapt_sv:
                     self._update_separation_vectors(whitened_batch, ipts_batch, spikes_batch)
 
-            ipts_output[seg_start : seg_end]   = ipts_batch
-            spikes_output[seg_start : seg_end] = spikes_batch
+            ipts_output[seg_start:seg_end] = ipts_batch
+            spikes_output[seg_start:seg_end] = spikes_batch
 
         remainder_samples = n_samples - n_batches * batch_size
         if remainder_samples > 0:
@@ -197,8 +196,7 @@ class AdaptiveDecomp:
                 rm = self.artifact_mask[start_idx:]
                 spikes_batch[rm] = 0
             if self.config.adapt_sv and not (
-                self.artifact_mask is not None
-                and bool(self.artifact_mask[start_idx:].any())
+                self.artifact_mask is not None and bool(self.artifact_mask[start_idx:].any())
             ):
                 self._update_separation_vectors(whitened_batch, ipts_batch, spikes_batch)
             ipts_output[start_idx:] = ipts_batch
@@ -207,8 +205,8 @@ class AdaptiveDecomp:
         losses: dict[str, Any] = {}
         if self.config.compute_loss:
             losses = {
-                "wh_loss":    wh_losses,
-                "sv_loss":    sv_losses,
+                "wh_loss": wh_losses,
+                "sv_loss": sv_losses,
                 "total_loss": total_losses,
             }
 
@@ -221,9 +219,8 @@ class AdaptiveDecomp:
         if self.config.adapt_wh or self.config.compute_loss:
             current_covariance = np.cov(whitened_signal).astype(np.float32)
             self.whitening_covariance = (
-                (1 - self.config.cov_alpha) * self.whitening_covariance
-                + self.config.cov_alpha * current_covariance
-            )
+                1 - self.config.cov_alpha
+            ) * self.whitening_covariance + self.config.cov_alpha * current_covariance
 
         if self.config.adapt_wh:
             self.whitening -= self.config.wh_learning_rate * (
@@ -236,9 +233,7 @@ class AdaptiveDecomp:
         """Project whitened signal through separation vectors."""
         return (self.sep_vectors @ whitened_signal).T
 
-    def _detect_spikes(
-        self, ipts_squared: np.ndarray, update_centroids: bool = True
-    ) -> np.ndarray:
+    def _detect_spikes(self, ipts_squared: np.ndarray, update_centroids: bool = True) -> np.ndarray:
         """Spike detection with amplitude-bounded peak finding and midpoint threshold."""
         spikes = np.zeros(ipts_squared.shape, dtype=np.int32)
 
@@ -260,7 +255,7 @@ class AdaptiveDecomp:
             spikes[peak_indices, unit_idx] = labels
 
             if update_centroids and self.config.adapt_sd:
-                n_spikes     = int(labels.sum())
+                n_spikes = int(labels.sum())
                 n_non_spikes = len(peak_indices) - n_spikes
                 if n_spikes > 0:
                     spike_centroid = np.mean(peak_values[labels.astype(bool)])
@@ -276,16 +271,17 @@ class AdaptiveDecomp:
                         + n_non_spikes * baseline_centroid
                     ) / (self.config.spike_prev_weight + n_non_spikes)
 
-                self.height[unit_idx] = self.spikes_centr[unit_idx] - (
-                    self.spikes_centr[unit_idx] - self.base_centr[unit_idx]
-                ) / 2
+                self.height[unit_idx] = (
+                    self.spikes_centr[unit_idx]
+                    - (self.spikes_centr[unit_idx] - self.base_centr[unit_idx]) / 2
+                )
 
         return spikes
 
     def _kl_divergence(self) -> float:
         """KL divergence between the estimated whitened covariance and the identity."""
-        cov  = self.whitening_covariance
-        n    = cov.shape[0]
+        cov = self.whitening_covariance
+        n = cov.shape[0]
         sign, logdet = np.linalg.slogdet(cov)
         if sign <= 0:
             return np.nan
@@ -297,11 +293,9 @@ class AdaptiveDecomp:
             return np.nan
         return float(((kl_div - self.kl_div_calib_mean) / (self.kl_div_calib_std + 1e-12)) ** 2)
 
-    def _contrast_value(
-        self, ipts_batch: np.ndarray, spikes_batch: np.ndarray
-    ) -> np.ndarray:
+    def _contrast_value(self, ipts_batch: np.ndarray, spikes_batch: np.ndarray) -> np.ndarray:
         """Mean logcosh contrast value at spike positions, per MU (nan when no spikes)."""
-        n_spikes  = spikes_batch.sum(axis=0).astype(float)
+        n_spikes = spikes_batch.sum(axis=0).astype(float)
         mean_ipts = (ipts_batch * spikes_batch).sum(axis=0) / (n_spikes + 1e-6)
         mean_ipts = mean_ipts.copy()
         mean_ipts[n_spikes == 0] = np.nan
@@ -327,17 +321,14 @@ class AdaptiveDecomp:
 
         active = spike_counts > 0
         if active.any():
-            separation_vectors_new[active] += (
-                self.config.sv_learning_rate * gradients[:, active].T
-            )
+            separation_vectors_new[active] += self.config.sv_learning_rate * gradients[:, active].T
             norms = np.linalg.norm(separation_vectors_new[active], axis=1, keepdims=True)
             separation_vectors_new[active] /= np.where(norms > 1e-8, norms, 1.0)
             for unit_idx in range(1, self.n_motor_units):
                 if not active[unit_idx]:
                     continue
-                separation_vectors_new[unit_idx] -= (
-                    separation_vectors_new[:unit_idx].T
-                    @ (separation_vectors_new[:unit_idx] @ separation_vectors_new[unit_idx])
+                separation_vectors_new[unit_idx] -= separation_vectors_new[:unit_idx].T @ (
+                    separation_vectors_new[:unit_idx] @ separation_vectors_new[unit_idx]
                 )
                 norm = np.linalg.norm(separation_vectors_new[unit_idx])
                 if norm > 1e-8:

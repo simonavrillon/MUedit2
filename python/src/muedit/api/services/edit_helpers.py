@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from typing import Any
 
 import numpy as np
@@ -17,10 +18,9 @@ def _expected_grid_count(loaded: dict[str, Any]) -> int:
         count = max(count, len(muscles))
     mu_grid_index = loaded.get("mu_grid_index")
     if isinstance(mu_grid_index, list) and mu_grid_index:
-        try:
+        # Non-numeric indices: fall back to the other counts.
+        with contextlib.suppress(TypeError, ValueError):
             count = max(count, int(max(mu_grid_index)) + 1)
-        except Exception:
-            pass
     return max(1, count)
 
 

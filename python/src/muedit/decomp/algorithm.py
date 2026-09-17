@@ -123,7 +123,8 @@ def fixed_point_alg(
         if w_norm == 0:
             logger.warning(
                 "FastICA: separating vector collapsed to zero norm after "
-                "%d iterations; stopping early.", k,
+                "%d iterations; stopping early.",
+                k,
             )
             break
         w = w / w_norm
@@ -323,7 +324,9 @@ def batch_process_filters(
                 pulse_t[mu_nb, :ltime] = pt_full[:ltime]
             else:
                 start = coordinates[nwin * 2]
-                w_win = whitened_windows(nwin) if callable(whitened_windows) else whitened_windows[nwin]
+                w_win = (
+                    whitened_windows(nwin) if callable(whitened_windows) else whitened_windows[nwin]
+                )
                 segment_len = w_win.shape[1]
                 pt_segment = np.dot(current_filter, w_win)
                 pulse_t[mu_nb, start : start + segment_len] = pt_segment[: ltime - start]
@@ -429,11 +432,8 @@ def rem_duplicates(
             common = np.intersect1d(ref_expanded, aligned_target)
             if len(common) > 0:
                 common = np.sort(common)
-                filtered_common = [common[0]]
-                for k in range(1, len(common)):
-                    if common[k] != common[k - 1] + 1:
-                        filtered_common.append(common[k])
-                n_common = len(filtered_common)
+                # Count runs of consecutive samples as one shared discharge.
+                n_common = 1 + int(np.count_nonzero(np.diff(common) != 1))
             else:
                 n_common = 0
             len_ref = len(distime[i])

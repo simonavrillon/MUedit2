@@ -201,7 +201,6 @@ def require_existing_path(path: str, field: str = "path") -> Path:
     return resolved
 
 
-
 def parse_entity_label(file_label: str) -> str:
     """Derive BIDS entity label stem from decomposition filename."""
     if not file_label:
@@ -215,15 +214,11 @@ def parse_entity_label(file_label: str) -> str:
     return stem
 
 
-def summarize_result(
-    result: dict[str, Any], save_path: str, persisted: bool
-) -> dict[str, Any]:
+def summarize_result(result: dict[str, Any], save_path: str, persisted: bool) -> dict[str, Any]:
     """Build compact decomposition summary for frontend progress/result panels."""
     signal = result.get("signal", {})
     pulse_t = signal.get("PulseT")
-    pulse_len = (
-        int(pulse_t.shape[1]) if hasattr(pulse_t, "shape") and pulse_t.size > 0 else 0
-    )
+    pulse_len = int(pulse_t.shape[1]) if hasattr(pulse_t, "shape") and pulse_t.size > 0 else 0
     mu_count = len(signal.get("Dischargetimes", []))
 
     return {

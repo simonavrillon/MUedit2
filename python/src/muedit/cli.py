@@ -54,7 +54,7 @@ def serve_api() -> None:
     """Start the FastAPI backend server."""
     app = create_app(title="MUedit API", version="2.1.0")
     include_routers(app)
-    host = os.environ.get("MUEDIT_HOST", "0.0.0.0")
+    host = os.environ.get("MUEDIT_HOST", "0.0.0.0")  # noqa: S104
     port = int(os.environ.get("MUEDIT_PORT") or os.environ.get("MUEDIT_BACKEND_PORT", "8000"))
     uvicorn.run(app, host=host, port=port, log_level="warning", access_log=False)
 
@@ -221,10 +221,7 @@ def run_decomposition_cli(argv: list[str] | None = None) -> None:
         "--auto-mask-artifacts",
         action=argparse.BooleanOptionalAction,
         default=False,
-        help=(
-            "Enable/disable automatic QC pipeline (bad-channel detection and "
-            "artifact masking)."
-        ),
+        help=("Enable/disable automatic QC pipeline (bad-channel detection and artifact masking)."),
     )
     parser.add_argument(
         "--bids-root",

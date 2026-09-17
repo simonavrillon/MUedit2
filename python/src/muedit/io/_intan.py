@@ -218,7 +218,8 @@ def _read_settings_xml(directory: Path) -> dict[str, str]:
     if not path.exists():
         return {}
     try:
-        root = ET.parse(path).getroot()
+        # Local file the user chose, not untrusted network input.
+        root = ET.parse(path).getroot()  # noqa: S314
     except ET.ParseError:
         return {}
     general = root.find("GeneralConfig")
@@ -286,8 +287,14 @@ def _read_per_channel(rec: _Recording) -> tuple[dict[int, np.ndarray], int]:
     n_samples = time_path.stat().st_size // np.dtype(np.int32).itemsize
 
     raw: dict[int, np.ndarray] = {}
-    for signal_type in (_AMPLIFIER, _AUX_INPUT, _SUPPLY_VOLTAGE, _BOARD_ADC, _DIGITAL_IN,
-                        _DIGITAL_OUT):
+    for signal_type in (
+        _AMPLIFIER,
+        _AUX_INPUT,
+        _SUPPLY_VOLTAGE,
+        _BOARD_ADC,
+        _DIGITAL_IN,
+        _DIGITAL_OUT,
+    ):
         channels = rec.header.enabled_channels(signal_type)
         if not channels:
             continue
@@ -370,6 +377,7 @@ def _read_traditional(rec: _Recording) -> tuple[dict[int, np.ndarray], int]:
         blocks = np.fromfile(handle, dtype=block_dtype)
 
     n_samples = int(blocks.size) * n_per_block
+    field_names = block_dtype.names or ()
     raw: dict[int, np.ndarray] = {}
     for signal_type, key in (
         (_AMPLIFIER, "amplifier"),
@@ -377,12 +385,12 @@ def _read_traditional(rec: _Recording) -> tuple[dict[int, np.ndarray], int]:
         (_SUPPLY_VOLTAGE, "supply"),
         (_BOARD_ADC, "adc"),
     ):
-        if key not in block_dtype.names:
+        if key not in field_names:
             continue
         stacked = np.concatenate(list(blocks[key]), axis=1).astype(np.float64)
         raw[signal_type] = _expand_to(stacked, n_samples)
     for signal_type, key in ((_DIGITAL_IN, "digital_in"), (_DIGITAL_OUT, "digital_out")):
-        if key not in block_dtype.names:
+        if key not in field_names:
             continue
         words = blocks[key].reshape(-1).astype(np.float64)
         raw[signal_type] = _split_digital_word(words, header.enabled_channels(signal_type))
@@ -534,8 +542,10 @@ def load_intan(
     )
     coordinates, ieds, discard_vecs, emg_types = format_hdemg_signal(resolved_grids)
 
-    high_pass = max(header.dsp_cutoff, header.lower_bandwidth) if header.dsp_enabled else (
-        header.lower_bandwidth
+    high_pass = (
+        max(header.dsp_cutoff, header.lower_bandwidth)
+        if header.dsp_enabled
+        else (header.lower_bandwidth)
     )
     hardware_filter = (
         f"HP: {high_pass:.2f} Hz, LP: {header.upper_bandwidth:.2f} Hz, "

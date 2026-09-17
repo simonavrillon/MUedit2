@@ -22,7 +22,7 @@ async def http_exception_handler(_: Request, exc: Exception) -> JSONResponse:
     """Translate HTTPException (FastAPI's or Starlette's routing 404/405) into the envelope."""
     if not isinstance(exc, HTTPException):
         return await unhandled_exception_handler(_, exc)
-    detail = exc.detail
+    detail: Any = exc.detail  # Starlette types it str; FastAPI allows any JSON
     message = detail if isinstance(detail, str) else "Request failed"
     return JSONResponse(
         status_code=exc.status_code,
@@ -35,9 +35,7 @@ async def http_exception_handler(_: Request, exc: Exception) -> JSONResponse:
     )
 
 
-async def validation_exception_handler(
-    _: Request, exc: Exception
-) -> JSONResponse:
+async def validation_exception_handler(_: Request, exc: Exception) -> JSONResponse:
     """Translate request model validation failures into project envelope."""
     if not isinstance(exc, RequestValidationError):
         return await unhandled_exception_handler(_, exc)

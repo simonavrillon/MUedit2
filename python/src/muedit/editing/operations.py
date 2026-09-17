@@ -25,7 +25,6 @@ SpikeTimes: TypeAlias = list[int]
 FilterUpdateResult: TypeAlias = tuple[np.ndarray | None, SpikeTimes]
 
 
-
 def _recompute_spikes_in_window(
     emg: np.ndarray,
     spike_times: SpikeTimes,
@@ -89,9 +88,7 @@ def _recompute_spikes_in_window(
     if use_peeloff and peeloff_spike_times:
         for other_spikes in peeloff_spike_times:
             local_spikes = np.asarray(other_spikes, dtype=int) - start
-            local_spikes = local_spikes[
-                (local_spikes >= edge) & (local_spikes < (win_len - edge))
-            ]
+            local_spikes = local_spikes[(local_spikes >= edge) & (local_spikes < (win_len - edge))]
             if local_spikes.size > 0:
                 w_sig = subtract_mu_waveforms(w_sig, local_spikes, fsamp, peeloff_win)
 
@@ -137,7 +134,9 @@ def _recompute_spikes_in_window(
             search_end = min(len(pt) - edge, local_pos + 11)
             local_peaks_in_range = peaks[(peaks >= search_start) & (peaks < search_end)]
             if local_peaks_in_range.size > 0:
-                nearest_peak = local_peaks_in_range[np.argmin(np.abs(local_peaks_in_range - local_pos))]
+                nearest_peak = local_peaks_in_range[
+                    np.argmin(np.abs(local_peaks_in_range - local_pos))
+                ]
                 realigned_spikes.append(int(nearest_peak))
             else:
                 realigned_spikes.append(local_pos)
@@ -309,8 +308,7 @@ def delete_high_discharge_rate_spikes_in_roi(
         right_val = pulse[right] if 0 <= right < len(pulse) else 0
         deletions.add(i if left_val < right_val else i + 1)
 
-    updated = [t for j, t in enumerate(ordered) if j not in deletions]
-    return updated
+    return [t for j, t in enumerate(ordered) if j not in deletions]
 
 
 def remove_discharge_rate_outliers(

@@ -8,7 +8,7 @@ version = "2.1.0"
 description = "FastICA-based Motor Unit decomposition of High-Density EMG signals"
 readme = "README.md"
 license = { file = "LICENSE" }
-requires-python = ">=3.11"
+requires-python = ">=3.11.4"  # tarfile extraction filters
 authors = [
   { name = "Simon Avrillon" },
 ]
@@ -30,13 +30,10 @@ dependencies = [
   "pydantic>=2.10",
   "PyYAML>=6.0",
   "h5py>=3.12",
-  "tk",
   "fastapi>=0.115",
   "uvicorn>=0.32",
   "python-multipart>=0.0.12",
   "pyedflib>=0.1.36",
-  "jupyterlab>=4.0",
-  "ipykernel>=6.29",
 ]
 
 [project.optional-dependencies]
@@ -44,7 +41,18 @@ dev = [
   "build>=1.2",
   "twine>=5.1",
   "pytest>=8.3",
-  "ruff>=0.8",
+  "pytest-cov>=6.0",
+  "httpx>=0.27",  # FastAPI TestClient backend (tests/test_api_http.py)
+  "ruff==0.15.16",  # keep in sync with .github/workflows/ci.yml and .pre-commit-config.yaml
+  "mypy==2.3.1",  # keep in sync with .github/workflows/ci.yml
+  "pre-commit>=4.0",
+  "types-PyYAML",
+]
+notebook = [
+  "jupyterlab>=4.0",
+  "ipykernel>=6.29",
+]
+research = [
   "optuna>=4.3",
 ]
 
@@ -67,25 +75,64 @@ Repository = "https://github.com/simonavrillon/MUedit2"
 # The ``muedit`` package lives under ``python/src`` (see [tool.setuptools]
 # above).  Adding it to ``pythonpath`` lets the suite run from a fresh
 # checkout without an editable install (``pip install -e .``), which is
-# convenient for CI and local one-shot runs.
-pythonpath = ["python/src"]
+# convenient for CI and local one-shot runs.  The repo root is added so the
+# ``from tests._helpers import ...`` imports resolve under a bare ``pytest``.
+pythonpath = ["python/src", "."]
 testpaths = ["tests"]
 # Report a one-line summary for every non-passed outcome (skips, xfails,
 # failures).  Useful here because conftest.py skips data-dependent tests
 # when the git-ignored sample files are absent, so a clean run still emits
 # skips worth seeing at a glance.
-addopts = "-ra"
-# Real data files under data/ are git-ignored; conftest.py skips the tests
-# that need them when the files are absent.  Treat those skips as expected
-# rather than reporting them as warnings noise.
-filterwarnings = [
-  "ignore::DeprecationWarning",
+addopts = ["-ra", "--strict-markers"]
+# CI runs ``-m "not data"``: runners have no recordings under data/.  That
+# tier is also the fast one (~1.5 min), since the decomposition benchmark and
+# simulation tests all need recordings.  Run everything locally with a plain
+# ``pytest``.  conftest.py applies ``data`` to any test that depends on a
+# sample-file fixture, so it never needs hand-marking.
+markers = [
+  "data: needs git-ignored sample recordings under data/ (auto-applied)",
 ]
 
 [tool.ruff]
 target-version = "py311"
 line-length = 100
+# Notebooks are ad-hoc utilities, not package code.
+extend-exclude = ["notebooks"]
 
 [tool.ruff.lint]
-select = ["I", "UP", "FA", "ANN", "F"]
-ignore = ["ANN401"]
+select = [
+  # Style and modernisation
+  "I", "UP", "FA", "ANN", "C4", "SIM", "RET", "PERF", "RUF",
+  # Bug finders
+  "F", "B", "PLE", "PLW", "BLE", "S",
+]
+# ANN401: Any is deliberate at the JSON/array boundaries.
+# C408: dict(key=value) calls read fine and are common in parameter overrides.
+# RUF001-003: Greek letters and other non-ASCII symbols are intentional in
+#   comments and docstrings.
+# RUF046: int(round(x)) is kept as an explicit, numpy-safe idiom.
+# S101: assert is used for internal invariants and throughout the tests.
+# S603/S607: subprocess calls use fixed argument lists (file dialog helpers).
+ignore = ["ANN401", "C408", "RUF001", "RUF002", "RUF003", "RUF046", "S101", "S603", "S607"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["muedit", "tests"]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["python/src/muedit"]
+mypy_path = "python/src"
+explicit_package_bases = true
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+check_untyped_defs = true
+disallow_untyped_defs = true
+no_implicit_optional = true
+warn_unreachable = true
+enable_error_code = ["possibly-undefined", "redundant-expr", "truthy-bool"]
+
+[[tool.mypy.overrides]]
+# Third-party packages without type information.
+module = ["scipy.*", "h5py.*", "pyedflib.*", "xmltodict.*", "matplotlib.*"]
+ignore_missing_imports = true

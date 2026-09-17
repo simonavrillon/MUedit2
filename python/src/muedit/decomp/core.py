@@ -84,7 +84,7 @@ def decompose_step(
                 coordinates_plateau[win_global * 2 + 1] -= edge_samples
 
             win_artifact = False
-            clean_cols = slice(None)
+            clean_cols: slice | np.ndarray = slice(None)
             win_clean = None
             if prep.artifact_mask is not None:
                 win_mask_raw = np.asarray(prep.artifact_mask[start:end], dtype=bool)
@@ -114,9 +114,8 @@ def decompose_step(
             x = w_sig_win
 
             use_activity_init = not params.initialization
-            if use_activity_init:
-                refractory = max(1, int(round(prep.fsamp * DECOMP_MIN_ISI_SEC)))
-                consumed = np.zeros(x.shape[1], dtype=bool)
+            refractory = max(1, int(round(prep.fsamp * DECOMP_MIN_ISI_SEC)))
+            consumed = np.zeros(x.shape[1] if use_activity_init else 0, dtype=bool)
 
             for j in range(params.niter):
                 w = rng.standard_normal(x.shape[0])
@@ -139,7 +138,11 @@ def decompose_step(
                     logger.info(
                         "Grid %d, Window %d: basis exhausted after %d/%d "
                         "iterations, stopping (deflated seed norm %.2e)",
-                        i + 1, nwin + 1, j, params.niter, w_norm,
+                        i + 1,
+                        nwin + 1,
+                        j,
+                        params.niter,
+                        w_norm,
                     )
                     break
                 w = w / w_norm
@@ -161,19 +164,14 @@ def decompose_step(
                     filter_matrix[:, j] = w_final
                     w_basis = w_final - basis[:, :j] @ (basis[:, :j].T @ w_final)
                     w_basis_norm = np.linalg.norm(w_basis)
-                    if w_basis_norm > 1e-12:
-                        w_basis = w_basis / w_basis_norm
-                    else:
-                        w_basis = w
+                    w_basis = w_basis / w_basis_norm if w_basis_norm > 1e-12 else w
                     basis[:, j] = w_basis
                     cov_scores[j] = cov_final
                     fitted[j] = True
                     _, _, sil_val = compute_silhouette(x, w_final, prep.fsamp)
                     sil_scores[j] = sil_val
                     if params.peel_off_enabled and sil_val >= params.sil_thr:
-                        x = subtract_mu_waveforms(
-                            x, spikes_final, prep.fsamp, params.peel_off_win
-                        )
+                        x = subtract_mu_waveforms(x, spikes_final, prep.fsamp, params.peel_off_win)
                 else:
                     basis[:, j] = w
 
@@ -204,8 +202,7 @@ def decompose_step(
                     "progress",
                     {
                         "message": (
-                            f"Grid {i + 1}/{prep.ngrid} • "
-                            f"Window {nwin + 1}/{nwindows} completed"
+                            f"Grid {i + 1}/{prep.ngrid} • Window {nwin + 1}/{nwindows} completed"
                         ),
                         "pct": pct,
                         "sil": sil_by_window[win_global],

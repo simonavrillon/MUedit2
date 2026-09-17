@@ -42,14 +42,10 @@ python/*.log
 # ── Frontend ────────────────────────────────────────────────────────────────
 frontend/node_modules/
 
-# ── Linter & formatter configs and caches (local dev only) ──────────────────
+# ── Linter & formatter caches ───────────────────────────────────────────────
 .eslintcache
 .prettiercache
 .stylelintcache
-frontend/eslint.config.js
-frontend/.prettierrc.json
-frontend/.prettierignore
-frontend/package-lock.json
 
 # ── EMG data files ──────────────────────────────────────────────────────────
 *.mat
@@ -59,9 +55,12 @@ frontend/package-lock.json
 *.otb+
 *.npz
 
-# ── Data subfolders ────────────────────────────────────────────────────────
-data/*/
+# ── Local recordings (files, folders and symlinks) ─────────────────────────
+data/*
 
-# ── Local test scripts and outputs ─────────────────────────────────────────
-tests/
+# ── Test outputs (rewritten on every run) ──────────────────────────────────
+tests/reports/
+tests/benchmark_leaderboard.json
+
+# ── Local research scripts ──────────────────────────────────────────────────
 research/

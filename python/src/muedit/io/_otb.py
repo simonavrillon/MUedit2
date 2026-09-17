@@ -35,8 +35,7 @@ def _sanitize_array(arr: Any) -> np.ndarray:
     finfo = np.finfo(np.float64)
     arr64 = np.where(np.isnan(arr64), 0.0, arr64)
     arr64 = np.where(np.isposinf(arr64), finfo.max, arr64)
-    arr64 = np.where(np.isneginf(arr64), finfo.min, arr64)
-    return arr64
+    return np.where(np.isneginf(arr64), finfo.min, arr64)
 
 
 def _parse_filter_string(filter_str: str, fsamp: float | None = None) -> str | float:
@@ -91,9 +90,7 @@ def _load_signal_file(
     with open(file_path, "rb") as handle:
         raw = np.fromfile(handle, dtype=dtype)
     if raw.size % n_channels != 0:
-        raise OSError(
-            f"Cannot reshape {os.path.basename(file_path)} into {n_channels} channels"
-        )
+        raise OSError(f"Cannot reshape {os.path.basename(file_path)} into {n_channels} channels")
     data = raw.reshape((n_channels, -1), order="F").astype(np.float32)
 
     block_data: list[tuple[dict[str, Any], np.ndarray]] = []
@@ -109,15 +106,12 @@ def _load_signal_file(
     return block_data
 
 
-def _concat_segments(
-    segments: list[np.ndarray], fallback_len: int = 0
-) -> np.ndarray:
+def _concat_segments(segments: list[np.ndarray], fallback_len: int = 0) -> np.ndarray:
     if not segments:
         return np.zeros((0, fallback_len))
     min_len = min(seg.shape[1] for seg in segments)
     cropped = [seg[:, :min_len] for seg in segments]
     return np.concatenate(cropped, axis=0)
-
 
 
 def _apply_otb_plus_scaling(
@@ -179,7 +173,6 @@ def _apply_otb_plus_scaling(
             if gain_val == 0:
                 gain_val = 1.0
             data[ch_idx] *= 4.8 / (2**24) * 1000 / gain_val
-
 
 
 @dataclass
@@ -244,9 +237,7 @@ def _parse_otb4_novecento(tmpdir: str, track_list: list[dict[str, Any]]) -> _OTB
 
     grid_segments = [p["data"] for _, p in emg_blocks]
     auxiliary_segments = [p["data"] for _, p in aux_blocks]
-    fs_out = (
-        emg_blocks[0][1]["fs"] if emg_blocks else (aux_blocks[0][1]["fs"] if aux_blocks else 0)
-    )
+    fs_out = emg_blocks[0][1]["fs"] if emg_blocks else (aux_blocks[0][1]["fs"] if aux_blocks else 0)
     ref_len = min(seg.shape[1] for seg in grid_segments) if grid_segments else None
     if ref_len is None and auxiliary_segments:
         ref_len = min(seg.shape[1] for seg in auxiliary_segments)
@@ -347,19 +338,12 @@ def _parse_otb4_generic(tmpdir: str, track_list: list[dict[str, Any]]) -> _OTB4C
     fs_out = (
         emg_blocks[0][1]["fs"]
         if emg_blocks
-        else (
-            aux_blocks[0][1]["fs"]
-            if aux_blocks
-            else int(track_list[0]["SamplingFrequency"])
-        )
+        else (aux_blocks[0][1]["fs"] if aux_blocks else int(track_list[0]["SamplingFrequency"]))
     )
     ref_len = min(seg.shape[1] for seg in grid_segments) if grid_segments else 0
     if auxiliary_segments:
-        ref_len = (
-            min(ref_len, min(seg.shape[1] for seg in auxiliary_segments))
-            if ref_len
-            else min(seg.shape[1] for seg in auxiliary_segments)
-        )
+        aux_len = min(seg.shape[1] for seg in auxiliary_segments)
+        ref_len = min(ref_len, aux_len) if ref_len else aux_len
     grid_data = _concat_segments(grid_segments, fallback_len=ref_len)
     auxiliary = _concat_segments(auxiliary_segments, fallback_len=grid_data.shape[1] or ref_len)
 
@@ -378,7 +362,6 @@ def _parse_otb4_generic(tmpdir: str, track_list: list[dict[str, Any]]) -> _OTB4C
     )
 
 
-
 def load_otb_plus(filepath: str) -> dict[str, Any]:
     """Load OTB+ archive (.otb+/.zip) and normalize channels/metadata."""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -387,7 +370,7 @@ def load_otb_plus(filepath: str) -> dict[str, Any]:
         else:
             try:
                 with tarfile.open(filepath, "r") as tar:
-                    tar.extractall(path=tmpdir)
+                    tar.extractall(path=tmpdir, filter="data")
             except (tarfile.TarError, OSError) as exc:
                 raise OSError(f"Failed to extract OTB+ file: {exc}") from exc
 
@@ -477,9 +460,7 @@ def load_otb_plus(filepath: str) -> dict[str, Any]:
                 muscle_name = ch.get("@Muscle", "")
                 side_name = ch.get("@Side", "")
                 muscle_str = (
-                    f"{side_name} {muscle_name}".strip()
-                    if side_name or muscle_name
-                    else ""
+                    f"{side_name} {muscle_name}".strip() if side_name or muscle_name else ""
                 )
                 muscles.append(muscle_str)
 
@@ -508,10 +489,7 @@ def load_otb_plus(filepath: str) -> dict[str, Any]:
                         try:
                             if len(prefix) > 3:
                                 val = int(prefix[3])
-                                if val < 5:
-                                    grid_position = 1
-                                else:
-                                    grid_position = 2
+                                grid_position = 1 if val < 5 else 2
                         except (TypeError, ValueError, IndexError):
                             grid_position = 0
                 else:
@@ -527,7 +505,9 @@ def load_otb_plus(filepath: str) -> dict[str, Any]:
                 if gain_array[channel_cursor] == 0:
                     gain_array[channel_cursor] = 1.0
 
-                _apply_otb_plus_scaling(data, channel_cursor, device_name, adapter_id, gain_array, ad_bits)
+                _apply_otb_plus_scaling(
+                    data, channel_cursor, device_name, adapter_id, gain_array, ad_bits
+                )
 
                 high_pass_array[channel_cursor] = hpf
                 low_pass_array[channel_cursor] = lpf
@@ -544,9 +524,7 @@ def load_otb_plus(filepath: str) -> dict[str, Any]:
         grid_mask = (adapter_types_arr == 3) | (adapter_types_arr == 4)
         signal_data = data[grid_mask, :]
 
-        grid_names_masked = [
-            grid_names[i] for i in range(len(grid_names)) if grid_mask[i]
-        ]
+        grid_names_masked = [grid_names[i] for i in range(len(grid_names)) if grid_mask[i]]
         muscles_masked = [muscles[i] for i in range(len(muscles)) if grid_mask[i]]
         grid_ids_masked = grid_ids_arr[grid_mask]
 
@@ -595,7 +573,9 @@ def load_otb_plus(filepath: str) -> dict[str, Any]:
                     valid_hardware_filters.add(f_str)
 
         emg_gains = (
-            gain_array[grid_mask] if len(gain_array) == len(grid_mask) else np.array([], dtype=float)
+            gain_array[grid_mask]
+            if len(gain_array) == len(grid_mask)
+            else np.array([], dtype=float)
         )
         emg_hpf = (
             high_pass_array[grid_mask]
@@ -652,14 +632,10 @@ def load_otb_plus(filepath: str) -> dict[str, Any]:
                 list(valid_hardware_filters) if valid_hardware_filters else ["n/a"]
             ),
             "channel_map_filters": adapter_filters,
-            "gains": (
-                emg_gains.tolist() if isinstance(emg_gains, np.ndarray) else emg_gains
-            ),
+            "gains": (emg_gains.tolist() if isinstance(emg_gains, np.ndarray) else emg_gains),
             "emg_hpf": emg_hpf.tolist() if isinstance(emg_hpf, np.ndarray) else emg_hpf,
             "emg_lpf": emg_lpf.tolist() if isinstance(emg_lpf, np.ndarray) else emg_lpf,
-            "aux_gains": (
-                aux_gains.tolist() if isinstance(aux_gains, np.ndarray) else aux_gains
-            ),
+            "aux_gains": (aux_gains.tolist() if isinstance(aux_gains, np.ndarray) else aux_gains),
             "aux_hpf": aux_hpf.tolist() if isinstance(aux_hpf, np.ndarray) else aux_hpf,
             "aux_lpf": aux_lpf.tolist() if isinstance(aux_lpf, np.ndarray) else aux_lpf,
             "units": "uV",
@@ -685,15 +661,16 @@ def load_otb4(filepath: str) -> dict[str, Any]:
             shutil.unpack_archive(filepath, tmpdir)
         elif tarfile.is_tarfile(filepath):
             with tarfile.open(filepath, "r") as tar:
-                tar.extractall(tmpdir)
+                tar.extractall(tmpdir, filter="data")
         else:
             raise OSError("Unsupported OTB4 archive format: expected tar or zip.")
 
-        xml_files = []
-        for root, _, files in os.walk(tmpdir):
-            for f in files:
-                if f == "Tracks_000.xml":
-                    xml_files.append(os.path.join(root, f))
+        xml_files = [
+            os.path.join(root, f)
+            for root, _, files in os.walk(tmpdir)
+            for f in files
+            if f == "Tracks_000.xml"
+        ]
         if not xml_files:
             raise FileNotFoundError("No Tracks_000.xml found in OTB4 archive.")
 
@@ -702,9 +679,7 @@ def load_otb4(filepath: str) -> dict[str, Any]:
 
         track_info = abs_xml["ArrayOfTrackInfo"]["TrackInfo"]
         track_list = _ensure_list(track_info)
-        device_field = next(
-            (t.get("Device") for t in track_list if "Device" in t), "Unknown"
-        )
+        device_field = next((t.get("Device") for t in track_list if "Device" in t), "Unknown")
         device = device_field.split(";")[0]
 
         ch = (
@@ -738,7 +713,7 @@ def load_otb4(filepath: str) -> dict[str, Any]:
 
         coordinates, ieds, discard_vecs, emg_types = format_hdemg_signal(refined_grid_names)
 
-        metadata = {
+        metadata: dict[str, Any] = {
             "acquisition_date": None,
             "manufacturer": "OT Bioelettronica",
             "device_name": device,

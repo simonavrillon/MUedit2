@@ -22,12 +22,12 @@ from muedit.io._bids_reader import (
 from muedit.signal.grid import get_grid_electrode_metadata
 
 __all__ = [
-    "export_bids_emg",
-    "write_bids_dataset_description",
-    "export_bids_mu_derivatives",
     "build_entities",
+    "export_bids_emg",
+    "export_bids_mu_derivatives",
     "load_bids_emg_grid",
     "resolve_bids_emg_path",
+    "write_bids_dataset_description",
 ]
 
 
@@ -60,9 +60,7 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
         json.dump(payload, f, indent=2, sort_keys=False)
 
 
-def _write_tsv(
-    path: Path, header: list[str], rows: Iterable[Iterable[Any]]
-) -> None:
+def _write_tsv(path: Path, header: list[str], rows: Iterable[Iterable[Any]]) -> None:
     """Write a tab-delimited file with header and row values."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as f:
@@ -153,9 +151,7 @@ def export_bids_emg(
             return
         _write_json(path, payload)
 
-    def _write_tsv_if_missing(
-        path: Path, header: list[str], rows: Iterable[Iterable[Any]]
-    ) -> None:
+    def _write_tsv_if_missing(path: Path, header: list[str], rows: Iterable[Iterable[Any]]) -> None:
         if skip_existing and path.exists():
             logger.info("BIDS export: %s already exists, skipping", path.name)
             return
@@ -218,7 +214,7 @@ def export_bids_emg(
         labels: list[str] = []
         seen: dict[str, int] = {}
         for i in range(count):
-            base = names[i] if names and i < len(names) and names[i] else f"Aux{i+1}"
+            base = names[i] if names and i < len(names) and names[i] else f"Aux{i + 1}"
             seen[base] = seen.get(base, 0) + 1
             labels.append(base if seen[base] == 1 else f"{base}_{seen[base]}")
         return labels
@@ -228,9 +224,7 @@ def export_bids_emg(
     resolved_aux_units = aux_units or "a.u."
 
     if skip_existing and edf_path.exists():
-        logger.info(
-            "BIDS export: %s already exists, skipping signal re-encode", edf_path.name
-        )
+        logger.info("BIDS export: %s already exists, skipping signal re-encode", edf_path.name)
     else:
         writer = None
         try:
@@ -251,7 +245,7 @@ def export_bids_emg(
                     ch_name = aux_labels[aux_idx]
                     ch_units = resolved_aux_units
                 else:
-                    ch_name = f"Ch{idx+1:02d}"
+                    ch_name = f"Ch{idx + 1:02d}"
                     ch_units = units
 
                 signal = final_data[idx, :].astype(np.float64)
@@ -289,13 +283,9 @@ def export_bids_emg(
                 writer.close()
 
     rows = []
-    ied_values: list[float | None]
-    if ied is None:
-        ied_values = [None] * len(grid_names)
-    elif isinstance(ied, list):
-        ied_values = [float(x) for x in ied]
-    else:
-        ied_values = [float(ied)] * len(grid_names)
+    ied_values: list[float | None] = (
+        [None] * len(grid_names) if ied is None else [float(x) for x in ied]
+    )
 
     # BIDS channels.tsv placement_scheme only allows "measured" or "other"
     _ch_placement = "measured" if (placement_scheme or "").lower() == "measured" else "other"
@@ -311,14 +301,15 @@ def export_bids_emg(
 
         for local_idx in range(n_grid_ch):
             global_idx = ch_idx + local_idx
-            ch_name = f"Ch{global_idx+1:02d}"
-            electrode_name = f"E{global_idx+1}"
+            ch_name = f"Ch{global_idx + 1:02d}"
+            electrode_name = f"E{global_idx + 1}"
 
             status = "bad" if mask[local_idx] == 1 else "good"
             status_desc = "manually excluded" if status == "bad" else "n/a"
 
             notch_val = (
-                f"{notch[global_idx]}" if isinstance(notch, list) and global_idx < len(notch)
+                f"{notch[global_idx]}"
+                if isinstance(notch, list) and global_idx < len(notch)
                 else (str(notch) if notch is not None else "n/a")
             )
 
@@ -331,14 +322,11 @@ def export_bids_emg(
                     fsamp,
                     electrode_name,
                     reference_description,
-                    f"Grid{g_idx+1}",
+                    f"Grid{g_idx + 1}",
                     (
                         target_muscle[g_idx]
-                        if isinstance(target_muscle, list)
-                        and g_idx < len(target_muscle)
-                        else (
-                            target_muscle if isinstance(target_muscle, str) else "n/a"
-                        )
+                        if isinstance(target_muscle, list) and g_idx < len(target_muscle)
+                        else (target_muscle if isinstance(target_muscle, str) else "n/a")
                     ),
                     placement_scheme_per_channel or _ch_placement,
                     "n/a",  # placement_description — free text, not auto-populated
@@ -347,12 +335,16 @@ def export_bids_emg(
                     (
                         _fmt_hz(low_cutoff[global_idx])
                         if isinstance(low_cutoff, list) and global_idx < len(low_cutoff)
-                        else (_fmt_hz(low_cutoff) if isinstance(low_cutoff, (int, float)) else "n/a")
+                        else (
+                            _fmt_hz(low_cutoff) if isinstance(low_cutoff, (int, float)) else "n/a"
+                        )
                     ),
                     (
                         _fmt_hz(high_cutoff[global_idx])
                         if isinstance(high_cutoff, list) and global_idx < len(high_cutoff)
-                        else (_fmt_hz(high_cutoff) if isinstance(high_cutoff, (int, float)) else "n/a")
+                        else (
+                            _fmt_hz(high_cutoff) if isinstance(high_cutoff, (int, float)) else "n/a"
+                        )
                     ),
                     notch_val,
                     status,
@@ -370,10 +362,7 @@ def export_bids_emg(
         for i in range(n_aux):
             name = aux_labels[i]
             upper_name = name.upper()
-            if "TRIG" in upper_name or "SYNC" in upper_name:
-                ctype = "TRIG"
-            else:
-                ctype = "MISC"
+            ctype = "TRIG" if "TRIG" in upper_name or "SYNC" in upper_name else "MISC"
 
             rows.append(
                 [
@@ -403,9 +392,7 @@ def export_bids_emg(
                     "n/a",
                     "good",
                     "n/a",
-                    (
-                        f"{aux_gain[i]}" if aux_gain and i < len(aux_gain) else "n/a"
-                    ),
+                    (f"{aux_gain[i]}" if aux_gain and i < len(aux_gain) else "n/a"),
                 ]
             )
 
@@ -468,8 +455,7 @@ def export_bids_emg(
     # `coordinate_system` column — never on the electrodes.tsv filename, which
     # BIDS-EMG does not allow a `space` entity for.
     space_labels = [
-        "".join(c for c in gn if c.isalnum()) or f"Grid{i + 1}"
-        for i, gn in enumerate(grid_names)
+        "".join(c for c in gn if c.isalnum()) or f"Grid{i + 1}" for i, gn in enumerate(grid_names)
     ]
     electrodes_tsv = emg_dir / f"{session_prefix}_electrodes.tsv"
 
@@ -503,7 +489,7 @@ def export_bids_emg(
                     el_meta["ElectrodeType"],
                     el_meta["ElectrodeMaterial"],
                     "n/a",  # impedance — not measured
-                    f"Grid{g_idx+1}",
+                    f"Grid{g_idx + 1}",
                 ]
             )
             electrode_counter += 1
@@ -532,7 +518,11 @@ def export_bids_emg(
                 "EMGCoordinateUnits": coord_units,
                 "EMGCoordinateSystemDescription": (
                     f"2D grid coordinates for {grid_name}: X/Y derived from row/column indices"
-                    + (f" multiplied by inter-electrode distance ({grid_ied} mm)." if grid_ied else ".")
+                    + (
+                        f" multiplied by inter-electrode distance ({grid_ied} mm)."
+                        if grid_ied
+                        else "."
+                    )
                 ),
             },
         )
@@ -579,13 +569,14 @@ def export_bids_emg(
     if gain is not None:
         if isinstance(gain, (int, float)):
             emg_json["Gain"] = float(gain)
-        elif isinstance(gain, list) and gain:
+        elif gain:
             unique_gains = set(gain)
             if len(unique_gains) == 1:
                 emg_json["Gain"] = float(next(iter(unique_gains)))
 
     # Auto-derive electrode metadata — collapse to scalar when uniform, list when mixed
     if grid_names:
+
         def _scalar_or_omit(key: str, exclude: str | None = None) -> str | None:
             # BIDS-EMG defines these sidecar fields as strings. When grids differ
             # we omit the field and let the per-electrode `type`/`material`
@@ -796,13 +787,20 @@ def export_bids_mu_derivatives(
     _write_json(
         events_json,
         {
-            "onset": {"Description": "Time of spike onset relative to recording start.", "Units": "s"},
+            "onset": {
+                "Description": "Time of spike onset relative to recording start.",
+                "Units": "s",
+            },
             "duration": {"Description": "Duration of the spike event.", "Units": "s"},
-            "sample": {"Description": "Sample index of spike onset at the recording sampling frequency.", "Units": "samples"},
-            "unit_id": {"Description": "Unique identifier of the motor unit, matching the mu_uid in the MUedit2 editlog."},
+            "sample": {
+                "Description": "Sample index of spike onset at the recording sampling frequency.",
+                "Units": "samples",
+            },
+            "unit_id": {
+                "Description": "Unique identifier of the motor unit, matching the mu_uid in the MUedit2 editlog."
+            },
             "description": {"Description": "Event type label."},
         },
     )
 
     return {"events_tsv": events_tsv, "events_json": events_json}
-

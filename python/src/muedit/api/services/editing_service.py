@@ -218,7 +218,9 @@ def _export_bids_from_mat_context(
     software_versions: str | None = None,
 ) -> dict[str, str] | None:
     """Best-effort BIDS EMG export using the raw signal cached from a .mat load."""
-    ctx = _get_edit_signal_context(edit_signal_token) or _get_edit_signal_context_by_label(file_label)
+    ctx = _get_edit_signal_context(edit_signal_token) or _get_edit_signal_context_by_label(
+        file_label
+    )
     if ctx is None:
         return None  # non-MAT source or context expired
 
@@ -240,14 +242,16 @@ def _export_bids_from_mat_context(
             session=entities["ses"],
             acquisition=entities["acq"],
             recording=entities["recording"],
-            target_muscle=muscle_names if len(muscle_names) > 1 else (muscle_names[0] if muscle_names else None),
+            target_muscle=muscle_names
+            if len(muscle_names) > 1
+            else (muscle_names[0] if muscle_names else None),
             aux_data=aux_data if isinstance(aux_data, np.ndarray) and aux_data.size > 0 else None,
             aux_names=aux_names if aux_names else None,
             # User-editable fields take priority; fall back to loader ctx, then hardcoded default
             manufacturer=manufacturer or ctx.get("manufacturer"),
             manufacturers_model_name=manufacturers_model_name or ctx.get("device_name"),
             powerline_freq=powerline_freq or ctx.get("powerline_freq") or 50.0,
-            placement_scheme=placement_scheme,
+            placement_scheme=placement_scheme or "ChannelSpecific",
             placement_scheme_description=placement_scheme_description,
             task_description=task_description,
             software_versions=software_versions,
@@ -274,21 +278,19 @@ def save_edits(payload: EditSavePayload) -> dict[str, Any]:
     pulse_trains_raw = payload.pulse_trains
     total_samples = payload.total_samples
     if total_samples <= 0:
-        raise HTTPException(
-            status_code=400, detail="total_samples is required to save edits"
-        )
+        raise HTTPException(status_code=400, detail="total_samples is required to save edits")
 
     fsamp = payload.fsamp
+    if fsamp is None:
+        raise HTTPException(status_code=400, detail="fsamp is required to save edits")
     mu_grid_index = _normalize_mu_grid_index(payload.mu_grid_index, len(distimes))
     expected_grid_count = (max(mu_grid_index) + 1) if mu_grid_index else 1
     grid_names = _pad_grid_names(payload.grid_names or [], expected_grid_count, [])
     parameters = payload.parameters or {}
     muscle_names = _normalize_muscle_names(payload.muscle or payload.muscle_names)
 
-    if isinstance(parameters, dict) and muscle_names and not parameters.get("target_muscle"):
-        parameters["target_muscle"] = (
-            muscle_names if len(muscle_names) > 1 else muscle_names[0]
-        )
+    if muscle_names and not parameters.get("target_muscle"):
+        parameters["target_muscle"] = muscle_names if len(muscle_names) > 1 else muscle_names[0]
 
     pulse_trains = None
     if pulse_trains_raw is not None:
@@ -313,20 +315,10 @@ def save_edits(payload: EditSavePayload) -> dict[str, Any]:
     )
     edit_history: list[dict[str, Any]] = list(payload.edit_history or [])
     artifact_times_raw = payload.artifact_times or []
-    # Preserve per-MU index alignment: substitute [] for malformed rows instead
-    # of dropping them, then pad to len(distimes) so keep_idx/kept_idx index safely.
-    artifact_times_all: list[list[int]] = []
-    for row in artifact_times_raw:
-        if isinstance(row, (list, tuple)):
-            artifact_times_all.append(
-                [int(x) for x in row if isinstance(x, (int, float))]
-            )
-        else:
-            artifact_times_all.append([])
+    # Pad to len(distimes) so keep_idx/kept_idx index safely.
+    artifact_times_all: list[list[int]] = [list(row) for row in artifact_times_raw]
     if len(artifact_times_all) < len(distimes):
-        artifact_times_all.extend(
-            [[] for _ in range(len(distimes) - len(artifact_times_all))]
-        )
+        artifact_times_all.extend([[] for _ in range(len(distimes) - len(artifact_times_all))])
 
     # Schema declares these as bool | None; default to True when unspecified.
     remove_flagged = True if payload.remove_flagged is None else payload.remove_flagged
@@ -334,11 +326,7 @@ def save_edits(payload: EditSavePayload) -> dict[str, Any]:
 
     if remove_flagged and distimes:
         flagged = _normalize_flagged(payload.flagged, len(distimes))
-        keep_idx = [
-            i
-            for i, spikes in enumerate(distimes)
-            if not flagged[i]
-        ]
+        keep_idx = [i for i, spikes in enumerate(distimes) if not flagged[i]]
         distimes = [distimes[i] for i in keep_idx]
         mu_grid_index = [mu_grid_index[i] for i in keep_idx]
         mu_uids = [mu_uids[i] for i in keep_idx]
@@ -410,7 +398,9 @@ def save_edits(payload: EditSavePayload) -> dict[str, Any]:
         write_bids_dataset_description(
             bids_root,
             subject=subject,
-            age=int(participant_meta["age"]) if participant_meta.get("age") not in (None, "", "n/a") else None,
+            age=int(participant_meta["age"])
+            if participant_meta.get("age") not in (None, "", "n/a")
+            else None,
             sex=participant_meta.get("sex") or None,
             handedness=participant_meta.get("handedness") or None,
         )
@@ -428,7 +418,7 @@ def save_edits(payload: EditSavePayload) -> dict[str, Any]:
                 mu_uids=mu_uids,
             )
             deriv_paths = {k: str(v) for k, v in deriv_result.items()}
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001, S110
             pass  # derivatives export is best-effort; never block the primary save
 
     bids_paths = _export_bids_from_mat_context(
@@ -464,9 +454,7 @@ def update_filter(payload: EditFilterPayload) -> dict[str, Any]:
     grid_index = payload.grid_index
     distimes = normalize_distimes(payload.distimes or [])
     if not distimes:
-        raise HTTPException(
-            status_code=400, detail="distimes are required for filter update"
-        )
+        raise HTTPException(status_code=400, detail="distimes are required for filter update")
 
     mu_index = payload.mu_index
     if mu_index < 0 or mu_index >= len(distimes):
@@ -489,14 +477,13 @@ def update_filter(payload: EditFilterPayload) -> dict[str, Any]:
     emg_mask: np.ndarray | None = None
     emg_is_presliced = False  # True only when BIDS loaded a view-length slice
 
-    if bids_root:
-        try:
-            emg, fsamp, emg_mask = _load_bids_grid(
-                bids_root, str(entity_label), grid_index, view_start, view_end
-            )
-            emg_is_presliced = True
-        except (ValueError, FileNotFoundError):
-            emg, fsamp, emg_mask = None, None, None
+    try:
+        emg, fsamp, emg_mask = _load_bids_grid(
+            bids_root, str(entity_label), grid_index, view_start, view_end
+        )
+        emg_is_presliced = True
+    except (ValueError, FileNotFoundError):
+        emg, fsamp, emg_mask = None, None, None
 
     if emg is None or fsamp is None or emg_mask is None:
         ctx = _get_edit_signal_context(edit_signal_token)
@@ -553,10 +540,12 @@ def update_filter(payload: EditFilterPayload) -> dict[str, Any]:
                     emg_mask = np.asarray(cell_arr != 0, dtype=int)
 
     artifact_times_raw = payload.artifact_times or []
-    artifact_times = [int(x) for x in artifact_times_raw if isinstance(x, (int, float))]
+    artifact_times = list(artifact_times_raw)
 
     artifact_mask: np.ndarray | None = None
-    ctx_for_mask = _get_edit_signal_context(edit_signal_token) or _get_edit_signal_context_by_label(file_label)
+    ctx_for_mask = _get_edit_signal_context(edit_signal_token) or _get_edit_signal_context_by_label(
+        file_label
+    )
     if ctx_for_mask is not None:
         am = ctx_for_mask.get("artifact_mask")
         if isinstance(am, np.ndarray) and am.size > 0:
@@ -580,9 +569,7 @@ def update_filter(payload: EditFilterPayload) -> dict[str, Any]:
         peeloff_spike_times=[
             distimes[i]
             for i in range(len(distimes))
-            if i != mu_index
-            and mu_grid_index[i] == grid_index
-            and not flagged[i]
+            if i != mu_index and mu_grid_index[i] == grid_index and not flagged[i]
         ],
         peeloff_win=peeloff_win,
         emg_offset=bids_emg_offset,
@@ -612,9 +599,7 @@ def update_filter(payload: EditFilterPayload) -> dict[str, Any]:
             "fsamp": fsamp,
             "distimes": updated,
             "pulse_train": (
-                updated_pulse.tolist()
-                if isinstance(updated_pulse, np.ndarray)
-                else pulse_train
+                updated_pulse.tolist() if isinstance(updated_pulse, np.ndarray) else pulse_train
             ),
         }
     )
@@ -654,7 +639,7 @@ def add_artifact(payload: EditRoiPayload) -> dict[str, Any]:
     y_min = payload.y_min if payload.y_min is not None else float("inf")
 
     artifact_times_raw = payload.artifact_times or []
-    artifact_times = [int(x) for x in artifact_times_raw if isinstance(x, (int, float))]
+    artifact_times = list(artifact_times_raw)
 
     pulse = np.array(pulse_train, dtype=float)
     updated = add_artifact_in_roi(pulse, artifact_times, fsamp, x_start, x_end, y_min)
@@ -676,15 +661,13 @@ def delete_spikes(payload: EditRoiPayload) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="mu_index out of range")
 
     pulse = np.array(pulse_train, dtype=float)
-    updated_distimes = delete_spikes_in_roi(
-        pulse, distimes[mu_index], x_start, x_end, y_min, y_max
-    )
+    updated_distimes = delete_spikes_in_roi(pulse, distimes[mu_index], x_start, x_end, y_min, y_max)
 
     # Also delete artifacts in the same ROI
     updated_artifact_times = None
     artifact_times_raw = payload.artifact_times
     if artifact_times_raw:
-        artifact_times = [int(x) for x in artifact_times_raw if isinstance(x, (int, float))]
+        artifact_times = list(artifact_times_raw)
         if artifact_times:
             updated_artifact_times = delete_artifacts_in_roi(
                 pulse, artifact_times, x_start, x_end, y_min, y_max
@@ -757,10 +740,12 @@ def remove_duplicates_service(payload: EditDeduplicatePayload) -> dict[str, Any]
     pulse_trains = build_pulse_trains_from_distimes(distimes, total_samples)
 
     if len(distimes) <= 1:
-        return make_json_safe({
-            "kept_indices": list(range(len(distimes))),
-            "distimes": distimes,
-        })
+        return make_json_safe(
+            {
+                "kept_indices": list(range(len(distimes))),
+                "distimes": distimes,
+            }
+        )
 
     dup_tol = _coerce_dup_tol(parameters.get("duplicatesthresh", 0.3))
     _, dedup_distimes, kept_idx = _dedup(pulse_trains, distimes, dup_tol, fsamp)
@@ -768,11 +753,13 @@ def remove_duplicates_service(payload: EditDeduplicatePayload) -> dict[str, Any]
         sorted({int(v) for v in np.asarray(d, dtype=int).tolist() if int(v) >= 0})
         for d in dedup_distimes
     ]
-    return make_json_safe({
-        "kept_indices": kept_idx,
-        "distimes": dedup_distimes_clean,
-        "removed_count": len(distimes) - len(kept_idx),
-    })
+    return make_json_safe(
+        {
+            "kept_indices": kept_idx,
+            "distimes": dedup_distimes_clean,
+            "removed_count": len(distimes) - len(kept_idx),
+        }
+    )
 
 
 def flag_mu(payload: EditFlagPayload) -> dict[str, Any]:

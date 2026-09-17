@@ -19,6 +19,7 @@ from muedit.signal.decomp_primitives import (
 
 _DEFAULT_CONFIG = Config()
 
+
 def _compute_calibration_stats(
     w_sig: np.ndarray,
     mu_filters: np.ndarray,
@@ -27,9 +28,9 @@ def _compute_calibration_stats(
     """Project the whitened calibration signal through MU filters and derive spike centroids."""
     n_mu = mu_filters.shape[1]
     ipts_calib = w_sig.T @ mu_filters
-    ipts_sq    = signed_square(ipts_calib)
+    ipts_sq = signed_square(ipts_calib)
 
-    base_centr   = np.zeros(n_mu, dtype=np.float32)
+    base_centr = np.zeros(n_mu, dtype=np.float32)
     spikes_centr = np.ones(n_mu, dtype=np.float32)
 
     for j in range(n_mu):
@@ -39,7 +40,7 @@ def _compute_calibration_stats(
             _, centroids, _ = split_by_amplitude(pt, peaks)
             hi = int(np.argmax(centroids))
             spikes_centr[j] = float(centroids[hi])
-            base_centr[j]   = float(centroids[1 - hi])
+            base_centr[j] = float(centroids[1 - hi])
         elif len(peaks) == 1:
             spikes_centr[j] = float(pt[peaks[0]])
 
@@ -85,16 +86,16 @@ def _run_adapt_decomp_bidirectional(
     artifact_mask: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
     """Run adaptive decomposition forward from calib_start and, if needed, backward over the pre-calibration segment."""
-    base_centr, spikes_centr = _compute_calibration_stats(
-        w_sig, mu_filters, config.fsamp
-    )
+    base_centr, spikes_centr = _compute_calibration_stats(w_sig, mu_filters, config.fsamp)
 
     ex_factor = w_sig.shape[0] // win_data_g.shape[0]
     bs = config.batch_size
 
     emg_calib_raw = win_data_g.T.astype(np.float32)
     n_calib = win_data_g.shape[1]
-    emg_calib_ext = extend_signal(win_data_g, ex_factor).T[ex_factor - 1 : n_calib].astype(np.float32)
+    emg_calib_ext = (
+        extend_signal(win_data_g, ex_factor).T[ex_factor - 1 : n_calib].astype(np.float32)
+    )
 
     fwd_start = max(0, calib_start - bs)
     emg_fwd = np.ascontiguousarray(grid_data_g[:, fwd_start:].T.astype(np.float32))
@@ -155,9 +156,9 @@ def _run_adapt_decomp_bidirectional(
 
     # Re-split at the reversed block boundaries and restore original order.
     rev_split_pts = list(np.cumsum([b.shape[0] for b in reversed(blocks)]))[:-1]
-    out_ipts   = np.split(ipts_bwd_rev,   rev_split_pts, axis=0)
+    out_ipts = np.split(ipts_bwd_rev, rev_split_pts, axis=0)
     out_spikes = np.split(spikes_bwd_rev, rev_split_pts, axis=0)
-    ipts_bwd   = np.concatenate(out_ipts[::-1],   axis=0)
+    ipts_bwd = np.concatenate(out_ipts[::-1], axis=0)
     spikes_bwd = np.concatenate(out_spikes[::-1], axis=0)
 
     if pad_len > 0:
@@ -169,8 +170,8 @@ def _run_adapt_decomp_bidirectional(
         n_bwd = losses_bwd_rev["wh_loss"].shape[0]
         bwd_idx = list(range(n_bwd - 1, -1, -1))
         bwd = {
-            "wh_loss":    losses_bwd_rev["wh_loss"][bwd_idx],
-            "sv_loss":    losses_bwd_rev["sv_loss"][bwd_idx],
+            "wh_loss": losses_bwd_rev["wh_loss"][bwd_idx],
+            "sv_loss": losses_bwd_rev["sv_loss"][bwd_idx],
             "total_loss": losses_bwd_rev["total_loss"][bwd_idx],
         }
         if pad_len > 0:
@@ -179,8 +180,8 @@ def _run_adapt_decomp_bidirectional(
             bwd["total_loss"][0] = np.nan
 
         losses = {
-            "wh_loss":    np.concatenate([bwd["wh_loss"],    losses_fwd["wh_loss"]]),
-            "sv_loss":    np.concatenate([bwd["sv_loss"],    losses_fwd["sv_loss"]], axis=0),
+            "wh_loss": np.concatenate([bwd["wh_loss"], losses_fwd["wh_loss"]]),
+            "sv_loss": np.concatenate([bwd["sv_loss"], losses_fwd["sv_loss"]], axis=0),
             "total_loss": np.concatenate([bwd["total_loss"], losses_fwd["total_loss"]]),
         }
 
@@ -241,7 +242,7 @@ def adaptive_batch_process(
         if filters.size == 0:
             continue
 
-        grid_idx    = nwin // max(1, nwindows_per_grid)
+        grid_idx = nwin // max(1, nwindows_per_grid)
         calib_start = coordinates[nwin * 2]
 
         win_data_nwin = win_data(nwin) if callable(win_data) else win_data[nwin]

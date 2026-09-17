@@ -35,7 +35,9 @@ router = APIRouter(prefix="/api/v1")
 
 
 @router.post("/edit/load-by-path", response_model=None)
-async def load_decomposition_by_path_endpoint(request: Request, payload: PathPayload) -> dict[str, Any] | Response:
+async def load_decomposition_by_path_endpoint(
+    request: Request, payload: PathPayload
+) -> dict[str, Any] | Response:
     """Load a decomposition from an absolute/local path for edit mode."""
     path = payload.path
     if not path:

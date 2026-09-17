@@ -40,36 +40,53 @@ def run_auto_qc(
     prelim_config = dc_replace(
         channel_qc_config or ChannelQCConfig(),
         intermittent_amp_ratio=float("inf"),
-        contact_loss_min_run_ms=10 ** 9,
+        contact_loss_min_run_ms=10**9,
         noisy_corr_threshold=-1.0,
         snr_thr=-float("inf"),
     )
     prelim_bad_masks = detect_bad_channels_per_grid(
-        data, fsamp, grid_channel_counts, grid_coordinates, prelim_config,
+        data,
+        fsamp,
+        grid_channel_counts,
+        grid_coordinates,
+        prelim_config,
     )
     prelim_bad = sum(int(m.sum()) for m in prelim_bad_masks)
     total_ch = sum(grid_channel_counts)
     logger.info(
         "QC stage 0 (preliminary bad channels): %d / %d channels (%.2f%%)",
-        prelim_bad, total_ch, 100.0 * prelim_bad / max(total_ch, 1),
+        prelim_bad,
+        total_ch,
+        100.0 * prelim_bad / max(total_ch, 1),
     )
 
     kept_data, kept_counts, _ = _select_kept_channels(
-        data, grid_channel_counts, prelim_bad_masks, grid_coordinates,
+        data,
+        grid_channel_counts,
+        prelim_bad_masks,
+        grid_coordinates,
     )
 
     _, artifact_mask = detect_artifact_masks(
-        kept_data, fsamp, kept_counts, artifact_config,
+        kept_data,
+        fsamp,
+        kept_counts,
+        artifact_config,
     )
     logger.info(
         "QC stage 1 (artifacts): %d / %d samples (%.2f%%)",
-        int(artifact_mask.sum()), data.shape[1],
+        int(artifact_mask.sum()),
+        data.shape[1],
         100.0 * artifact_mask.sum() / data.shape[1],
     )
 
     qc_data = _exclude_samples(data, artifact_mask)
     final_bad_masks = detect_bad_channels_per_grid(
-        qc_data, fsamp, grid_channel_counts, grid_coordinates, channel_qc_config,
+        qc_data,
+        fsamp,
+        grid_channel_counts,
+        grid_coordinates,
+        channel_qc_config,
     )
 
     bad_channel_masks = [
@@ -79,7 +96,9 @@ def run_auto_qc(
     total_bad = sum(int(m.sum()) for m in bad_channel_masks)
     logger.info(
         "QC stage 2 (bad channels): %d / %d channels (%.2f%%)",
-        total_bad, total_ch, 100.0 * total_bad / max(total_ch, 1),
+        total_bad,
+        total_ch,
+        100.0 * total_bad / max(total_ch, 1),
     )
 
     return QCPipelineResult(
@@ -108,7 +127,7 @@ def _select_kept_channels(
             kept = np.array([0])
         kept_slices.append(data[ch_idx + kept, :])
         kept_counts.append(kept.size)
-        if grid_coordinates is not None:
+        if grid_coordinates is not None and kept_coords is not None:
             kept_coords.append(grid_coordinates[grid_idx][kept])
         ch_idx += n_ch
 

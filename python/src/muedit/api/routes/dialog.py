@@ -24,17 +24,18 @@ def _open_dialog_macos() -> str | None:
     ext_list = "{" + ", ".join(f'".{e}"' for e in _EXTENSIONS) + "}"
     script = (
         'tell application "System Events"\n'
-        '  activate\n'
+        "  activate\n"
         f'  set f to choose file with prompt "Select EMG signal or decomposition file" '
-        f'of type {ext_list}\n'
-        '  return POSIX path of f\n'
-        'end tell'
+        f"of type {ext_list}\n"
+        "  return POSIX path of f\n"
+        "end tell"
     )
     result = subprocess.run(
         ["osascript", "-e", script],
         capture_output=True,
         text=True,
         timeout=120,
+        check=False,
     )
     path = result.stdout.strip()
     return path if path else None
@@ -81,6 +82,7 @@ def _open_dialog_tkinter() -> str | None:
         capture_output=True,
         text=True,
         timeout=120,
+        check=False,
         **kwargs,
     )
     if result.returncode != 0:

@@ -226,15 +226,11 @@ def postprocess_step(
                 ch_idx_g += n_ch_g
 
             def _build_full_extended(grid_idx: int) -> np.ndarray:
-                grid_raw = prep.data[
-                    ch_offset_by_grid[grid_idx] + keep_idx_by_grid[grid_idx], :
-                ]
+                grid_raw = prep.data[ch_offset_by_grid[grid_idx] + keep_idx_by_grid[grid_idx], :]
                 return extend_signal(grid_raw, ex_factor_by_grid[grid_idx])
 
             build_full_extended = _build_full_extended
-            window_to_grid = {
-                nwin: nwin // max(1, nwindows) for nwin in decomposed.mu_filters
-            }
+            window_to_grid = {nwin: nwin // max(1, nwindows) for nwin in decomposed.mu_filters}
             logger.info("Applying MU filters over the full trace (dewhitened).")
 
         pulse_t, distime = batch_process_filters(
@@ -259,11 +255,11 @@ def postprocess_step(
         prep.fsamp,
     )
 
-    mu_window_map: list[tuple[int, int]] = []
-    for nwin in sorted(decomposed.mu_filters.keys()):
-        n_good = decomposed.mu_filters[nwin].shape[1]
-        for j in range(n_good):
-            mu_window_map.append((nwin, j))
+    mu_window_map: list[tuple[int, int]] = [
+        (nwin, j)
+        for nwin in sorted(decomposed.mu_filters.keys())
+        for j in range(decomposed.mu_filters[nwin].shape[1])
+    ]
 
     sil_flat: list[float] = []
     sil_by_window: dict[int, list[float]] = {}
@@ -304,8 +300,14 @@ def export_step(
     if bids_entity_label and bids_emg_path:
         _emg_parts = list(Path(bids_emg_path).resolve().parts)
         _dir_parts = _emg_parts[:-1]  # exclude the filename
-        _sub_idx = next((i for i in range(len(_dir_parts) - 1, -1, -1)
-                        if _dir_parts[i].lower().startswith("sub-")), -1)
+        _sub_idx = next(
+            (
+                i
+                for i in range(len(_dir_parts) - 1, -1, -1)
+                if _dir_parts[i].lower().startswith("sub-")
+            ),
+            -1,
+        )
         if _sub_idx > 0:
             _bids_rt = Path(*_emg_parts[:_sub_idx])
             _subj = _emg_parts[_sub_idx][4:]
@@ -366,14 +368,15 @@ def export_step(
             "adaptive_losses": np.array([post.adaptive_losses], dtype=object),
             "sil": np.asarray(post.sil, dtype=float),
             "sil_keys": np.array(_sil_keys, dtype=int),
-            "sil_by_window": pack_object_array([
-                np.asarray(post.sil_by_window.get(k, []), dtype=float)
-                for k in _sil_keys
-            ]),
+            "sil_by_window": pack_object_array(
+                [np.asarray(post.sil_by_window.get(k, []), dtype=float) for k in _sil_keys]
+            ),
             "rois": np.array(
                 [(int(s), int(e)) for s, e in prep.roi_list],
                 dtype=int,
-            ) if prep.roi_list else np.array([], dtype=int),
+            )
+            if prep.roi_list
+            else np.array([], dtype=int),
         }
         if save_emg_data:
             extras["emg_data"] = prep.data

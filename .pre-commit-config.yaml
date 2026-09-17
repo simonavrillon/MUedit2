@@ -1,0 +1,34 @@
+# Fixes staged files before each commit; CI (.github/workflows/ci.yml) runs
+# the same checks in check-only mode.
+#   pip install -e ".[dev]" && pre-commit install
+#   pre-commit run --all-files    # run on the whole tree
+# mypy and pytest are left out to keep commits fast; they run in CI, or
+# locally with `mypy` and `pytest`.
+repos:
+  # Keep rev in sync with the ruff pin in .github/workflows/ci.yml.
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.16
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+
+  # Uses the Prettier/ESLint versions locked in frontend/package-lock.json, so
+  # the hooks and CI cannot disagree (the prettier mirror would pin its own).
+  # Both need `npm ci` in frontend/ first, and say so if it hasn't been run.
+  - repo: local
+    hooks:
+      - id: prettier
+        name: prettier
+        language: system
+        entry: bash -c 'test -x frontend/node_modules/.bin/prettier || { echo "prettier not installed; run npm ci in frontend/" >&2; exit 1; }; frontend/node_modules/.bin/prettier --write --ignore-unknown --ignore-path frontend/.prettierignore "$@"' --
+        files: ^frontend/
+        types: [text]
+
+      # ESLint 9 finds eslint.config.js from the working directory, and the
+      # config's `files` globs are relative to frontend/, so run from there.
+      - id: eslint
+        name: eslint
+        language: system
+        entry: bash -c 'cd frontend && { test -x node_modules/.bin/eslint || { echo "eslint not installed; run npm ci in frontend/" >&2; exit 1; }; } && node_modules/.bin/eslint --fix --max-warnings 0 "${@#frontend/}"' --
+        files: ^frontend/.*\.(js|mjs|cjs)$

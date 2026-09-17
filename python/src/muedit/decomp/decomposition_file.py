@@ -37,6 +37,7 @@ LOADER_BIDS_META_KEYS: tuple[str, ...] = (
     "software_versions",
 )
 
+
 class DecompositionLoad(NamedTuple):
     """Normalized decomposition artifact fields extracted from a .npz or .mat file."""
 
@@ -80,9 +81,7 @@ def save_decomposition_npz(
     """
     payload: dict[str, Any] = {
         "pulse_trains": pulse_trains,
-        "discharge_times": pack_object_array(
-            [np.asarray(d, dtype=int) for d in distimes]
-        ),
+        "discharge_times": pack_object_array([np.asarray(d, dtype=int) for d in distimes]),
         "fsamp": fsamp,
         "grid_names": np.array(grid_names, dtype=object),
         "mu_grid_index": np.array(mu_grid_index, dtype=int),
@@ -128,9 +127,7 @@ def first_non_none(*values: Any) -> Any:
     return None
 
 
-def build_pulse_trains_from_distimes(
-    distimes: list[list[int]], total_samples: int
-) -> np.ndarray:
+def build_pulse_trains_from_distimes(distimes: list[list[int]], total_samples: int) -> np.ndarray:
     """Create a binary pulse-train matrix from discharge-time indices."""
     nmu = len(distimes)
     pulses = np.zeros((nmu, total_samples), dtype=float)
@@ -164,7 +161,7 @@ def _parse_mu_grid_index(raw: Any) -> list[int]:
     return [int(x) for x in np.array(raw).flatten().tolist()]
 
 
-def _get_case_insensitive(mapping: dict[str, Any], *names: str) -> Any:
+def _get_case_insensitive(mapping: Any, *names: str) -> Any:
     """Return the first value found under any of ``names`` in ``mapping``, case-insensitively."""
     if not isinstance(mapping, dict):
         return None
@@ -213,8 +210,7 @@ def _parse_rois(rois_raw: Any) -> list[tuple[int, int]]:
         arr = np.asarray(rois_raw, dtype=int).reshape(-1, 2)
     except (TypeError, ValueError):
         logger.warning(
-            "ROI data could not be reshaped into (start, end) pairs; "
-            "ignoring ROIs (raw shape: %s)",
+            "ROI data could not be reshaped into (start, end) pairs; ignoring ROIs (raw shape: %s)",
             np.asarray(rois_raw).shape,
         )
         return []
@@ -275,6 +271,7 @@ def _extract_decomp_fields(
 def _load_mat73_decomp(filepath: str) -> DecompositionLoad:
     """Load a MATLAB v7.3 (HDF5) decomposition file into a DecompositionLoad."""
     with h5py.File(filepath, "r") as h5f:
+
         def read_root(name: str) -> Any:
             return mat73_read(h5f[name], h5f) if name in h5f else None
 
@@ -308,7 +305,9 @@ def _load_npz_decomp(filepath: str) -> DecompositionLoad:
     else:
         total_samples = None
 
-    grid_names = parse_text_list(data.get("grid_names")) if data.get("grid_names") is not None else []
+    grid_names = (
+        parse_text_list(data.get("grid_names")) if data.get("grid_names") is not None else []
+    )
     mu_grid_index = _parse_mu_grid_index(data.get("mu_grid_index"))
 
     parameters = _unwrap_parameters(data.get("parameters"))
@@ -386,8 +385,11 @@ def _extract_grid_pulse_blocks(raw: Any) -> list[np.ndarray]:
     return blocks
 
 
-def _extract_grid_distime_blocks(raw: Any, expected_grids: int | None = None) -> list[list[list[int]]]:
+def _extract_grid_distime_blocks(
+    raw: Any, expected_grids: int | None = None
+) -> list[list[list[int]]]:
     """Split per-grid discharge-time cell arrays into nested lists of MU index lists."""
+
     def _mu_vector(cell: Any) -> list[int]:
         if cell is None:
             return []
@@ -434,13 +436,11 @@ def _top_level_cell_items(raw: Any) -> list[Any]:
     """Flatten an object ndarray or sequence into a list of top-level cell items."""
     if isinstance(raw, np.ndarray) and raw.dtype == object:
         squeezed = np.squeeze(raw)
-        if isinstance(squeezed, np.ndarray):
-            if squeezed.ndim == 0:
-                return [squeezed.item()]
-            if squeezed.ndim == 1:
-                return squeezed.tolist()
-            return [row for row in squeezed]
-        return [squeezed]
+        if squeezed.ndim == 0:
+            return [squeezed.item()]
+        if squeezed.ndim == 1:
+            return squeezed.tolist()
+        return list(squeezed)
     if isinstance(raw, (list, tuple)):
         return list(raw)
     return []
@@ -591,15 +591,15 @@ def _parse_emgmask_cells(raw: Any) -> list[np.ndarray]:
             return np.array([], dtype=int)
         if isinstance(item, np.ndarray):
             if item.dtype == object:
-                flat = np.array([int(v) for v in item.flatten().tolist()], dtype=int)
-                return flat
+                return np.array([int(v) for v in item.flatten().tolist()], dtype=int)
             try:
                 return np.asarray(item, dtype=int).flatten()
             except (TypeError, ValueError):
                 logger.warning(
                     "EMGmask ndarray could not be coerced to int (dtype=%s, "
                     "shape=%s); treating as empty mask.",
-                    item.dtype, item.shape,
+                    item.dtype,
+                    item.shape,
                 )
                 return np.array([], dtype=int)
         if isinstance(item, (list, tuple)):
@@ -616,8 +616,7 @@ def _parse_emgmask_cells(raw: Any) -> list[np.ndarray]:
             return np.asarray([int(item)], dtype=int)
         except (TypeError, ValueError):
             logger.warning(
-                "EMGmask scalar could not be coerced to int (type=%s); "
-                "treating as empty mask.",
+                "EMGmask scalar could not be coerced to int (type=%s); treating as empty mask.",
                 type(item).__name__,
             )
             return np.array([], dtype=int)
@@ -629,10 +628,7 @@ def _parse_emgmask_cells(raw: Any) -> list[np.ndarray]:
         if raw.ndim == 2:
             return [_parse_mask_item(raw[i]) for i in range(raw.shape[0])]
 
-    masks: list[np.ndarray] = []
-    for item in items:
-        masks.append(_parse_mask_item(item))
-    return masks
+    return [_parse_mask_item(item) for item in items]
 
 
 def _parse_signal_coordinates(raw: Any) -> list[np.ndarray]:
@@ -690,7 +686,9 @@ def _load_npz_signal_context(filepath: str) -> dict[str, Any] | None:
     fsamp_val = data.get("fsamp")
     fsamp = float(np.asarray(fsamp_val).ravel()[0]) if fsamp_val is not None else None
 
-    grid_names = parse_text_list(data.get("grid_names")) if data.get("grid_names") is not None else []
+    grid_names = (
+        parse_text_list(data.get("grid_names")) if data.get("grid_names") is not None else []
+    )
 
     discard_raw = data.get("discard_channels")
     emgmask = _parse_emgmask_cells(discard_raw)
