@@ -20,6 +20,7 @@ Use this to trace what the user can reach.
 | `GET /health` | User-exposed | HTTP |
 | `POST /preview-by-path` | User-exposed | HTTP |
 | `POST /qc/window` | User-exposed | HTTP |
+| `POST /qc/auto` | User-exposed | HTTP |
 
 ### `routes/decompose.py`
 
@@ -60,9 +61,11 @@ Use this to trace what the user can reach.
 |---|---|---|
 | `build_preview_from_path(path)` | App-internal | `POST /preview-by-path` route |
 | `get_qc_window(payload)` | App-internal | `POST /qc/window` route |
+| `run_auto_qc_on_token(payload)` | App-internal | `POST /qc/auto` route |
 | `_build_preview_core(filepath)` | App-internal | Called by `build_preview_from_path` |
 | `_encode_qc_raw_f32(...)` | App-internal | Called by `get_qc_window` |
 | `_decomp_artifact_error(field)` | App-internal | Called by `build_preview_from_path` |
+| `_mask_to_regions(mask)` | App-internal | Called by `run_auto_qc_on_token` |
 
 ### `services/decompose_service.py`
 
@@ -157,9 +160,11 @@ Use this to trace what the user can reach.
 | `common.parse_json_object()` | App-internal | Called by decompose routes |
 | `common.parse_entity_label()` | App-internal | Called by editing services |
 | `common.summarize_result()` | App-internal | Called by decompose service |
+| `common.require_existing_path()` | App-internal | Called by preview/editing route handlers |
 | `common._coerce_param_value()` | App-internal | Called by `build_params` |
 | `cache._store_upload_signal()` | App-internal | Called by preview service |
 | `cache._get_upload_signal()` | App-internal | Called by decompose service |
+| `cache._get_upload_source_path()` | App-internal | Called by decompose service |
 | `cache._store_qc_signal()` | App-internal | Called by preview service |
 | `cache._get_qc_signal()` | App-internal | Called by preview service |
 | `cache._store_decomp_preview_binary()` | App-internal | Called by decompose service |
@@ -294,6 +299,8 @@ Use this to trace what the user can reach.
 | `AdaptiveDecomp._whiten()` | App-internal | Called by `run` |
 | `AdaptiveDecomp._separate()` | App-internal | Called by `run` |
 | `AdaptiveDecomp._detect_spikes()` | App-internal | Called by `run` |
+| `AdaptiveDecomp._edge_ipts()` | App-internal | Called by `_detect_spikes_with_context` |
+| `AdaptiveDecomp._detect_spikes_with_context()` | App-internal | Called by `run` |
 | `AdaptiveDecomp._kl_divergence()` | App-internal | Called by `_wh_loss` |
 | `AdaptiveDecomp._wh_loss()` | App-internal | Called by `run` |
 | `AdaptiveDecomp._contrast_value()` | App-internal | Called by `_sv_loss` |
@@ -315,6 +322,7 @@ Use this to trace what the user can reach.
 | `DecompositionSignalExport` | App-internal | Used by `decomp.postprocess.export_step` |
 | `DecompositionExport` | App-internal | Used by `decomp.postprocess.export_step` |
 | `_as_2d_float_array()` | App-internal | Called by `SignalImport.from_mapping` |
+| `_as_name_list()` | App-internal | Called by `SignalImport.build` for gridname/muscle coercion |
 | `_ensure_channel_matrix()` | App-internal | Called by `SignalImport.from_mapping` |
 
 ---

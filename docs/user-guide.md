@@ -84,7 +84,7 @@ Open the sidebar with the hamburger button (top-left). It contains three collaps
 
 The panel also exposes optional **participant** (age, sex, handedness) and
 **acquisition/hardware** metadata (manufacturer, device model, powerline
-frequency, placement scheme, task description). These are written to the BIDS
+frequency, placement scheme). These are written to the BIDS
 `participants.tsv` and `_emg.json` sidecars on save, and pre-filled from those
 files (or from auto-detected loader metadata) when you reopen a recording.
 Electrode details (type, material, inter-electrode distance) are derived
@@ -106,8 +106,7 @@ automatically from the grid model name and do not need to be entered.
 | Analysis windows | Number of analysis windows (default 1) |
 | Duplicates thresh | Cross-correlation threshold for duplicate removal (0–1, default 0.3) |
 | Peeloff | Toggle peeloff; set window in ms (default 25 ms) |
-| Use adaptive | Toggle adaptive decomposition mode |
-| Full trace | Apply MU filters over the entire EMG trace instead of only the decomposed windows |
+| Post-processing | Mode for applying MU filters after decomposition: **Windowed** (default — filters applied only over the decomposed windows), **Full trace** (apply over the entire EMG trace), or **Adaptive** (use adaptive online post-processing) |
 
 **Quality Filters** (applied after decomposition)
 
@@ -148,7 +147,7 @@ Use the **Grid** and **Motor Unit** dropdowns, or the keyboard shortcuts `<` (pr
 |---|---|---|
 | Add Spike | `A` | Activate add mode, then drag a box on the pulse train to add spikes within the selection |
 | Add Artifact | `X` | Activate artifact mode, then drag a box to mark a peak as an artifact (see below) |
-| Delete Spike | `D` | Activate delete mode, then drag a box (or click) to remove both spikes and artifact markers within the selection |
+| Delete Spike/Artifact | `D` | Activate delete mode, then drag a box (or click) to remove both spikes and artifact markers within the selection |
 | Remove Outliers | `R` | Automatically remove spikes with abnormally high discharge rates |
 | Update Filter | `Space` | Recompute the MU filter from the BIDS EMG signal over the current view window |
 | Peel-off | `P` | Toggle peel-off for filter updates (see below) |

@@ -35,10 +35,17 @@ Core NPZ keys (aligned with web-app save format):
 - `parameters`
 - `adaptive_losses`
 
+Additional keys always written:
+- `sil` — silhouette score per MU
+- `sil_keys` — window keys for the `sil_by_window` mapping
+- `sil_by_window` — per-window SIL scores
+- `rois` — list of `(start, end)` analysis windows
+
 Conditional key:
 - `emg_data` (included only when BIDS export is not requested)
 - `discard_channels` (included only when BIDS export is not requested)
 - `coordinates` (included only when BIDS export is not requested)
+- `artifact_mask` (included only when `artifact_mask` is not None and BIDS export is not requested)
 
 Notes:
 - CLI decomposition uses `save_npz=True` by default.
@@ -123,9 +130,12 @@ validator by `.bidsignore`):
 
 ```text
 <bids_root>/derivatives/muedit/
-  dataset_description.json                        # created if missing
   sub-<subject>/[ses-<session>/]decomp/<entity>_decomp.npz
 ```
+
+> The derivatives-level `dataset_description.json` under
+> `derivatives/muedit/` is **not** written by the decomposition pipeline — it
+> is created only during the edited-save flow (see §3 below).
 
 BIDS decomposition NPZ keys (same core schema):
 - `pulse_trains`
@@ -153,11 +163,11 @@ Primary outputs:
 Best-effort BIDS-facing side outputs (failures never block the primary save):
 
 ```text
-<bids_root>/dataset_description.json                                   # created/updated
+<bids_root>/dataset_description.json                                   # created if missing
 <bids_root>/participants.tsv | participants.json                      # subject row upserted from the form
 <bids_root>/sub-<subject>/[ses-<session>/]emg/<entity>_*              # raw EMG sidecars re-exported (see §2)
 <bids_root>/derivatives/muedit/sub-<subject>/[ses-<session>/]emg/
-    <entity>_desc-decomposition_events.tsv                            # one row per MU spike (onset/sample/unit_id)
+    <entity>_desc-decomposition_events.tsv                            # one row per MU spike (onset, duration, sample, unit_id, description)
     <entity>_desc-decomposition_events.json
 ```
 
@@ -173,6 +183,9 @@ Edited NPZ keys:
 - `muscle`
 - `parameters`
 - `total_samples`
+
+Conditional key:
+- `artifact_mask` (included only when artifact regions are provided)
 
 ### Edit Log Sidecar
 
@@ -234,7 +247,8 @@ The sidecar contains:
       "timestamp": "2026-04-16T14:36:00.000Z",
       "flagged": true
     }
-  ]
+  ],
+  "artifact_times": [[7200, 9100], [], []]
 }
 ```
 
@@ -242,12 +256,14 @@ The sidecar contains:
 
 **`history`** — append-only log of all edit actions across all sessions. Carries over when the file is saved and reloaded for further editing.
 
+**`artifact_times`** — present when any MU has artifact markers. A list of lists — one entry per MU — containing the sample indices of all peaks marked as artifacts. Restored automatically on reload.
+
 Action types and their fields. Every entry also carries a `type` and an ISO-8601
 `timestamp`; fields marked `?` are present only when non-empty.
 
 | `type` | Fields | Notes |
 |---|---|---|
-| `add_spikes` | `mu_uid`, `spikes_added`? | Spikes added over a region of interest. |
+| `add_spikes` | `mu_uid`, `spikes_added`?, `spikes_removed`? | Spikes added over a region of interest; `spikes_removed` captures any net removals. |
 | `delete_spikes` | `mu_uid`, `spikes_removed`? | Spikes removed over a region of interest. |
 | `delete_dr` | `mu_uid`, `spikes_added`?, `spikes_removed`? | Discharge-rate-based edit. |
 | `add_artifact` | `mu_uid`, `artifacts_added`? | Artifact times added (separate channel from spikes). |

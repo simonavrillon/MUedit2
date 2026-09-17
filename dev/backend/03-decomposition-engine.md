@@ -387,7 +387,7 @@ Best-effort extraction of raw EMG context embedded in decomposition files. Retur
 
 ### BIDS metadata keys (LOADER_BIDS_META_KEYS)
 
-`manufacturer`, `device_name`, `powerline_freq`, `gains`, `emg_hpf`, `emg_lpf`, `aux_gains`, `aux_hpf`, `aux_lpf`, `hardware_filters`, `units`, `recording_type`, `software_filters`, `software_versions`
+`manufacturer`, `device_name`, `powerline_freq`, `gains`, `emg_hpf`, `emg_lpf`, `aux_gains`, `aux_hpf`, `aux_lpf`, `aux_units`, `hardware_filters`, `units`, `recording_type`, `software_filters`, `software_versions`
 
 ---
 
@@ -412,6 +412,13 @@ def adaptive_batch_process(
 For each window: demean data, compute calibration stats from the window, run bidirectional adaptive decomposition, extract per-MU pulse trains (`signed_square` of ipts), zero artifact regions, collect discharge times.
 
 ### Bidirectional pass
+
+```python
+def _run_one_pass(grid_data_g, whiten_mat, mu_filters, base_centr, spikes_centr,
+                  config, artifact_mask, reverse=False)
+    -> (ipts, spikes, losses)
+```
+Single-direction adaptive decomposition over one grid. When `reverse=True`, the signal is reversed in blocks, processed, then output reversed back. Handles artifact mask slicing.
 
 ```python
 def _run_adapt_decomp_bidirectional(grid_data_g, win_data_g, whiten_mat, mu_filters,

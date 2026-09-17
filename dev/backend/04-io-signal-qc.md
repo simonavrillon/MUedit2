@@ -189,6 +189,11 @@ def find_refractory_peaks(signal, fsamp, min_isi_sec=DECOMP_MIN_ISI_SEC, **kwarg
 Peak picking with refractory-distance constraint via `scipy.signal.find_peaks`.
 
 ```python
+def enforce_refractory(signal, fsamp, min_isi_sec=POSTPROC_MIN_ISI_SEC) -> np.ndarray
+```
+Removes peaks that violate the minimum inter-spike interval. Used during post-processing to clean up spike trains after filter application.
+
+```python
 def split_by_amplitude(values, peaks, kmeans_iter=KMEANS_ITER, missing="raise", seed=0)
     -> (high_indices, centroids, labels)
 ```

@@ -273,7 +273,7 @@ Stages do **not** have `init`/`enter`/`exit`/`destroy` methods. Instead:
 | `createLayoutStageService` | layout-stage.js | 4 methods |
 | `createUiService` | services/ui.js | 21 methods |
 | `createFileSessionService` | file-session.js | 9 methods |
-| `createApiClient` | api/client.js | 11 methods |
+| `createApiClient` | api/client.js | 14 methods |
 
 ### Per-stage setup functions (event wiring)
 

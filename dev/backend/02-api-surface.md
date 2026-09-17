@@ -243,7 +243,7 @@ Thread-safe (single `threading.Lock`), TTL-based, with budget-driven eviction (m
 
 | Function | Description |
 |---|---|
-| `_store_upload_signal(signal: SignalImport) -> token` | Store a copy of the signal, return UUID token |
+| `_store_upload_signal(signal, source_path=None) -> token` | Store a copy of the signal, return UUID token; `source_path` records the original file path |
 | `_get_upload_signal(token) -> SignalImport \| None` | Get a copy of the signal, refresh TTL on hit |
 | `_store_qc_signal(token, data, fsamp, grid_names, discard_channels)` | Attach QC arrays to upload session |
 | `_get_qc_signal(token) -> QCSignal \| None` | Get QC arrays (`data` is a read-only view) |

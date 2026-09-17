@@ -19,7 +19,7 @@ python/src/muedit/io/
 
 Loader dispatch is registry-based in `python/src/muedit/io/factory.py`:
 
-- `register_loader(ext, loader, overwrite=False)` — register/override an extension
+- `register_loader(ext, loader, *, overwrite=False)` — register/override an extension (`overwrite` is keyword-only)
 - `get_loader(filepath)` — resolve the loader for a path (or a BIDS/Intan recording directory)
 - `supported_extensions()` — list registered extensions
 - `load_signal(filepath)` — load a file and return a `SignalImport`
@@ -77,6 +77,16 @@ uses during BIDS export and preview payload construction. The set of keys carrie
 from a loaded decomposition through to BIDS export is defined once as
 `LOADER_BIDS_META_KEYS` in `python/src/muedit/decomp/decomposition_file.py` — keep new keys in
 sync there.
+
+> **Wiring note:** all 15 keys are persisted to decomposition files via
+> `LOADER_BIDS_META_KEYS`, but not all flow from `loader_meta` to the BIDS
+> export call. `powerline_freq` and `units` are read from user-provided
+> `bids_entities` (settings panel) rather than from loader metadata, and
+> `recording_type` and `software_filters` are not passed from `loader_meta`
+> at all (they silently use export defaults). The remaining 11 keys
+> (`hardware_filters`, `gains`, `emg_hpf`, `emg_lpf`, `aux_gains`, `aux_hpf`,
+> `aux_lpf`, `aux_units`, `manufacturer`, `device_name`, `software_versions`)
+> are correctly wired from `loader_meta` to `export_bids_emg`.
 
 Required:
 - No metadata keys are strictly required for core decomposition to run.
