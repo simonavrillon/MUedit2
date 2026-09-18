@@ -132,7 +132,7 @@ def fixed_point_alg(
         w = w / w_norm
 
         k += 1
-        delta = abs(abs(np.dot(w.flatten(), w_last.flatten())) - 1)
+        delta = float(abs(abs(np.dot(w.flatten(), w_last.flatten())) - 1))
 
     return w
 

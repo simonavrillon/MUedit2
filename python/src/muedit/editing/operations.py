@@ -106,7 +106,7 @@ def _recompute_spikes_in_window(
     if norm > 0.0:
         mu_filters = mu_filters / norm
 
-    pt = mu_filters.T @ w_sig
+    pt: FloatArray = mu_filters.T @ w_sig
     pt = pt[: window_emg.shape[1]]
     pt[:edge] = 0
     pt[-edge:] = 0

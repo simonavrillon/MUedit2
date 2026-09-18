@@ -282,7 +282,7 @@ def _safe_correlation(data: FloatArray) -> FloatArray:
     std = data.std(axis=1)
     with np.errstate(invalid="ignore", divide="ignore"):
         corr = np.corrcoef(data)
-    corr = np.nan_to_num(corr, nan=0.0, posinf=0.0, neginf=0.0)
+    corr = np.asarray(np.nan_to_num(corr, nan=0.0, posinf=0.0, neginf=0.0))
     flat_std = std < 1e-15
     if flat_std.any():
         corr[flat_std, :] = 0.0

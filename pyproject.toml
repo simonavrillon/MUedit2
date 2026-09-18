@@ -23,16 +23,17 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Bio-Informatics",
 ]
 dependencies = [
-  "numpy>=1.26",
-  "scipy>=1.13",
+  "numpy>=2.4",
+  "scipy>=1.17",
   "matplotlib>=3.9",
   "xmltodict>=0.14",
   "pydantic>=2.10",
   "PyYAML>=6.0",
   "h5py>=3.12",
-  "fastapi>=0.115",
+  "fastapi>=0.141",
+  "starlette>=1.3.1",  # imported directly; floor clears known advisories
   "uvicorn>=0.32",
-  "python-multipart>=0.0.12",
+  "python-multipart>=0.0.31",  # floor clears known advisories
   "pyedflib>=0.1.36",
 ]
 
@@ -119,7 +120,7 @@ ignore = ["ANN401", "C408", "RUF001", "RUF002", "RUF003", "RUF046", "S101", "S60
 known-first-party = ["muedit", "tests"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"  # numpy >=2.5 stubs use 3.12 syntax; ruff still targets py311
 files = ["python/src/muedit", "tests"]
 mypy_path = "python/src"
 explicit_package_bases = true

@@ -15,7 +15,6 @@ import pytest
 import scipy.io
 from fastapi import FastAPI
 from httpx import Response
-from starlette.routing import Route
 from starlette.testclient import TestClient
 
 from tests.conftest import REPO_ROOT
@@ -47,6 +46,9 @@ LIVE_ENDPOINTS: list[tuple[str, str]] = [
 ]
 
 ENVELOPE_KEYS = {"data", "meta"}
+
+# Path Item keys that are operations; the rest (``parameters``, ``summary``, ...) are metadata.
+OPENAPI_OPERATION_KEYS = {"get", "put", "post", "delete", "options", "head", "patch", "trace"}
 
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────
@@ -230,11 +232,12 @@ class TestRouteTable:
     def test_every_live_endpoint_is_registered(self, client: TestClient) -> None:
         app = client.app
         assert isinstance(app, FastAPI)
+        # FastAPI >=0.137 keeps included routers nested, so ``app.routes`` no longer lists them.
         registered = {
-            (method, route.path)
-            for route in app.routes
-            if isinstance(route, Route)
-            for method in route.methods or ()
+            (method.upper(), path)
+            for path, path_item in app.openapi()["paths"].items()
+            for method in path_item
+            if method in OPENAPI_OPERATION_KEYS
         }
         missing = [(m, API + p) for m, p in LIVE_ENDPOINTS if (m, API + p) not in registered]
         assert not missing
@@ -343,6 +346,11 @@ class TestPreview:
     def test_by_path_missing_body_is_422(self, client: TestClient) -> None:
         err = _err(client.post(f"{API}/preview-by-path", json={}), 422, "validation_error")
         assert isinstance(err["detail"], list)
+
+    def test_by_path_without_json_content_type_is_422(self, client: TestClient) -> None:
+        body = json.dumps({"path": "x.mat"}).encode()
+        resp = client.post(f"{API}/preview-by-path", content=body, headers={"content-type": ""})
+        _err(resp, 422, "validation_error")
 
     def test_by_path_nonexistent_file_is_404(self, client: TestClient, workspace: Path) -> None:
         missing = str(workspace / "nope.mat")
