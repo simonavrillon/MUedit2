@@ -6,7 +6,7 @@
 |---|---|
 | Package name | `muedit` |
 | Version | `2.1.0` |
-| Python | `>=3.11` |
+| Python | `>=3.11.4` |
 | Source root | `python/src/` |
 | Config | `pyproject.toml` (repo root) |
 
@@ -19,9 +19,9 @@
 
 ### Dependencies
 
-`numpy`, `scipy`, `matplotlib`, `xmltodict`, `pydantic`, `PyYAML`, `h5py`, `tk`, `fastapi`, `uvicorn`, `python-multipart`, `pyedflib`, `jupyterlab`, `ipykernel`
+`numpy`, `scipy`, `matplotlib`, `xmltodict`, `pydantic`, `PyYAML`, `h5py`, `fastapi`, `uvicorn`, `python-multipart`, `pyedflib`
 
-Dev: `build`, `twine`, `pytest`, `ruff`, `optuna`
+Extras: `dev` (`build`, `twine`, `pytest`, `pytest-cov`, `httpx`, `ruff`, `mypy`, `pre-commit`, `types-PyYAML`), `notebook` (`jupyterlab`, `ipykernel`), `research` (`optuna`). All versions are pinned in `uv.lock`.
 
 ---
 
@@ -36,9 +36,9 @@ cli.serve_api()
       → CORSMiddleware (allow_origins=["*"], methods=["*"], headers=["*"])
       → errors.register_exception_handlers(app)
   → routes.include_routers(app)
-      → app.include_router(preview_router)    # /api/v1: health, preview, qc
-      → app.include_router(decompose_router)  # /api/v1: decompose, stream
-      → app.include_router(editing_router)    # /api/v1: config, edit/*
+      → app.include_router(preview_router)    # /api/v1: health, preview-by-path, qc/*
+      → app.include_router(decompose_router)  # /api/v1: decompose_stream, decompose_preview
+      → app.include_router(editing_router)    # /api/v1: edit/*
       → app.include_router(dialog_router)   # /api/v1/dialog: open-file
   → uvicorn.run(app, host, port)
       → host: MUEDIT_HOST env (default 0.0.0.0)
@@ -283,4 +283,7 @@ Returns `DATA_ROOT / project` (or `DATA_ROOT / "muedit_out"` if project is empty
 | `MUEDIT_DATA_ROOT` | `<repo>/data` | BIDS output root |
 | `MUEDIT_HOST` | `0.0.0.0` | API server bind host |
 | `MUEDIT_PORT` | `8000` | API server bind port |
-| `MUEDIT_BACKEND_PORT` | `8000` | Fallback API port |
+| `MUEDIT_BACKEND_PORT` | `8000` | Fallback API port; the launchers copy it into `MUEDIT_PORT` |
+| `MUEDIT_FRONTEND_PORT` | `8080` | Static frontend port (launchers) |
+| `MUEDIT_OPEN_BROWSER` | `1` | Open the browser once both servers answer (launchers) |
+| `MUEDIT_NO_UV` | `0` | `1` makes the launchers use the active `python` instead of `uv run` |

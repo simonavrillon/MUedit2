@@ -45,11 +45,11 @@ Conditional key:
 - `emg_data` (included only when BIDS export is not requested)
 - `discard_channels` (included only when BIDS export is not requested)
 - `coordinates` (included only when BIDS export is not requested)
-- `artifact_mask` (included only when `artifact_mask` is not None and BIDS export is not requested)
+- `artifact_mask` (included whenever an artifact mask was applied, with or without BIDS export)
 
 Notes:
 - CLI decomposition uses `save_npz=True` by default.
-- API decomposition persists this file only when `persist_output=true` is set on the request.
+- API decomposition persists this file when `persist_output=true` is set on the request or BIDS export is requested (then under `derivatives/muedit/.../decomp/`, see below).
 
 ## 2) BIDS Export During Decomposition
 
