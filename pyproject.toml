@@ -50,7 +50,7 @@ dev = [
   "types-PyYAML",
 ]
 notebook = [
-  "jupyterlab>=4.0",
+  "jupyterlab>=4.6.2",  # floor clears known advisories
   "ipykernel>=6.29",
 ]
 research = [
