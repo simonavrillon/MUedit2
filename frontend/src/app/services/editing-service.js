@@ -9,6 +9,7 @@ import { normalizeEditLoadPayload } from "../../api/payloads.js";
 import { inferGridCount, normalizeGridNames } from "../../io/grid.js";
 import { getSuggestedNpzName } from "../../io/bids.js";
 import { muUidFor } from "../../state/selectors.js";
+import { spikesDiff } from "../../editing/operations.js";
 import {
   clearAllEditSelections,
   clearEditDrSelections,
@@ -30,6 +31,7 @@ import {
   setEditFsamp,
   setEditGridNames,
   setEditHistory,
+  keepEditMus,
   setEditMuGridIndex,
   setEditMuUids,
   setEditOriginalDistimes,
@@ -51,21 +53,6 @@ import {
 /** @typedef {import("../state.js").FileRef} FileRef */
 /** @typedef {import("../state.js").EditHistoryEntry} EditHistoryEntry */
 /** @typedef {import("../state.js").Bookmark} Bookmark */
-
-// Compare a motor unit's spike times before/after an edit. The added/removed
-// lists feed the edit-history log so individual edits can be reverted per MU.
-/**
- * @param {number[]} before
- * @param {number[]} after
- */
-function spikesDiff(before, after) {
-  const afterSet = new Set(after);
-  const beforeSet = new Set(before);
-  return {
-    added: after.filter((s) => !beforeSet.has(s)),
-    removed: before.filter((s) => !afterSet.has(s)),
-  };
-}
 
 // Assign stable per-grid MU identifiers ("g<grid>_mu<n>") used to correlate
 // motor units with editlog entries across reloads. Numbering restarts per grid.
@@ -404,55 +391,18 @@ export async function removeDuplicateMus(app) {
 
     const keptSet = new Set(keptIdx);
     ensureEditFlagged();
-    setEditDistimes(
-      state,
-      keptIdx.map((i) => data.distimes[keptIdx.indexOf(i)] || distimes[i]),
-    );
-    setEditPulseTrains(
-      state,
-      keptIdx.map((i) => state.edit.pulseTrains?.[i] || []),
-    );
-    setEditOriginalDistimes(
-      state,
-      (state.edit.originalDistimes || []).filter((_, i) => keptSet.has(i)),
-    );
-    setEditOriginalPulseTrains(
-      state,
-      (state.edit.originalPulseTrains || []).filter((_, i) => keptSet.has(i)),
-    );
-    setEditMuGridIndex(
-      state,
-      (state.edit.muGridIndex || []).filter((_, i) => keptSet.has(i)),
-    );
-    setEditFlaggedArray(
-      state,
-      (state.edit.flagged || []).filter((_, i) => keptSet.has(i)),
-    );
-    setEditMuUids(
-      state,
-      (state.edit.muUids || []).filter((_, i) => keptSet.has(i)),
-    );
-    setEditArtifactTimes(
-      state,
-      (state.edit.artifactTimes || []).filter((_, i) => keptSet.has(i)),
-    );
-
-    const removedCount = data.removed_count || distimes.length - keptIdx.length;
     const removedUids = (state.edit.muUids || []).filter(
       (_, i) => !keptSet.has(i),
     );
+    keepEditMus(state, keptIdx);
+    setShowBookmark(state, false);
+
+    const removedCount = distimes.length - keptIdx.length;
     app.appendEditHistory({
       type: "remove_duplicates",
       removed_count: removedCount,
       removed_mu_uids: removedUids,
     });
-
-    const currentMu = state.edit.currentMu ?? 0;
-    const newCurrentMu = keptIdx.includes(currentMu)
-      ? keptIdx.indexOf(currentMu)
-      : 0;
-    setEditCurrentMu(state, newCurrentMu, { resetView: false });
-    setShowBookmark(state, false);
 
     recomputeEditDirty();
     renderEditExplorer();
@@ -525,6 +475,7 @@ export async function saveEditedFile(app) {
     getBidsMuscleNames,
     setEditStatus,
     recomputeEditDirty,
+    renderEditExplorer,
   } = app;
 
   const distimes = state.edit.distimes || [];
@@ -575,6 +526,18 @@ export async function saveEditedFile(app) {
   try {
     setEditStatus("Saving edited file...", "muted");
     const saved = await persistNpzBySaveTarget(payload, payload.file_label);
+    // Mirror the saved file: the backend drops flagged and duplicate MUs and logs it.
+    if (Array.isArray(saved?.editHistory)) {
+      setEditHistory(state, saved.editHistory);
+    }
+    const kept = saved?.keptIndices;
+    if (
+      Array.isArray(kept) &&
+      (kept.length !== distimes.length || kept.some((k, i) => k !== i))
+    ) {
+      keepEditMus(state, kept);
+      renderEditExplorer();
+    }
     setEditOriginalDistimes(
       state,
       (state.edit.distimes || []).map((d) => [...d]),

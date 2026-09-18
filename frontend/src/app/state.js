@@ -19,6 +19,7 @@ import { GRID_COLORS } from "../config.js";
  * @property {boolean} flagged
  * @property {number[] | null} pulseTrain
  * @property {number[]} artifactTimes
+ * @property {number} historyLength Edit-log length when the backup was taken.
  */
 
 /**
@@ -40,6 +41,7 @@ import { GRID_COLORS } from "../config.js";
  * @property {boolean} [lock_spikes]
  * @property {number} [removed_count]
  * @property {string[]} [removed_mu_uids]
+ * @property {boolean} [on_save] Logged by the backend for MUs dropped while saving.
  */
 
 /**

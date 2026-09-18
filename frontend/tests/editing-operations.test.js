@@ -328,14 +328,18 @@ describe("selection to ROI request", () => {
 });
 
 describe("undo", () => {
-  test("restores the backed-up MU and drops only its last history entry", () => {
+  test("restores the backed-up MU and drops only its entries since the backup", () => {
     state.edit.currentMu = 1;
     state.edit.editHistory = [
       { mu_uid: "g0_mu1", type: "first" },
       { mu_uid: "g0_mu0", type: "other" },
-      { mu_uid: "g0_mu1", type: "last" },
     ];
     app.backupEditMu();
+    state.edit.editHistory.push(
+      { mu_uid: "g0_mu1", type: "delete_spikes" },
+      { mu_uid: "g0_mu2", type: "duplicate_mu" },
+      { mu_uid: "g0_mu1", type: "delete_artifact" },
+    );
 
     state.edit.distimes[1] = [9];
     state.edit.artifactTimes[1] = [3];
@@ -354,7 +358,7 @@ describe("undo", () => {
     );
     assert.deepEqual(
       state.edit.editHistory.map((e) => e.type),
-      ["first", "other"],
+      ["first", "other", "duplicate_mu"],
     );
     assert.equal(state.edit.backup, null);
     assert.equal(state.edit.selectionPulse, null);
@@ -364,6 +368,16 @@ describe("undo", () => {
       "Undo applied",
       "success",
     ]);
+  });
+
+  test("undoing an edit that logged nothing keeps earlier entries", () => {
+    state.edit.editHistory = [{ mu_uid: "g0_mu0", type: "remove_outliers" }];
+    app.backupEditMu();
+    app.restoreEditBackup();
+    assert.deepEqual(
+      state.edit.editHistory.map((e) => e.type),
+      ["remove_outliers"],
+    );
   });
 
   test("the backup is a copy, not a view of the live arrays", () => {
@@ -418,6 +432,15 @@ describe("duplicateMu", () => {
     assert.equal(state.edit.flagged.length, 3);
   });
 
+  test("never reuses the uid of an MU the log says was removed", () => {
+    state.edit.editHistory = [
+      { type: "remove_duplicates", removed_mu_uids: ["g0_mu5"] },
+      { type: "flag_mu", mu_uid: "g0_mu7", flagged: true },
+    ];
+    app.duplicateMu();
+    assert.equal(state.edit.muUids.at(-1), "g0_mu8");
+  });
+
   test("an MU with no pulse is not duplicated", () => {
     state.edit.pulseTrains[0] = [];
     app.duplicateMu();
@@ -427,7 +450,7 @@ describe("duplicateMu", () => {
 });
 
 describe("resetCurrentMuEdits", () => {
-  test("returns the MU to its loaded state and clears only its history", () => {
+  test("returns the MU to its loaded state and logs what the reset undid", () => {
     state.edit.distimes[0] = [7];
     state.edit.artifactTimes[0] = [5];
     state.edit.flagged[0] = true;
@@ -449,10 +472,32 @@ describe("resetCurrentMuEdits", () => {
     );
     assert.deepEqual(
       state.edit.editHistory.map((e) => e.type),
-      ["keep"],
+      ["add", "keep", "reset_mu"],
     );
+    const { timestamp, ...entry } = state.edit.editHistory.at(-1);
+    assert.ok(timestamp);
+    assert.deepEqual(entry, {
+      type: "reset_mu",
+      mu_uid: "g0_mu0",
+      spikes_added: [2, 5, 8],
+      spikes_removed: [7],
+      artifacts_removed: [5],
+      flagged: false,
+    });
     assert.equal(state.edit.backup, null);
     assert.equal(app.renderEditExplorer.calls.length, 1);
+  });
+
+  test("resetting a duplicated MU keeps the record that it was duplicated", () => {
+    app.duplicateMu();
+    app.resetCurrentMuEdits();
+    assert.deepEqual(
+      state.edit.editHistory.map((e) => [e.type, e.mu_uid]),
+      [
+        ["duplicate_mu", "g0_mu2"],
+        ["reset_mu", "g0_mu2"],
+      ],
+    );
   });
 
   test("an MU with no baseline is left alone", () => {
@@ -461,5 +506,100 @@ describe("resetCurrentMuEdits", () => {
     app.resetCurrentMuEdits();
     assert.deepEqual(state.edit.distimes[0], [7]);
     assert.equal(app.renderEditExplorer.calls.length, 0);
+  });
+});
+
+describe("removeDuplicateMus", () => {
+  /** Three MUs: 0 and 2 are duplicates and the backend keeps 2. */
+  function threeMus() {
+    state.edit.distimes.push([2, 5, 9]);
+    state.edit.originalDistimes.push([2, 5, 9]);
+    state.edit.pulseTrains.push(new Array(10).fill(2));
+    state.edit.originalPulseTrains.push(new Array(10).fill(2));
+    state.edit.artifactTimes.push([7]);
+    state.edit.flagged.push(false);
+    state.edit.muUids.push("g0_mu2");
+    state.edit.muGridIndex.push(0);
+    app.api = {
+      editRemoveDuplicates: async () => ({
+        kept_indices: [1, 2],
+        distimes: [
+          [1, 4],
+          [2, 5, 9],
+        ],
+        removed_count: 1,
+      }),
+    };
+  }
+
+  test("logs the uid of the MU that was actually removed", async () => {
+    threeMus();
+    await app.removeDuplicateMus();
+    const { timestamp, ...entry } = state.edit.editHistory.at(-1);
+    assert.ok(timestamp);
+    assert.deepEqual(entry, {
+      type: "remove_duplicates",
+      removed_count: 1,
+      removed_mu_uids: ["g0_mu0"],
+    });
+  });
+
+  test("keeps uids aligned with the surviving spike trains", async () => {
+    threeMus();
+    await app.removeDuplicateMus();
+    assert.deepEqual(state.edit.muUids, ["g0_mu1", "g0_mu2"]);
+    assert.deepEqual(state.edit.distimes, [
+      [1, 4],
+      [2, 5, 9],
+    ]);
+    assert.deepEqual(state.edit.originalDistimes, state.edit.distimes);
+    assert.deepEqual(state.edit.artifactTimes, [[], [7]]);
+  });
+
+  test("clears the undo backup, whose MU index no longer applies", async () => {
+    threeMus();
+    state.edit.currentMu = 2;
+    app.backupEditMu();
+    await app.removeDuplicateMus();
+    assert.equal(state.edit.backup, null);
+    assert.equal(state.edit.currentMu, 1);
+    app.restoreEditBackup();
+    assert.equal(state.edit.distimes.length, 2);
+  });
+});
+
+describe("saveEditedFile", () => {
+  function stubSave(response) {
+    const payloads = [];
+    Object.assign(app, {
+      getBidsMuscleNames: () => [],
+      persistNpzBySaveTarget: async (payload) => {
+        payloads.push(payload);
+        return { mode: "saved", path: "/out.npz", ...response };
+      },
+    });
+    return payloads;
+  }
+
+  test("leaves duplicate removal on the backend's default", async () => {
+    const payloads = stubSave({});
+    await app.saveEditedFile();
+    assert.equal("remove_duplicates" in payloads[0], false);
+  });
+
+  test("mirrors the MUs and log entries the save removed", async () => {
+    state.edit.flagged = [true, false];
+    const saveEntry = {
+      type: "remove_flagged",
+      on_save: true,
+      removed_count: 1,
+      removed_mu_uids: ["g0_mu0"],
+    };
+    stubSave({ keptIndices: [1], editHistory: [saveEntry] });
+    await app.saveEditedFile();
+    assert.deepEqual(state.edit.muUids, ["g0_mu1"]);
+    assert.deepEqual(state.edit.distimes, [[1, 4]]);
+    assert.deepEqual(state.edit.flagged, [false]);
+    assert.deepEqual(state.edit.editHistory, [saveEntry]);
   });
 });

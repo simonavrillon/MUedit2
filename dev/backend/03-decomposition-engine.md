@@ -53,7 +53,7 @@ Algorithm hyper-parameters for a single decomposition run.
 | `random_seed` | `int` | `0` | RNG seed |
 | `peel_off_enabled` | `bool` | `False` | Enable MU waveform subtraction (peel-off) |
 | `covfilter` | `bool` | `False` | Filter MUs by ISI coefficient-of-variation |
-| `duplicatesbgrids` | `bool` | `False` | Remove duplicate MUs across grids |
+| `duplicatesbgrids` | `bool` | `True` | Remove duplicate MUs across grids |
 | `nbextchan` | `int` | `1000` | Target number of extended channels |
 | `edges_sec` | `float` | `0.2` | Edge-trim duration in seconds |
 | `contrast_func` | `str` | `"skew"` | FastICA contrast (`"skew"`, `"kurtosis"`, `"logcosh"`) |
@@ -277,7 +277,7 @@ Steps:
 1. **Filter application**:
    - If `use_adaptive`: extract per-grid raw data and call `adaptive_batch_process()` with all adapt params + artifact mask
    - Else: call `batch_process_filters()` (full-trace dewhitened or windowed mode)
-2. **Deduplication** via `_remove_duplicates_by_grid()` (calls `rem_duplicates()` with `maxlag = fsamp/40`, `jitter = 0.00025s`)
+2. **Deduplication** via `remove_duplicates_by_grid()` (calls `rem_duplicates()` with `maxlag = fsamp/40`, `jitter = 0.00025s`)
 3. **SIL remapping** from deduplicated global indices
 4. Return `PostprocessStepOutput`
 
@@ -285,7 +285,7 @@ Steps:
 
 | Function | Description |
 |---|---|
-| `_remove_duplicates_by_grid(pulse_t, distime, mu_grid_index, ngrid, params, fsamp)` | Within-grid (and optionally cross-grid) dedup |
+| `remove_duplicates_by_grid(pulse_t, distime, mu_grid_index, ngrid, params, fsamp)` | Within-grid (and optionally cross-grid) dedup |
 | `_reconstruct_window_signal(prep, params, win_global, whiten_mat) -> (win_data, w_sig)` | Recompute window data for filter application |
 | `_make_window_reconstructors(prep, params, decomposed) -> (get_win_data, get_w_sig)` | Returns cached callable reconstructors |
 

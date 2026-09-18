@@ -72,3 +72,12 @@ def _coerce_dup_tol(raw: Any, default: float = 0.3) -> float:
     while isinstance(raw, (list, tuple, np.ndarray)) and np.ndim(raw) > 0:
         raw = raw[0] if len(raw) > 0 else default
     return float(raw)
+
+
+def _coerce_bool_param(raw: Any) -> bool:
+    """Coerce a boolean parameter such as ``duplicatesbgrids`` (MATLAB stores 0/1), unwrapping nested lists."""
+    while isinstance(raw, (list, tuple, np.ndarray)) and np.ndim(raw) > 0:
+        raw = raw[0] if len(raw) > 0 else False
+    if isinstance(raw, str):
+        return raw.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(raw)

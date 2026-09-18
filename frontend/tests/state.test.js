@@ -172,30 +172,60 @@ describe("edit slice", () => {
     assert.notEqual(e.pulseTrains[0], e.originalPulseTrains[0]);
   });
 
-  test("popLastEditHistoryEntryForMu removes only that MU's latest entry", () => {
+  test("dropEditHistoryForMuSince keeps older entries and other MUs", () => {
     state.edit.editHistory = [
       { mu_uid: "a", op: 1 },
       { mu_uid: "b", op: 2 },
       { mu_uid: "a", op: 3 },
       { mu_uid: "b", op: 4 },
+      { mu_uid: "a", op: 5 },
     ];
-    actions.popLastEditHistoryEntryForMu(state, "a");
+    actions.dropEditHistoryForMuSince(state, "a", 2);
     assert.deepEqual(
       state.edit.editHistory.map((e) => e.op),
       [1, 2, 4],
     );
-    actions.popLastEditHistoryEntryForMu(state, "missing");
-    assert.equal(state.edit.editHistory.length, 3);
   });
 
-  test("clearEditHistoryForMu leaves other MUs alone", () => {
-    state.edit.editHistory = [
-      { mu_uid: "a", op: 1 },
-      { mu_uid: "b", op: 2 },
-      { mu_uid: "a", op: 3 },
-    ];
-    actions.clearEditHistoryForMu(state, "a");
-    assert.deepEqual(state.edit.editHistory, [{ mu_uid: "b", op: 2 }]);
+  test("keepEditMus reorders every per-MU array together", () => {
+    Object.assign(state.edit, {
+      distimes: [[0], [1], [2]],
+      originalDistimes: [[10], [11], [12]],
+      pulseTrains: [[100], [101], [102]],
+      originalPulseTrains: [[200], [201], [202]],
+      muGridIndex: [0, 1, 0],
+      flagged: [false, true, false],
+      muUids: ["u0", "u1", "u2"],
+      artifactTimes: [[30], [31], [32]],
+      currentMu: 2,
+      bookmarkPosition: { muIdx: 1, position: 50 },
+      backup: { muIdx: 2 },
+    });
+    actions.keepEditMus(state, [2, 1]);
+    const e = state.edit;
+    assert.deepEqual(e.distimes, [[2], [1]]);
+    assert.deepEqual(e.originalDistimes, [[12], [11]]);
+    assert.deepEqual(e.pulseTrains, [[102], [101]]);
+    assert.deepEqual(e.originalPulseTrains, [[202], [201]]);
+    assert.deepEqual(e.muGridIndex, [0, 1]);
+    assert.deepEqual(e.flagged, [false, true]);
+    assert.deepEqual(e.muUids, ["u2", "u1"]);
+    assert.deepEqual(e.artifactTimes, [[32], [31]]);
+    assert.equal(e.currentMu, 0);
+    assert.deepEqual(e.bookmarkPosition, { muIdx: 1, position: 50 });
+    assert.equal(e.backup, null);
+  });
+
+  test("keepEditMus falls back to MU 0 and drops a bookmark on a removed MU", () => {
+    Object.assign(state.edit, {
+      distimes: [[0], [1]],
+      muUids: ["u0", "u1"],
+      currentMu: 1,
+      bookmarkPosition: { muIdx: 1, position: 5 },
+    });
+    actions.keepEditMus(state, [0]);
+    assert.equal(state.edit.currentMu, 0);
+    assert.equal(state.edit.bookmarkPosition, null);
   });
 
   test("per-MU spike and artifact times are coerced and filtered", () => {

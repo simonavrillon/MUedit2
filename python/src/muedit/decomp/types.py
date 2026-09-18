@@ -35,7 +35,7 @@ class DecompositionParameters:
     random_seed: int = 0
     peel_off_enabled: bool = False
     covfilter: bool = False
-    duplicatesbgrids: bool = False
+    duplicatesbgrids: bool = True
     nbextchan: int = DEFAULT_NBEXTCHAN
     edges_sec: float = 0.2
     contrast_func: ContrastFunc = "skew"

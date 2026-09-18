@@ -512,23 +512,16 @@ export function appendEditHistoryEntry(state, entry) {
 }
 
 /**
+ * Drop the MU's entries logged at or after `fromIndex`, i.e. since an undo backup.
+ *
  * @param {State} state
  * @param {string} muUid
+ * @param {number} fromIndex
  */
-export function popLastEditHistoryEntryForMu(state, muUid) {
-  if (!Array.isArray(state.edit.editHistory)) return;
-  const idx = state.edit.editHistory.findLastIndex((e) => e.mu_uid === muUid);
-  if (idx !== -1) state.edit.editHistory.splice(idx, 1);
-}
-
-/**
- * @param {State} state
- * @param {string} muUid
- */
-export function clearEditHistoryForMu(state, muUid) {
+export function dropEditHistoryForMuSince(state, muUid, fromIndex) {
   if (!Array.isArray(state.edit.editHistory)) return;
   state.edit.editHistory = state.edit.editHistory.filter(
-    (e) => e.mu_uid !== muUid,
+    (e, i) => i < fromIndex || e.mu_uid !== muUid,
   );
 }
 
@@ -748,6 +741,40 @@ export function appendEditMu(state, { distimes, pulseTrain, gridIdx, uid }) {
   state.edit.muUids.push(uid);
   if (!state.edit.artifactTimes) state.edit.artifactTimes = [];
   state.edit.artifactTimes.push([]);
+}
+
+/**
+ * Keep only the MUs at `keptIdx`, in that order, across every per-MU array.
+ * The undo backup is dropped because its MU index no longer applies.
+ *
+ * @param {State} state
+ * @param {number[]} keptIdx
+ */
+export function keepEditMus(state, keptIdx) {
+  const e = state.edit;
+  /**
+   * @template T
+   * @param {T[] | null | undefined} arr
+   * @param {(i: number) => T} fallback
+   */
+  const pick = (arr, fallback) => keptIdx.map((i) => arr?.[i] ?? fallback(i));
+  e.distimes = pick(e.distimes, () => []);
+  e.pulseTrains = pick(e.pulseTrains, () => []);
+  e.originalDistimes = pick(e.originalDistimes, () => []);
+  e.originalPulseTrains = pick(e.originalPulseTrains, () => []);
+  e.muGridIndex = pick(e.muGridIndex, () => 0);
+  e.flagged = pick(e.flagged, () => false);
+  e.muUids = pick(e.muUids, (i) => `mu${i}`);
+  e.artifactTimes = pick(e.artifactTimes, () => []);
+  e.currentMu = Math.max(0, keptIdx.indexOf(e.currentMu ?? 0));
+  const bookmarkIdx = e.bookmarkPosition
+    ? keptIdx.indexOf(e.bookmarkPosition.muIdx)
+    : -1;
+  e.bookmarkPosition =
+    bookmarkIdx === -1 || !e.bookmarkPosition
+      ? null
+      : { ...e.bookmarkPosition, muIdx: bookmarkIdx };
+  e.backup = null;
 }
 
 /**

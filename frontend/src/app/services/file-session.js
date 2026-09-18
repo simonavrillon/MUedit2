@@ -263,7 +263,12 @@ export function createFileSessionService(app) {
       ...getBidsSaveFields(),
     });
     app.setStatus("Saved", "success");
-    return { mode: "saved", path: data.path || "" };
+    return {
+      mode: "saved",
+      path: data.path || "",
+      keptIndices: data.kept_indices,
+      editHistory: data.edit_history,
+    };
   }
 
   return {

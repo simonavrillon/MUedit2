@@ -4,6 +4,7 @@ import csv
 import json
 import logging
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +41,7 @@ from muedit.api.services.bids_helpers import (
     read_bids_sidecar_meta,
 )
 from muedit.api.services.edit_helpers import (
+    _coerce_bool_param,
     _coerce_dup_tol,
     _expected_grid_count,
     _generate_mu_uids,
@@ -48,7 +50,6 @@ from muedit.api.services.edit_helpers import (
     _normalize_muscle_names,
     _pad_grid_names,
 )
-from muedit.decomp.algorithm import DEDUP_JITTER, DEDUP_MAXLAG_RATIO, rem_duplicates
 from muedit.decomp.decomposition_file import (
     build_pulse_trains_from_distimes,
     load_decomposition_file,
@@ -57,8 +58,9 @@ from muedit.decomp.decomposition_file import (
     save_decomposition_npz,
     save_editlog,
 )
+from muedit.decomp.postprocess import remove_duplicates_by_grid
 from muedit.decomp.preprocess import build_manual_artifact_mask
-from muedit.decomp.types import DEFAULT_PEEL_OFF_WIN_SEC
+from muedit.decomp.types import DEFAULT_PEEL_OFF_WIN_SEC, DecompositionParameters
 from muedit.editing.operations import (
     add_artifact_in_roi,
     add_spikes_in_roi,
@@ -211,20 +213,30 @@ def load_decomposition_binary_from_path(filepath: str) -> Response | dict[str, A
 
 
 def _dedup(
-    pulse_trains: np.ndarray,
-    distimes: list,
-    dup_tol: float,
+    distimes: list[list[int]],
+    mu_grid_index: list[int],
+    parameters: dict[str, Any],
     fsamp: float,
-) -> tuple[np.ndarray, list, list[int]]:
-    return rem_duplicates(
-        np.asarray(pulse_trains, dtype=float),
+    total_samples: int,
+) -> list[int]:
+    """Return the indices of the MUs the decomposition's duplicate removal keeps, ascending."""
+    params = DecompositionParameters(
+        duplicatesthresh=_coerce_dup_tol(parameters.get("duplicatesthresh", 0.3)),
+        duplicatesbgrids=_coerce_bool_param(parameters.get("duplicatesbgrids", True)),
+    )
+    _, _, _, kept = remove_duplicates_by_grid(
+        build_pulse_trains_from_distimes(distimes, total_samples),
         [np.asarray(d, dtype=int) for d in distimes],
-        [np.asarray(d, dtype=int) for d in distimes],
-        round(fsamp / DEDUP_MAXLAG_RATIO),
-        DEDUP_JITTER,
-        dup_tol,
+        mu_grid_index,
+        max(mu_grid_index, default=0) + 1,
+        params,
         fsamp,
     )
+    return sorted(kept)
+
+
+def _clean_distimes(spikes: list[int]) -> list[int]:
+    return sorted({int(v) for v in spikes if int(v) >= 0})
 
 
 def _export_bids_from_mat_context(
@@ -301,6 +313,17 @@ def _export_bids_from_mat_context(
         return None  # never block the primary save on BIDS export error
 
 
+def _save_removal_entry(entry_type: str, removed_uids: list[str]) -> dict[str, Any]:
+    """Build the editlog entry for MUs dropped while saving."""
+    return {
+        "type": entry_type,
+        "on_save": True,
+        "removed_count": len(removed_uids),
+        "removed_mu_uids": removed_uids,
+        "timestamp": datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+    }
+
+
 def save_edits(payload: EditSavePayload) -> dict[str, Any]:
     distimes = normalize_distimes(payload.distimes or payload.discharge_times or [])
     pulse_trains_raw = payload.pulse_trains
@@ -352,26 +375,34 @@ def save_edits(payload: EditSavePayload) -> dict[str, Any]:
     remove_flagged = True if payload.remove_flagged is None else payload.remove_flagged
     remove_duplicates = True if payload.remove_duplicates is None else payload.remove_duplicates
 
+    # Indices into the payload's MUs that survive the save, in saved order.
+    kept_mus = list(range(len(distimes)))
+
     if remove_flagged and distimes:
         flagged = _normalize_flagged(payload.flagged, len(distimes))
         keep_idx = [i for i, spikes in enumerate(distimes) if not flagged[i]]
+        removed_uids = [mu_uids[i] for i in range(len(distimes)) if flagged[i]]
         distimes = [distimes[i] for i in keep_idx]
         mu_grid_index = [mu_grid_index[i] for i in keep_idx]
         mu_uids = [mu_uids[i] for i in keep_idx]
         pulse_trains = pulse_trains[keep_idx, :] if pulse_trains.size else pulse_trains
         artifact_times_all = [artifact_times_all[i] for i in keep_idx]
+        kept_mus = [kept_mus[i] for i in keep_idx]
+        if removed_uids:
+            edit_history.append(_save_removal_entry("remove_flagged", removed_uids))
 
     if remove_duplicates and len(distimes) > 1 and fsamp and fsamp > 0:
-        dup_tol = _coerce_dup_tol(parameters.get("duplicatesthresh", 0.3))
-        dedup_pulses, dedup_distimes, kept_idx = _dedup(pulse_trains, distimes, dup_tol, fsamp)
-        pulse_trains = dedup_pulses if dedup_pulses.size else np.zeros((0, total_samples))
-        distimes = [
-            sorted({int(v) for v in np.asarray(d, dtype=int).tolist() if int(v) >= 0})
-            for d in dedup_distimes
-        ]
+        kept_idx = _dedup(distimes, mu_grid_index, parameters, fsamp, total_samples)
+        kept_set = set(kept_idx)
+        removed_uids = [uid for i, uid in enumerate(mu_uids) if i not in kept_set]
+        pulse_trains = pulse_trains[kept_idx, :] if kept_idx else np.zeros((0, total_samples))
+        distimes = [_clean_distimes(distimes[i]) for i in kept_idx]
         mu_grid_index = [mu_grid_index[i] for i in kept_idx]
         mu_uids = [mu_uids[i] for i in kept_idx]
         artifact_times_all = [artifact_times_all[i] for i in kept_idx]
+        kept_mus = [kept_mus[i] for i in kept_idx]
+        if removed_uids:
+            edit_history.append(_save_removal_entry("remove_duplicates", removed_uids))
 
     bids_root = resolve_bids_root(payload.project)
     file_label = payload.file_label or ""
@@ -466,7 +497,13 @@ def save_edits(payload: EditSavePayload) -> dict[str, Any]:
         task_description=payload.task_description or None,
         software_versions=payload.software_versions or None,
     )
-    result: dict[str, Any] = {"saved": True, "path": str(out_path)}
+    result: dict[str, Any] = {
+        "saved": True,
+        "path": str(out_path),
+        "kept_indices": kept_mus,
+        "mu_uids": mu_uids,
+        "edit_history": edit_history,
+    }
     if bids_paths:
         result["bids_emg_paths"] = bids_paths
     if deriv_paths:
@@ -763,8 +800,6 @@ def remove_duplicates_service(payload: EditDeduplicatePayload) -> dict[str, Any]
         total_samples = max((max(d) for d in distimes if d), default=0) + 1
     parameters = payload.parameters or {}
 
-    pulse_trains = build_pulse_trains_from_distimes(distimes, total_samples)
-
     if len(distimes) <= 1:
         return make_json_safe(
             {
@@ -773,16 +808,12 @@ def remove_duplicates_service(payload: EditDeduplicatePayload) -> dict[str, Any]
             }
         )
 
-    dup_tol = _coerce_dup_tol(parameters.get("duplicatesthresh", 0.3))
-    _, dedup_distimes, kept_idx = _dedup(pulse_trains, distimes, dup_tol, fsamp)
-    dedup_distimes_clean = [
-        sorted({int(v) for v in np.asarray(d, dtype=int).tolist() if int(v) >= 0})
-        for d in dedup_distimes
-    ]
+    mu_grid_index = _normalize_mu_grid_index(payload.mu_grid_index, len(distimes))
+    kept_idx = _dedup(distimes, mu_grid_index, parameters, fsamp, total_samples)
     return make_json_safe(
         {
             "kept_indices": kept_idx,
-            "distimes": dedup_distimes_clean,
+            "distimes": [_clean_distimes(distimes[i]) for i in kept_idx],
             "removed_count": len(distimes) - len(kept_idx),
         }
     )

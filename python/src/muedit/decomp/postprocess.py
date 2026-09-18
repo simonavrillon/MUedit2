@@ -33,7 +33,7 @@ from muedit.signal.filters import demean
 logger = logging.getLogger(__name__)
 
 
-def _remove_duplicates_by_grid(
+def remove_duplicates_by_grid(
     pulse_t: FloatArray,
     distime: list[IntArray],
     mu_grid_index: list[int],
@@ -246,7 +246,7 @@ def postprocess_step(
             artifact_mask=prep.artifact_mask,
         )
 
-    pulse_t, distime, mu_grid_index, kept_global = _remove_duplicates_by_grid(
+    pulse_t, distime, mu_grid_index, kept_global = remove_duplicates_by_grid(
         pulse_t,
         distime,
         decomposed.mu_grid_index,

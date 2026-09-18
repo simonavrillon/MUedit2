@@ -252,7 +252,7 @@ The sidecar contains:
 }
 ```
 
-**`mu_uids`** — one stable string ID per surviving MU (after flagged/duplicate removal), in the same order as `discharge_times`. Format: `g<grid_index>_mu<rank_within_grid>`. Assigned once at first load; preserved through successive saves.
+**`mu_uids`** — one stable string ID per surviving MU (after flagged/duplicate removal), in the same order as `discharge_times`. Format: `g<grid_index>_mu<rank_within_grid>`. Assigned once at first load; preserved through successive saves. A uid is never reused: a new MU from `duplicate_mu` is numbered after every uid the history has ever named, including removed ones.
 
 **`history`** — append-only log of all edit actions across all sessions. Carries over when the file is saved and reloaded for further editing.
 
@@ -271,8 +271,13 @@ Action types and their fields. Every entry also carries a `type` and an ISO-8601
 | `update_filter` | `mu_uid`, `view_start`, `view_end`, `use_peeloff`, `lock_spikes`, `spikes_added`?, `spikes_removed`? | Filter re-estimation over `[view_start, view_end)`; `spikes_*` capture the net change. |
 | `remove_outliers` | `mu_uid`, `spikes_removed`? | Automatic outlier-spike removal. |
 | `duplicate_mu` | `mu_uid`, `source_mu_uid` | `mu_uid` is the **new** MU; `source_mu_uid` is the one it was copied from. |
-| `remove_duplicates` | `removed_count`, `removed_mu_uids` | Multi-MU action — no single `mu_uid`. |
+| `remove_duplicates` | `removed_count`, `removed_mu_uids`, `on_save`? | Multi-MU action — no single `mu_uid`. `on_save: true` when the save itself removed them. |
 | `flag_mu` | `mu_uid`, `flagged` | `flagged: true` marks the MU for deletion. |
+| `remove_flagged` | `removed_count`, `removed_mu_uids`, `on_save` | Flagged MUs dropped when the file was saved. |
+| `reset_mu` | `mu_uid`, `spikes_added`?, `spikes_removed`?, `artifacts_removed`?, `flagged`? | The MU was reset to its loaded state; the fields record what the reset changed. |
+
+Undo removes the entries of the action it undoes, so the history always describes
+the saved data.
 
 All spike, artifact, and view coordinates are 0-based sample indices (same units
 as `discharge_times`).

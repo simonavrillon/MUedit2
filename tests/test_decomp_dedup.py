@@ -12,7 +12,7 @@ from muedit.decomp.algorithm import (
     DEDUP_MAXLAG_RATIO,
     rem_duplicates,
 )
-from muedit.decomp.postprocess import _remove_duplicates_by_grid
+from muedit.decomp.postprocess import remove_duplicates_by_grid
 from muedit.decomp.types import DecompositionParameters
 from muedit.signal.decomp_primitives import isi_cov
 
@@ -323,7 +323,7 @@ class TestRemDuplicatesCore:
         assert idx == [0], f"lowest-CoV representative not kept: {idx}"
 
 
-# ── 2. Within-grid deduplication via _remove_duplicates_by_grid ──────────────
+# ── 2. Within-grid deduplication via remove_duplicates_by_grid ──────────────
 
 
 class TestWithinGridDedup:
@@ -334,7 +334,7 @@ class TestWithinGridDedup:
     ) -> None:
         """The 5 duplicate groups (5 members each) collapse to exactly 5 survivors."""
         params = DecompositionParameters(duplicatesthresh=_DEDUP_TOL, duplicatesbgrids=False)
-        pulse_t, distime, gidx, _ = _remove_duplicates_by_grid(
+        pulse_t, distime, gidx, _ = remove_duplicates_by_grid(
             within_grid_dataset["pulse_t"],
             within_grid_dataset["distime"],
             within_grid_dataset["mu_grid_index"],
@@ -360,7 +360,7 @@ class TestWithinGridDedup:
         )
 
 
-# ── 3. Between-grid deduplication via _remove_duplicates_by_grid ─────────────
+# ── 3. Between-grid deduplication via remove_duplicates_by_grid ─────────────
 
 
 class TestBetweenGridDedup:
@@ -371,7 +371,7 @@ class TestBetweenGridDedup:
     ) -> None:
         """With ``duplicatesbgrids=False`` cross-grid duplicates are *not* removed."""
         params = DecompositionParameters(duplicatesthresh=_DEDUP_TOL, duplicatesbgrids=False)
-        _, distime, gidx, _ = _remove_duplicates_by_grid(
+        _, distime, gidx, _ = remove_duplicates_by_grid(
             between_grid_dataset["pulse_t"],
             between_grid_dataset["distime"],
             between_grid_dataset["mu_grid_index"],
@@ -392,7 +392,7 @@ class TestBetweenGridDedup:
     ) -> None:
         """With ``duplicatesbgrids=True`` the 4 cross-grid lagged copies collapse."""
         params = DecompositionParameters(duplicatesthresh=_DEDUP_TOL, duplicatesbgrids=True)
-        pulse_t, distime, gidx, _ = _remove_duplicates_by_grid(
+        pulse_t, distime, gidx, _ = remove_duplicates_by_grid(
             between_grid_dataset["pulse_t"],
             between_grid_dataset["distime"],
             between_grid_dataset["mu_grid_index"],

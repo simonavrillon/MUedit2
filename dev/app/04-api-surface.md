@@ -259,7 +259,7 @@ Request: {
   mu_grid_index: number[],
   parameters: object
 }
-Response: { kept_indices: number[], ... }
+Response: { kept_indices: number[] /* ascending */, distimes: number[][], removed_count: number }
 ```
 
 ### POST /edit/flag-mu
@@ -295,7 +295,7 @@ Request: {
   edit_signal_token: string,
   software_versions: object
 }
-Response: { mode: string, path: string }
+Response: { mode: string, path: string, keptIndices: number[], editHistory: object[] }
 ```
 
 ---

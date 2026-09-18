@@ -86,7 +86,7 @@
  * @property {(file: FileRef | null, data?: JsonObject) => void} applySessionInfoFromDecomposition
  * @property {() => void} renderBidsAutoInfo
  * @property {() => void} renderBidsMuscleFields
- * @property {(payload: JsonObject, fallbackName?: string) => Promise<{ mode: string, path: string }>} persistNpzBySaveTarget
+ * @property {(payload: JsonObject, fallbackName?: string) => Promise<{ mode: string, path: string, keptIndices?: number[], editHistory?: EditHistoryEntry[] }>} persistNpzBySaveTarget
  * @property {() => void} clearUploadFormatError
  * @property {() => void} showUnsupportedUploadFormatError
  * @property {(file: FileRef) => "raw" | "decomposition" | "ambiguous_mat" | "unsupported"} detectLandingFileType

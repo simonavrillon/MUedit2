@@ -51,7 +51,7 @@ The edit stage is the most complex section. This document lists every control bu
 | `editPeelOffToggle` | Peel-off: Off/On | `applyLabeledToggle(...)` | (no direct API) | Toggle that sets `use_peeloff` flag, read by `requestFilterUpdate` when "Update Filter" is clicked. |
 | `editLockSpikesToggle` | Lock: Off/On | `applyLabeledToggle(...)` | (no direct API) | Toggle that sets `lock_spikes` flag, read by `requestFilterUpdate` when "Update Filter" is clicked. |
 | `editUndoBtn` | Undo | `restoreEditBackup()` | (local, no API) | Restores the last backup (single-level undo). Disabled when `state.edit.backup === null`. |
-| `editResetBtn` | Reset | `resetCurrentMuEdits()` | (local, no API) | Restores current MU to its original loaded state (originalDistimes, originalPulseTrains). Clears artifacts and history for that MU. |
+| `editResetBtn` | Reset | `resetCurrentMuEdits()` | (local, no API) | Restores current MU to its original loaded state (originalDistimes, originalPulseTrains). Clears artifacts and logs a `reset_mu` entry. |
 | `editSaveBtn` | Save | `saveEditedFile()` | `POST /edit/save` | Saves the edited decomposition to a .npz file. Disabled until dirty. 120s timeout. |
 
 ### Button Busy State
@@ -149,8 +149,8 @@ All shortcuts fire only when `state.currentStage === "edit"` and focus is not in
 | `ensureEditFlagged` | `(state)` | Ensures `state.edit.flagged` array matches `distimes` length; fills with `false` if mismatched |
 | `getRawPulse` | `(state, muIdx)` | Returns `state.edit.pulseTrains[muIdx]` or `[]` |
 | `getDisplayPulse` | `(state, muIdx)` | Returns raw pulse, or all-zeros if MU is flagged for deletion |
-| `backupEditMu` | `(state)` | Snapshots current MU's `distimes`, `flagged`, `pulseTrain`, `artifactTimes` into `state.edit.backup` |
-| `restoreEditBackup` | `(deps)` | Restores the backup; pops last history entry for that MU; clears backup; clears selections; re-renders |
+| `backupEditMu` | `(state)` | Snapshots current MU's `distimes`, `flagged`, `pulseTrain`, `artifactTimes` and the history length into `state.edit.backup` |
+| `restoreEditBackup` | `(deps)` | Restores the backup; drops that MU's history entries logged since the backup; clears backup; clears selections; re-renders |
 | `recomputeEditDirty` | `(state)` | Compares `distimes` vs `originalDistimes` by JSON stringify; sets `state.edit.dirty` |
 | `getEditTotalSamples` | `(state)` | Returns `totalSamples` or `pulseTrains[0].length` |
 | `getPulseViewMeta` | `(state)` | Returns `{s, e, minVal, maxVal, span, slice}` for the current view window of the current MU's pulse |
@@ -162,8 +162,8 @@ All shortcuts fire only when `state.currentStage === "edit"` and focus is not in
 | `deleteSpikesInSelection` | `(deps, sel)` | Converts selection to value range, backs up MU, calls `requestRoiEdit("delete-spikes", {...})` with `artifact_times` |
 | `deleteDrInSelection` | `(deps, sel)` | Converts DR-canvas selection to a DR threshold; backs up MU; calls `requestRoiEdit("delete-dr", {...})` |
 | `computeInstantaneousDr` | `(spikes, fsamp, totalSamples)` | Pure: builds a series of length `totalSamples` with DR values at midpoints between consecutive spikes |
-| `duplicateMu` | `(deps)` | Appends a copy of the current MU with a new UID `g{gridIdx}_mu{n}`; switches to the new MU; appends history `duplicate_mu` |
-| `resetCurrentMuEdits` | `(deps)` | Restores current MU's `distimes`/`pulseTrain` from `originalDistimes`/`originalPulseTrains`; clears artifacts; clears history for that MU; clears backup |
+| `duplicateMu` | `(deps)` | Appends a copy of the current MU with a new UID `g{gridIdx}_mu{n}`, `n` above every uid the history has named; switches to the new MU; appends history `duplicate_mu` |
+| `resetCurrentMuEdits` | `(deps)` | Restores current MU's `distimes`/`pulseTrain` from `originalDistimes`/`originalPulseTrains`; clears artifacts; appends history `reset_mu` with the spikes/artifacts it changed; clears backup |
 
 ---
 
@@ -179,9 +179,9 @@ Each ROI-based edit sends a request to the backend and updates local state from 
 | `delete-dr` | `POST /edit/delete-dr` | `distimes, mu_index, pulse_train, fsamp, x_start, x_end, y_min` | `distimes` for current MU |
 | `update-filter` | `POST /edit/update-filter` | `project, edit_signal_token, file_label, grid_index, mu_index, distimes, mu_grid_index, pulse_train, view_start, view_end, use_peeloff, lock_spikes, flagged, artifact_times` | `distimes` + `pulseTrain` for current MU |
 | `remove-outliers` | `POST /edit/remove-outliers` | `distimes, mu_index, pulse_train, fsamp` | `distimes` for current MU |
-| `remove-duplicates` | `POST /edit/remove-duplicates` | `distimes, fsamp, total_samples, mu_grid_index, parameters` | Filters all parallel arrays by `kept_indices` |
+| `remove-duplicates` | `POST /edit/remove-duplicates` | `distimes, fsamp, total_samples, mu_grid_index, parameters` | `keepEditMus(kept_indices)` reorders all parallel arrays together, remaps current MU/bookmark, clears the undo backup |
 | `flag-mu` | `POST /edit/flag-mu` | `distimes, mu_index, flag` | `flagged` for current MU |
-| `save` | `POST /edit/save` | `distimes, flagged, pulse_trains, total_samples, fsamp, grid_names, mu_grid_index, mu_uids, parameters, muscle, edit_history, artifact_times, entity_label, file_label, edit_signal_token, software_versions` | Returns saved file path |
+| `save` | `POST /edit/save` | `distimes, flagged, pulse_trains, total_samples, fsamp, grid_names, mu_grid_index, mu_uids, parameters, muscle, edit_history, artifact_times, entity_label, file_label, edit_signal_token, software_versions` | Saved path, `kept_indices`, `edit_history`; the backend drops flagged and duplicate MUs, and the edit state adopts both so it mirrors the file |
 
 ---
 
@@ -209,7 +209,7 @@ Each ROI-based edit sends a request to the backend and updates local state from 
 
 - `backupEditMu()` snapshots the current MU's `distimes`, `flagged`, `pulseTrain`, `artifactTimes` into `state.edit.backup` **before** any mutating action.
 - `restoreEditBackup()` restores that snapshot, then:
-  - Calls `popLastEditHistoryEntryForMu(state, muUid)` to remove the corresponding history entry
+  - Calls `dropEditHistoryForMuSince(state, muUid, backup.historyLength)` to remove every entry the undone action logged (a delete can log both `delete_spikes` and `delete_artifact`; a no-op logs none)
   - Sets `state.edit.backup = null` (undo is one-shot)
   - Clears all selections
   - Recomputes dirty and re-renders
@@ -218,7 +218,7 @@ Each ROI-based edit sends a request to the backend and updates local state from 
 
 ### Per-MU Reset (broader than undo)
 
-- `resetCurrentMuEdits()` restores the current MU to its **original** loaded state (`originalDistimes`, `originalPulseTrains`), clears artifacts, clears the entire edit history for that MU, and clears the backup.
+- `resetCurrentMuEdits()` restores the current MU to its **original** loaded state (`originalDistimes`, `originalPulseTrains`), clears artifacts, logs a `reset_mu` entry, and clears the backup. Earlier entries are kept: after a reload they describe edits already in the baseline.
 
 ---
 
@@ -243,7 +243,7 @@ Each ROI-based edit sends a request to the backend and updates local state from 
 
 ### Entry Types
 
-`add_spikes`, `delete_spikes`, `delete_dr`, `add_artifact`, `delete_artifact`, `update_filter`, `remove_outliers`, `remove_duplicates`, `flag_mu`, `duplicate_mu`
+`add_spikes`, `delete_spikes`, `delete_dr`, `add_artifact`, `delete_artifact`, `update_filter`, `remove_outliers`, `remove_duplicates`, `flag_mu`, `duplicate_mu`, `reset_mu`; the backend appends `remove_flagged` and `remove_duplicates` with `on_save: true` when saving drops MUs
 
 History is **persisted to the saved file** (included in `editSave` payload as `edit_history`).
 
@@ -254,8 +254,7 @@ On **reload**, `loadDecompositionForEdit` reads `data.edit_history` and restores
 | Function | Description |
 |---|---|
 | `appendEditHistoryEntry(state, entry)` | Push a new entry |
-| `popLastEditHistoryEntryForMu(state, muUid)` | Find and splice the last entry for a MU (used by undo) |
-| `clearEditHistoryForMu(state, muUid)` | Filter out all entries for a MU (used by reset) |
+| `dropEditHistoryForMuSince(state, muUid, fromIndex)` | Remove a MU's entries at or after `fromIndex` (used by undo) |
 | `setEditHistory(state, history)` | Replace entire array (used by load) |
 
 ---

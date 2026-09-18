@@ -154,7 +154,7 @@ Use the **Grid** and **Motor Unit** dropdowns, or the keyboard shortcuts `<` (pr
 | Lock Spikes | `L` | Toggle spike-locking for filter updates — preserves your existing spikes when recomputing the filter (see below) |
 | Flag MU | — | Mark the current MU for deletion — it will be excluded when saving |
 | Duplicate MU | — | Create an identical copy of the current MU in the same grid (same pulse train and discharge times) — intended as a starting point for separating two merged units |
-| Remove Duplicates | — | Run duplicate detection across all grids immediately: pairs whose lag-corrected spike overlap exceeds the **Duplicates thresh** setting are deduplicated, keeping the unit with the lowest inter-spike interval variability |
+| Remove Duplicates | — | Run duplicate detection immediately, exactly as the decomposition does: within each grid and then across grids (unless the decomposition's parameters set `duplicatesbgrids` to false), pairs whose lag-corrected spike overlap exceeds the **Duplicates thresh** setting are deduplicated, keeping the unit with the lowest inter-spike interval variability |
 | Undo | — | Undo the last edit on the current MU |
 | Reset | — | Revert all edits on the current MU to the original decomposition values |
 | Save | — | Write the edited decomposition to disk |
@@ -195,7 +195,7 @@ The `.npz` contains the corrected pulse trains. The `.json` sidecar contains a f
 
 Each save also refreshes the **BIDS events file** (`<entity>_desc-decomposition_events.tsv`, with a companion `.json`): a standards-compliant representation of the motor-unit discharges, with one row per spike (onset, sample index, and unit ID). It is regenerated from the current edits every time you save, so it always reflects the latest corrected spike trains. Saving additionally upserts the subject row in `participants.tsv`; see [saved-files.md](saved-files.md) for the full file list.
 
-Flagged MUs are removed on save. Duplicate MUs are also removed on save: pairs whose lag-corrected spike overlap exceeds the **Duplicates thresh** setting (default 0.3) are considered duplicates, and only the one with the lowest inter-spike interval variability is kept. You can also trigger deduplication at any point during editing using the **Remove Duplicates** button.
+Flagged MUs are removed on save. Duplicate MUs are also removed on save, with the same rules as the decomposition (within each grid, then across grids unless `duplicatesbgrids` is false): pairs whose lag-corrected spike overlap exceeds the **Duplicates thresh** setting (default 0.3) are considered duplicates, and only the one with the lowest inter-spike interval variability is kept. An MU copied with **Duplicate MU** is therefore removed on save unless you have edited it enough to fall below the threshold. The edit history records every MU removed on save (`remove_flagged` and `remove_duplicates` entries with `on_save: true`), and the editor drops them too so it matches the saved file. You can also trigger deduplication at any point during editing using the **Remove Duplicates** button.
 
 ---
 
@@ -240,8 +240,10 @@ Additional history action types:
 |---|---|---|
 | `add_artifact` | `mu_uid`, `artifacts_added` | One or more peaks were marked as artifacts; `artifacts_added` lists the sample indices |
 | `duplicate_mu` | `mu_uid`, `source_mu_uid` | A new MU was created as a copy of `source_mu_uid` |
-| `remove_duplicates` | `removed_count`, `removed_mu_uids` | Deduplication was run; lists the UIDs that were removed |
+| `remove_duplicates` | `removed_count`, `removed_mu_uids`, `on_save`? | Deduplication was run; lists the UIDs that were removed. `on_save: true` when the save removed them |
 | `flag_mu` | `mu_uid`, `flagged` | A MU was flagged (`true`) or unflagged (`false`) for deletion |
+| `remove_flagged` | `removed_count`, `removed_mu_uids` | Flagged MUs were removed when the file was saved |
+| `reset_mu` | `mu_uid`, `spikes_added`, `spikes_removed`, `artifacts_removed` | **Reset** returned the MU to its loaded state; lists what the reset changed |
 
 ---
 

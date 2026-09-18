@@ -1,5 +1,4 @@
 import {
-  clearEditHistoryForMu,
   clearAllEditSelections,
   resetEditSlice,
   appendEditMu,
@@ -13,12 +12,13 @@ import {
   setEditFlaggedArray,
   setEditPulseTrainForMu,
   setEditTotalSamples,
-  popLastEditHistoryEntryForMu,
+  dropEditHistoryForMuSince,
 } from "../state/actions.js";
 import { muUidFor } from "../state/selectors.js";
 
 /** @typedef {import("../app/state.js").State} State */
 /** @typedef {import("../app/state.js").Selection} Selection */
+/** @typedef {import("../app/state.js").EditHistoryEntry} EditHistoryEntry */
 /** @typedef {ReturnType<typeof buildEditDropdownModel>} EditDropdownModel */
 /** @typedef {ReturnType<typeof getPulseViewMeta>} PulseViewMeta */
 
@@ -73,6 +73,7 @@ export function backupEditMu(state) {
       ? [...state.edit.pulseTrains[muIdx]]
       : null,
     artifactTimes: [...(state.edit.artifactTimes?.[muIdx] || [])],
+    historyLength: state.edit.editHistory?.length ?? 0,
   });
 }
 
@@ -101,7 +102,7 @@ export function restoreEditBackup(app) {
     setEditPulseTrainForMu(state, muIdx, backup.pulseTrain);
   }
   const muUid = muUidFor(state, muIdx);
-  popLastEditHistoryEntryForMu(state, muUid);
+  dropEditHistoryForMuSince(state, muUid, backup.historyLength);
   setEditBackup(state, null);
   clearAllEditSelections(state);
   recomputeEditDirty();
@@ -356,6 +357,37 @@ export function deleteDrInSelection(app, sel) {
 
 // --- MU mutations ---
 
+// Compare a motor unit's spike times before/after an edit. The added/removed
+// lists feed the edit-history log so individual edits can be reverted per MU.
+/**
+ * @param {number[]} before
+ * @param {number[]} after
+ */
+export function spikesDiff(before, after) {
+  const afterSet = new Set(after);
+  const beforeSet = new Set(before);
+  return {
+    added: after.filter((s) => !beforeSet.has(s)),
+    removed: before.filter((s) => !afterSet.has(s)),
+  };
+}
+
+// Every uid the edit log has ever named, so a new MU never reuses the uid of
+// one that was removed and inherits its history.
+/**
+ * @param {State} state
+ * @returns {Set<string>}
+ */
+function knownMuUids(state) {
+  const uids = new Set(state.edit.muUids || []);
+  for (const e of state.edit.editHistory || []) {
+    if (e.mu_uid) uids.add(e.mu_uid);
+    if (e.source_mu_uid) uids.add(e.source_mu_uid);
+    for (const uid of e.removed_mu_uids || []) uids.add(uid);
+  }
+  return uids;
+}
+
 // Compute instantaneous discharge rate series from spike times. Pure
 // signal-processing — no DOM, no state. Extracted from edit-canvas.js so
 // the view layer only renders, never computes domain data.
@@ -403,9 +435,8 @@ export function duplicateMu(app) {
 
   const gridIdx = state.edit.muGridIndex?.[muIdx] ?? 0;
 
-  const existingUids = state.edit.muUids || [];
   const prefix = `g${gridIdx}_mu`;
-  const existingCounts = existingUids
+  const existingCounts = [...knownMuUids(state)]
     .filter((uid) => uid.startsWith(prefix))
     .map((uid) => parseInt(uid.slice(prefix.length), 10))
     .filter((n) => Number.isFinite(n));
@@ -439,6 +470,12 @@ export function resetCurrentMuEdits(app) {
   const muIdx = state.edit.currentMu ?? 0;
   const baseline = state.edit.originalDistimes?.[muIdx];
   if (!baseline) return;
+  const { added, removed } = spikesDiff(
+    state.edit.distimes?.[muIdx] || [],
+    baseline,
+  );
+  const artifactsRemoved = [...(state.edit.artifactTimes?.[muIdx] || [])];
+  const wasFlagged = !!state.edit.flagged?.[muIdx];
   setEditDistimesForMu(state, muIdx, baseline);
   setEditArtifactTimesForMu(state, muIdx, []);
   if (state.edit.originalPulseTrains?.[muIdx]) {
@@ -446,8 +483,13 @@ export function resetCurrentMuEdits(app) {
   }
   ensureEditFlagged();
   setEditFlagForMu(state, muIdx, false);
-  const muUid = muUidFor(state, muIdx);
-  clearEditHistoryForMu(state, muUid);
+  /** @type {EditHistoryEntry} */
+  const entry = { type: "reset_mu", mu_uid: muUidFor(state, muIdx) };
+  if (added.length) entry.spikes_added = added;
+  if (removed.length) entry.spikes_removed = removed;
+  if (artifactsRemoved.length) entry.artifacts_removed = artifactsRemoved;
+  if (wasFlagged) entry.flagged = false;
+  app.appendEditHistory(entry);
   setEditBackup(state, null);
   clearAllEditSelections(state);
   recomputeEditDirty();

@@ -473,6 +473,130 @@ class TestEditRoutes:
         assert len(data["kept_indices"]) == 2
         assert 2 in data["kept_indices"]
 
+    def test_remove_duplicates_keeps_original_order(self, api_client: TestClient) -> None:
+        a = _spike_train(10.0, seed=3).tolist()
+        b = _spike_train(8.0, seed=4).tolist()
+        # An extra mid-ISI spike raises MU 0's CoV, so its duplicate MU 2 is kept instead.
+        noisy_a = sorted([*a, (a[5] + a[6]) // 2])
+        data = _post(
+            api_client,
+            "remove-duplicates",
+            {"distimes": [noisy_a, b, a], "fsamp": FSAMP, "total_samples": N_SAMPLES},
+        )
+        assert data["kept_indices"] == [1, 2]
+        assert data["distimes"] == [b, a]
+
+    @pytest.mark.parametrize(
+        "bgrids,kept",
+        [(None, [0, 1]), (False, [0, 1, 2]), (0, [0, 1, 2]), (True, [0, 1]), ([[1.0]], [0, 1])],
+    )
+    def test_remove_duplicates_across_grids_unless_disabled(
+        self, api_client: TestClient, bgrids: Any, kept: list[int]
+    ) -> None:
+        a = _spike_train(10.0, seed=3).tolist()
+        b = _spike_train(8.0, seed=4).tolist()
+        parameters = {} if bgrids is None else {"duplicatesbgrids": bgrids}
+        data = _post(
+            api_client,
+            "remove-duplicates",
+            {
+                "distimes": [a, b, a],
+                "mu_grid_index": [0, 0, 1],
+                "parameters": parameters,
+                "fsamp": FSAMP,
+                "total_samples": N_SAMPLES,
+            },
+        )
+        assert data["kept_indices"] == kept
+
+    @pytest.mark.parametrize("bgrids", [False, True])
+    def test_remove_duplicates_matches_decomposition(
+        self, api_client: TestClient, bgrids: bool
+    ) -> None:
+        from muedit.decomp.decomposition_file import build_pulse_trains_from_distimes
+        from muedit.decomp.postprocess import remove_duplicates_by_grid
+        from muedit.decomp.types import DecompositionParameters
+
+        a = _spike_train(10.0, seed=3).tolist()
+        b = _spike_train(8.0, seed=4).tolist()
+        c = _spike_train(12.0, seed=5).tolist()
+        noisy_a = sorted([*a, (a[5] + a[6]) // 2])
+        distimes = [a, b, noisy_a, c, a, b]
+        grids = [0, 0, 1, 1, 1, 2]
+        _, _, _, pipeline_kept = remove_duplicates_by_grid(
+            build_pulse_trains_from_distimes(distimes, N_SAMPLES),
+            [np.asarray(d) for d in distimes],
+            grids,
+            3,
+            DecompositionParameters(duplicatesbgrids=bgrids),
+            FSAMP,
+        )
+        data = _post(
+            api_client,
+            "remove-duplicates",
+            {
+                "distimes": distimes,
+                "mu_grid_index": grids,
+                "parameters": {"duplicatesbgrids": bgrids},
+                "fsamp": FSAMP,
+                "total_samples": N_SAMPLES,
+            },
+        )
+        assert data["kept_indices"] == sorted(pipeline_kept)
+
+    def test_save_logs_mus_removed_on_save(self, api_client: TestClient, tmp_path: Path) -> None:
+        import json
+
+        a = _spike_train(10.0, seed=3).tolist()
+        b = _spike_train(8.0, seed=4).tolist()
+        c = _spike_train(12.0, seed=5).tolist()
+        history = [{"type": "duplicate_mu", "mu_uid": "g0_mu3", "source_mu_uid": "g0_mu0"}]
+        data = _post(
+            api_client,
+            "save",
+            {
+                "distimes": [a, b, c, a],
+                "flagged": [False, True, False, False],
+                "mu_uids": ["g0_mu0", "g0_mu1", "g0_mu2", "g0_mu3"],
+                "mu_grid_index": [0, 0, 0, 0],
+                "edit_history": history,
+                "total_samples": N_SAMPLES,
+                "fsamp": FSAMP,
+                "entity_label": "sub-01_task-x",
+                "file_label": "sub-01_task-x_edited.npz",
+            },
+        )
+        assert data["kept_indices"] == [0, 2]
+        assert data["mu_uids"] == ["g0_mu0", "g0_mu2"]
+        removals = [
+            {k: e[k] for k in ("type", "on_save", "removed_mu_uids")}
+            for e in data["edit_history"][1:]
+        ]
+        assert removals == [
+            {"type": "remove_flagged", "on_save": True, "removed_mu_uids": ["g0_mu1"]},
+            {"type": "remove_duplicates", "on_save": True, "removed_mu_uids": ["g0_mu3"]},
+        ]
+        editlog = json.loads(Path(data["path"]).with_suffix(".json").read_text())
+        assert editlog["mu_uids"] == data["mu_uids"]
+        assert editlog["history"] == data["edit_history"]
+
+    def test_save_without_dedup_keeps_duplicates(self, api_client: TestClient) -> None:
+        a = _spike_train(10.0, seed=3).tolist()
+        data = _post(
+            api_client,
+            "save",
+            {
+                "distimes": [a, a],
+                "mu_uids": ["g0_mu0", "g0_mu1"],
+                "remove_duplicates": False,
+                "total_samples": N_SAMPLES,
+                "fsamp": FSAMP,
+                "entity_label": "sub-01_task-x",
+            },
+        )
+        assert data["kept_indices"] == [0, 1]
+        assert data["edit_history"] == []
+
     @pytest.mark.parametrize("flag,expected", [(None, True), (True, True), (False, False)])
     def test_flag_mu(self, api_client: TestClient, flag: bool | None, expected: bool) -> None:
         body = {"distimes": [[1]], "mu_index": 0}
