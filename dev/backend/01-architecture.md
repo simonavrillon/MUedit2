@@ -19,7 +19,7 @@
 
 ### Dependencies
 
-`numpy`, `scipy`, `matplotlib`, `xmltodict`, `pydantic`, `PyYAML`, `h5py`, `fastapi`, `uvicorn`, `python-multipart`, `pyedflib`
+`numpy`, `scipy`, `matplotlib`, `xmltodict`, `pydantic`, `PyYAML`, `h5py`, `fastapi`, `starlette`, `uvicorn`, `python-multipart`, `pyedflib`
 
 Extras: `dev` (`build`, `twine`, `pytest`, `pytest-cov`, `httpx`, `ruff`, `mypy`, `pre-commit`, `types-PyYAML`), `notebook` (`jupyterlab`, `ipykernel`), `research` (`optuna`). All versions are pinned in `uv.lock`.
 

@@ -242,8 +242,8 @@ Additional history action types:
 | `duplicate_mu` | `mu_uid`, `source_mu_uid` | A new MU was created as a copy of `source_mu_uid` |
 | `remove_duplicates` | `removed_count`, `removed_mu_uids`, `on_save`? | Deduplication was run; lists the UIDs that were removed. `on_save: true` when the save removed them |
 | `flag_mu` | `mu_uid`, `flagged` | A MU was flagged (`true`) or unflagged (`false`) for deletion |
-| `remove_flagged` | `removed_count`, `removed_mu_uids` | Flagged MUs were removed when the file was saved |
-| `reset_mu` | `mu_uid`, `spikes_added`, `spikes_removed`, `artifacts_removed` | **Reset** returned the MU to its loaded state; lists what the reset changed |
+| `remove_flagged` | `removed_count`, `removed_mu_uids`, `on_save` | Flagged MUs were removed when the file was saved |
+| `reset_mu` | `mu_uid`, `spikes_added`, `spikes_removed`, `artifacts_removed`, `flagged` | **Reset** returned the MU to its loaded state; lists what the reset changed (`flagged: false` if it cleared a flag) |
 
 ---
 

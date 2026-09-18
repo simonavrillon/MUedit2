@@ -122,7 +122,8 @@ Use this to trace what the user can reach.
 | `_normalize_flagged(raw, nmu)` | App-internal | Called by `save_edits` |
 | `_generate_mu_uids(mu_grid_index)` | App-internal | Called by `save_edits` |
 | `_normalize_mu_grid_index(raw, nmu)` | App-internal | Called by `save_edits` |
-| `_coerce_dup_tol(raw, default)` | App-internal | Called by `save_edits`/`remove_duplicates_service` |
+| `_coerce_dup_tol(raw, default)` | App-internal | Called by `_dedup` |
+| `_coerce_bool_param(raw)` | App-internal | Called by `_dedup` (`duplicatesbgrids`) |
 
 ### `schemas.py`
 
@@ -192,7 +193,8 @@ Use this to trace what the user can reach.
 | `select_roi_interactively()` | User-exposed | CLI `--manual-roi` (imports matplotlib lazily) |
 | `build_manual_artifact_mask()` | App-internal | Called by `preprocess_step`, editing service save |
 | `batch_process_filters()` | App-internal | Called by `postprocess_step` |
-| `rem_duplicates()` | App-internal | Called by `postprocess_step`, editing service |
+| `remove_duplicates_by_grid()` | App-internal | Called by `postprocess_step`, editing service `_dedup` |
+| `rem_duplicates()` | App-internal | Called by `remove_duplicates_by_grid` |
 | `compute_silhouette()` | App-internal | Called by `decompose_step` |
 | `extend_signal()` | App-internal | Called by `decompose_step`, `operations.py` |
 | `fixed_point_alg()` | App-internal | Called by `decompose_step` |

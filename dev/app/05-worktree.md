@@ -563,13 +563,14 @@ All functions are state mutators (`set*` functions). Each is called by at least 
 - `setGridSeries`, `setGridNames`, `setChannelMeans`, `setCoordinates`, `setChannelTraces`, `setChannelTraceForGrid`
 - `setQcWindowLoading`, `setQcWindowLoadingForGrid`
 - `setMetadata`, `setMuscle`, `setFsamp`, `setPreviewSeries`, `setAuxData`
-- `setDiscardMaskChannel`, `ensureDiscardMasks`
+- `setDiscardMaskChannel`, `setDiscardMasks`, `ensureDiscardMasks`
+- `setArtifactMode`, `setArtifactDraft`, `setArtifactRegions`, `addArtifactRegion`, `removeLastArtifactRegion`
 - `setParameters`, `setIsRunning`
 - `setMuPreviewData`, `setRunCurrentMuGrid`, `setRunCurrentMu`, `setRunView`
 - `setRunDownloadInFlight`, `setLastRunDownloadKey`
 - `setCurrentStage`, `setCurrentGrid`
 - `clearPreviewState`
-- Edit slice: `setEditMode`, `setEditCurrentMuGrid`, `setEditCurrentMu`, `setEditProject`, `setEditSignalToken`, `setEditView`, `setEditDistimesForMu`, `setEditArtifactTimesForMu`, `setEditPulseTrainForMu`, `setEditFlagForMu`, `clearEditPulseSelections`, `clearEditDrSelections`, `clearAllEditSelections`, `setEditFile`, `setEditFilename`, `setEditPulseTrains`, `setEditOriginalPulseTrains`, `setEditDistimes`, `setEditOriginalDistimes`, `setEditGridNames`, `setEditMuGridIndex`, `setEditFsamp`, `setEditParameters`, `setEditTotalSamples`, `setEditFlaggedArray`, `setEditMuUids`, `setEditHistory`, `setEditArtifactTimes`, `appendEditHistoryEntry`, `popLastEditHistoryEntryForMu`, `clearEditHistoryForMu`, `setEditBackup`, `setEditBookmark`, `setShowBookmark`, `setEditDirty`, `setEditPulseSelection`, `setEditPulseDraftSelection`, `setEditDrSelection`, `setEditDrDraftSelection`, `resetEditSlice`, `appendEditMu`, `setEditSoftwareVersions`
+- Edit slice: `setEditMode`, `setEditCurrentMuGrid`, `setEditCurrentMu`, `setEditProject`, `setEditSignalToken`, `setEditView`, `setEditDistimesForMu`, `setEditArtifactTimesForMu`, `setEditPulseTrainForMu`, `setEditFlagForMu`, `clearEditPulseSelections`, `clearEditDrSelections`, `clearAllEditSelections`, `setEditFile`, `setEditFilename`, `setEditPulseTrains`, `setEditOriginalPulseTrains`, `setEditDistimes`, `setEditOriginalDistimes`, `setEditGridNames`, `setEditMuGridIndex`, `setEditFsamp`, `setEditParameters`, `setEditTotalSamples`, `setEditFlaggedArray`, `setEditMuUids`, `setEditHistory`, `setEditArtifactTimes`, `appendEditHistoryEntry`, `dropEditHistoryForMuSince`, `setEditBackup`, `setEditBookmark`, `setShowBookmark`, `setEditDirty`, `setEditPulseSelection`, `setEditPulseDraftSelection`, `setEditDrSelection`, `setEditDrDraftSelection`, `resetEditSlice`, `appendEditMu`, `keepEditMus`, `setEditSoftwareVersions`
 
 ---
 

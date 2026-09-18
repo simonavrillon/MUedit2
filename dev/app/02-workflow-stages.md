@@ -331,7 +331,8 @@ Each edit: backupEditMu() -> API call -> setEditDistimesForMu -> recomputeEditDi
            appendEditHistory -> renderEditExplorer
   |
   v
-Save -> POST /edit/save -> setEditOriginalDistimes (dirty cleared)
+Save -> POST /edit/save -> setEditHistory + keepEditMus (mirror the saved file) ->
+        setEditOriginalDistimes (dirty cleared)
 ```
 
 ### Can Also Be Reached Directly

@@ -39,7 +39,7 @@ FilterUpdateResult: TypeAlias = tuple[np.ndarray | None, SpikeTimes]
 | Delete spikes | `/edit/delete-spikes` | spikes + artifacts | yes | `[y_min, y_max]` | `delete_spikes()` | `delete_spikes_in_roi()` + `delete_artifacts_in_roi()` |
 | Delete high DR | `/edit/delete-dr` | spikes | yes | rate > `y_min` | `delete_dr()` | `delete_high_discharge_rate_spikes_in_roi()` |
 | Remove outliers | `/edit/remove-outliers` | spikes | no | rate > mean + z*sigma | `remove_outliers()` | `remove_discharge_rate_outliers()` |
-| Remove duplicates | `/edit/remove-duplicates` | all MUs | no | lag overlap | `remove_duplicates_service()` | `_dedup()` -> `rem_duplicates()` |
+| Remove duplicates | `/edit/remove-duplicates` | all MUs | no | lag overlap | `remove_duplicates_service()` | `_dedup()` -> `remove_duplicates_by_grid()` |
 | Flag MU | `/edit/flag-mu` | metadata | no | — | `flag_mu()` | — |
 | Load decomposition | `/edit/load-by-path` | — | no | — | `load_decomposition_from_path()` | `load_decomposition_file()` |
 | Save edits | `/edit/save` | — | no | — | `save_edits()` | NPZ save + BIDS export |
@@ -243,21 +243,22 @@ Note: `z_factor` is hardcoded to `3.0` in the core function; the API does not ex
 
 ## 8. Remove Duplicates (`remove_duplicates_service`)
 
-Service-level operation that calls `rem_duplicates()` from `decomp/algorithm.py` with standard parameters.
+Service-level operation that runs the same duplicate removal as the decomposition pipeline, so interactive and save-time dedup match what `postprocess_step` produced.
 
 ```python
 # Service layer
 def remove_duplicates_service(payload: EditDeduplicatePayload) -> dict[str, Any]
 ```
-Builds pulse trains from distimes via `build_pulse_trains_from_distimes()`, then calls `_dedup()`:
+Calls `_dedup()`:
 
 ```python
-def _dedup(pulse_trains, distimes, dup_tol, fsamp) -> (pulse_trains, distimes, kept_indices)
+def _dedup(distimes, mu_grid_index, parameters, fsamp, total_samples) -> list[int]  # kept indices, ascending
 ```
-Which calls `rem_duplicates(pulse_t, distime, None, maxlag, jitter, tol, fsamp)` with:
-- `maxlag = fsamp / 40`
-- `jitter = 0.00025` seconds
-- `tol = dup_tol` (from `duplicatesthresh` parameter, default `0.3`)
+Which builds pulse trains via `build_pulse_trains_from_distimes()` and calls `remove_duplicates_by_grid()` from `decomp/postprocess.py` (within-grid, then cross-grid) with a `DecompositionParameters` carrying:
+- `duplicatesthresh` from `parameters` via `_coerce_dup_tol()` (default `0.3`)
+- `duplicatesbgrids` from `parameters` via `_coerce_bool_param()` (default `True`; accepts MATLAB 0/1, nested arrays, strings)
+
+`maxlag = fsamp / 40` and `jitter = 0.00025` s are applied inside `remove_duplicates_by_grid()`.
 
 Returns: `{kept_indices, distimes, removed_count}`
 
@@ -284,9 +285,9 @@ Full save pipeline:
 2. Normalize muscle names via `_normalize_muscle_names()`
 3. Normalize grid names via `_pad_grid_names()`
 4. Generate MU UIDs via `_generate_mu_uids()`
-5. Optional: remove flagged MUs if `remove_flagged=True`
-6. Optional: deduplicate if `remove_duplicates=True` via `_dedup()`
-7. Build pulse trains from distimes via `build_pulse_trains_from_distimes()`
+5. Remove flagged MUs unless `remove_flagged=False`; append a `remove_flagged` editlog entry (`on_save: true`) naming the dropped uids
+6. Deduplicate unless `remove_duplicates=False` via `_dedup()`; append a `remove_duplicates` entry (`on_save: true`) if any were dropped
+7. Build pulse trains from distimes via `build_pulse_trains_from_distimes()` when the payload's `pulse_trains` are missing or mis-shaped
 8. Build artifact mask from `payload.artifact_regions` via `build_manual_artifact_mask()`; fall back to cached signal context mask if no manual regions
 9. Save NPZ via `decomposition_file.save_decomposition_npz()` (includes `artifact_mask` extra) to BIDS derivatives layout
 10. Write editlog JSON via `save_editlog()` (mu_uids, edit_history, artifact_times)
@@ -294,7 +295,7 @@ Full save pipeline:
 12. Export BIDS MU derivatives via `export_bids_mu_derivatives()`
 13. Best-effort BIDS EMG export from MAT context via `_export_bids_from_mat_context()`
 
-Returns: `{saved: bool, path: str, bids_emg_paths?: dict, bids_deriv_paths?: dict}`
+Returns: `{saved: bool, path: str, kept_indices: list[int], mu_uids: list[str], edit_history: list[dict], bids_emg_paths?: dict, bids_deriv_paths?: dict}`. `kept_indices` indexes the payload's MUs in saved order; the frontend uses it and `edit_history` to mirror the saved file.
 
 ---
 

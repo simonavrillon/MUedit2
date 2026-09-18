@@ -31,7 +31,7 @@ Header `x-muedit-binary` (default `"1"`) controls binary vs JSON preview encodin
 | Method | Path | Accepts | Returns | Service |
 |---|---|---|---|---|
 | POST | `/edit/load-by-path` | JSON: `PathPayload`; header `x-muedit-binary` | JSON or Binary MELD (`x-muedit-format: edit-load-f32-v1`) | `load_decomposition_binary_from_path(path)` / `load_decomposition_from_path(path)` |
-| POST | `/edit/save` | JSON: `EditSavePayload` | JSON: `{saved, path, bids_emg_paths?, bids_deriv_paths?}` | `save_edits(payload)` |
+| POST | `/edit/save` | JSON: `EditSavePayload` | JSON: `{saved, path, kept_indices, mu_uids, edit_history, bids_emg_paths?, bids_deriv_paths?}` | `save_edits(payload)` |
 | POST | `/edit/update-filter` | JSON: `EditFilterPayload` | JSON: `{fsamp, distimes, pulse_train}` | `update_filter(payload)` |
 | POST | `/edit/add-spikes` | JSON: `EditRoiPayload` | JSON: `{distimes}` | `add_spikes(payload)` |
 | POST | `/edit/add-artifact` | JSON: `EditRoiPayload` | JSON: `{artifact_times}` | `add_artifact(payload)` |
