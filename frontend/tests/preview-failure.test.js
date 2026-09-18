@@ -17,8 +17,7 @@ globalThis.window = {
 console.error = () => {};
 
 const { state: initialState } = await import("../src/app/state.js");
-const { createQcStageService } = await import("../src/app/stages/qc-stage.js");
-const { runDecomposition } = await import("../src/decomp/run.js");
+const { createApp } = await import("../src/app/create-app.js");
 
 const pristine = structuredClone(initialState);
 
@@ -47,17 +46,19 @@ function recorder() {
   return fn;
 }
 
-function qcService(state, api) {
-  const deps = {
-    state,
-    els: {},
-    api,
+/**
+ * The real app context over stand-in elements, with the members these tests
+ * observe (or that would schedule DOM work) replaced by recorders.
+ */
+function testApp(state, api) {
+  const app = createApp({ state, els: {}, api });
+  Object.assign(app, {
     setStatus: recorder(),
     updateProgress: recorder(),
-    updateStartAvailability: recorder(),
-    setUploadLoading: recorder(),
-  };
-  return { service: createQcStageService(deps), deps };
+    switchStage: recorder(),
+    handleStreamMessage: recorder(),
+  });
+  return app;
 }
 
 describe("raw preview failure", () => {
@@ -73,8 +74,8 @@ describe("raw preview failure", () => {
   });
 
   test("rolls back to a no-file state", async () => {
-    const { service } = qcService(state, failingApi);
-    const ok = await service.handleRawFilePath("/data/new.mat", "new.mat");
+    const app = testApp(state, failingApi);
+    const ok = await app.handleRawFilePath("/data/new.mat", "new.mat");
 
     assert.equal(ok, false);
     assert.equal(state.file, null);
@@ -90,14 +91,14 @@ describe("raw preview failure", () => {
   });
 
   test("silent failure skips the status message", async () => {
-    const { service, deps } = qcService(state, failingApi);
-    const ok = await service.handleRawFilePath("/data/new.mat", "new.mat", {
+    const app = testApp(state, failingApi);
+    const ok = await app.handleRawFilePath("/data/new.mat", "new.mat", {
       silentPreviewFailure: true,
     });
 
     assert.equal(ok, false);
     assert.ok(
-      !deps.setStatus.calls.some(([text]) => text === "Preview failed"),
+      !app.setStatus.calls.some(([text]) => text === "Preview failed"),
       "no 'Preview failed' status for a silent attempt",
     );
     assert.equal(state.file, null);
@@ -106,21 +107,6 @@ describe("raw preview failure", () => {
 
 describe("decomposition upload-token recovery", () => {
   const streamBody = () => new Response('{"stage":"done","pct":100}\n').body;
-
-  function runDeps(state, api) {
-    return {
-      state,
-      api,
-      getBidsProject: () => "",
-      collectBidsEntities: () => ({}),
-      buildParams: () => ({ niter: 1 }),
-      updateStartAvailability: () => {},
-      switchStage: () => {},
-      setStatus: recorder(),
-      updateProgress: recorder(),
-      handleStreamMessageFn: recorder(),
-    };
-  }
 
   test("re-mints the token from the file path and retries once", async () => {
     const state = loadedState();
@@ -140,9 +126,9 @@ describe("decomposition upload-token recovery", () => {
       },
     };
     state.rois = [{ start: 0, end: 3 }];
-    const deps = runDeps(state, api);
+    const app = testApp(state, api);
 
-    await runDecomposition(deps);
+    await app.runDecomposition();
 
     assert.deepEqual(previewPaths, ["/data/old.otb+"]);
     assert.deepEqual(sentTokens, ["old-token", "fresh-token"]);
@@ -150,7 +136,7 @@ describe("decomposition upload-token recovery", () => {
     // User selections survive the reload.
     assert.deepEqual(state.rois, [{ start: 0, end: 3 }]);
     assert.deepEqual(state.discardMasks, [[0, 1]]);
-    assert.deepEqual(deps.handleStreamMessageFn.calls, [
+    assert.deepEqual(app.handleStreamMessage.calls, [
       [{ stage: "done", pct: 100 }],
     ]);
     assert.equal(state.isRunning, false);
@@ -168,12 +154,12 @@ describe("decomposition upload-token recovery", () => {
         previewCalls += 1;
       },
     };
-    const deps = runDeps(state, api);
+    const app = testApp(state, api);
 
-    await runDecomposition(deps);
+    await app.runDecomposition();
 
     assert.equal(previewCalls, 0);
-    assert.deepEqual(deps.setStatus.calls.at(-1), [
+    assert.deepEqual(app.setStatus.calls.at(-1), [
       "Error: HTTP 400: upload_token Token expired or missing",
       "error",
     ]);
@@ -192,12 +178,12 @@ describe("decomposition upload-token recovery", () => {
         throw new Error("should not be called");
       },
     };
-    const deps = runDeps(state, api);
+    const app = testApp(state, api);
 
-    await runDecomposition(deps);
+    await app.runDecomposition();
 
     assert.equal(streamCalls, 1);
-    assert.deepEqual(deps.setStatus.calls.at(-1), [
+    assert.deepEqual(app.setStatus.calls.at(-1), [
       "Error: HTTP 500: boom",
       "error",
     ]);

@@ -1,6 +1,6 @@
 # 02 - User Workflow Stages
 
-The app has four stages, presented as a linear workflow with a clickable stepper at the top of the workspace. Each stage is a CSS-toggled section; there is no formal enter/exit lifecycle.
+The app has four stages, presented as a linear workflow with a clickable stepper at the top of the workspace. Import is the landing screen; QC, Run and Edit are workspace sections whose entry guards, enter/exit hooks and redraws are declared in `app/stages/lifecycle.js` (see [01-architecture.md](01-architecture.md#stage-registration-and-lifecycle)).
 
 ```
   Import ───> QC / ROI ───> Decompose ───> Edit
@@ -76,7 +76,7 @@ beginRawPreviewTransition(state, file):
   - setChannelMeans, setCoordinates, setChannelTraces([])
   - setMetadata, setMuscle, setAuxData, setFsamp
   - setPreviewSeries, setRois
-  - setCurrentStage(state, "qc")
+  - switchStage("qc")   # runs the Edit exit hook if the user was editing
 ```
 
 ---
@@ -271,7 +271,7 @@ User clicks "Decompose Signal"
           - msg.pct?       -> updateProgress(pct, message, stage)
           - msg.message?   -> updateProgress(undefined, message, stage)
           - msg.preview?   -> applyPreviewData() [hydrates MU pulse trains]
-          - msg.summary?   -> setProgressText("Grid 1: N MU | Grid 2: M MU | Total: X MU")
+          - msg.summary?   -> progressText = "Grid 1: N MU | Grid 2: M MU | Total: X MU"
           - msg.stage=="error" -> setStatus(error)
           - msg.stage=="done"  -> autoSaveRunDecomposition()
      8. finally: setIsRunning(state, false)

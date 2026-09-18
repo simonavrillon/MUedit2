@@ -1,13 +1,46 @@
-export function createFileSessionService(deps) {
-  const { els } = deps;
+/**
+ * The session form: file-type detection, the upload indicator, and the BIDS
+ * entity, participant and hardware fields that travel with a run or a save.
+ * Every DOM read or write of those fields goes through here.
+ */
+import {
+  applyParticipantFields,
+  applySessionInfoToDom,
+  renderBidsAutoInfo as renderBidsAutoInfoView,
+  renderBidsMuscleFields as renderBidsMuscleFieldsView,
+} from "../../view/bids-renderer.js";
+import {
+  buildBidsAutoInfoModel,
+  buildBidsMuscleRowsModel,
+  buildEntityLabelFromSession,
+  buildSessionInfoFromDecomposition,
+  listifyMuscles,
+  parseBidsEntitiesFromLabel,
+} from "../../io/bids.js";
+import {
+  setEditProject,
+  setEditSoftwareVersions,
+  setFsamp,
+  setMuscle,
+} from "../../state/actions.js";
+
+/** @typedef {import("../context.js").App} App */
+
+/**
+ * @param {App} app
+ * @returns {import("../context.js").FileSessionService}
+ */
+export function createFileSessionService(app) {
+  const { els, state, api } = app;
 
   function getBidsProject() {
     return (els.bidsProject?.value || "").trim();
   }
 
   function getBidsMuscleNames() {
-    const inputs =
-      els.bidsMuscleContainer?.querySelectorAll(".bids-muscle-input");
+    const inputs = /** @type {NodeListOf<HTMLInputElement> | undefined} */ (
+      els.bidsMuscleContainer?.querySelectorAll(".bids-muscle-input")
+    );
     if (!inputs?.length) return [];
     return Array.from(inputs)
       .map((input) => String(input.value || "").trim())
@@ -130,12 +163,105 @@ export function createFileSessionService(deps) {
     return entities;
   }
 
+  function setBidsEntitiesInput(entities) {
+    if (els.bidsSubject && entities.subject)
+      els.bidsSubject.value = entities.subject;
+    if (els.bidsTask && entities.task) els.bidsTask.value = entities.task;
+    if (els.bidsSession && entities.session)
+      els.bidsSession.value = entities.session;
+    if (els.bidsAcquisition && entities.acq)
+      els.bidsAcquisition.value = entities.acq;
+    if (els.bidsRun && entities.run) els.bidsRun.value = entities.run;
+    if (els.bidsProject && entities.project) {
+      els.bidsProject.value = entities.project;
+      setEditProject(state, entities.project);
+    }
+  }
+
+  function applyPreviewMetadata(data) {
+    if (els.fsamp) {
+      const fs = Number(data.fsamp);
+      els.fsamp.value =
+        Number.isFinite(fs) && fs > 0 ? String(Math.round(fs)) : "";
+    }
+    applyParticipantFields(els, data?.participant_meta || {});
+    if (els.bidsManufacturer && data?.manufacturer)
+      els.bidsManufacturer.value = data.manufacturer;
+    if (els.bidsDeviceModel && data?.manufacturers_model_name)
+      els.bidsDeviceModel.value = data.manufacturers_model_name;
+  }
+
+  function applySessionInfoFromDecomposition(file, data = {}) {
+    const payload = buildSessionInfoFromDecomposition(file, data, {
+      parseBidsEntitiesFromLabel,
+      listifyMuscles,
+    });
+    applySessionInfoToDom(els, payload);
+    setMuscle(state, payload.muscles);
+    setEditSoftwareVersions(state, payload.bids?.softwareVersions ?? null);
+    setFsamp(state, payload.fsampText);
+  }
+
+  function renderBidsAutoInfo() {
+    const model = buildBidsAutoInfoModel(state);
+    renderBidsAutoInfoView(els, model);
+    // Pre-fill editable hardware fields from loader metadata when empty.
+    if (model && !model.hidden) {
+      if (
+        els.bidsManufacturer &&
+        !els.bidsManufacturer.value &&
+        model.manufacturer
+      )
+        els.bidsManufacturer.value = model.manufacturer;
+      if (els.bidsDeviceModel && !els.bidsDeviceModel.value && model.deviceName)
+        els.bidsDeviceModel.value = model.deviceName;
+      const meta = state.metadata || {};
+      if (
+        els.bidsPowerlineFreq &&
+        !els.bidsPowerlineFreq.value &&
+        meta.powerline_freq
+      )
+        els.bidsPowerlineFreq.value = String(meta.powerline_freq);
+    }
+  }
+
+  function renderBidsMuscleFields() {
+    renderBidsMuscleFieldsView(els, buildBidsMuscleRowsModel(state));
+  }
+
+  async function persistNpzBySaveTarget(payload, fallbackName) {
+    const { subject, task, session, run, acquisition } = getBidsEntityInputs();
+    const entityLabel =
+      buildEntityLabelFromSession({
+        subject,
+        task,
+        session,
+        run,
+        acq: acquisition,
+      }) || payload.entity_label;
+
+    const data = await api.editSave({
+      ...payload,
+      file_label: payload.file_label || fallbackName || "decomposition.npz",
+      entity_label: entityLabel,
+      ...getBidsSaveFields(),
+    });
+    app.setStatus("Saved", "success");
+    return { mode: "saved", path: data.path || "" };
+  }
+
   return {
     getBidsProject,
     getBidsMuscleNames,
     getBidsEntityInputs,
     getBidsSaveFields,
     collectBidsEntities,
+    setBidsEntitiesInput,
+    applyPreviewMetadata,
+    applySessionInfoFromDecomposition,
+    renderBidsAutoInfo,
+    renderBidsMuscleFields,
+    persistNpzBySaveTarget,
     clearUploadFormatError,
     showUnsupportedUploadFormatError,
     detectLandingFileType,

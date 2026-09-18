@@ -124,32 +124,29 @@ All elements are registered in `dom.js` as `els.*` properties.
 
 ---
 
-## Module: `app/container.js` (Composition Root)
+## Module: `app/container.js` (Entry)
 
 ### User-exposed: none (internal wiring)
-
-### App-internal functions
 
 | Function | [A/?] | Called By |
 |---|---|---|
 | `initializeApp` | [A] | app.js (entry) |
-| `wireEvents` | [A] | initializeApp |
-| `updateStartAvailability` | [A] | wireEvents, switchStage, handleRawFile |
-| `ensureDiscardMasks` | [A] | applyPreviewData, renderChannelQC |
-| `getCurrentGrid` | [A] | drawGridOverlay, renderChannelQC |
-| `buildParams` | [A] | runDecomposition |
-| `applySessionInfoFromDecomposition` | [A] | loadDecompositionForEdit |
-| `renderBidsAutoInfo` | [A] | requestPreview, loadDecompositionForEdit |
-| `renderBidsMuscleFields` | [A] | requestPreview, loadDecompositionForEdit |
-| `persistNpzBySaveTarget` | [A] | autoSaveRunDecomposition, saveEditedFile |
-| `setEditModeWithStatus` | [A] | keyboard nav (a/d/x keys) |
-| `refreshEditModeButtons` | [A] | setEditModeWithStatus, backupEditMu, loadDecompositionForEdit |
-| `handleKeyboardNavigation` | [A] | window keydown listener |
-| `nextFrame` | [A] | layout rerender |
-| `renderChannelQC` (forwarder) | [A] | ui.rerenderPlotsForLayout, scheduleLayoutRerender |
-| `refreshVisuals` (forwarder) | [A] | ui.rerenderPlotsForLayout, scheduleLayoutRerender |
-| `renderEditExplorer` (forwarder) | [A] | ui.rerenderPlotsForLayout, switchStage |
-| `setSelectedGrid` | [A] | populateGridTabs |
+
+---
+
+## Module: `app/create-app.js`
+
+| Function | [A/?] | Called By |
+|---|---|---|
+| `createApp` | [A] | initializeApp; tests/lifecycle.test.js |
+
+---
+
+## Module: `app/context.js`
+
+| Export | [A/?] | Used By |
+|---|---|---|
+| `App`, `Core`, `UiService`, `FileSessionService`, `QcStage`, `RunStage`, `EditStage`, `StageKey` typedefs | [?] | Every `@param {App} app`; enforced by `npm run typecheck`, not at runtime |
 
 ---
 
@@ -193,17 +190,26 @@ All elements are registered in `dom.js` as `els.*` properties.
 
 | Function | [A/?] | Called By |
 |---|---|---|
-| `setStatus` | [A] | ui.js, multiple stages |
-| `updateWorkflowStepper` | [A] | ui.js, switchStage |
-| `showWorkspace` | [A] | import-stage, qc-stage, editing-service |
-| `updateStepAvailability` | [A] | ui.js, switchStage |
-| `switchStage` | [A] | import-stage, run-stage, editing-service, import-stage stepper |
-| `populateGridTabs` | [A] | showWorkspace |
-| `getViewForStage` | [A] | navigation key handler |
-| `setViewForStage` | [A] | navigation key handler |
-| `adjustView` | [A] | keyboard nav |
-| `goToMu` | [A] | keyboard nav |
-| `handleKeyboardNavigation` | [A] | container.js |
+| `setStatus` | [A] | ui.js |
+| `updateWorkflowStepper` | [A] | ui.js |
+| `showWorkspace` | [A] | ui.js |
+| `updateStepAvailability` | [A] | ui.js |
+| `populateGridTabs` | [A] | ui.js |
+| `getViewForStage` | [A] | handleKeyboardNavigation |
+| `setViewForStage` | [A] | handleKeyboardNavigation |
+| `adjustView` | [A] | handleKeyboardNavigation |
+| `goToMu` | [A] | handleKeyboardNavigation (`<` / `>`) |
+| `handleKeyboardNavigation` | [A] | setupEditEvents (window keydown) |
+
+---
+
+## Module: `app/stages/lifecycle.js`
+
+| Export | [A/?] | Called By |
+|---|---|---|
+| `STAGES` | [A] | switchStage, renderActiveStage |
+| `switchStage` | [A] | ui.js (`app.switchStage`: stepper, showWorkspace, requestPreview, runDecomposition, loadDecompositionForEdit) |
+| `renderActiveStage` | [A] | scheduleLayoutRerender |
 
 ---
 
@@ -211,28 +217,27 @@ All elements are registered in `dom.js` as `els.*` properties.
 
 | Function | [A/?] | Called By |
 |---|---|---|
-| `setStatus` | [A] | all stages (via wrapper) |
+| `setStatus` | [A] | all stages |
 | `setEditStatus` | [A] | editing-service, edit-stage |
-| `setRunPhase` | [A] | updateProgress |
-| `updateProgress` | [A] | run-stage handleStreamMessage |
+| `setRunPhase` (private) | [A] | updateProgress |
+| `updateProgress` | [A] | run.js handleStreamMessage, qc.js |
 | `updateWorkflowStepper` | [A] | switchStage, import-stage |
-| `updateStepAvailability` | [A] | switchStage, wireEvents |
-| `setSettingsOpen` | [A] | layout-stage, settingsOverlay click |
-| `toggleSettingsOpen` | [A] | layout-stage settingsToggleBtn |
-| `ensureSettingsToggleIcon` | [A] | wireEvents |
-| `initLayoutResizePolicy` | [A] | layout-stage |
+| `updateStepAvailability` | [A] | switchStage, initializeApp |
+| `setSettingsOpen` | [A] | switchStage, showWorkspace, setupLayoutEvents |
+| `toggleSettingsOpen` | [A] | setupLayoutEvents (settingsToggleBtn) |
+| `ensureSettingsToggleIcon` | [A] | setupLayoutEvents |
+| `initLayoutResizePolicy` | [A] | setupLayoutEvents |
 | `scheduleLayoutRerender` | [A] | switchStage, setSettingsOpen, resize |
-| `showWorkspace` | [A] | import/qc/edit stages |
-| `switchStage` | [A] | import/run/edit stages |
-| `populateGridTabs` | [A] | showWorkspace |
+| `showWorkspace` | [A] | qc.js, run.js, editing-service, import-stage stepper |
+| `switchStage` | [A] | see `lifecycle.js` |
+| `populateGridTabs` | [A] | showWorkspace, requestPreview |
 | `setupToggle` | [A] | run-stage setup |
 | `setupLockedOnToggle` | [A] | run-stage setup (SIL) |
 | `toggleConditional` | [A] | run-stage setup |
-| `isToggleOn` | [A] | run-stage, edit-stage |
-| `runEditAction` | [A] | edit-stage setup (all mutating buttons) |
-| `applyLabeledToggle` | [A] | edit-stage setup (peeloff, lock) |
-| `setEditActionBusy` | [A] | runEditAction |
-| `rerenderPlotsForLayout` | [A] | scheduleLayoutRerender |
+| `isToggleOn` | [A] | run-stage buildParams |
+| `runEditAction` | [A] | edit-stage setup (all mutating buttons), keyboard nav |
+| `applyLabeledToggle` | [A] | edit-stage setup (peeloff, lock), keyboard nav |
+| `setEditActionBusy` | [A] | runEditAction, refreshEditModeButtons |
 
 ---
 
@@ -243,7 +248,6 @@ All elements are registered in `dom.js` as `els.*` properties.
 | `setSettingsOpen` | [A] | ui.js |
 | `toggleSettingsOpen` | [A] | ui.js |
 | `ensureSettingsToggleIcon` | [A] | ui.js |
-| `rerenderPlotsForLayout` | [A] | ui.js |
 | `scheduleLayoutRerender` | [A] | ui.js |
 | `initLayoutResizePolicy` | [A] | ui.js |
 
@@ -253,15 +257,21 @@ All elements are registered in `dom.js` as `els.*` properties.
 
 | Function | [A/?] | Called By |
 |---|---|---|
-| `getBidsProject` | [A] | runDecomposition (FormData), persistNpzBySaveTarget |
-| `getBidsMuscleNames` | [A] | autoSaveRunDecomposition, persistNpzBySaveTarget |
+| `getBidsProject` | [A] | runDecomposition (FormData), getBidsSaveFields |
+| `getBidsMuscleNames` | [A] | autoSaveRunDecomposition, saveEditedFile, collectBidsEntities |
 | `clearUploadFormatError` | [A] | import-stage |
 | `showUnsupportedUploadFormatError` | [A] | import-stage |
 | `detectLandingFileType` | [A] | import-stage |
-| `setUploadLoading` | [A] | qc-stage (requestPreview) |
-| `getBidsEntityInputs` | [A] | collectBidsEntities |
+| `setUploadLoading` | [A] | import-stage, qc.js requestPreview, loadDecompositionForEdit |
+| `getBidsEntityInputs` | [A] | persistNpzBySaveTarget |
 | `getBidsSaveFields` | [A] | persistNpzBySaveTarget |
 | `collectBidsEntities` | [A] | runDecomposition (FormData) |
+| `setBidsEntitiesInput` | [A] | import-stage (BDF/EDF entity label) |
+| `applyPreviewMetadata` | [A] | qc.js requestPreview |
+| `applySessionInfoFromDecomposition` | [A] | loadDecompositionForEdit |
+| `renderBidsAutoInfo` | [A] | qc.js requestPreview, run.js applyPreviewData |
+| `renderBidsMuscleFields` | [A] | qc.js requestPreview, run.js applyPreviewData, loadDecompositionForEdit |
+| `persistNpzBySaveTarget` | [A] | autoSaveRunDecomposition, saveEditedFile |
 
 ---
 
@@ -294,11 +304,10 @@ All elements are registered in `dom.js` as `els.*` properties.
 
 | Function | [A/?] | Called By |
 |---|---|---|
-| `createImportStageService` | [A] | container.js |
-| `handleNativeDialogOpen` | [A] | setupImportEvents (browseSignalBtn click) |
+| `handleNativeDialogOpen` (private) | [A] | setupImportEvents (browseSignalBtn click) |
 | `displayNameForPath` | [A] | handleNativeDialogOpen |
 | `inferProjectFromPath` | [A] | handleNativeDialogOpen |
-| `setupImportEvents` | [A] | wireEvents |
+| `setupImportEvents` | [A] | initializeApp |
 
 ---
 
@@ -306,19 +315,20 @@ All elements are registered in `dom.js` as `els.*` properties.
 
 | Function | [A/?] | Called By |
 |---|---|---|
-| `createQcStageService` | [A] | container.js |
+| `createQcStageService` | [A] | createApp |
 | `populateAuxSelector` | [A] | requestPreview, applyPreviewData |
 | `renderAuxiliaryChannels` | [A] | refreshVisuals, setupRunEvents, applyPreviewData |
 | `requestQcGridWindow` | [A] | renderChannelQC, enableRoiSelection, handleStreamMessage |
 | `requestPreview` | [A] | handleRawFilePath |
 | `handleRawFilePath` | [A] | import-stage (handleNativeDialogOpen) |
-| `renderChannelQC` | [A] | ui.rerenderPlotsForLayout, requestPreview, handleStreamMessage |
+| `renderChannelQC` | [A] | QC stage render, requestPreview, handleStreamMessage |
 | `enableRoiSelection` | [A] | requestPreview, applyPreviewData, setupRunEvents |
-| `refreshVisuals` | [A] | ui.rerenderPlotsForLayout, scheduleLayoutRerender |
+| `refreshVisuals` | [A] | QC stage render, ROI drags, auto-QC |
 | `syncRois` | [A] | setupRunEvents (nwindows change) |
 | `runAutoQc` | [A] | setupRunEvents (qcAutoBtn click) |
 | `toggleArtifactMode` | [A] | setupRunEvents (artifactAddBtn click) |
 | `removeLastArtifact` | [A] | setupRunEvents (artifactRemoveBtn click) |
+| `setSelectedGrid` | [A] | populateGridTabs (grid tab click) |
 
 ---
 
@@ -326,14 +336,16 @@ All elements are registered in `dom.js` as `els.*` properties.
 
 | Function | [A/?] | Called By |
 |---|---|---|
-| `createRunStageService` | [A] | container.js |
+| `createRunStageService` | [A] | createApp |
 | `getMuIndicesForGrid` | [A] | renderMuDropdowns |
 | `renderMuDropdowns` | [A] | renderMuExplorer |
 | `renderMuExplorer` | [A] | refreshVisuals, handleStreamMessage, setupRunEvents |
 | `autoSaveRunDecomposition` | [A] | handleStreamMessage (on done) |
 | `handleStreamMessage` | [A] | runDecomposition (stream loop) |
 | `runDecomposition` | [A] | setupRunEvents (startBtn click) |
-| `setupRunEvents` | [A] | wireEvents |
+| `updateStartAvailability` | [A] | handleRawFilePath, runDecomposition, setupRunEvents |
+| `buildParams` | [A] | runDecomposition |
+| `setupRunEvents` | [A] | initializeApp |
 
 ---
 
@@ -341,7 +353,9 @@ All elements are registered in `dom.js` as `els.*` properties.
 
 | Function | [A/?] | Called By |
 |---|---|---|
-| `createEditStageService` | [A] | container.js |
+| `createEditStageService` | [A] | createApp |
+| `refreshEditModeButtons` | [A] | setEditMode, backupEditMu, resetEditState |
+| `setEditMode` | [A] | edit toolbar, keyboard nav (a/d/x), Edit stage exit |
 | `ensureEditFlagged` | [A] | requestRoiEdit, loadDecompositionForEdit |
 | `getRawPulse` | [A] | renderEditExplorer |
 | `getDisplayPulse` | [A] | renderEditExplorer |
@@ -355,7 +369,7 @@ All elements are registered in `dom.js` as `els.*` properties.
 | `getEditMuIndices` | [A] | renderEditDropdowns |
 | `renderEditDropdowns` | [A] | renderEditExplorer |
 | `renderInstantaneousDr` | [A] | renderEditExplorer |
-| `renderEditExplorer` | [A] | ui.rerenderPlotsForLayout, switchStage, all mutating ops |
+| `renderEditExplorer` | [A] | Edit stage render, all mutating ops |
 | `restoreEditBackup` | [A] | setupEditEvents (undo button) |
 | `requestRoiEdit` | [A] | operations.js |
 | `requestFilterUpdate` | [A] | updateMuFilter |
@@ -375,7 +389,7 @@ All elements are registered in `dom.js` as `els.*` properties.
 | `saveEditedFile` | [A] | setupEditEvents (save button) |
 | `loadDecompositionForEdit` | [A] | import-stage, autoSaveRunDecomposition |
 | `loadDecompositionForEditByPath` | [A] | import-stage |
-| `setupEditEvents` | [A] | wireEvents |
+| `setupEditEvents` | [A] | initializeApp |
 
 ---
 
@@ -383,12 +397,7 @@ All elements are registered in `dom.js` as `els.*` properties.
 
 | Function | [A/?] | Called By |
 |---|---|---|
-| `createLayoutStageService` | [A] | container.js |
-| `ensureSettingsToggleIcon` | [A] | wireEvents |
-| `toggleSettingsOpen` | [A] | setupLayoutEvents |
-| `setSettingsOpen` | [A] | setupLayoutEvents |
-| `initLayoutResizePolicy` | [A] | setupLayoutEvents |
-| `setupLayoutEvents` | [A] | wireEvents |
+| `setupLayoutEvents` | [A] | initializeApp |
 
 ---
 
@@ -396,7 +405,7 @@ All elements are registered in `dom.js` as `els.*` properties.
 
 | Function | [A/?] | Called By |
 |---|---|---|
-| `createApiClient` | [A] | container.js |
+| `createApiClient` | [A] | initializeApp |
 | `postJson` (internal) | [A] | editAction, editMode, etc. |
 | `fetchQcWindow` | [A] | qc-stage.requestQcGridWindow |
 | `fetchPreviewByPath` | [A] | qc-stage.requestPreview, decomp/run.js (token re-mint on expiry) |
@@ -464,7 +473,7 @@ All elements are registered in `dom.js` as `els.*` properties.
 | Export | [A/?] | Called By |
 |---|---|---|
 | `postprocessFlags` | [A] | buildDecomposeParams |
-| `buildDecomposeParams` | [A] | container.js.buildParams |
+| `buildDecomposeParams` | [A] | run-stage buildParams |
 | `POSTPROCESS_MODES` | [A] | run-stage setup |
 | `DEFAULT_POSTPROCESS_MODE` | [A] | run-stage setup |
 
@@ -568,7 +577,7 @@ All functions are state mutators (`set*` functions). Each is called by at least 
 
 | Function | [A/?] | Called By |
 |---|---|---|
-| `getCurrentGrid` | [A] | container.js, qc-renderer |
+| `getCurrentGrid` | [A] | qc.js, run.js, qc-renderer |
 | `roiStart` | [A] | qc-renderer, plots, qc.js |
 | `roiEnd` | [A] | qc-renderer, plots, qc.js |
 | `muUidFor` | [A] | editing-service, operations.js |
@@ -594,8 +603,8 @@ All functions are state mutators (`set*` functions). Each is called by at least 
 | `makeInfoItem` | [A] | renderBidsAutoInfo |
 | `resetBidsEntityDefaults` | [A] | qc-stage.handleRawFile, handleRawFilePath |
 | `applyParticipantFields` | [A] | applySessionInfoToDom |
-| `renderBidsAutoInfo` | [A] | container.js.renderBidsAutoInfo |
-| `renderBidsMuscleFields` | [A] | container.js.renderBidsMuscleFields |
+| `renderBidsAutoInfo` | [A] | file-session renderBidsAutoInfo |
+| `renderBidsMuscleFields` | [A] | file-session renderBidsMuscleFields |
 | `applySessionInfoToDom` | [A] | applySessionInfoFromDecomposition |
 
 ---
@@ -630,6 +639,7 @@ All functions are state mutators (`set*` functions). Each is called by at least 
 
 | Function | [A/?] | Called By |
 |---|---|---|
+| `nextFrame` | [A] | qc.js requestPreview, qc-renderer renderChannelQC |
 | `getAxisPadding` (private) | [A] | getCanvasPlotMetrics |
 | `getCanvasPlotMetrics` | [A] | drawSeries, drawGridOverlay, edit-canvas, qc-renderer |
 | `drawSelectionRect` (private) | [A] | drawSeries |
@@ -668,14 +678,6 @@ All functions are state mutators (`set*` functions). Each is called by at least 
 | `COLORS` | [A] | plots.js, edit-canvas.js, qc-renderer.js |
 | `GRID_COLORS` | [A] | state.js (gridColors), plots.js |
 | `UNIFORM_PULSE_COLOR` | [A] | edit-canvas.js |
-
----
-
-## Module: `app/deps.js`
-
-| Export | [A/?] | Used By |
-|---|---|---|
-| JSDoc typedefs | [?] | Documentation only — not enforced at runtime |
 
 ---
 

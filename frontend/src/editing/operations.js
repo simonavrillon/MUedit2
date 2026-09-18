@@ -17,6 +17,8 @@ import {
 } from "../state/actions.js";
 import { muUidFor } from "../state/selectors.js";
 
+/** @typedef {import("../app/context.js").App} App */
+
 // --- State helpers ---
 
 export function ensureEditFlagged(state) {
@@ -53,14 +55,15 @@ export function backupEditMu(state) {
   });
 }
 
-export function restoreEditBackup(deps) {
+/** @param {App} app */
+export function restoreEditBackup(app) {
   const {
     state,
     setEditStatus,
     renderEditExplorer,
     recomputeEditDirty,
     ensureEditFlagged,
-  } = deps;
+  } = app;
 
   const backup = state.edit.backup;
   if (!backup) {
@@ -148,15 +151,17 @@ export function buildEditDropdownModel(state, getEditMuIndices) {
   };
 }
 
-export function resetEditState(deps) {
-  const { state, refreshEditModeButtons } = deps;
+/** @param {App} app */
+export function resetEditState(app) {
+  const { state, refreshEditModeButtons } = app;
   resetEditSlice(state);
   refreshEditModeButtons();
 }
 
 // --- Selection coordinators (bridge canvas coordinates → API actions) ---
 
-export function addSpikesInSelection(deps, sel) {
+/** @param {App} app */
+export function addSpikesInSelection(app, sel) {
   const {
     state,
     getRawPulse,
@@ -164,7 +169,7 @@ export function addSpikesInSelection(deps, sel) {
     getPulseViewMeta,
     getPulsePlotHeight,
     requestRoiEdit,
-  } = deps;
+  } = app;
 
   const muIdx = state.edit.currentMu ?? 0;
   const pulse = getRawPulse(muIdx);
@@ -189,7 +194,8 @@ export function addSpikesInSelection(deps, sel) {
   });
 }
 
-export function addArtifactInSelection(deps, sel) {
+/** @param {App} app */
+export function addArtifactInSelection(app, sel) {
   const {
     state,
     getRawPulse,
@@ -197,7 +203,7 @@ export function addArtifactInSelection(deps, sel) {
     getPulseViewMeta,
     getPulsePlotHeight,
     requestRoiEdit,
-  } = deps;
+  } = app;
 
   const muIdx = state.edit.currentMu ?? 0;
   const pulse = getRawPulse(muIdx);
@@ -222,7 +228,8 @@ export function addArtifactInSelection(deps, sel) {
   });
 }
 
-export function deleteSpikesInSelection(deps, sel) {
+/** @param {App} app */
+export function deleteSpikesInSelection(app, sel) {
   const {
     state,
     getRawPulse,
@@ -230,7 +237,7 @@ export function deleteSpikesInSelection(deps, sel) {
     getPulseViewMeta,
     getPulsePlotHeight,
     requestRoiEdit,
-  } = deps;
+  } = app;
 
   const muIdx = state.edit.currentMu ?? 0;
   const pulse = getRawPulse(muIdx);
@@ -258,9 +265,10 @@ export function deleteSpikesInSelection(deps, sel) {
   });
 }
 
-export function deleteDrInSelection(deps, sel) {
+/** @param {App} app */
+export function deleteDrInSelection(app, sel) {
   const { state, backupEditMu, getDrPlotHeight, getRawPulse, requestRoiEdit } =
-    deps;
+    app;
 
   const muIdx = state.edit.currentMu ?? 0;
   const spikes = state.edit.distimes?.[muIdx] || [];
@@ -315,14 +323,15 @@ export function computeInstantaneousDr(spikes, fsamp, totalSamples) {
   return { series, markers, markerVals };
 }
 
-export function duplicateMu(deps) {
+/** @param {App} app */
+export function duplicateMu(app) {
   const {
     state,
     setEditStatus,
     ensureEditFlagged,
     recomputeEditDirty,
     renderEditExplorer,
-  } = deps;
+  } = app;
 
   const muIdx = state.edit.currentMu ?? 0;
   const pulse = state.edit.pulseTrains?.[muIdx];
@@ -348,14 +357,12 @@ export function duplicateMu(deps) {
   appendEditMu(state, { distimes, pulseTrain: pulse, gridIdx, uid: newUid });
   ensureEditFlagged();
 
-  if (deps.appendEditHistory) {
-    const sourceUid = muUidFor(state, muIdx);
-    deps.appendEditHistory({
-      type: "duplicate_mu",
-      mu_uid: newUid,
-      source_mu_uid: sourceUid,
-    });
-  }
+  const sourceUid = muUidFor(state, muIdx);
+  app.appendEditHistory({
+    type: "duplicate_mu",
+    mu_uid: newUid,
+    source_mu_uid: sourceUid,
+  });
 
   setEditCurrentMuGrid(state, gridIdx, { resetView: false });
   setEditCurrentMu(state, newIdx, { resetView: false });
@@ -364,9 +371,10 @@ export function duplicateMu(deps) {
   setEditStatus(`MU duplicated — now editing MU ${newIdx + 1}`, "success");
 }
 
-export function resetCurrentMuEdits(deps) {
+/** @param {App} app */
+export function resetCurrentMuEdits(app) {
   const { state, ensureEditFlagged, recomputeEditDirty, renderEditExplorer } =
-    deps;
+    app;
 
   const muIdx = state.edit.currentMu ?? 0;
   const baseline = state.edit.originalDistimes?.[muIdx];

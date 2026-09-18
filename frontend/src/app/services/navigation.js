@@ -1,10 +1,12 @@
 import {
-  setCurrentStage,
   setEditCurrentMu,
   setEditView,
   setRunCurrentMu,
   setRunView,
+  setShowBookmark,
 } from "../../state/actions.js";
+
+/** @typedef {import("../context.js").App} App */
 
 export function setStatus(els, text, tone = "muted") {
   if (!els.status) return;
@@ -13,8 +15,9 @@ export function setStatus(els, text, tone = "muted") {
   els.status.dataset.tone = tone;
 }
 
-export function updateWorkflowStepper(deps, targetStage) {
-  const { els, state } = deps;
+/** @param {App} app @param {string} targetStage */
+export function updateWorkflowStepper(app, targetStage) {
+  const { els, state } = app;
   const steps = [
     { key: "import", el: els.stepImport, complete: !!state.file },
     { key: "qc", el: els.stepQc, complete: !!state.previewSeries?.length },
@@ -41,18 +44,20 @@ export function updateWorkflowStepper(deps, targetStage) {
   });
 }
 
-export function showWorkspace(deps, options = {}) {
-  const { els, state, setSettingsOpen, switchStage, populateGridTabs } = deps;
+/** @param {App} app */
+export function showWorkspace(app, options = {}) {
+  const { els, state } = app;
   const { keepLandingVisible = false } = options;
   if (els.landing && !keepLandingVisible) els.landing.classList.add("hidden");
   if (els.workspace) els.workspace.classList.remove("hidden");
-  setSettingsOpen(false);
-  switchStage(state.currentStage || "qc");
-  populateGridTabs();
+  app.setSettingsOpen(false);
+  app.switchStage(state.currentStage || "qc");
+  app.populateGridTabs();
 }
 
-export function updateStepAvailability(deps) {
-  const { els, state } = deps;
+/** @param {App} app */
+export function updateStepAvailability(app) {
+  const { els, state } = app;
   const hasFile = !!state.file;
   const hasPreview = !!state.previewSeries?.length;
   const hasRunResults = !!state.muDistimes?.length;
@@ -68,48 +73,16 @@ export function updateStepAvailability(deps) {
   }
 }
 
-export function switchStage(deps, target) {
-  const {
-    state,
-    els,
-    setSettingsOpen,
-    setStatus,
-    updateStepAvailability,
-    updateWorkflowStepper,
-    scheduleLayoutRerender,
-  } = deps;
-  if (!state.file && target !== "edit") {
-    return;
-  }
-  setSettingsOpen(false);
-  if (target === "run" && !state.previewSeries?.length) {
-    setStatus("Run step is locked until preview is loaded", "muted");
-    return;
-  }
-  if (target === "edit" && !state.edit.distimes?.length) {
-    setStatus("Load a decomposition file to edit", "muted");
-  }
-  setCurrentStage(state, target);
-  const qcStage = els.stageQc;
-  const runStage = els.stageRun;
-  const editStage = els.stageEdit;
-  if (qcStage) qcStage.classList.toggle("active", target === "qc");
-  if (runStage) runStage.classList.toggle("active", target === "run");
-  if (editStage) editStage.classList.toggle("active", target === "edit");
-  updateStepAvailability();
-  updateWorkflowStepper(target);
-  scheduleLayoutRerender(0);
-}
-
-export function populateGridTabs(deps) {
-  const { els, state, setSelectedGrid } = deps;
+/** @param {App} app */
+export function populateGridTabs(app) {
+  const { els, state } = app;
   if (!els.qcGridTabs) return;
   els.qcGridTabs.innerHTML = "";
   (state.gridNames || []).forEach((name, idx) => {
     const btn = document.createElement("button");
     btn.className = `tab-btn ${idx === state.currentGrid ? "active" : ""}`;
     btn.textContent = `Grid ${idx + 1}${name ? ` • ${name}` : ""}`;
-    btn.onclick = () => setSelectedGrid(idx);
+    btn.onclick = () => app.setSelectedGrid(idx);
     els.qcGridTabs.appendChild(btn);
   });
 }
@@ -132,16 +105,17 @@ export function getViewForStage(state, stage) {
   return { view: null, total: 0 };
 }
 
-export function setViewForStage(deps, stage, view) {
-  const { state, renderEditExplorer, renderMuExplorer } = deps;
+/** @param {App} app */
+export function setViewForStage(app, stage, view) {
+  const { state } = app;
   if (stage === "edit") {
     setEditView(state, view);
-    renderEditExplorer();
+    app.renderEditExplorer();
     return;
   }
   if (stage === "run") {
     setRunView(state, view);
-    renderMuExplorer();
+    app.renderMuExplorer();
   }
 }
 
@@ -187,34 +161,34 @@ export function adjustView(view, total, action) {
   return { start: nextStart, end: nextEnd };
 }
 
-export function goToMu(deps, direction, stage) {
-  const { state } = deps;
+/** @param {App} app */
+export function goToMu(app, direction, stage) {
+  const { state } = app;
   if (stage === "edit") {
-    const { getEditMuIndicesForGrid, renderEditExplorer } = deps;
     const gridIdx = state.edit.currentMuGrid || 0;
-    const mus = getEditMuIndicesForGrid(gridIdx);
+    const mus = app.getEditMuIndices(gridIdx);
     if (!mus.length) return;
     const current = state.edit.currentMu ?? mus[0];
     const idx = mus.indexOf(current);
     const offset = direction === "prev" ? -1 : 1;
     const next = mus[(idx + offset + mus.length) % mus.length];
     setEditCurrentMu(state, next, { resetView: true });
-    renderEditExplorer();
+    app.renderEditExplorer();
   } else if (stage === "run") {
-    const { getMuIndicesForGrid, renderMuExplorer } = deps;
     const gridIdx = state.currentMuGrid || 0;
-    const mus = getMuIndicesForGrid(gridIdx);
+    const mus = app.getMuIndicesForGrid(gridIdx);
     if (!mus.length) return;
     const current = state.currentMu ?? mus[0];
     const idx = mus.indexOf(current);
     const next =
       mus[(idx + (direction === "prev" ? -1 : 1) + mus.length) % mus.length];
     setRunCurrentMu(state, next, { resetView: true });
-    renderMuExplorer();
+    app.renderMuExplorer();
   }
 }
 
-export function handleKeyboardNavigation(deps, e) {
+/** @param {App} app @param {KeyboardEvent} e */
+export function handleKeyboardNavigation(app, e) {
   const {
     state,
     els,
@@ -222,13 +196,8 @@ export function handleKeyboardNavigation(deps, e) {
     runEditAction,
     removeOutliers,
     updateMuFilter,
-    goToMuFn,
-    getViewForStageFn,
-    adjustViewFn,
-    setViewForStageFn,
-    setShowBookmark,
     applyLabeledToggle,
-  } = deps;
+  } = app;
 
   const active = document.activeElement;
   if (active && ["INPUT", "TEXTAREA", "SELECT"].includes(active.tagName))
@@ -266,11 +235,11 @@ export function handleKeyboardNavigation(deps, e) {
       e.preventDefault();
       return;
     } else if (e.key === "<") {
-      goToMuFn("prev", "edit");
+      goToMu(app, "prev", "edit");
       e.preventDefault();
       return;
     } else if (e.key === ">") {
-      goToMuFn("next", "edit");
+      goToMu(app, "next", "edit");
       e.preventDefault();
       return;
     } else if (key === "p") {
@@ -310,13 +279,13 @@ export function handleKeyboardNavigation(deps, e) {
   if (e.key === "ArrowRight") action = "scroll_right";
   if (!action) return;
 
-  if (stage === "edit" && action === "zoom_out" && setShowBookmark) {
+  if (stage === "edit" && action === "zoom_out") {
     setShowBookmark(state, true);
   }
 
-  const { view, total } = getViewForStageFn(stage);
+  const { view, total } = getViewForStage(state, stage);
   if (!view || !total) return;
-  const next = adjustViewFn(view, total, action);
-  setViewForStageFn(stage, next);
+  const next = adjustView(view, total, action);
+  setViewForStage(app, stage, next);
   e.preventDefault();
 }

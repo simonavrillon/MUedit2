@@ -1,4 +1,5 @@
 import {
+  ensureDiscardMasks,
   setArtifactMode,
   setArtifactRegions,
   setAuxData,
@@ -6,7 +7,6 @@ import {
   setChannelTraceForGrid,
   setChannelTraces,
   setCoordinates,
-  setCurrentStage,
   setDiscardMasks,
   setFsamp,
   setGridNames,
@@ -20,7 +20,10 @@ import {
   setSeriesLength,
   setUploadToken,
 } from "../state/actions.js";
-import { roiStart, roiEnd } from "../state/selectors.js";
+import { getCurrentGrid, roiStart, roiEnd } from "../state/selectors.js";
+import { nextFrame } from "../view/plots.js";
+
+/** @typedef {import("../app/context.js").App} App */
 
 function channelsToEnv(channels) {
   return (Array.isArray(channels) ? channels : [])
@@ -43,7 +46,8 @@ export function syncRois(state, nwin) {
  * (+/- to correct those). Nothing is sent to the decomposition here — the
  * corrected masks travel with the run request.
  */
-export async function requestAutoQc(deps) {
+/** @param {App} app */
+export async function requestAutoQc(app) {
   const {
     state,
     els,
@@ -52,7 +56,7 @@ export async function requestAutoQc(deps) {
     updateProgress,
     renderChannelQC,
     refreshVisuals,
-  } = deps;
+  } = app;
 
   if (!state.uploadToken) {
     setStatus("Load a signal first", "error");
@@ -96,8 +100,9 @@ export async function requestAutoQc(deps) {
   }
 }
 
-export async function requestQcGridWindow(deps, gridIdx, start, end) {
-  const { state, api, renderChannelQC, setStatus } = deps;
+/** @param {App} app */
+export async function requestQcGridWindow(app, gridIdx, start, end) {
+  const { state, api, renderChannelQC, setStatus } = app;
   const s = Number.isFinite(start) ? start : 0;
   const e = Number.isFinite(end) ? end : state.seriesLength;
 
@@ -131,30 +136,28 @@ export async function requestQcGridWindow(deps, gridIdx, start, end) {
   }
 }
 
-export async function requestPreview(deps, options = {}) {
+/** @param {App} app */
+export async function requestPreview(app, options = {}) {
   const { silentFailure = false, filepath = null } = options;
   const {
     state,
+    els,
     api,
     setUploadLoading,
     updateProgress,
     populateAuxSelector,
-    ensureDiscardMasks,
     populateGridTabs,
     requestQcGridWindow,
-    getCurrentGrid,
     enableRoiSelection,
     renderBidsAutoInfo,
     renderBidsMuscleFields,
     setStatus,
     showWorkspace,
-    nextFrame,
+    switchStage,
     refreshVisuals,
     renderChannelQC,
     applyPreviewMetadata,
-    getNwindows,
-    hideLanding,
-  } = deps;
+  } = app;
 
   if (!filepath) return;
   setUploadLoading(true);
@@ -174,12 +177,12 @@ export async function requestPreview(deps, options = {}) {
     setMuscle(state, data.muscle || []);
     setAuxData(state, data.auxiliary || [], data.auxiliary_names || []);
     setFsamp(state, data.fsamp);
-    if (applyPreviewMetadata) applyPreviewMetadata(data);
+    applyPreviewMetadata(data);
     setPreviewSeries(state, data.mean_abs || []);
     populateAuxSelector();
-    ensureDiscardMasks();
+    ensureDiscardMasks(state);
     populateGridTabs();
-    const nwin = getNwindows ? getNwindows() : 1;
+    const nwin = Number(els.nwindows?.value) || 1;
     const defaultEnd = state.seriesLength || 0;
     const rois = [];
     for (let i = 0; i < nwin; i++) {
@@ -190,7 +193,7 @@ export async function requestPreview(deps, options = {}) {
     setArtifactMode(state, false);
     const roiPreview = state.rois?.[0];
     await requestQcGridWindow(
-      getCurrentGrid(),
+      getCurrentGrid(state),
       roiStart(roiPreview),
       roiEnd(roiPreview, state.seriesLength),
     );
@@ -198,7 +201,7 @@ export async function requestPreview(deps, options = {}) {
     enableRoiSelection("auxCanvas");
     // Raw preview resets edit slice first; ensure BIDS rows render in QC context
     // so they source run grid names instead of edit fallback ("Grid 1").
-    setCurrentStage(state, "qc");
+    switchStage("qc");
     renderBidsAutoInfo();
     renderBidsMuscleFields();
 
@@ -208,7 +211,7 @@ export async function requestPreview(deps, options = {}) {
     await nextFrame();
     refreshVisuals();
     await renderChannelQC(true);
-    if (hideLanding) hideLanding();
+    els.landing?.classList.add("hidden");
     return true;
   } catch (err) {
     console.error(err);

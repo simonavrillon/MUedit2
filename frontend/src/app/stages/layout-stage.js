@@ -1,29 +1,11 @@
-export function createLayoutStageService(deps) {
-  const {
-    ensureSettingsToggleIcon,
-    toggleSettingsOpen,
-    setSettingsOpen,
-    initLayoutResizePolicy,
-  } = deps;
+/** @typedef {import("../context.js").App} App */
 
-  return {
-    ensureSettingsToggleIcon,
-    toggleSettingsOpen,
-    setSettingsOpen,
-    initLayoutResizePolicy,
-  };
-}
-
-/**
- * @typedef {import('../deps.js').LayoutSetupDeps} LayoutSetupDeps
- */
-
-/**
- * @param {LayoutSetupDeps} deps
- */
-export function setupLayoutEvents(deps) {
+/** @param {App} app */
+export function setupLayoutEvents(app) {
   const { els, toggleSettingsOpen, setSettingsOpen, initLayoutResizePolicy } =
-    deps;
+    app;
+
+  app.ensureSettingsToggleIcon();
 
   const sectionHeaders =
     els.settingsPanel?.querySelectorAll(".section-header") || [];

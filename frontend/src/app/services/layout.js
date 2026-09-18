@@ -1,9 +1,14 @@
+import { renderActiveStage } from "../stages/lifecycle.js";
+
+/** @typedef {import("../context.js").App} App */
+
 let layoutRerenderTimer = null;
 let layoutSettleTimer = null;
 let layoutResizePolicyInitialized = false;
 
-export function setSettingsOpen(deps, open) {
-  const { els, scheduleLayoutRerender } = deps;
+/** @param {App} app @param {boolean} open */
+export function setSettingsOpen(app, open) {
+  const { els } = app;
   if (!els.workspace) return;
   const next = !!open;
   els.workspace.classList.toggle("settings-open", next);
@@ -13,15 +18,17 @@ export function setSettingsOpen(deps, open) {
       next ? "true" : "false",
     );
   }
-  scheduleLayoutRerender(0);
+  app.scheduleLayoutRerender(0);
 }
 
-export function toggleSettingsOpen(deps) {
-  const { els, setSettingsOpen } = deps;
+/** @param {App} app */
+export function toggleSettingsOpen(app) {
+  const { els } = app;
   if (!els.workspace) return;
-  setSettingsOpen(!els.workspace.classList.contains("settings-open"));
+  app.setSettingsOpen(!els.workspace.classList.contains("settings-open"));
 }
 
+/** @param {App["els"]} els */
 export function ensureSettingsToggleIcon(els) {
   if (!els.settingsToggleBtn) return;
   els.settingsToggleBtn.setAttribute("aria-label", "Toggle settings panel");
@@ -45,17 +52,11 @@ export function ensureSettingsToggleIcon(els) {
   els.settingsToggleBtn.appendChild(svg);
 }
 
-export function rerenderPlotsForLayout(deps) {
-  const { state, renderChannelQC, refreshVisuals, renderEditExplorer } = deps;
-  renderChannelQC();
-  refreshVisuals();
-  if (state.edit.distimes?.length) {
-    renderEditExplorer();
-  }
-}
-
-export function scheduleLayoutRerender(deps, delay = 90) {
-  const { rerenderPlotsForLayout } = deps;
+// Only the visible stage is drawn: hidden stages are display:none, so their
+// canvases have no size, and entering a stage schedules its own redraw.
+/** @param {App} app */
+export function scheduleLayoutRerender(app, delay = 90) {
+  const rerenderPlotsForLayout = () => renderActiveStage(app);
   if (layoutRerenderTimer) {
     clearTimeout(layoutRerenderTimer);
   }
@@ -81,8 +82,10 @@ export function scheduleLayoutRerender(deps, delay = 90) {
   );
 }
 
-export function initLayoutResizePolicy(deps) {
-  const { els, scheduleLayoutRerender } = deps;
+/** @param {App} app */
+export function initLayoutResizePolicy(app) {
+  const { els } = app;
+  const scheduleLayoutRerender = app.scheduleLayoutRerender;
   if (layoutResizePolicyInitialized) return;
   layoutResizePolicyInitialized = true;
 

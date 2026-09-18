@@ -37,16 +37,44 @@ import {
 } from "../services/editing-service.js";
 import {
   appendEditHistoryEntry,
+  setEditMode as setEditModeAction,
   setEditProject,
   setEditCurrentMu,
   setEditCurrentMuGrid,
-  setEditBookmark,
-  setShowBookmark,
 } from "../../state/actions.js";
 import { getEditMuIndicesForGrid } from "../../state/selectors.js";
+import { getCanvasPlotMetrics } from "../../view/plots.js";
+import { handleKeyboardNavigation } from "../services/navigation.js";
 
-export function createEditStageService(deps) {
-  const { state, els, getCanvasPlotMetrics, refreshEditModeButtons } = deps;
+/** @typedef {import("../context.js").App} App */
+
+/**
+ * @param {App} app
+ * @returns {import("../context.js").EditStage}
+ */
+export function createEditStageService(app) {
+  const { state, els } = app;
+
+  function refreshEditModeButtons() {
+    app.setEditActionBusy(els.editAddBtn, state.edit.mode === "add");
+    app.setEditActionBusy(
+      els.editAddArtifactBtn,
+      state.edit.mode === "add_artifact",
+    );
+    app.setEditActionBusy(
+      els.editDeleteSpikeBtn,
+      state.edit.mode === "delete_spikes",
+    );
+    if (els.editUndoBtn) els.editUndoBtn.disabled = !state.edit.backup;
+  }
+
+  function setEditMode(mode, message) {
+    setEditModeAction(state, mode);
+    refreshEditModeButtons();
+    if (mode) {
+      app.setEditStatus(message || `Mode: ${mode}`, "muted");
+    }
+  }
 
   function plotHeight(canvas) {
     return canvas ? getCanvasPlotMetrics(canvas, true).plotHeight || 1 : 1;
@@ -93,7 +121,7 @@ export function createEditStageService(deps) {
   }
 
   function resetEditState() {
-    resetEditStateFeature(ctx);
+    resetEditStateFeature(app);
     if (els.editSaveBtn) els.editSaveBtn.disabled = true;
     if (els.bidsProject) els.bidsProject.value = "";
   }
@@ -114,67 +142,41 @@ export function createEditStageService(deps) {
   }
 
   function renderInstantaneousDr() {
-    renderInstantaneousDrFeature(ctx);
+    renderInstantaneousDrFeature(app);
   }
 
   function renderEditExplorer() {
-    renderEditExplorerFeature(ctx);
-    renderEditTimelineFeature(ctx);
+    renderEditExplorerFeature(app);
+    renderEditTimelineFeature(app);
   }
 
-  const restoreEditBackup = () => restoreEditBackupFeature(ctx);
+  const restoreEditBackup = () => restoreEditBackupFeature(app);
   const requestRoiEdit = (action, payload) =>
-    requestRoiEditFeature(ctx, action, payload);
-  const requestFilterUpdate = (mode) => requestFilterUpdateFeature(ctx, mode);
+    requestRoiEditFeature(app, action, payload);
+  const requestFilterUpdate = (mode) => requestFilterUpdateFeature(app, mode);
   const updateMuFilter = () => requestFilterUpdate("update-filter");
-  const addSpikesInSelection = (sel) => addSpikesInSelectionFeature(ctx, sel);
+  const addSpikesInSelection = (sel) => addSpikesInSelectionFeature(app, sel);
   const addArtifactInSelection = (sel) =>
-    addArtifactInSelectionFeature(ctx, sel);
+    addArtifactInSelectionFeature(app, sel);
   const deleteSpikesInSelection = (sel) =>
-    deleteSpikesInSelectionFeature(ctx, sel);
-  const deleteDrInSelection = (sel) => deleteDrInSelectionFeature(ctx, sel);
-  const removeOutliers = () => removeOutliersFeature(ctx);
-  const flagMuForDeletion = () => flagMuForDeletionFeature(ctx);
-  const resetCurrentMuEdits = () => resetCurrentMuEditsFeature(ctx);
-  const removeDuplicateMus = () => removeDuplicateMusFeature(ctx);
-  const duplicateMu = () => duplicateMuFeature(ctx);
-  const bindEditCanvas = () => bindEditCanvasFeature(ctx);
-  const bindEditDrCanvas = () => bindEditDrCanvasFeature(ctx);
-  const bindEditTimeline = () => bindEditTimelineFeature(ctx);
-  const saveEditedFile = () => saveEditedFileFeature(ctx);
+    deleteSpikesInSelectionFeature(app, sel);
+  const deleteDrInSelection = (sel) => deleteDrInSelectionFeature(app, sel);
+  const removeOutliers = () => removeOutliersFeature(app);
+  const flagMuForDeletion = () => flagMuForDeletionFeature(app);
+  const resetCurrentMuEdits = () => resetCurrentMuEditsFeature(app);
+  const removeDuplicateMus = () => removeDuplicateMusFeature(app);
+  const duplicateMu = () => duplicateMuFeature(app);
+  const bindEditCanvas = () => bindEditCanvasFeature(app);
+  const bindEditDrCanvas = () => bindEditDrCanvasFeature(app);
+  const bindEditTimeline = () => bindEditTimelineFeature(app);
+  const saveEditedFile = () => saveEditedFileFeature(app);
   const loadDecompositionForEdit = (file, absolutePath) =>
-    loadDecompositionForEditFeature(ctx, file, absolutePath);
+    loadDecompositionForEditFeature(app, file, absolutePath);
 
   function loadDecompositionForEditByPath(path) {
     const name = path.split("/").pop().split("\\").pop() || path;
     return loadDecompositionForEdit({ name }, path);
   }
-
-  const ctx = {
-    ...deps,
-    setEditBookmark,
-    setShowBookmark,
-    appendEditHistory,
-    ensureEditFlagged,
-    getRawPulse,
-    getDisplayPulse,
-    backupEditMu,
-    recomputeEditDirty,
-    refreshEditTotals,
-    resetEditState,
-    getEditTotalSamples,
-    getPulseViewMeta,
-    getPulsePlotHeight: () => plotHeight(els.editPulseCanvas),
-    getDrPlotHeight: () => plotHeight(els.editDrCanvas),
-    renderEditDropdowns,
-    renderEditExplorer,
-    renderInstantaneousDr,
-    requestRoiEdit,
-    addSpikesInSelection,
-    addArtifactInSelection,
-    deleteSpikesInSelection,
-    deleteDrInSelection,
-  };
 
   return {
     getEditMuIndices,
@@ -184,6 +186,15 @@ export function createEditStageService(deps) {
     backupEditMu,
     recomputeEditDirty,
     refreshEditTotals,
+    getEditTotalSamples,
+    getPulseViewMeta,
+    getPulsePlotHeight: () => plotHeight(els.editPulseCanvas),
+    getDrPlotHeight: () => plotHeight(els.editDrCanvas),
+    appendEditHistory,
+    resetEditState,
+    refreshEditModeButtons,
+    setEditMode,
+    renderEditDropdowns,
     restoreEditBackup,
     renderEditExplorer,
     renderInstantaneousDr,
@@ -208,14 +219,8 @@ export function createEditStageService(deps) {
   };
 }
 
-/**
- * @typedef {import('../deps.js').EditSetupDeps} EditSetupDeps
- */
-
-/**
- * @param {EditSetupDeps} deps
- */
-export function setupEditEvents(deps) {
+/** @param {App} app */
+export function setupEditEvents(app) {
   const {
     els,
     state,
@@ -234,26 +239,25 @@ export function setupEditEvents(deps) {
     restoreEditBackup,
     setEditMode,
     refreshEditModeButtons,
-    handleKeyboardNavigation,
     applyLabeledToggle,
-  } = deps;
+  } = app;
 
   bindEditCanvas();
   bindEditDrCanvas();
   bindEditTimeline();
 
-  els.editMuGridSelect?.addEventListener("change", (e) => {
-    const idx = Number(e.target.value) || 0;
+  els.editMuGridSelect?.addEventListener("change", () => {
+    const idx = Number(els.editMuGridSelect.value) || 0;
     setEditCurrentMuGrid(state, idx, { resetView: true });
     renderEditExplorer();
-    e.target.blur();
+    els.editMuGridSelect.blur();
   });
 
-  els.editMuSelect?.addEventListener("change", (e) => {
-    const idx = Number(e.target.value);
+  els.editMuSelect?.addEventListener("change", () => {
+    const idx = Number(els.editMuSelect.value);
     setEditCurrentMu(state, idx, { resetView: true });
     renderEditExplorer();
-    e.target.blur();
+    els.editMuSelect.blur();
   });
 
   els.editSaveBtn?.addEventListener("click", () => {
@@ -323,15 +327,16 @@ export function setupEditEvents(deps) {
     setEditMode("delete_spikes", "Drag a box on pulse train to delete spikes");
   });
 
-  els.bidsProject?.addEventListener("input", (e) => {
-    setEditProject(state, e.target.value);
+  els.bidsProject?.addEventListener("input", () => {
+    setEditProject(state, els.bidsProject.value);
   });
 
-  els.bidsPlacementScheme?.addEventListener("change", (e) => {
+  els.bidsPlacementScheme?.addEventListener("change", () => {
     const row = els.bidsPlacementDescRow;
-    if (row) row.classList.toggle("hidden", e.target.value !== "Other");
+    if (row)
+      row.classList.toggle("hidden", els.bidsPlacementScheme.value !== "Other");
   });
 
   refreshEditModeButtons();
-  window.addEventListener("keydown", handleKeyboardNavigation);
+  window.addEventListener("keydown", (e) => handleKeyboardNavigation(app, e));
 }

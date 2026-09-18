@@ -20,10 +20,38 @@ import { getRunMuIndicesForGrid } from "../../state/selectors.js";
 import {
   DEFAULT_POSTPROCESS_MODE,
   POSTPROCESS_MODES,
+  buildDecomposeParams,
 } from "../../decomp/params.js";
+import { drawSeries } from "../../view/plots.js";
 
-export function createRunStageService(deps) {
-  const { state, els, drawSeries, loadDecompositionForEditByPath } = deps;
+/** @typedef {import("../context.js").App} App */
+
+/**
+ * @param {App} app
+ * @returns {import("../context.js").RunStage}
+ */
+export function createRunStageService(app) {
+  const { state, els } = app;
+
+  function updateStartAvailability() {
+    if (els.start) {
+      els.start.disabled = !state.file || state.isRunning;
+    }
+  }
+
+  function buildParams() {
+    return buildDecomposeParams({
+      niter: Number(els.niter?.value) || 150,
+      nwindows: Number(els.nwindows?.value) || 1,
+      peelOn: app.isToggleOn(els.peelOffToggle),
+      postprocessMode: els.postprocessMode?.value || "windowed",
+      covOn: app.isToggleOn(els.covToggle),
+      peelWindow: Number(els.peelOffWindow?.value) || 25,
+      covVal: Number(els.covValue?.value) || 0.5,
+      silVal: Number(els.silValue?.value) || 0.9,
+      duplicatesthresh: Number(els.duplicatesthresh?.value) || 0.3,
+    });
+  }
 
   function getMuIndicesForGrid(gridIdx) {
     return getRunMuIndicesForGrid(state, gridIdx);
@@ -62,36 +90,20 @@ export function createRunStageService(deps) {
     renderMuExplorerController({ els, drawSeries }, model);
   }
 
-  const autoSaveRunDecomposition = () => autoSaveRunDecompositionFeature(ctx);
-  const handleStreamMessage = (msg) => handleStreamMessageFeature(ctx, msg);
-  const runDecomposition = () => runDecompositionFeature(ctx);
-
-  const ctx = {
-    ...deps,
-    renderMuExplorer,
-    autoSaveRunDecomposition,
-    handleStreamMessageFn: handleStreamMessage,
-    onSaved: loadDecompositionForEditByPath || null,
-  };
-
   return {
     getMuIndicesForGrid,
     renderMuDropdowns,
     renderMuExplorer,
-    autoSaveRunDecomposition,
-    handleStreamMessage,
-    runDecomposition,
+    autoSaveRunDecomposition: () => autoSaveRunDecompositionFeature(app),
+    handleStreamMessage: (msg) => handleStreamMessageFeature(app, msg),
+    runDecomposition: () => runDecompositionFeature(app),
+    updateStartAvailability,
+    buildParams,
   };
 }
 
-/**
- * @typedef {import('../deps.js').RunSetupDeps} RunSetupDeps
- */
-
-/**
- * @param {RunSetupDeps} deps
- */
-export function setupRunEvents(deps) {
+/** @param {App} app */
+export function setupRunEvents(app) {
   const {
     els,
     state,
@@ -108,27 +120,22 @@ export function setupRunEvents(deps) {
     runAutoQc,
     toggleArtifactMode,
     removeLastArtifact,
-  } = deps;
+  } = app;
 
   els.start?.addEventListener("click", runDecomposition);
-
-  if (runAutoQc) els.qcAutoBtn?.addEventListener("click", runAutoQc);
-  if (toggleArtifactMode) {
-    els.artifactAddBtn?.addEventListener("click", toggleArtifactMode);
-  }
-  if (removeLastArtifact) {
-    els.artifactRemoveBtn?.addEventListener("click", removeLastArtifact);
-  }
-  refreshVisuals?.();
+  els.qcAutoBtn?.addEventListener("click", runAutoQc);
+  els.artifactAddBtn?.addEventListener("click", toggleArtifactMode);
+  els.artifactRemoveBtn?.addEventListener("click", removeLastArtifact);
+  refreshVisuals();
 
   enableRoiSelection("emgCanvas");
 
   if (els.nwindows) {
-    els.nwindows.addEventListener("change", (e) => {
+    els.nwindows.addEventListener("change", () => {
       const nwin = Number(els.nwindows.value) || 1;
       syncRois(nwin);
       refreshVisuals();
-      e.target.blur();
+      els.nwindows.blur();
     });
   }
 
@@ -143,9 +150,9 @@ export function setupRunEvents(deps) {
     els.postprocessModeHint.textContent = mode.hint;
   };
   renderPostprocessHint();
-  els.postprocessMode?.addEventListener("change", (e) => {
+  els.postprocessMode?.addEventListener("change", () => {
     renderPostprocessHint();
-    e.target.blur();
+    els.postprocessMode.blur();
   });
   setupToggle(els.covToggle, (on) => toggleConditional("covSettings", on));
   setupLockedOnToggle(els.silToggle, (on) =>
@@ -153,22 +160,22 @@ export function setupRunEvents(deps) {
   );
   updateStartAvailability();
 
-  els.auxSelector?.addEventListener("change", (e) => {
+  els.auxSelector?.addEventListener("change", () => {
     renderAuxiliaryChannels();
-    e.target.blur();
+    els.auxSelector.blur();
   });
 
-  els.muGridSelect?.addEventListener("change", (e) => {
-    const idx = Number(e.target.value) || 0;
+  els.muGridSelect?.addEventListener("change", () => {
+    const idx = Number(els.muGridSelect.value) || 0;
     setRunCurrentMuGrid(state, idx, { resetView: true });
     renderMuExplorer();
-    e.target.blur();
+    els.muGridSelect.blur();
   });
 
-  els.muSelect?.addEventListener("change", (e) => {
-    const idx = Number(e.target.value);
+  els.muSelect?.addEventListener("change", () => {
+    const idx = Number(els.muSelect.value);
     setRunCurrentMu(state, idx, { resetView: true });
     renderMuExplorer();
-    e.target.blur();
+    els.muSelect.blur();
   });
 }

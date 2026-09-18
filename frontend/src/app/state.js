@@ -56,7 +56,7 @@ export const state = {
   qcWindowLoading: {},
   metadata: {},
   muscle: [],
-  currentStage: "qc",
+  currentStage: /** @type {import("./context.js").StageKey} */ ("qc"),
   currentGrid: 0,
   muPulseTrains: [],
   muDistimes: [],

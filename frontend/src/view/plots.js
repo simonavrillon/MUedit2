@@ -6,6 +6,13 @@
  */
 import { COLORS } from "../config.js";
 
+/** Resolve after the browser's next paint, once layout has settled. */
+export function nextFrame() {
+  return new Promise((resolve) => {
+    window.requestAnimationFrame(() => resolve());
+  });
+}
+
 function getAxisPadding(showAxes) {
   return showAxes
     ? { left: 38, right: 8, top: 8, bottom: 20 }

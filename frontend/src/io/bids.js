@@ -7,6 +7,9 @@ function safeBidsToken(value, fallback = "") {
   return token || fallback;
 }
 
+/**
+ * @param {{ subject?: string, task?: string, session?: string, run?: string, acq?: string }} [entities]
+ */
 export function buildEntityLabelFromSession({
   subject,
   task,

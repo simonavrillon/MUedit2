@@ -2,8 +2,8 @@
 # the same checks in check-only mode.
 #   uv sync --extra dev && uv run pre-commit install
 #   pre-commit run --all-files    # run on the whole tree
-# mypy and pytest are left out to keep commits fast; they run in CI, or
-# locally with `uv run mypy` and `uv run pytest`.
+# mypy, tsc and pytest are left out to keep commits fast; they run in CI, or
+# locally with `uv run mypy`, `npm run typecheck` (in frontend/) and `uv run pytest`.
 repos:
   # Keep rev in sync with the ruff pin in pyproject.toml ([dev] extra),
   # which is what CI resolves through uv.lock.

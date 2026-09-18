@@ -265,13 +265,13 @@ machine and CI resolve identical versions. After editing dependencies in
 and fails if the two have drifted. To move a single pin deliberately, use
 `uv lock --upgrade-package numpy`.
 
-The frontend has its own lint, format and test checks, which CI also runs
-(Node 20 or later):
+The frontend has its own lint, format, type and test checks, which CI also
+runs (Node 20 or later):
 
 ```bash
 cd frontend
 npm ci
-npm run check   # eslint, prettier --check, node --test
+npm run check   # eslint, prettier --check, tsc --checkJs, node --test
 ```
 
 The architecture of the frontend and backend is documented under

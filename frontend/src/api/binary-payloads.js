@@ -7,7 +7,7 @@
  *
  * All integers/floats are little-endian. When the magic prefix is absent the
  * server fell back to JSON, so the bytes are parsed as text instead. Mirrors the
- * Python `_pack_json_f32_payload` packer in `api/common.py`.
+ * Python `pack_json_f32_payload` packer in `api/binary.py`.
  */
 const textDecoder = new TextDecoder();
 

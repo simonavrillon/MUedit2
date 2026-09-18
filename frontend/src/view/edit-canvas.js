@@ -4,7 +4,8 @@
  * drag-to-select ROI handlers. Selection gestures update draft/committed
  * selection state via the action helpers; the container re-renders in response.
  */
-import { UNIFORM_PULSE_COLOR } from "../config.js";
+import { COLORS, UNIFORM_PULSE_COLOR } from "../config.js";
+import { drawSeries, getCanvasPlotMetrics } from "./plots.js";
 import {
   clearEditDrSelections,
   clearEditPulseSelections,
@@ -13,9 +14,12 @@ import {
   setEditPulseDraftSelection,
   setEditPulseSelection,
   setEditView,
+  setShowBookmark,
 } from "../state/actions.js";
 import { computeInstantaneousDr } from "../editing/operations.js";
 import { renderSelectPair } from "./select-renderers.js";
+
+/** @typedef {import("../app/context.js").App} App */
 
 const TIMELINE_PAD_L = 38;
 const TIMELINE_PAD_R = 8;
@@ -124,16 +128,15 @@ export function renderEditDropdownsView(els, model) {
   );
 }
 
-export function renderEditExplorer(deps) {
+/** @param {App} app */
+export function renderEditExplorer(app) {
   const {
     els,
     state,
-    drawSeries,
     renderEditDropdowns,
     getDisplayPulse,
     renderInstantaneousDr,
-    getCanvasPlotMetrics,
-  } = deps;
+  } = app;
 
   renderEditDropdowns();
   const muIdx = state.edit.currentMu ?? 0;
@@ -149,7 +152,6 @@ export function renderEditExplorer(deps) {
   const markerVals = spikes.map((s) => pulse?.[s] ?? 0);
   const artifacts = state.edit.artifactTimes?.[muIdx] || [];
   const artifactVals = artifacts.map((s) => pulse?.[s] ?? 0);
-  const { COLORS } = deps;
   const pulseCanvas = els?.editPulseCanvas || "editPulseCanvas";
   const canvasEl =
     typeof pulseCanvas === "string"
@@ -193,15 +195,9 @@ export function renderEditExplorer(deps) {
   renderInstantaneousDr();
 }
 
-export function renderInstantaneousDr(deps) {
-  const {
-    state,
-    els,
-    COLORS,
-    drawSeries,
-    getEditTotalSamples,
-    ensureEditFlagged,
-  } = deps;
+/** @param {App} app */
+export function renderInstantaneousDr(app) {
+  const { state, els, getEditTotalSamples, ensureEditFlagged } = app;
 
   const canvas = els?.editDrCanvas || "editDrCanvas";
   const pulse = state.edit.pulseTrains?.[state.edit.currentMu] || [];
@@ -241,20 +237,19 @@ export function renderInstantaneousDr(deps) {
   );
 }
 
-export function bindEditCanvas(deps) {
+/** @param {App} app */
+export function bindEditCanvas(app) {
   const {
     els,
     state,
     getRawPulse,
-    getCanvasPlotMetrics,
     renderEditExplorer,
     setEditStatus,
     addSpikesInSelection,
     addArtifactInSelection,
     deleteSpikesInSelection,
     setEditMode,
-    setShowBookmark,
-  } = deps;
+  } = app;
 
   const canvas = els.editPulseCanvas;
   if (!canvas) return;
@@ -343,15 +338,14 @@ export function bindEditCanvas(deps) {
     if (!pulse.length) return;
     setEditView(state, { start: 0, end: pulse.length });
     clearEditPulseSelections(state);
-    if (setShowBookmark) {
-      setShowBookmark(state, true);
-    }
+    setShowBookmark(state, true);
     renderEditExplorer();
   });
 }
 
-export function renderEditTimeline(deps) {
-  const { els, state, getDisplayPulse } = deps;
+/** @param {App} app */
+export function renderEditTimeline(app) {
+  const { els, state, getDisplayPulse } = app;
   const canvas = els?.editTimelineCanvas;
   if (!canvas) return;
 
@@ -432,8 +426,9 @@ export function renderEditTimeline(deps) {
   );
 }
 
-export function bindEditTimeline(deps) {
-  const { els, state, getDisplayPulse, renderEditExplorer } = deps;
+/** @param {App} app */
+export function bindEditTimeline(app) {
+  const { els, state, getDisplayPulse, renderEditExplorer } = app;
   const canvas = els?.editTimelineCanvas;
   if (!canvas) return;
 
@@ -511,15 +506,15 @@ export function bindEditTimeline(deps) {
   });
 }
 
-export function bindEditDrCanvas(deps) {
+/** @param {App} app */
+export function bindEditDrCanvas(app) {
   const {
     els,
     state,
-    getCanvasPlotMetrics,
     getEditTotalSamples,
     renderEditExplorer,
     deleteDrInSelection,
-  } = deps;
+  } = app;
 
   const canvas = els.editDrCanvas;
   if (!canvas) return;

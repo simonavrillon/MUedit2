@@ -13,105 +13,59 @@ index.html
 
 ```
 initializeApp():
-  1. wireEvents()
-     ├─ layoutStage.ensureSettingsToggleIcon()
-     ├─ setupImportEvents(importDeps)     # browse button, stepper clicks
-     ├─ setupRunEvents(runDeps)           # start button, toggles, MU dropdowns
-     ├─ setupEditEvents(editDeps)         # edit toolbar, canvas bindings, keyboard
-     └─ setupLayoutEvents(layoutDeps)     # section collapse, settings overlay, ESC
-  2. ui.updateStepAvailability()          # disable run/edit steps if no file
-  3. ui.updateWorkflowStepper("import")  # highlight "Import" chip
-  4. els.browseSignalBtn.disabled = true # block until backend responds
-  5. ui.setStatus("Connecting to backend...")   # #status pill, top-right of header
-  6. await waitForBackend(api.healthUrl())
+  1. app = createApp({ state, els, api })  # one context, every service merged in
+  2. setupImportEvents(app)              # browse button, stepper clicks
+     setupRunEvents(app)                 # start button, toggles, MU dropdowns
+     setupEditEvents(app)                # edit toolbar, canvas bindings, keyboard
+     setupLayoutEvents(app)              # settings icon, section collapse, overlay, ESC
+  3. app.updateStepAvailability()        # disable run/edit steps if no file
+  4. app.updateWorkflowStepper("import") # highlight "Import" chip
+  5. els.browseSignalBtn.disabled = true # block until backend responds
+  6. app.setStatus("Connecting to backend...")   # #status pill, top-right of header
+  7. await waitForBackend(api.healthUrl())
      ├─ success → enable browse button, clear status
      └─ failure → "Backend unreachable — please restart the app"
 ```
 
-### Construction Phase (module load, synchronous)
-
-The `container.js` module body executes synchronously on import, constructing all service instances before `initializeApp` is called:
-
-```
-container.js module load:
-  1. const api = createApiClient({ apiFetch, apiJson, API_BASE })
-  2. Helper closures: nextFrame, updateStartAvailability, ensureDiscardMasks,
-     getCurrentGrid, buildParams, applySessionInfoFromDecomposition,
-     renderBidsAutoInfo, renderBidsMuscleFields, persistNpzBySaveTarget
-  3. Late-bound forwarders: renderChannelQC, refreshVisuals, renderEditExplorer
-     (qcStage/runStage/editStage not yet assigned — these use optional chaining)
-  4. const ui = createUiService({ els, state, renderChannelQC, refreshVisuals,
-     renderEditExplorer, setSelectedGrid })
-  5. const fileSession = createFileSessionService({ els })
-  6. Navigation helpers: getViewForStage, setViewForStage, adjustView, goToMu,
-     handleKeyboardNavigation
-  7. editStage = createEditStageService(editDeps)       # first (needs ui, fileSession)
-  8. runStage  = createRunStageService(runDeps)         # second (needs qc forwarders + editStage)
-  9. qcStage   = createQcStageService(qcDeps)           # third (needs runStage.renderMuExplorer)
- 10. importStage = createImportStageService(importDeps) # needs qcStage + editStage
- 11. layoutStage = createLayoutStageService(layoutDeps) # needs ui layout methods
-```
-
-The circular dependency between qc/run/edit stages is solved via **late-bound forwarder functions**:
-
-```js
-let qcStage, runStage, editStage;
-
-function renderChannelQC(...args) { return qcStage?.renderChannelQC(...args); }
-function refreshVisuals(...args)  { return qcStage?.refreshVisuals(...args); }
-function renderEditExplorer(...args) { return editStage?.renderEditExplorer(...args); }
-```
-
 ---
 
-## Dependency Injection Pattern
+## The Application Context
 
-Each stage follows a dual-export pattern:
+Every service and feature function receives one object, `app`, typed as `App` in `app/context.js`:
 
 ```
-┌─────────────────────────────────────────────────────┐
-│  Factory: createXxxStageService(deps)                │
-│    - Defines closures, builds one `ctx` bag          │
-│    - Returns bag of methods                          │
-│    - Called once at module load (container.js)       │
-└─────────────────────────────────────────────────────┘
-┌─────────────────────────────────────────────────────┐
-│  Setup: setupXxxEvents(deps)                         │
-│    - Destructures service methods + els + state      │
-│    - Adds addEventListener calls to DOM elements     │
-│    - Called once in wireEvents()                     │
-└─────────────────────────────────────────────────────┘
+App = Core                # state, els, api — the three singletons
+    & UiService           # status, progress, stepper, settings panel, toggles, switchStage
+    & FileSessionService  # file-type detection, upload indicator, BIDS form fields, save
+    & QcStage             # preview, channel grid, ROI/artifact selection, auto-QC
+    & RunStage            # decomposition run, stream handling, MU explorer, run settings
+    & EditStage           # edit load/save, canvases, ROI edits, filters, edit modes
 ```
 
-### The shared context bag (`ctx`)
-
-Inside `createQcStageService`, `createRunStageService`, `createEditStageService` and `createUiService`, every feature function receives the same object:
+### Construction — `create-app.js`
 
 ```js
-const ctx = { ...deps, renderEditExplorer, requestRoiEdit, /* local helpers */ };
-const removeOutliers = () => removeOutliersFeature(ctx);
+const app = { state, els, api };
+for (const service of [ui, fileSession, qcStage, runStage, editStage]) {
+  Object.assign(app, createService(app));   // throws on a duplicate member name
+}
 ```
 
-`ctx` is built just before the factory's `return`, after every helper is defined; helpers only read it when called. Feature functions (`editing/operations.js`, `app/services/editing-service.js`, `view/*.js`, `signal/qc.js`, `decomp/run.js`, `navigation.js`, `layout.js`) destructure only the keys they use, so the superset is safe. Two rules keep it that way:
+Each factory receives the same `app` it is being merged into. The QC, run and edit stages call each other (run renders QC, QC redraws the run explorer, a finished run opens the edit stage), and that works because of one rule:
 
-- A feature must not give a dependency a default value in its destructuring, and optional dependencies (checked with `if (dep)` / `dep?.()`) must be supplied by every factory whose features rely on them.
-- A few features expect a dependency under a different name; the bag carries both: `refreshVisualsFn` (qc), `handleStreamMessageFn` and `onSaved` (run).
+- **A factory reads only `state`, `els` and `api` while it is being constructed.** Everything else is reached as `app.x()` (or destructured from `app`) inside a function body, so it is looked up at call time, after every service has been merged.
 
-### `deps.js` — JSDoc typedef contracts
+There are no forwarders, thunks or per-stage `ctx` bags: a feature function such as `removeOutliers(app)` in `editing-service.js` destructures the members it uses straight from `app`.
 
-Defines explicit interfaces for each setup deps bundle:
+### What is not in the context
 
-| Typedef | Fields |
-|---|---|
-| `ImportSetupDeps` | els, state, handleNativeDialogOpen, setStatus, showWorkspace, switchStage, updateWorkflowStepper |
-| `RunSetupDeps` | els, state, runDecomposition, enableRoiSelection, syncRois, refreshVisuals, setupToggle, setupLockedOnToggle, toggleConditional, updateStartAvailability, renderAuxiliaryChannels, renderMuExplorer, runAutoQc?, toggleArtifactMode?, removeLastArtifact? |
-| `EditSetupDeps` | els, state, bindEditCanvas, bindEditDrCanvas, bindEditTimeline, renderEditExplorer, runEditAction, saveEditedFile, resetCurrentMuEdits, updateMuFilter, removeOutliers, flagMuForDeletion, duplicateMu, removeDuplicateMus, restoreEditBackup, setEditMode, refreshEditModeButtons, handleKeyboardNavigation, applyLabeledToggle |
-| `LayoutSetupDeps` | els, toggleSettingsOpen, setSettingsOpen, initLayoutResizePolicy |
-| `UiService` | setStatus, setEditStatus, setRunPhase, updateProgress, updateWorkflowStepper, updateStepAvailability, setSettingsOpen, toggleSettingsOpen, ensureSettingsToggleIcon, initLayoutResizePolicy, scheduleLayoutRerender, showWorkspace, switchStage, setupToggle, setupLockedOnToggle, toggleConditional, isToggleOn, runEditAction |
-| `FileSessionService` | getBidsProject, getBidsMuscleNames, clearUploadFormatError, showUnsupportedUploadFormatError, detectLandingFileType, setUploadLoading |
-| `QcStageService` | 12 methods |
-| `RunStageService` | 6 methods |
-| `EditStageService` | 28 methods |
+Pure helpers are imported where they are used rather than injected: plot drawing (`view/plots.js`), BIDS naming (`io/bids.js`), state actions and selectors (`state/`), parameter building (`decomp/params.js`), and `COLORS`. A module only needs `app` for state, the DOM, the API, or another service.
+
+### Type checking
+
+`npm run typecheck` runs `tsc --checkJs` over `src/` (config in `frontend/tsconfig.json`, CI runs it on every push). Because every feature is annotated `@param {App} app`, a misspelt or removed context member is a type error, and each factory's `@returns` ties it to its typedef in `context.js`. DOM handles in `dom.js` are typed per element (`HTMLInputElement`, `HTMLCanvasElement`, …). The check is not `strict`: implicit `any` and nullable values are allowed.
+
+To add a service method: implement it in the factory, add it to the factory's return object, and add its signature to the matching typedef in `context.js`.
 
 ### Wiring Topology
 
@@ -126,38 +80,17 @@ Defines explicit interfaces for each setup deps bundle:
          │ http   │  │ dom    │  │ state │
          │(fetch) │  │ (els)  │  │       │
          └───┬────┘  └───┬────┘  └───┬───┘
-             │           │           │
              v           │           │
         ┌──────────┐     │           │
         │ apiClient│     │           │
         └────┬─────┘     │           │
-             │           │           │
-    ┌────────┼───────────┼───────────┤
-    │        v           v           v
-    │   ┌──────────────────────────────────┐
-    │   │     container.js (composition)   │
-    │   │                                  │
-    │   │  ┌─────┐  ┌──────────┐           │
-    │   │  │ ui  │  │fileSession│          │
-    │   │  └──┬──┘  └─────┬────┘          │
-    │   │     │           │               │
-    │   │  ┌──┴──┐  ┌─────┴────┐  ┌──────┴────┐  ┌──────────┐  ┌────────┐
-    │   │  │edit │  │  run     │  │   qc      │  │ import   │  │ layout │
-    │   │  │stage│  │  stage   │  │   stage   │  │ stage    │  │ stage  │
-    │   │  └─────┘  └──────────┘  └───────────┘  └──────────┘  └────────┘
-    │   └──────────────────────────────────┘
-    │
-    └──> wireEvents() -> setupXxxEvents() for each stage
-```
-
-### Thunks for Late Binding
-
-Many deps are passed as zero-arg thunks to break circular construction:
-
-```js
-renderChannelQC: () => qcStage.renderChannelQC(...args)
-requestQcGridWindow: (...args) => qcStage.requestQcGridWindow(...args)
-loadDecompositionForEditByPath: (...args) => editStage.loadDecompositionForEditByPath(...args)
+             v           v           v
+        ┌──────────────────────────────────────────────────────┐
+        │  createApp → app                                      │
+        │    ui · fileSession · qcStage · runStage · editStage  │
+        └──────────────────────────┬───────────────────────────┘
+                                   v
+        setupImportEvents · setupRunEvents · setupEditEvents · setupLayoutEvents
 ```
 
 ---
@@ -255,51 +188,67 @@ The run stage uses `state.muPulseTrains` / `state.currentMu` / `state.runView` d
 
 ## Stage Registration and Lifecycle
 
-Stages do **not** have `init`/`enter`/`exit`/`destroy` methods. Instead:
+The three workspace stages are declared in `app/stages/lifecycle.js`:
 
-1. **Construction** — `createXxxStageService(deps)` returns a bag of closures. Called once at module load.
-2. **Event wiring** — `setupXxxEvents(deps)` attaches DOM listeners. Called once in `wireEvents()`.
-3. **Stage activation** — Pure CSS class toggling via `switchStage()`. No enter/exit callbacks.
-4. **Re-rendering** — `scheduleLayoutRerender()` triggers plot redraws on stage switch and resize.
+```js
+STAGES = {
+  qc:   { panel: "stageQc",   blocked, render, exit },
+  run:  { panel: "stageRun",  blocked, render },
+  edit: { panel: "stageEdit", blocked, render, enter, exit },
+}
+```
+
+| Hook | QC | Run | Edit |
+|---|---|---|---|
+| `blocked` | no file (silent) | no file (silent); no preview → "Run step is locked until preview is loaded" | never |
+| `enter` | — | — | no edit data → status "Load a decomposition file to edit" |
+| `exit` | disarm artifact selection | — | clear the armed edit mode (add / add artifact / delete) |
+| `render` | channel grid + EMG/aux plots | MU explorer | edit plots, once data is loaded |
+
+`enter` and `exit` run only when the stage actually changes; re-selecting the current stage runs neither. `render` is what layout changes call: `scheduleLayoutRerender` draws only the active stage, since hidden stages are `display: none` and their canvases have no size, and every stage switch schedules a redraw.
+
+Loading a new raw file is **not** a stage exit. The edit slice is reset by `beginRawPreviewTransition` in `state/transitions.js` because the session changed; leaving the edit stage to look at QC keeps the loaded decomposition and its edits.
 
 ### Per-stage service factories
 
-| Factory | File | Returns |
+| Factory | File | Merged into `app` as |
 |---|---|---|
-| `createImportStageService` | import-stage.js | `{ handleNativeDialogOpen }` |
-| `createQcStageService` | qc-stage.js | 12 methods |
-| `createRunStageService` | run-stage.js | 6 methods |
-| `createEditStageService` | edit-stage.js | 28 methods |
-| `createLayoutStageService` | layout-stage.js | 4 methods |
-| `createUiService` | services/ui.js | 21 methods |
-| `createFileSessionService` | file-session.js | 9 methods |
-| `createApiClient` | api/client.js | 14 methods |
+| `createUiService` | services/ui.js | `UiService` |
+| `createFileSessionService` | services/file-session.js | `FileSessionService` |
+| `createQcStageService` | stages/qc-stage.js | `QcStage` |
+| `createRunStageService` | stages/run-stage.js | `RunStage` |
+| `createEditStageService` | stages/edit-stage.js | `EditStage` |
+
+The import and layout stages have no service: `setupImportEvents` and `setupLayoutEvents` only attach listeners.
 
 ### Per-stage setup functions (event wiring)
 
 | Setup | File | Listeners |
 |---|---|---|
 | `setupImportEvents` | import-stage.js | browseSignalBtn click, stepper chip clicks |
-| `setupRunEvents` | run-stage.js | start click, nwindows change, toggles, dropdowns |
+| `setupRunEvents` | run-stage.js | start click, auto-QC and artifact buttons, nwindows change, toggles, dropdowns |
 | `setupEditEvents` | edit-stage.js | all edit toolbar buttons, canvas bindings, keyboard |
-| `setupLayoutEvents` | layout-stage.js | section collapse, settings toggle, ESC |
+| `setupLayoutEvents` | layout-stage.js | settings icon, section collapse, settings toggle, ESC |
 
 ---
 
 ## Stage Navigation
 
-### `switchStage()` — `navigation.js`
+### `switchStage()` — `stages/lifecycle.js`
 
 ```
-switchStage(deps, target):
-  guard: if no file and target != "edit" -> return (no-op)
-  guard: if target == "run" and no previewSeries -> setStatus("locked"), return
-  guard: if target == "edit" and no edit.distimes -> "Load a decomposition file"
+switchStage(app, target):
+  reason = STAGES[target].blocked(app)
+  if reason == "" -> return                      # silent refusal
+  setSettingsOpen(false)
+  if reason -> setStatus(reason), return
+  if stage changes: STAGES[current].exit(app)
   setCurrentStage(state, target)
-  toggle .active on stageQc/stageRun/stageEdit
+  toggle .active on each stage's panel
+  if stage changes: STAGES[target].enter(app)
   updateStepAvailability()
   updateWorkflowStepper(target)
-  scheduleLayoutRerender(0)
+  scheduleLayoutRerender(0)                      # -> STAGES[target].render(app)
 ```
 
 ### `updateStepAvailability()` — `navigation.js`

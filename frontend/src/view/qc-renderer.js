@@ -1,9 +1,15 @@
 import { COLORS } from "../config.js";
-import { drawRoiRects } from "./plots.js";
+import {
+  drawGridOverlay,
+  drawMiniSeries,
+  drawRoiRects,
+  nextFrame,
+} from "./plots.js";
 import { gridDimensionsFor } from "../io/grid.js";
-import { roiStart, roiEnd } from "../state/selectors.js";
+import { getCurrentGrid, roiStart, roiEnd } from "../state/selectors.js";
 import {
   addArtifactRegion,
+  ensureDiscardMasks,
   setArtifactDraft,
   setArtifactMode,
   setChannelTraces,
@@ -12,6 +18,8 @@ import {
   setRoiDraft,
   setRoiForIndex,
 } from "../state/actions.js";
+
+/** @typedef {import("../app/context.js").App} App */
 
 /**
  * Decomposition ROIs and artifact windows are drawn on the same canvases, so
@@ -53,19 +61,13 @@ export function renderArtifactControls(els, state) {
   }
 }
 
-export function refreshVisuals(deps) {
-  const {
-    state,
-    els,
-    drawGridOverlay,
-    renderAuxiliaryChannels,
-    renderMuExplorer,
-  } = deps;
+/** @param {App} app */
+export function refreshVisuals(app) {
+  const { state, els, renderAuxiliaryChannels, renderMuExplorer } = app;
   const selections = buildSelections(state);
   renderArtifactControls(els, state);
-  const emgCanvas = els?.emgCanvas || "emgCanvas";
   drawGridOverlay(
-    emgCanvas,
+    els.emgCanvas,
     state.gridSeries,
     state.gridColors,
     selections,
@@ -75,15 +77,16 @@ export function refreshVisuals(deps) {
   renderMuExplorer();
 }
 
-export function enableRoiSelection(deps, canvasId) {
+/** @param {App} app */
+export function enableRoiSelection(app, canvasId) {
   const {
     state,
     els,
     syncRois,
-    refreshVisualsFn,
+    refreshVisuals,
     requestQcGridWindow,
     updateProgress,
-  } = deps;
+  } = app;
   const canvas = els?.[canvasId] || document.getElementById(canvasId);
   if (!canvas || canvas.dataset.roiBound === "1") return;
   canvas.dataset.roiBound = "1";
@@ -122,7 +125,7 @@ export function enableRoiSelection(deps, canvasId) {
     });
     setRoiDraft(state, null);
     setChannelTraces(state, []);
-    refreshVisualsFn();
+    refreshVisuals();
     requestQcGridWindow(
       state.currentGrid,
       state.rois[0]?.start || 0,
@@ -143,7 +146,7 @@ export function enableRoiSelection(deps, canvasId) {
     });
     setArtifactDraft(state, null);
     setArtifactMode(state, false);
-    refreshVisualsFn();
+    refreshVisuals();
     const n = state.artifactRegions.length;
     updateProgress(
       undefined,
@@ -173,7 +176,7 @@ export function enableRoiSelection(deps, canvasId) {
     };
     if (dragIsArtifact) setArtifactDraft(state, draft);
     else setRoiDraft(state, draft);
-    refreshVisualsFn();
+    refreshVisuals();
   });
 
   window.addEventListener("mouseup", () => {
@@ -185,7 +188,7 @@ export function enableRoiSelection(deps, canvasId) {
     if (Math.abs(endX - startX) < 4) {
       setRoiDraft(state, null);
       setArtifactDraft(state, null);
-      refreshVisualsFn();
+      refreshVisuals();
       return;
     }
     if (dragIsArtifact) commitArtifact();
@@ -193,21 +196,14 @@ export function enableRoiSelection(deps, canvasId) {
   });
 }
 
-export function renderChannelQC(deps, waitForMiniPlots = false) {
-  const {
-    state,
-    els,
-    nextFrame,
-    drawMiniSeries,
-    requestQcGridWindow,
-    getCurrentGrid,
-    ensureDiscardMasks,
-  } = deps;
+/** @param {App} app */
+export function renderChannelQC(app, waitForMiniPlots = false) {
+  const { state, els, requestQcGridWindow } = app;
   const section = els.qcSection;
   if (!section) return waitForMiniPlots ? Promise.resolve() : undefined;
   section.innerHTML = "";
-  ensureDiscardMasks();
-  let gridIdx = getCurrentGrid();
+  ensureDiscardMasks(state);
+  let gridIdx = getCurrentGrid(state);
   const allMeans = state.channelMeans || [];
   if (!allMeans[gridIdx] && allMeans.length) {
     gridIdx = 0;
@@ -248,7 +244,7 @@ export function renderChannelQC(deps, waitForMiniPlots = false) {
     const off = mask[chIdx] === 1;
     if (off) cell.classList.add("off");
     const label = document.createElement("div");
-    label.textContent = chIdx + 1;
+    label.textContent = String(chIdx + 1);
     label.className = "qc-label";
     const mini = document.createElement("canvas");
     mini.height = 26;
@@ -260,7 +256,7 @@ export function renderChannelQC(deps, waitForMiniPlots = false) {
     cell.title = `Channel ${chIdx + 1} • mean |EMG| ${meanText}`;
     cell.addEventListener("click", () => {
       setDiscardMaskChannel(state, gridIdx, chIdx, off ? 0 : 1);
-      renderChannelQC(deps, false);
+      renderChannelQC(app, false);
     });
     miniDrawJobs.push(() =>
       drawMiniSeries(mini, traces[chIdx], mask[chIdx] === 1),

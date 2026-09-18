@@ -1,4 +1,5 @@
 import {
+  ensureDiscardMasks,
   setAuxData,
   setChannelMeans,
   setChannelTraces,
@@ -17,18 +18,22 @@ import {
   setSeriesLength,
   setUploadToken,
 } from "../state/actions.js";
-import { roiStart, roiEnd } from "../state/selectors.js";
+import { getCurrentGrid, roiStart, roiEnd } from "../state/selectors.js";
 import { normalizePreviewPayload } from "../api/payloads.js";
+import { getSuggestedNpzName } from "../io/bids.js";
+import { drawGridOverlay } from "../view/plots.js";
 
-export async function autoSaveRunDecomposition(deps) {
+/** @typedef {import("../app/context.js").App} App */
+
+/** @param {App} app */
+export async function autoSaveRunDecomposition(app) {
   const {
     state,
-    getSuggestedNpzName,
     persistNpzBySaveTarget,
     getBidsMuscleNames,
     setStatus,
-    onSaved,
-  } = deps;
+    loadDecompositionForEditByPath,
+  } = app;
 
   if (state.runDownloadInFlight) return;
   if (!state.muDistimes?.length) return;
@@ -37,8 +42,7 @@ export async function autoSaveRunDecomposition(deps) {
   const key = `${suggestedName}:${state.muDistimes.length}:${state.seriesLength || 0}`;
   if (state.lastRunDownloadKey === key) return;
 
-  const muscleNames =
-    typeof getBidsMuscleNames === "function" ? getBidsMuscleNames() : [];
+  const muscleNames = getBidsMuscleNames();
   const totalSamples =
     state.seriesLength ||
     (state.muPulseTrains?.[0]?.length ?? 0) ||
@@ -70,8 +74,8 @@ export async function autoSaveRunDecomposition(deps) {
         : "Decomposition saved",
       "success",
     );
-    if (onSaved && saved?.path) {
-      onSaved(saved.path);
+    if (saved?.path) {
+      loadDecompositionForEditByPath(saved.path);
     }
   } catch (err) {
     console.error(err);
@@ -81,7 +85,8 @@ export async function autoSaveRunDecomposition(deps) {
   }
 }
 
-export async function runDecomposition(deps) {
+/** @param {App} app */
+export async function runDecomposition(app) {
   const {
     state,
     api,
@@ -92,8 +97,8 @@ export async function runDecomposition(deps) {
     switchStage,
     setStatus,
     updateProgress,
-    handleStreamMessageFn,
-  } = deps;
+    handleStreamMessage,
+  } = app;
 
   if (state.isRunning) {
     setStatus("Decomposition already running", "muted");
@@ -133,10 +138,7 @@ export async function runDecomposition(deps) {
       );
     }
 
-    const project =
-      typeof getBidsProject === "function"
-        ? String(getBidsProject() || "").trim()
-        : "";
+    const project = String(getBidsProject() || "").trim();
     if (project) {
       formData.append("project", project);
     }
@@ -185,7 +187,7 @@ export async function runDecomposition(deps) {
       for (const line of lines) {
         if (!line.trim()) continue;
         try {
-          handleStreamMessageFn(JSON.parse(line));
+          handleStreamMessage(JSON.parse(line));
         } catch (e) {
           console.warn("Dropped malformed stream event", e);
           malformedEvents += 1;
@@ -194,7 +196,7 @@ export async function runDecomposition(deps) {
     }
     if (buffer.trim()) {
       try {
-        handleStreamMessageFn(JSON.parse(buffer));
+        handleStreamMessage(JSON.parse(buffer));
       } catch (e) {
         console.warn("Dropped malformed final stream event", e);
         malformedEvents += 1;
@@ -216,14 +218,13 @@ export async function runDecomposition(deps) {
   }
 }
 
-function applyPreviewData(deps, preview, options = {}) {
+/** @param {App} app */
+function applyPreviewData(app, preview, options = {}) {
   const {
     state,
-    ensureDiscardMasks,
+    els,
     renderChannelQC,
-    getCurrentGrid,
     requestQcGridWindow,
-    drawGridOverlay,
     showWorkspace,
     renderMuExplorer,
     renderBidsAutoInfo,
@@ -231,9 +232,7 @@ function applyPreviewData(deps, preview, options = {}) {
     populateAuxSelector,
     renderAuxiliaryChannels,
     enableRoiSelection,
-    setNwindows,
-    emgCanvasId,
-  } = deps;
+  } = app;
   const { skipMuData = false } = options;
 
   const {
@@ -262,7 +261,7 @@ function applyPreviewData(deps, preview, options = {}) {
       state,
       rois.map((r) => ({ start: r[0] ?? r.start, end: r[1] ?? r.end })),
     );
-    if (setNwindows) setNwindows(state.rois.length);
+    if (els.nwindows) els.nwindows.value = String(state.rois.length);
   }
   if (grid_mean_abs && grid_names) {
     setGridSeries(state, grid_mean_abs);
@@ -296,18 +295,17 @@ function applyPreviewData(deps, preview, options = {}) {
     renderAuxiliaryChannels();
     enableRoiSelection("auxCanvas");
   }
-  ensureDiscardMasks();
+  ensureDiscardMasks(state);
   renderChannelQC();
   const roiStream = state.rois?.[0];
   requestQcGridWindow(
-    getCurrentGrid(),
+    getCurrentGrid(state),
     roiStart(roiStream),
     roiEnd(roiStream, state.seriesLength),
   );
   setPreviewSeries(state, mean_abs);
-  const emgCanvas = emgCanvasId || "emgCanvas";
   drawGridOverlay(
-    emgCanvas,
+    els.emgCanvas,
     state.gridSeries,
     state.gridColors,
     state.rois,
@@ -329,29 +327,17 @@ async function hydrateBinaryDecomposePreview(deps) {
   }
 }
 
-export function handleStreamMessage(deps, msg) {
+/** @param {App} app */
+export function handleStreamMessage(app, msg) {
   const {
     state,
+    els,
     api,
     setStatus,
     updateProgress,
-    setProgressText,
-    ensureDiscardMasks,
-    renderChannelQC,
-    getCurrentGrid,
-    requestQcGridWindow,
-    drawGridOverlay,
-    showWorkspace,
     renderMuExplorer,
-    renderBidsAutoInfo,
-    renderBidsMuscleFields,
-    populateAuxSelector,
-    renderAuxiliaryChannels,
-    enableRoiSelection,
     autoSaveRunDecomposition,
-    setNwindows,
-    emgCanvasId,
-  } = deps;
+  } = app;
 
   let pendingAutoSave = false;
 
@@ -371,45 +357,20 @@ export function handleStreamMessage(deps, msg) {
   }
 
   if (msg.preview) {
-    const commonPreviewDeps = {
-      state,
-      ensureDiscardMasks,
-      renderChannelQC,
-      getCurrentGrid,
-      requestQcGridWindow,
-      drawGridOverlay,
-      showWorkspace,
-      renderMuExplorer,
-      renderBidsAutoInfo,
-      renderBidsMuscleFields,
-      populateAuxSelector,
-      renderAuxiliaryChannels,
-      enableRoiSelection,
-      setNwindows,
-      emgCanvasId,
-    };
-
     if (msg.preview.preview_binary_token && api) {
       const previewNoToken = { ...msg.preview };
       delete previewNoToken.preview_binary_token;
-      applyPreviewData(
-        commonPreviewDeps,
-        normalizePreviewPayload(previewNoToken),
-        {
-          skipMuData: true,
-        },
-      );
+      applyPreviewData(app, normalizePreviewPayload(previewNoToken), {
+        skipMuData: true,
+      });
       void hydrateBinaryDecomposePreview({
         api,
         token: msg.preview.preview_binary_token,
         applyPreview: (previewPayload) => {
-          applyPreviewData(
-            commonPreviewDeps,
-            normalizePreviewPayload(previewPayload),
-          );
+          applyPreviewData(app, normalizePreviewPayload(previewPayload));
           if (pendingAutoSave) {
             renderMuExplorer();
-            void autoSaveRunDecomposition?.();
+            void autoSaveRunDecomposition();
           }
         },
         onError: (err) => {
@@ -418,7 +379,7 @@ export function handleStreamMessage(deps, msg) {
         },
       });
     } else {
-      applyPreviewData(commonPreviewDeps, normalizePreviewPayload(msg.preview));
+      applyPreviewData(app, normalizePreviewPayload(msg.preview));
     }
   }
 
@@ -448,7 +409,7 @@ export function handleStreamMessage(deps, msg) {
     }
     const perGrid = counts.map((n, idx) => `Grid ${idx + 1}: ${n} MU`);
     const summaryText = `${perGrid.join(" • ")}${perGrid.length ? " • " : ""}Total: ${totalMu} MU`;
-    if (setProgressText) setProgressText(summaryText);
+    if (els.progressText) els.progressText.textContent = summaryText;
     if (parameters) {
       setParameters(state, parameters);
     }
@@ -457,7 +418,7 @@ export function handleStreamMessage(deps, msg) {
   if (msg.stage === "done") {
     if (Array.isArray(state.muPulseTrains) && state.muPulseTrains.length) {
       renderMuExplorer();
-      void autoSaveRunDecomposition?.();
+      void autoSaveRunDecomposition();
     } else {
       pendingAutoSave = true;
     }

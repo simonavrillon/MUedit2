@@ -1,5 +1,7 @@
 import { parseBidsEntitiesFromLabel } from "../../io/bids.js";
 
+/** @typedef {import("../context.js").App} App */
+
 function displayNameForPath(fullPath, name) {
   if (String(name || "").toLowerCase() !== "info.rhd") return name;
   const parts = String(fullPath || "")
@@ -19,7 +21,8 @@ function inferProjectFromPath(fullPath) {
   return candidate;
 }
 
-export function createImportStageService(deps) {
+/** @param {App} app */
+async function handleNativeDialogOpen(app) {
   const {
     api,
     setStatus,
@@ -30,77 +33,66 @@ export function createImportStageService(deps) {
     handleRawFilePath,
     loadDecompositionForEditByPath,
     setBidsEntitiesInput,
-  } = deps;
+  } = app;
 
-  async function handleNativeDialogOpen() {
-    clearUploadFormatError();
-    setUploadLoading(false);
+  clearUploadFormatError();
+  setUploadLoading(false);
 
-    let result;
-    try {
-      result = await api.openFileDialog();
-    } catch (err) {
-      console.error("File dialog failed:", err);
-      setStatus("Failed to open file dialog", "error");
-      return;
-    }
-
-    if (!result.path) return;
-
-    const { path } = result;
-    const name = displayNameForPath(path, result.name);
-    const kind = detectLandingFileType({ name });
-
-    if (kind === "unsupported") {
-      showUnsupportedUploadFormatError();
-      return;
-    }
-    if (kind === "raw") {
-      await handleRawFilePath(path, name);
-      const lname = name.toLowerCase();
-      if (lname.endsWith(".bdf") || lname.endsWith(".edf")) {
-        const entityLabel = name
-          .replace(/_emg\.[^.]+$/i, "")
-          .replace(/\.[^.]+$/, "");
-        setBidsEntitiesInput({
-          ...parseBidsEntitiesFromLabel(entityLabel),
-          project: inferProjectFromPath(path),
-        });
-      }
-    } else if (kind === "decomposition") {
-      await loadDecompositionForEditByPath(path);
-    } else {
-      const ok = await handleRawFilePath(path, name, {
-        silentPreviewFailure: true,
-      });
-      if (!ok) await loadDecompositionForEditByPath(path);
-    }
+  let result;
+  try {
+    result = await api.openFileDialog();
+  } catch (err) {
+    console.error("File dialog failed:", err);
+    setStatus("Failed to open file dialog", "error");
+    return;
   }
 
-  return { handleNativeDialogOpen };
+  if (!result.path) return;
+
+  const { path } = result;
+  const name = displayNameForPath(path, result.name);
+  const kind = detectLandingFileType({ name });
+
+  if (kind === "unsupported") {
+    showUnsupportedUploadFormatError();
+    return;
+  }
+  if (kind === "raw") {
+    await handleRawFilePath(path, name);
+    const lname = name.toLowerCase();
+    if (lname.endsWith(".bdf") || lname.endsWith(".edf")) {
+      const entityLabel = name
+        .replace(/_emg\.[^.]+$/i, "")
+        .replace(/\.[^.]+$/, "");
+      setBidsEntitiesInput({
+        ...parseBidsEntitiesFromLabel(entityLabel),
+        project: inferProjectFromPath(path),
+      });
+    }
+  } else if (kind === "decomposition") {
+    await loadDecompositionForEditByPath(path);
+  } else {
+    const ok = await handleRawFilePath(path, name, {
+      silentPreviewFailure: true,
+    });
+    if (!ok) await loadDecompositionForEditByPath(path);
+  }
 }
 
-/**
- * @typedef {import('../deps.js').ImportSetupDeps} ImportSetupDeps
- */
-
-/**
- * @param {ImportSetupDeps} deps
- */
-export function setupImportEvents(deps) {
+/** @param {App} app */
+export function setupImportEvents(app) {
   const {
     els,
     state,
-    handleNativeDialogOpen,
     setStatus,
     showWorkspace,
     switchStage,
     updateWorkflowStepper,
-  } = deps;
+  } = app;
 
   if (els.browseSignalBtn) {
     els.browseSignalBtn.addEventListener("click", () => {
-      void handleNativeDialogOpen();
+      void handleNativeDialogOpen(app);
     });
   }
 

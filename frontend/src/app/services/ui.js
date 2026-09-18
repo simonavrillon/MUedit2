@@ -1,7 +1,6 @@
 import {
   setStatus as setStatusController,
   showWorkspace as showWorkspaceController,
-  switchStage as switchStageController,
   populateGridTabs as populateGridTabsController,
   updateStepAvailability as updateStepAvailabilityController,
   updateWorkflowStepper as updateWorkflowStepperController,
@@ -9,14 +8,20 @@ import {
 import {
   ensureSettingsToggleIcon as ensureSettingsToggleIconController,
   initLayoutResizePolicy as initLayoutResizePolicyController,
-  rerenderPlotsForLayout as rerenderPlotsForLayoutController,
   scheduleLayoutRerender as scheduleLayoutRerenderController,
   setSettingsOpen as setSettingsOpenController,
   toggleSettingsOpen as toggleSettingsOpenController,
 } from "./layout.js";
+import { switchStage as switchStageController } from "../stages/lifecycle.js";
 
-export function createUiService(deps) {
-  const { els } = deps;
+/** @typedef {import("../context.js").App} App */
+
+/**
+ * @param {App} app
+ * @returns {import("../context.js").UiService}
+ */
+export function createUiService(app) {
+  const { els } = app;
 
   function setStatus(text, tone = "muted") {
     setStatusController(els, text, tone);
@@ -29,8 +34,8 @@ export function createUiService(deps) {
   }
 
   const updateWorkflowStepper = (targetStage) =>
-    updateWorkflowStepperController(ctx, targetStage);
-  const updateStepAvailability = () => updateStepAvailabilityController(ctx);
+    updateWorkflowStepperController(app, targetStage);
+  const updateStepAvailability = () => updateStepAvailabilityController(app);
 
   function setRunPhase(pct, message = "", stage = "") {
     if (!els.runPhase) return;
@@ -72,29 +77,16 @@ export function createUiService(deps) {
     }
   }
 
-  const rerenderPlotsForLayout = () => rerenderPlotsForLayoutController(ctx);
   const scheduleLayoutRerender = (delay = 90) =>
-    scheduleLayoutRerenderController(ctx, delay);
-  const initLayoutResizePolicy = () => initLayoutResizePolicyController(ctx);
-  const setSettingsOpen = (open) => setSettingsOpenController(ctx, open);
-  const toggleSettingsOpen = () => toggleSettingsOpenController(ctx);
+    scheduleLayoutRerenderController(app, delay);
+  const initLayoutResizePolicy = () => initLayoutResizePolicyController(app);
+  const setSettingsOpen = (open) => setSettingsOpenController(app, open);
+  const toggleSettingsOpen = () => toggleSettingsOpenController(app);
   const ensureSettingsToggleIcon = () =>
     ensureSettingsToggleIconController(els);
-  const switchStage = (target) => switchStageController(ctx, target);
-  const populateGridTabs = () => populateGridTabsController(ctx);
-  const showWorkspace = (options = {}) => showWorkspaceController(ctx, options);
-
-  const ctx = {
-    ...deps,
-    setStatus,
-    updateStepAvailability,
-    updateWorkflowStepper,
-    rerenderPlotsForLayout,
-    scheduleLayoutRerender,
-    setSettingsOpen,
-    switchStage,
-    populateGridTabs,
-  };
+  const switchStage = (target) => switchStageController(app, target);
+  const populateGridTabs = () => populateGridTabsController(app);
+  const showWorkspace = (options = {}) => showWorkspaceController(app, options);
 
   function applyToggle(btn, on) {
     if (!btn) return;
@@ -190,7 +182,6 @@ export function createUiService(deps) {
   return {
     setStatus,
     setEditStatus,
-    setRunPhase,
     updateProgress,
     updateWorkflowStepper,
     updateStepAvailability,
