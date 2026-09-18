@@ -11,9 +11,9 @@
 
 .workspace-header {
   position: relative;
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  justify-content: center;
   gap: 12px;
   padding: 8px 14px 10px;
   border-bottom: 1px solid var(--border);
@@ -34,9 +34,10 @@
 }
 
 .app-status {
-  position: absolute;
-  right: 14px;
-  max-width: 40%;
+  grid-column: 3;
+  justify-self: end;
+  min-width: 0;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -100,11 +101,11 @@
 /* ── Workflow Stepper ── */
 
 .workflow-stepper {
+  grid-column: 2;
   display: flex;
   justify-content: center;
   gap: 6px;
   flex-wrap: wrap;
-  flex: 0 1 auto;
 }
 
 .step-chip {

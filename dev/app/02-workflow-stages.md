@@ -190,7 +190,7 @@ Artifact windows are visually shaded on the EMG overview. They are OR'd into the
 |---|---|---|
 | `windowed` | Windowed | "Filters applied inside each analysis window only. Pulse trains are zero outside the ROI." |
 | `full-trace` | Full trace | "Filters dewhitened and applied across the whole recording, so units extend beyond the ROI." |
-| `adaptive` | Adaptive | "Separation vectors and whitening track the signal batch by batch across the whole recording." (beta) |
+| `adaptive` | Adaptive | "Filters and whitening are adapted batch by batch across the whole recording." (beta) |
 
 ### Flow
 

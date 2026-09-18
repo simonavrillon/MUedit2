@@ -27,7 +27,7 @@ export const POSTPROCESS_MODES = {
   },
   adaptive: {
     label: "Adaptive",
-    hint: "Separation vectors and whitening track the signal batch by batch across the whole recording.",
+    hint: "Filters and whitening are adapted batch by batch across the whole recording.",
     flags: { use_adaptive: 1, full_trace: 0 },
   },
 };
