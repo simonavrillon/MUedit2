@@ -6,19 +6,55 @@
  */
 import { COLORS } from "../config.js";
 
+/** @typedef {import("../app/context.js").Span} Span */
+/** @typedef {import("../app/state.js").ChannelTrace} ChannelTrace */
+/** @typedef {{ left: number, right: number, top: number, bottom: number }} Padding */
+/** @typedef {Span & { yMin?: number, yMax?: number, kind?: string }} Overlay */
+/** @typedef {HTMLCanvasElement | string | null | undefined} CanvasRef */
+
+/**
+ * @typedef {object} SeriesOptions
+ * @property {string} [noDataText]
+ * @property {boolean} [showAxes]
+ * @property {boolean} [hideYAxis]
+ * @property {number | null} [fsamp]
+ * @property {string} [markerColor]
+ * @property {{ positions: number[], values?: number[] | null, color?: string }[]} [extraMarkers]
+ */
+
+/**
+ * @param {CanvasRef} canvas
+ * @returns {HTMLCanvasElement | null}
+ */
+function resolveCanvas(canvas) {
+  if (typeof canvas !== "string") return canvas ?? null;
+  return /** @type {HTMLCanvasElement | null} */ (
+    document.getElementById(canvas)
+  );
+}
+
 /** Resolve after the browser's next paint, once layout has settled. */
 export function nextFrame() {
-  return new Promise((resolve) => {
+  return new Promise((/** @type {(value?: void) => void} */ resolve) => {
     window.requestAnimationFrame(() => resolve());
   });
 }
 
+/**
+ * @param {boolean} showAxes
+ * @returns {Padding}
+ */
 function getAxisPadding(showAxes) {
   return showAxes
     ? { left: 38, right: 8, top: 8, bottom: 20 }
     : { left: 0, right: 0, top: 0, bottom: 0 };
 }
 
+/**
+ * @param {HTMLCanvasElement} canvas
+ * @param {boolean} showAxes
+ * @param {{ hideYAxis?: boolean }} [options]
+ */
 export function getCanvasPlotMetrics(
   canvas,
   showAxes,
@@ -40,10 +76,24 @@ export function getCanvasPlotMetrics(
   };
 }
 
+/**
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {number} startX
+ * @param {number} endX
+ * @param {Overlay} sel
+ * @param {Padding} padding
+ * @param {number} plotHeight
+ */
 function drawSelectionRect(ctx, startX, endX, sel, padding, plotHeight) {
-  const hasY = Number.isFinite(sel?.yMin) && Number.isFinite(sel?.yMax);
-  const yMin = hasY ? Math.max(0, Math.min(plotHeight, sel.yMin)) : 0;
-  const yMax = hasY ? Math.max(0, Math.min(plotHeight, sel.yMax)) : plotHeight;
+  const top = sel?.yMin;
+  const bottom = sel?.yMax;
+  const hasY =
+    typeof top === "number" &&
+    typeof bottom === "number" &&
+    Number.isFinite(top) &&
+    Number.isFinite(bottom);
+  const yMin = hasY ? Math.max(0, Math.min(plotHeight, top)) : 0;
+  const yMax = hasY ? Math.max(0, Math.min(plotHeight, bottom)) : plotHeight;
   const rectTop = padding.top + Math.min(yMin, yMax);
   const rectHeight = Math.max(1, Math.abs(yMax - yMin));
   const x = Math.min(startX, endX);
@@ -55,6 +105,13 @@ function drawSelectionRect(ctx, startX, endX, sel, padding, plotHeight) {
   ctx.strokeRect(x, rectTop, width, rectHeight);
 }
 
+/**
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {Overlay[] | null | undefined} selections
+ * @param {number | null | undefined} totalSamples
+ * @param {number} width
+ * @param {number} height
+ */
 export function drawRoiRects(ctx, selections, totalSamples, width, height) {
   if (!selections || !selections.length || !totalSamples) return;
   selections.forEach((sel) => {
@@ -69,6 +126,18 @@ export function drawRoiRects(ctx, selections, totalSamples, width, height) {
   });
 }
 
+/**
+ * @param {CanvasRef} canvas
+ * @param {number[]} series
+ * @param {string} [color]
+ * @param {number[]} [markers]
+ * @param {Overlay[]} [selections]
+ * @param {number | null} [totalSamples]
+ * @param {Span | null} [viewRange]
+ * @param {number[] | null} [markerValues]
+ * @param {boolean} [drawLine]
+ * @param {SeriesOptions} [options]
+ */
 export function drawSeries(
   canvas,
   series,
@@ -81,10 +150,10 @@ export function drawSeries(
   drawLine = true,
   options = {},
 ) {
-  const canvasEl =
-    typeof canvas === "string" ? document.getElementById(canvas) : canvas;
+  const canvasEl = resolveCanvas(canvas);
   if (!canvasEl) return;
   const ctx = canvasEl.getContext("2d");
+  if (!ctx) return;
   const w = canvasEl.clientWidth || canvasEl.width || 1;
   canvasEl.width = w;
   const h = canvasEl.clientHeight || canvasEl.height || 220;
@@ -130,14 +199,14 @@ export function drawSeries(
   const span = max - min || 1;
   const stepX = plotWidth / Math.max(1, sliced.length - 1);
 
-  const toCanvasX = (idx) => padding.left + idx * stepX;
-  const toCanvasY = (v) =>
+  const toCanvasX = (/** @type {number} */ idx) => padding.left + idx * stepX;
+  const toCanvasY = (/** @type {number} */ v) =>
     padding.top + plotHeight - ((v - min) / span) * plotHeight;
 
   if (selections && selections.length && viewSpan > 0) {
     selections.forEach((sel) => {
-      const rawStart = sel?.start ?? sel?.[0];
-      const rawEnd = sel?.end ?? sel?.[1];
+      const rawStart = sel?.start;
+      const rawEnd = sel?.end;
       if (!Number.isFinite(rawStart) || !Number.isFinite(rawEnd)) return;
       const s = Math.max(clampedStart, Math.min(clampedEnd, rawStart));
       const e = Math.max(s + 1, Math.min(clampedEnd, rawEnd));
@@ -273,6 +342,13 @@ export function drawSeries(
   }
 }
 
+/**
+ * @param {CanvasRef} canvas
+ * @param {number[][]} [seriesList]
+ * @param {string[]} [colors]
+ * @param {Overlay[]} [selections]
+ * @param {number | null} [totalSamples]
+ */
 export function drawGridOverlay(
   canvas,
   seriesList = [],
@@ -280,10 +356,10 @@ export function drawGridOverlay(
   selections = [],
   totalSamples = null,
 ) {
-  const canvasEl =
-    typeof canvas === "string" ? document.getElementById(canvas) : canvas;
+  const canvasEl = resolveCanvas(canvas);
   if (!canvasEl) return;
   const ctx = canvasEl.getContext("2d");
+  if (!ctx) return;
   const w = canvasEl.clientWidth || canvasEl.width || 1;
   canvasEl.width = w;
   const h = canvasEl.clientHeight || canvasEl.height || 220;
@@ -345,23 +421,30 @@ export function drawGridOverlay(
   });
 }
 
+/**
+ * @param {HTMLCanvasElement | null | undefined} canvas
+ * @param {ChannelTrace | null | undefined} series
+ * @param {boolean} [off]
+ */
 export function drawMiniSeries(canvas, series, off = false) {
   if (!canvas) return;
   const ctx = canvas.getContext("2d");
+  if (!ctx) return;
   canvas.width = canvas.clientWidth || 60;
   canvas.height = canvas.clientHeight || 28;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  if (!series || (!series.length && !(series.min && series.max))) {
+  const hasEnvelope =
+    !!series &&
+    !Array.isArray(series) &&
+    Array.isArray(series.min) &&
+    Array.isArray(series.max);
+  if (!series || (Array.isArray(series) ? !series.length : !hasEnvelope)) {
     ctx.fillStyle = COLORS.gridEmpty;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     return;
   }
-  const hasEnvelope =
-    !Array.isArray(series) &&
-    Array.isArray(series.min) &&
-    Array.isArray(series.max);
-  const valuesMin = hasEnvelope ? series.min : series;
-  const valuesMax = hasEnvelope ? series.max : series;
+  const valuesMin = Array.isArray(series) ? series : series.min;
+  const valuesMax = Array.isArray(series) ? series : series.max;
   let max = -Infinity;
   let min = Infinity;
   for (let i = 0; i < valuesMax.length; i++) {
@@ -389,7 +472,7 @@ export function drawMiniSeries(canvas, series, off = false) {
     }
   } else {
     ctx.beginPath();
-    series.forEach((v, idx) => {
+    valuesMax.forEach((v, idx) => {
       const x = idx * stepX;
       const y = canvas.height - ((v - min) / span) * canvas.height;
       if (idx === 0) ctx.moveTo(x, y);

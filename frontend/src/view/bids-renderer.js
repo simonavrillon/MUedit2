@@ -1,5 +1,15 @@
 import { naToEmpty } from "../io/bids.js";
 
+/** @typedef {import("../app/context.js").Els} Els */
+/** @typedef {import("../io/bids.js").ParticipantFields} ParticipantFields */
+/** @typedef {import("../io/bids.js").BidsAutoInfoModel} BidsAutoInfoModel */
+/** @typedef {import("../io/bids.js").BidsMuscleRows} BidsMuscleRows */
+/** @typedef {import("../io/bids.js").SessionInfo} SessionInfo */
+
+/**
+ * @param {string} label
+ * @param {string} value
+ */
 function makeInfoItem(label, value) {
   const row = document.createElement("div");
   row.className = "auto-info-item";
@@ -12,6 +22,10 @@ function makeInfoItem(label, value) {
   return row;
 }
 
+/**
+ * @param {Els} els
+ * @param {string | null} [fileName]
+ */
 export function resetBidsEntityDefaults(els, fileName) {
   if (els.bidsSubject) els.bidsSubject.value = "1";
   if (els.bidsSession) els.bidsSession.value = "1";
@@ -24,6 +38,10 @@ export function resetBidsEntityDefaults(els, fileName) {
   }
 }
 
+/**
+ * @param {Els} els
+ * @param {ParticipantFields | null | undefined} participant
+ */
 export function applyParticipantFields(els, participant) {
   if (!participant) return;
   if (els.bidsParticipantAge && participant.age != null)
@@ -34,6 +52,10 @@ export function applyParticipantFields(els, participant) {
     els.bidsParticipantHandedness.value = naToEmpty(participant.handedness);
 }
 
+/**
+ * @param {Els} els
+ * @param {BidsAutoInfoModel} model
+ */
 export function renderBidsAutoInfo(els, model) {
   const box = els.bidsAutoInfo;
   if (!box) return;
@@ -62,6 +84,10 @@ export function renderBidsAutoInfo(els, model) {
     box.appendChild(makeInfoItem("Amplifier Gain:", model.gainText));
 }
 
+/**
+ * @param {Els} els
+ * @param {BidsMuscleRows} rows
+ */
 export function renderBidsMuscleFields(els, rows) {
   const container = els.bidsMuscleContainer;
   if (!container) return;
@@ -87,6 +113,10 @@ export function renderBidsMuscleFields(els, rows) {
   });
 }
 
+/**
+ * @param {Els} els
+ * @param {SessionInfo | null | undefined} payload
+ */
 export function applySessionInfoToDom(els, payload) {
   if (!payload) return;
   if (els.fileName) {
@@ -131,19 +161,11 @@ export function applySessionInfoToDom(els, payload) {
   // Pre-fill participant fields from BIDS sidecar.
   applyParticipantFields(els, payload.participant);
 
-  // Pre-fill hardware fields from BIDS sidecar or auto-detected loader metadata.
-  if (
-    els.bidsManufacturer &&
-    (payload.hardware?.manufacturer || payload.autoInfo?.manufacturer)
-  )
-    els.bidsManufacturer.value =
-      payload.hardware?.manufacturer || payload.autoInfo.manufacturer;
-  if (
-    els.bidsDeviceModel &&
-    (payload.hardware?.deviceModel || payload.autoInfo?.deviceName)
-  )
-    els.bidsDeviceModel.value =
-      payload.hardware?.deviceModel || payload.autoInfo.deviceName;
+  // Pre-fill hardware fields from the BIDS sidecar.
+  if (els.bidsManufacturer && payload.hardware?.manufacturer)
+    els.bidsManufacturer.value = payload.hardware.manufacturer;
+  if (els.bidsDeviceModel && payload.hardware?.deviceModel)
+    els.bidsDeviceModel.value = payload.hardware.deviceModel;
 
   // Pre-fill BIDS recording metadata round-tripped from the EMG JSON sidecar.
   if (

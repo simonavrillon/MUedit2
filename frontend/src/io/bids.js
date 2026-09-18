@@ -1,5 +1,27 @@
 import { inferGridCount, normalizeGridNames } from "./grid.js";
 
+/** @typedef {import("../app/state.js").State} State */
+/** @typedef {import("../app/state.js").FileRef} FileRef */
+/** @typedef {import("../app/context.js").JsonObject} JsonObject */
+
+/** @typedef {ReturnType<typeof buildBidsAutoInfoModel>} BidsAutoInfoModel */
+/** @typedef {ReturnType<typeof buildBidsMuscleRowsModel>} BidsMuscleRows */
+/** @typedef {ReturnType<typeof buildSessionInfoFromDecomposition>} SessionInfo */
+/** @typedef {{ age?: string | null, sex?: string | null, handedness?: string | null }} ParticipantFields */
+
+/** @typedef {ReturnType<typeof parseBidsEntitiesFromLabel>} BidsEntities */
+
+/**
+ * @typedef {object} SessionInfoDeps
+ * @property {typeof parseBidsEntitiesFromLabel} parseBidsEntitiesFromLabel
+ * @property {typeof listifyMuscles} listifyMuscles
+ */
+
+/**
+ * @param {string | null | undefined} value
+ * @param {string} [fallback]
+ * @returns {string}
+ */
 function safeBidsToken(value, fallback = "") {
   const token = String(value || "")
     .trim()
@@ -8,7 +30,7 @@ function safeBidsToken(value, fallback = "") {
 }
 
 /**
- * @param {{ subject?: string, task?: string, session?: string, run?: string, acq?: string }} [entities]
+ * @param {Partial<BidsEntities>} [entities]
  */
 export function buildEntityLabelFromSession({
   subject,
@@ -31,15 +53,23 @@ export function buildEntityLabelFromSession({
   return parts.join("_");
 }
 
+/**
+ * @param {string | null | undefined} baseName
+ * @param {string} [suffix]
+ * @returns {string}
+ */
 export function getSuggestedNpzName(baseName, suffix = "_edited") {
   let stem = String(baseName || "decomposition").replace(/\.[^.]+$/, "");
   if (suffix && stem.endsWith(suffix)) stem = stem.slice(0, -suffix.length);
   return `${stem}${suffix}.npz`;
 }
 
+/**
+ * @param {string | null | undefined} label
+ */
 export function parseBidsEntitiesFromLabel(label) {
   const text = String(label || "");
-  const get = (key) => {
+  const get = (/** @type {string} */ key) => {
     const m = text.match(new RegExp(`(?:^|_)${key}-([^_\\.]+)`));
     return m && m[1] ? m[1] : "";
   };
@@ -52,6 +82,10 @@ export function parseBidsEntitiesFromLabel(label) {
   };
 }
 
+/**
+ * @param {string | (string | null | undefined)[] | null | undefined} value
+ * @returns {string[]}
+ */
 export function listifyMuscles(value) {
   if (Array.isArray(value))
     return value.map((v) => String(v || "").trim()).filter(Boolean);
@@ -59,6 +93,9 @@ export function listifyMuscles(value) {
   return [];
 }
 
+/**
+ * @param {State} state
+ */
 export function buildBidsAutoInfoModel(state) {
   const meta = state.metadata || {};
   const muscles = Array.isArray(state.muscle) ? state.muscle : [];
@@ -88,6 +125,9 @@ export function buildBidsAutoInfoModel(state) {
   };
 }
 
+/**
+ * @param {State} state
+ */
 export function buildBidsMuscleRowsModel(state) {
   const inEditStage = state.currentStage === "edit";
   const editGridNames =
@@ -124,10 +164,19 @@ export function buildBidsMuscleRowsModel(state) {
   }));
 }
 
+/**
+ * @param {string | null | undefined} v
+ * @returns {string}
+ */
 export function naToEmpty(v) {
   return !v || v === "n/a" ? "" : v;
 }
 
+/**
+ * @param {FileRef | null | undefined} file
+ * @param {JsonObject | null | undefined} data
+ * @param {SessionInfoDeps} deps
+ */
 export function buildSessionInfoFromDecomposition(file, data, deps) {
   const { parseBidsEntitiesFromLabel, listifyMuscles } = deps;
   const fileLabel = file?.name || data?.file_label || "decomposition";

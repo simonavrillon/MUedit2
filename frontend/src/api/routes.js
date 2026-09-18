@@ -8,11 +8,11 @@ export const routes = {
   qcAuto: "/qc/auto",
   previewByPath: "/preview-by-path",
   decomposeStream: "/decompose_stream",
-  decomposePreview: (token) =>
+  decomposePreview: (/** @type {string} */ token) =>
     `/decompose_preview/${encodeURIComponent(token)}`,
   editSave: "/edit/save",
-  editAction: (action) => `/edit/${action}`,
-  editMode: (mode) => `/edit/${mode}`,
+  editAction: (/** @type {string} */ action) => `/edit/${action}`,
+  editMode: (/** @type {string} */ mode) => `/edit/${mode}`,
   editRemoveOutliers: "/edit/remove-outliers",
   editRemoveDuplicates: "/edit/remove-duplicates",
   editFlagMu: "/edit/flag-mu",

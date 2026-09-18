@@ -63,9 +63,17 @@ Pure helpers are imported where they are used rather than injected: plot drawing
 
 ### Type checking
 
-`npm run typecheck` runs `tsc --checkJs` over `src/` (config in `frontend/tsconfig.json`, CI runs it on every push). Because every feature is annotated `@param {App} app`, a misspelt or removed context member is a type error, and each factory's `@returns` ties it to its typedef in `context.js`. DOM handles in `dom.js` are typed per element (`HTMLInputElement`, `HTMLCanvasElement`, …). The check is not `strict`: implicit `any` and nullable values are allowed.
+`npm run typecheck` runs `tsc --checkJs` in `strict` mode over `src/` (config in `frontend/tsconfig.json`, CI runs it on every push). Every parameter needs a type and nullable values must be checked before use. Because every feature is annotated `@param {App} app`, a misspelt or removed context member is a type error, and each factory's `@returns` ties it to its typedef in `context.js`. DOM handles in `dom.js` are typed per element (`HTMLInputElement`, `HTMLCanvasElement`, …).
 
-To add a service method: implement it in the factory, add it to the factory's return object, and add its signature to the matching typedef in `context.js`.
+The annotations follow five rules:
+
+- **Intended types.** A parameter is typed as what callers should pass. When the function guards against missing or malformed input, write `T | null | undefined` and keep the guard: `@param {Span[] | null | undefined} rois`.
+- **`unknown` only for values that really can be anything:** caught errors (`errorMessage(err)`) and the helpers that validate raw input (`toFiniteNumber`, the payload normalisers in `api/payloads.js`).
+- **Untyped backend JSON is `JsonObject`** (`Record<string, any>`, defined in `context.js`). A payload with guaranteed fields gets a named type that intersects `JsonObject` with them, like `EditLoadPayload`. Wire formats are converted where they enter: the backend sends regions (ROIs, artifact windows) as `[start, end]` pairs, and `toSpans` in `api/payloads.js` turns them into `Span` objects, so state and views never see a pair.
+- **Shared shapes have names**, declared next to the code that owns them: state shapes in `state.js` (`Selection`, `EditHistoryEntry`, `Bookmark`), cross-module contracts in `context.js` (`RoiEditRequest`, `WorkflowStep`), and view models beside their builders (`EditDropdownModel = ReturnType<typeof buildEditDropdownModel>`). Single-use parameter bags stay inline.
+- **Service and stage methods take their types from `context.js`:** `/** @type {EditStage["duplicateMu"]} */`. Only private helpers inside a factory carry their own `@param`s.
+
+To add a service method: add its signature to the matching typedef in `context.js`, then implement it in the factory under `/** @type {Typedef["name"]} */` and add it to the factory's return object.
 
 ### Wiring Topology
 

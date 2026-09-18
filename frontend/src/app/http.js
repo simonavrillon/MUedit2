@@ -1,3 +1,9 @@
+/** @typedef {import("../app/context.js").JsonObject} JsonObject */
+
+/**
+ * @param {Response} res
+ * @returns {Promise<string>}
+ */
 async function parseApiError(res) {
   let message = `HTTP ${res.status}`;
   try {
@@ -30,6 +36,12 @@ async function parseApiError(res) {
   return message;
 }
 
+/**
+ * @param {string} url
+ * @param {RequestInit} [options]
+ * @param {number} [timeoutMs]
+ * @returns {Promise<Response>}
+ */
 export async function apiFetch(url, options = {}, timeoutMs = 120000) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -40,7 +52,7 @@ export async function apiFetch(url, options = {}, timeoutMs = 120000) {
     }
     return res;
   } catch (err) {
-    if (err?.name === "AbortError") {
+    if (err instanceof Error && err.name === "AbortError") {
       throw new Error("Request timed out");
     }
     throw err;
@@ -49,6 +61,11 @@ export async function apiFetch(url, options = {}, timeoutMs = 120000) {
   }
 }
 
+/**
+ * @param {string} healthUrl
+ * @param {{ intervalMs?: number, timeoutMs?: number }} [options]
+ * @returns {Promise<boolean>}
+ */
 export async function waitForBackend(
   healthUrl,
   { intervalMs = 500, timeoutMs = 60000 } = {},
@@ -66,6 +83,12 @@ export async function waitForBackend(
   return false;
 }
 
+/**
+ * @param {string} url
+ * @param {RequestInit} [options]
+ * @param {number} [timeoutMs]
+ * @returns {Promise<JsonObject>}
+ */
 export async function apiJson(url, options = {}, timeoutMs = 120000) {
   const res = await apiFetch(url, options, timeoutMs);
   const payload = await res.json();

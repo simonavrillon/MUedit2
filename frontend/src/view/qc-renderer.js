@@ -20,12 +20,19 @@ import {
 } from "../state/actions.js";
 
 /** @typedef {import("../app/context.js").App} App */
+/** @typedef {import("../app/context.js").Els} Els */
+/** @typedef {import("../app/context.js").RoiCanvasId} RoiCanvasId */
+/** @typedef {import("../app/state.js").State} State */
+/** @typedef {import("./plots.js").Overlay} Overlay */
 
 /**
  * Decomposition ROIs and artifact windows are drawn on the same canvases, so
  * they travel as one selection list; `kind: "artifact"` is what tells
  * `drawRoiRects` to switch colour. Drafts are appended so an in-flight drag
  * renders alongside the committed windows.
+ *
+ * @param {State} state
+ * @returns {Overlay[]}
  */
 export function buildSelections(state) {
   const rois = state.roiDraft
@@ -44,6 +51,9 @@ export function buildSelections(state) {
  * Sync the +/- control row with state. Driven from `refreshVisuals` so every
  * path that changes artifact windows updates the count and armed state
  * without having to remember to call this itself.
+ *
+ * @param {Els} els
+ * @param {State} state
  */
 export function renderArtifactControls(els, state) {
   if (els?.artifactCount) {
@@ -77,7 +87,10 @@ export function refreshVisuals(app) {
   renderMuExplorer();
 }
 
-/** @param {App} app */
+/**
+ * @param {App} app
+ * @param {RoiCanvasId} canvasId
+ */
 export function enableRoiSelection(app, canvasId) {
   const {
     state,
@@ -87,7 +100,7 @@ export function enableRoiSelection(app, canvasId) {
     requestQcGridWindow,
     updateProgress,
   } = app;
-  const canvas = els?.[canvasId] || document.getElementById(canvasId);
+  const canvas = els[canvasId];
   if (!canvas || canvas.dataset.roiBound === "1") return;
   canvas.dataset.roiBound = "1";
 
@@ -96,12 +109,13 @@ export function enableRoiSelection(app, canvasId) {
   let endX = 0;
   let dragIsArtifact = false;
 
-  const toSamples = (sx, ex) => {
+  const toSamples = (/** @type {number} */ sx, /** @type {number} */ ex) => {
     const width = canvas.clientWidth || 1;
+    const total = state.seriesLength || 0;
     const s = Math.max(0, Math.min(width, Math.min(sx, ex)));
     const e = Math.max(0, Math.min(width, Math.max(sx, ex)));
-    const startSample = Math.round((s / width) * state.seriesLength);
-    const endSample = Math.round((e / width) * state.seriesLength);
+    const startSample = Math.round((s / width) * total);
+    const endSample = Math.round((e / width) * total);
     return { startSample, endSample };
   };
 
@@ -196,7 +210,11 @@ export function enableRoiSelection(app, canvasId) {
   });
 }
 
-/** @param {App} app */
+/**
+ * @param {App} app
+ * @param {boolean} [waitForMiniPlots]
+ * @returns {Promise<void> | undefined}
+ */
 export function renderChannelQC(app, waitForMiniPlots = false) {
   const { state, els, requestQcGridWindow } = app;
   const section = els.qcSection;
@@ -224,6 +242,7 @@ export function renderChannelQC(app, waitForMiniPlots = false) {
 
   const mask = state.discardMasks?.[gridIdx] || [];
   const traces = state.channelTraces?.[gridIdx] || [];
+  /** @type {(() => void)[]} */
   const miniDrawJobs = [];
   if (!traces.length) {
     const roi = state.rois?.[0];
@@ -279,6 +298,10 @@ export function renderChannelQC(app, waitForMiniPlots = false) {
   return undefined;
 }
 
+/**
+ * @param {Els} els
+ * @param {State} state
+ */
 export function populateAuxSelector(els, state) {
   const sel = els.auxSelector;
   if (!sel) return;
@@ -286,17 +309,22 @@ export function populateAuxSelector(els, state) {
   if (state.auxNames && state.auxNames.length) {
     state.auxNames.forEach((name, idx) => {
       const opt = document.createElement("option");
-      opt.value = idx;
+      opt.value = String(idx);
       opt.textContent = name || `Aux ${idx + 1}`;
       sel.appendChild(opt);
     });
   }
 }
 
+/**
+ * @param {Els} els
+ * @param {State} state
+ */
 export function renderAuxiliaryChannels(els, state) {
   const canvas = els.auxCanvas;
   if (!canvas) return;
   const ctx = canvas.getContext("2d");
+  if (!ctx) return;
   const w = canvas.clientWidth || canvas.width || 1;
   const h = canvas.clientHeight || canvas.height || 120;
   canvas.width = w;

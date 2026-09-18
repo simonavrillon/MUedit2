@@ -24,6 +24,7 @@ import {
 import { roiEnd, roiStart } from "../../state/selectors.js";
 
 /** @typedef {import("../context.js").App} App */
+/** @typedef {import("../context.js").QcStage} QcStage */
 
 /**
  * @param {App} app
@@ -32,14 +33,17 @@ import { roiEnd, roiStart } from "../../state/selectors.js";
 export function createQcStageService(app) {
   const { state, els } = app;
 
+  /** @type {QcStage["populateAuxSelector"]} */
   function populateAuxSelector() {
     populateAuxSelectorFeature(els, state);
   }
 
+  /** @type {QcStage["renderAuxiliaryChannels"]} */
   function renderAuxiliaryChannels() {
     renderAuxiliaryChannelsFeature(els, state);
   }
 
+  /** @type {QcStage["requestQcGridWindow"]} */
   async function requestQcGridWindow(
     gridIdx,
     start = 0,
@@ -48,10 +52,12 @@ export function createQcStageService(app) {
     return requestQcGridWindowFeature(app, gridIdx, start, end);
   }
 
+  /** @type {QcStage["requestPreview"]} */
   async function requestPreview(options = {}) {
     return requestPreviewFeature(app, options);
   }
 
+  /** @type {QcStage["handleRawFilePath"]} */
   async function handleRawFilePath(path, name, options = {}) {
     const syntheticFile = { name, path };
     beginRawPreviewTransition(state, syntheticFile);
@@ -69,27 +75,33 @@ export function createQcStageService(app) {
     return ok;
   }
 
+  /** @type {QcStage["renderChannelQC"]} */
   function renderChannelQC(waitForMiniPlots = false) {
     return renderChannelQCController(app, waitForMiniPlots);
   }
 
+  /** @type {QcStage["enableRoiSelection"]} */
   function enableRoiSelection(canvasId) {
     return enableRoiSelectionController(app, canvasId);
   }
 
+  /** @type {QcStage["refreshVisuals"]} */
   function refreshVisuals() {
     refreshVisualsController(app);
   }
 
+  /** @type {QcStage["syncRois"]} */
   function syncRois(nwin) {
     syncRoisController(state, nwin);
   }
 
+  /** @type {QcStage["runAutoQc"]} */
   function runAutoQc() {
     return requestAutoQcFeature(app);
   }
 
   /** Arm (or cancel) artifact selection for the next drag on the EMG plot. */
+  /** @type {QcStage["toggleArtifactMode"]} */
   function toggleArtifactMode() {
     setArtifactMode(state, !state.artifactMode);
     refreshVisuals();
@@ -101,6 +113,7 @@ export function createQcStageService(app) {
     );
   }
 
+  /** @type {QcStage["removeLastArtifact"]} */
   function removeLastArtifact() {
     const removed = removeLastArtifactRegion(state);
     setArtifactMode(state, false);
@@ -114,6 +127,7 @@ export function createQcStageService(app) {
     );
   }
 
+  /** @type {QcStage["setSelectedGrid"]} */
   function setSelectedGrid(idx) {
     setCurrentGrid(state, idx);
     const tabs = els.qcGridTabs?.querySelectorAll(".tab-btn") || [];

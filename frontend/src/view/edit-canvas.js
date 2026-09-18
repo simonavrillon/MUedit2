@@ -20,18 +20,31 @@ import { computeInstantaneousDr } from "../editing/operations.js";
 import { renderSelectPair } from "./select-renderers.js";
 
 /** @typedef {import("../app/context.js").App} App */
+/** @typedef {import("../app/context.js").Els} Els */
+/** @typedef {import("../app/context.js").Span} Span */
+/** @typedef {import("../app/state.js").State} State */
+/** @typedef {import("../editing/operations.js").EditDropdownModel} EditDropdownModel */
+/** @typedef {typeof getCanvasPlotMetrics} PlotMetricsFn */
 
 const TIMELINE_PAD_L = 38;
 const TIMELINE_PAD_R = 8;
 const TIMELINE_BAR_TOP = 4;
 const TIMELINE_BAR_H = 12;
 
+/**
+ * @param {HTMLCanvasElement} canvas
+ * @param {State} state
+ * @param {number} muIdx
+ * @param {Span | null} view
+ * @param {PlotMetricsFn} getCanvasPlotMetrics
+ */
 function renderBookmark(canvas, state, muIdx, view, getCanvasPlotMetrics) {
   const bookmark = state.edit.bookmarkPosition;
-  if (!bookmark || bookmark.muIdx !== muIdx) return;
+  if (!view || !bookmark || bookmark.muIdx !== muIdx) return;
   if (!state.edit.showBookmark) return;
 
   const ctx = canvas.getContext("2d");
+  if (!ctx) return;
   const metrics = getCanvasPlotMetrics(canvas, true, { hideYAxis: false });
 
   const bookmarkPos = Math.max(
@@ -55,6 +68,11 @@ function renderBookmark(canvas, state, muIdx, view, getCanvasPlotMetrics) {
   ctx.textAlign = "start";
 }
 
+/**
+ * @param {number} py
+ * @param {HTMLCanvasElement} canvas
+ * @param {PlotMetricsFn} getCanvasPlotMetrics
+ */
 function clampY(py, canvas, getCanvasPlotMetrics) {
   const metrics = getCanvasPlotMetrics(canvas, true);
   const clamped = Math.max(
@@ -64,6 +82,11 @@ function clampY(py, canvas, getCanvasPlotMetrics) {
   return clamped - metrics.padding.top;
 }
 
+/**
+ * @param {HTMLCanvasElement} canvas
+ * @param {PlotMetricsFn} getCanvasPlotMetrics
+ * @param {(px: number) => number} pxToSample
+ */
 function createDragState(canvas, getCanvasPlotMetrics, pxToSample) {
   let dragging = false;
   let startPx = 0;
@@ -72,6 +95,7 @@ function createDragState(canvas, getCanvasPlotMetrics, pxToSample) {
   let endPy = 0;
 
   return {
+    /** @param {MouseEvent} e */
     begin(e) {
       const rect = canvas.getBoundingClientRect();
       startPx = e.clientX - rect.left;
@@ -80,6 +104,7 @@ function createDragState(canvas, getCanvasPlotMetrics, pxToSample) {
       endPy = startPy;
       dragging = true;
     },
+    /** @param {MouseEvent} e */
     update(e) {
       if (!dragging) return null;
       const rect = canvas.getBoundingClientRect();
@@ -109,6 +134,10 @@ function createDragState(canvas, getCanvasPlotMetrics, pxToSample) {
   };
 }
 
+/**
+ * @param {Els} els
+ * @param {EditDropdownModel} model
+ */
 export function renderEditDropdownsView(els, model) {
   const gridOptions = model.gridNames.map((name, idx) => ({
     value: idx,
@@ -152,13 +181,9 @@ export function renderEditExplorer(app) {
   const markerVals = spikes.map((s) => pulse?.[s] ?? 0);
   const artifacts = state.edit.artifactTimes?.[muIdx] || [];
   const artifactVals = artifacts.map((s) => pulse?.[s] ?? 0);
-  const pulseCanvas = els?.editPulseCanvas || "editPulseCanvas";
-  const canvasEl =
-    typeof pulseCanvas === "string"
-      ? document.getElementById(pulseCanvas)
-      : pulseCanvas;
+  const canvasEl = els.editPulseCanvas;
   drawSeries(
-    pulseCanvas,
+    canvasEl,
     pulse,
     UNIFORM_PULSE_COLOR,
     spikes,
@@ -256,7 +281,7 @@ export function bindEditCanvas(app) {
 
   const getPulse = () => getRawPulse(state.edit.currentMu ?? 0);
 
-  const pxToSample = (px) => {
+  const pxToSample = (/** @type {number} */ px) => {
     const pulse = getPulse();
     const metrics = getCanvasPlotMetrics(canvas, true, { hideYAxis: false });
     const view = state.edit.view || { start: 0, end: pulse.length || 0 };
@@ -350,6 +375,7 @@ export function renderEditTimeline(app) {
   if (!canvas) return;
 
   const ctx = canvas.getContext("2d");
+  if (!ctx) return;
   const w = canvas.clientWidth || canvas.width || 1;
   canvas.width = w;
   canvas.height = 20;
@@ -440,7 +466,7 @@ export function bindEditTimeline(app) {
   const getTotal = () =>
     (getDisplayPulse(state.edit.currentMu ?? 0) || []).length;
 
-  const fracFromClientX = (clientX) => {
+  const fracFromClientX = (/** @type {number} */ clientX) => {
     const rect = canvas.getBoundingClientRect();
     const bw = Math.max(1, rect.width - TIMELINE_PAD_L - TIMELINE_PAD_R);
     return Math.max(
@@ -519,7 +545,7 @@ export function bindEditDrCanvas(app) {
   const canvas = els.editDrCanvas;
   if (!canvas) return;
 
-  const pxToSample = (px) => {
+  const pxToSample = (/** @type {number} */ px) => {
     const metrics = getCanvasPlotMetrics(canvas, true, { hideYAxis: false });
     const total = getEditTotalSamples();
     const view = state.edit.view || { start: 0, end: total };

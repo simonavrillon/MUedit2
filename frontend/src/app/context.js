@@ -11,12 +11,37 @@
  * not in the context; modules import them directly.
  */
 
-/** @typedef {typeof import("./state.js").state} State */
+/** @typedef {import("./state.js").State} State */
 /** @typedef {import("./dom.js").Els} Els */
 /** @typedef {ReturnType<typeof import("../api/client.js").createApiClient>} Api */
 /** @typedef {"qc" | "run" | "edit"} StageKey */
+/** @typedef {"import" | StageKey} WorkflowStep A step of the header stepper. */
+/** @typedef {import("./state.js").FileRef} FileRef */
+/** @typedef {import("./state.js").Selection} Selection */
+/** @typedef {import("./state.js").EditMode} EditMode */
+/** @typedef {import("./state.js").EditHistoryEntry} EditHistoryEntry */
+/** @typedef {import("../io/bids.js").BidsEntities} BidsEntities */
+/** @typedef {import("../editing/operations.js").PulseViewMeta} PulseViewMeta */
+/** @typedef {import("../decomp/params.js").DecomposeParams} DecomposeParams */
+/** @typedef {"emgCanvas" | "auxCanvas"} RoiCanvasId Canvases that take ROI and artifact drags. */
+/** @typedef {"add-spikes" | "add-artifact" | "delete-spikes" | "delete-dr"} RoiAction */
+
+/**
+ * A box drawn on an edit canvas, in samples and pulse-train units.
+ *
+ * @typedef {object} RoiEditRequest
+ * @property {number} muIdx
+ * @property {number[]} pulse
+ * @property {number} xStart
+ * @property {number} xEnd
+ * @property {number} yMin
+ * @property {number} [yMax]
+ * @property {number} [fs]
+ * @property {number[]} [artifact_times]
+ */
 /** @typedef {"muted" | "success" | "error"} Tone */
 /** @typedef {{ start: number, end: number }} Span */
+/** @typedef {Record<string, any>} JsonObject A decoded backend JSON object whose fields are not typed. */
 
 /**
  * @typedef {object} Core
@@ -30,7 +55,7 @@
  * @property {(text: string, tone?: Tone) => void} setStatus
  * @property {(text: string, tone?: Tone) => void} setEditStatus
  * @property {(pct?: number, message?: string, stage?: string) => void} updateProgress
- * @property {(target: string) => void} updateWorkflowStepper
+ * @property {(target: WorkflowStep) => void} updateWorkflowStepper
  * @property {() => void} updateStepAvailability
  * @property {(open: boolean) => void} setSettingsOpen
  * @property {() => void} toggleSettingsOpen
@@ -53,18 +78,18 @@
  * @typedef {object} FileSessionService
  * @property {() => string} getBidsProject
  * @property {() => string[]} getBidsMuscleNames
- * @property {() => Record<string, string>} getBidsEntityInputs
- * @property {() => Record<string, any>} getBidsSaveFields
- * @property {() => Record<string, any>} collectBidsEntities
- * @property {(entities: Record<string, string>) => void} setBidsEntitiesInput
- * @property {(data: any) => void} applyPreviewMetadata
- * @property {(file: { name?: string }, data?: any) => void} applySessionInfoFromDecomposition
+ * @property {() => { subject?: string, task?: string, session?: string, run?: string, acquisition?: string }} getBidsEntityInputs
+ * @property {() => JsonObject} getBidsSaveFields
+ * @property {() => JsonObject} collectBidsEntities
+ * @property {(entities: Partial<BidsEntities> & { project?: string }) => void} setBidsEntitiesInput
+ * @property {(data: JsonObject) => void} applyPreviewMetadata
+ * @property {(file: FileRef | null, data?: JsonObject) => void} applySessionInfoFromDecomposition
  * @property {() => void} renderBidsAutoInfo
  * @property {() => void} renderBidsMuscleFields
- * @property {(payload: any, fallbackName?: string) => Promise<{ mode: string, path: string }>} persistNpzBySaveTarget
+ * @property {(payload: JsonObject, fallbackName?: string) => Promise<{ mode: string, path: string }>} persistNpzBySaveTarget
  * @property {() => void} clearUploadFormatError
  * @property {() => void} showUnsupportedUploadFormatError
- * @property {(file: { name?: string }) => string} detectLandingFileType
+ * @property {(file: FileRef) => "raw" | "decomposition" | "ambiguous_mat" | "unsupported"} detectLandingFileType
  * @property {(active: boolean) => void} setUploadLoading
  */
 
@@ -72,11 +97,11 @@
  * @typedef {object} QcStage
  * @property {() => void} populateAuxSelector
  * @property {() => void} renderAuxiliaryChannels
- * @property {(gridIdx: number, start?: number, end?: number) => Promise<void>} requestQcGridWindow
- * @property {(options?: { silentFailure?: boolean, filepath?: string }) => Promise<boolean | undefined>} requestPreview
+ * @property {(gridIdx: number, start?: number, end?: number | null) => Promise<void>} requestQcGridWindow
+ * @property {(options?: { silentFailure?: boolean, filepath?: string }) => Promise<boolean>} requestPreview
  * @property {(path: string, name: string, options?: { silentPreviewFailure?: boolean }) => Promise<boolean>} handleRawFilePath
  * @property {(waitForMiniPlots?: boolean) => Promise<void> | void} renderChannelQC
- * @property {(canvasId: string) => void} enableRoiSelection
+ * @property {(canvasId: RoiCanvasId) => void} enableRoiSelection
  * @property {() => void} refreshVisuals
  * @property {(nwin: number) => void} syncRois
  * @property {() => Promise<boolean>} runAutoQc
@@ -91,10 +116,10 @@
  * @property {() => void} renderMuDropdowns
  * @property {() => void} renderMuExplorer
  * @property {() => Promise<void>} autoSaveRunDecomposition
- * @property {(msg: any) => void} handleStreamMessage
+ * @property {(msg: JsonObject) => void} handleStreamMessage
  * @property {() => Promise<void>} runDecomposition
  * @property {() => void} updateStartAvailability
- * @property {() => Record<string, unknown>} buildParams
+ * @property {() => DecomposeParams} buildParams
  */
 
 /**
@@ -107,26 +132,26 @@
  * @property {() => void} recomputeEditDirty
  * @property {() => void} refreshEditTotals
  * @property {() => number} getEditTotalSamples
- * @property {() => any} getPulseViewMeta
+ * @property {() => PulseViewMeta} getPulseViewMeta
  * @property {() => number} getPulsePlotHeight
  * @property {() => number} getDrPlotHeight
- * @property {(entry: Record<string, unknown>) => void} appendEditHistory
+ * @property {(entry: EditHistoryEntry) => void} appendEditHistory
  * @property {() => void} resetEditState
  * @property {() => void} refreshEditModeButtons
- * @property {(mode: string | null, message?: string) => void} setEditMode
+ * @property {(mode: EditMode | null, message?: string) => void} setEditMode
  * @property {() => void} renderEditDropdowns
  * @property {() => void} renderEditExplorer
  * @property {() => void} renderInstantaneousDr
  * @property {() => void} bindEditCanvas
  * @property {() => void} bindEditDrCanvas
  * @property {() => void} bindEditTimeline
- * @property {(action: string, payload: any) => Promise<void>} requestRoiEdit
+ * @property {(action: RoiAction, payload: RoiEditRequest) => Promise<void>} requestRoiEdit
  * @property {(mode: string) => Promise<void>} requestFilterUpdate
  * @property {() => Promise<void>} updateMuFilter
- * @property {(sel: Span) => void} addSpikesInSelection
- * @property {(sel: Span) => void} addArtifactInSelection
- * @property {(sel: Span) => void} deleteSpikesInSelection
- * @property {(sel: any) => void} deleteDrInSelection
+ * @property {(sel: Selection) => void} addSpikesInSelection
+ * @property {(sel: Selection) => void} addArtifactInSelection
+ * @property {(sel: Selection) => void} deleteSpikesInSelection
+ * @property {(sel: Selection) => void} deleteDrInSelection
  * @property {() => void} restoreEditBackup
  * @property {() => Promise<void>} removeOutliers
  * @property {() => Promise<void>} flagMuForDeletion
@@ -134,7 +159,7 @@
  * @property {() => void} duplicateMu
  * @property {() => Promise<void>} removeDuplicateMus
  * @property {() => Promise<void>} saveEditedFile
- * @property {(file: { name?: string }, path: string) => Promise<void>} loadDecompositionForEdit
+ * @property {(file: FileRef, path: string) => Promise<void>} loadDecompositionForEdit
  * @property {(path: string) => Promise<void>} loadDecompositionForEditByPath
  */
 

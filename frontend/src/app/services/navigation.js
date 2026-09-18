@@ -7,7 +7,19 @@ import {
 } from "../../state/actions.js";
 
 /** @typedef {import("../context.js").App} App */
+/** @typedef {import("../context.js").Els} Els */
+/** @typedef {import("../context.js").Span} Span */
+/** @typedef {import("../context.js").StageKey} StageKey */
+/** @typedef {import("../context.js").Tone} Tone */
+/** @typedef {import("../context.js").WorkflowStep} WorkflowStep */
+/** @typedef {import("../state.js").State} State */
+/** @typedef {"zoom_in" | "zoom_out" | "scroll_left" | "scroll_right"} ViewAction */
 
+/**
+ * @param {Els} els
+ * @param {string} text
+ * @param {Tone} [tone]
+ */
 export function setStatus(els, text, tone = "muted") {
   if (!els.status) return;
   els.status.textContent = text;
@@ -15,7 +27,10 @@ export function setStatus(els, text, tone = "muted") {
   els.status.dataset.tone = tone;
 }
 
-/** @param {App} app @param {string} targetStage */
+/**
+ * @param {App} app
+ * @param {WorkflowStep} targetStage
+ */
 export function updateWorkflowStepper(app, targetStage) {
   const { els, state } = app;
   const steps = [
@@ -24,6 +39,7 @@ export function updateWorkflowStepper(app, targetStage) {
     { key: "run", el: els.stepRun, complete: !!state.muDistimes?.length },
     { key: "edit", el: els.stepEdit, complete: !!state.edit.distimes?.length },
   ];
+  /** @type {Record<WorkflowStep, WorkflowStep>} */
   const activeKeyByStage = {
     import: "import",
     qc: "qc",
@@ -44,7 +60,10 @@ export function updateWorkflowStepper(app, targetStage) {
   });
 }
 
-/** @param {App} app */
+/**
+ * @param {App} app
+ * @param {{ keepLandingVisible?: boolean }} [options]
+ */
 export function showWorkspace(app, options = {}) {
   const { els, state } = app;
   const { keepLandingVisible = false } = options;
@@ -76,17 +95,23 @@ export function updateStepAvailability(app) {
 /** @param {App} app */
 export function populateGridTabs(app) {
   const { els, state } = app;
-  if (!els.qcGridTabs) return;
-  els.qcGridTabs.innerHTML = "";
+  const tabs = els.qcGridTabs;
+  if (!tabs) return;
+  tabs.innerHTML = "";
   (state.gridNames || []).forEach((name, idx) => {
     const btn = document.createElement("button");
     btn.className = `tab-btn ${idx === state.currentGrid ? "active" : ""}`;
     btn.textContent = `Grid ${idx + 1}${name ? ` • ${name}` : ""}`;
     btn.onclick = () => app.setSelectedGrid(idx);
-    els.qcGridTabs.appendChild(btn);
+    tabs.appendChild(btn);
   });
 }
 
+/**
+ * @param {State} state
+ * @param {StageKey} stage
+ * @returns {{ view: Span | null, total: number }}
+ */
 export function getViewForStage(state, stage) {
   if (stage === "edit") {
     const pulse = state.edit.pulseTrains?.[state.edit.currentMu] || [];
@@ -105,7 +130,11 @@ export function getViewForStage(state, stage) {
   return { view: null, total: 0 };
 }
 
-/** @param {App} app */
+/**
+ * @param {App} app
+ * @param {StageKey} stage
+ * @param {Span | null} view
+ */
 export function setViewForStage(app, stage, view) {
   const { state } = app;
   if (stage === "edit") {
@@ -119,6 +148,12 @@ export function setViewForStage(app, stage, view) {
   }
 }
 
+/**
+ * @param {Span | null} view
+ * @param {number} total
+ * @param {ViewAction} action
+ * @returns {Span | null}
+ */
 export function adjustView(view, total, action) {
   if (!view || total <= 0) return view;
   const span = Math.max(1, view.end - view.start);
@@ -161,7 +196,11 @@ export function adjustView(view, total, action) {
   return { start: nextStart, end: nextEnd };
 }
 
-/** @param {App} app */
+/**
+ * @param {App} app
+ * @param {"prev" | "next"} direction
+ * @param {StageKey} stage
+ */
 export function goToMu(app, direction, stage) {
   const { state } = app;
   if (stage === "edit") {
@@ -187,7 +226,10 @@ export function goToMu(app, direction, stage) {
   }
 }
 
-/** @param {App} app @param {KeyboardEvent} e */
+/**
+ * @param {App} app
+ * @param {KeyboardEvent} e
+ */
 export function handleKeyboardNavigation(app, e) {
   const {
     state,
@@ -205,6 +247,7 @@ export function handleKeyboardNavigation(app, e) {
   const stage = state.currentStage;
   if (stage !== "run" && stage !== "edit") return;
 
+  /** @type {ViewAction | null} */
   let action = null;
   if (stage === "edit") {
     const key = e.key.toLowerCase();

@@ -47,6 +47,7 @@ import { getCanvasPlotMetrics } from "../../view/plots.js";
 import { handleKeyboardNavigation } from "../services/navigation.js";
 
 /** @typedef {import("../context.js").App} App */
+/** @typedef {import("../context.js").EditStage} EditStage */
 
 /**
  * @param {App} app
@@ -55,6 +56,7 @@ import { handleKeyboardNavigation } from "../services/navigation.js";
 export function createEditStageService(app) {
   const { state, els } = app;
 
+  /** @type {EditStage["refreshEditModeButtons"]} */
   function refreshEditModeButtons() {
     app.setEditActionBusy(els.editAddBtn, state.edit.mode === "add");
     app.setEditActionBusy(
@@ -68,6 +70,7 @@ export function createEditStageService(app) {
     if (els.editUndoBtn) els.editUndoBtn.disabled = !state.edit.backup;
   }
 
+  /** @type {EditStage["setEditMode"]} */
   function setEditMode(mode, message) {
     setEditModeAction(state, mode);
     refreshEditModeButtons();
@@ -76,31 +79,38 @@ export function createEditStageService(app) {
     }
   }
 
+  /** @param {HTMLCanvasElement | null | undefined} canvas */
   function plotHeight(canvas) {
     return canvas ? getCanvasPlotMetrics(canvas, true).plotHeight || 1 : 1;
   }
 
+  /** @type {EditStage["ensureEditFlagged"]} */
   function ensureEditFlagged() {
     ensureEditFlaggedFeature(state);
   }
 
+  /** @type {EditStage["getRawPulse"]} */
   function getRawPulse(muIdx) {
     return getRawPulseFeature(state, muIdx);
   }
 
+  /** @type {EditStage["getDisplayPulse"]} */
   function getDisplayPulse(muIdx) {
     return getDisplayPulseFeature(state, muIdx);
   }
 
+  /** @type {EditStage["backupEditMu"]} */
   function backupEditMu() {
     backupEditMuFeature(state);
     refreshEditModeButtons();
   }
 
+  /** @type {EditStage["recomputeEditDirty"]} */
   function recomputeEditDirty() {
     recomputeEditDirtyFeature(state);
   }
 
+  /** @type {EditStage["appendEditHistory"]} */
   function appendEditHistory(entry) {
     appendEditHistoryEntry(state, {
       ...entry,
@@ -108,28 +118,34 @@ export function createEditStageService(app) {
     });
   }
 
+  /** @type {EditStage["getEditTotalSamples"]} */
   function getEditTotalSamples() {
     return getEditTotalSamplesFeature(state);
   }
 
+  /** @type {EditStage["getPulseViewMeta"]} */
   function getPulseViewMeta() {
     return getPulseViewMetaFeature(state);
   }
 
+  /** @type {EditStage["refreshEditTotals"]} */
   function refreshEditTotals() {
     refreshEditTotalsFeature(state);
   }
 
+  /** @type {EditStage["resetEditState"]} */
   function resetEditState() {
     resetEditStateFeature(app);
     if (els.editSaveBtn) els.editSaveBtn.disabled = true;
     if (els.bidsProject) els.bidsProject.value = "";
   }
 
+  /** @type {EditStage["getEditMuIndices"]} */
   function getEditMuIndices(gridIdx) {
     return getEditMuIndicesForGrid(state, gridIdx);
   }
 
+  /** @type {EditStage["renderEditDropdowns"]} */
   function renderEditDropdowns() {
     const model = buildEditDropdownModel(state, getEditMuIndices);
     if (model.needsGridSwitch) {
@@ -141,40 +157,61 @@ export function createEditStageService(app) {
     renderEditDropdownsView(els, model);
   }
 
+  /** @type {EditStage["renderInstantaneousDr"]} */
   function renderInstantaneousDr() {
     renderInstantaneousDrFeature(app);
   }
 
+  /** @type {EditStage["renderEditExplorer"]} */
   function renderEditExplorer() {
     renderEditExplorerFeature(app);
     renderEditTimelineFeature(app);
   }
 
+  /** @type {EditStage["restoreEditBackup"]} */
   const restoreEditBackup = () => restoreEditBackupFeature(app);
+  /** @type {EditStage["requestRoiEdit"]} */
   const requestRoiEdit = (action, payload) =>
     requestRoiEditFeature(app, action, payload);
+  /** @type {EditStage["requestFilterUpdate"]} */
   const requestFilterUpdate = (mode) => requestFilterUpdateFeature(app, mode);
+  /** @type {EditStage["updateMuFilter"]} */
   const updateMuFilter = () => requestFilterUpdate("update-filter");
+  /** @type {EditStage["addSpikesInSelection"]} */
   const addSpikesInSelection = (sel) => addSpikesInSelectionFeature(app, sel);
+  /** @type {EditStage["addArtifactInSelection"]} */
   const addArtifactInSelection = (sel) =>
     addArtifactInSelectionFeature(app, sel);
+  /** @type {EditStage["deleteSpikesInSelection"]} */
   const deleteSpikesInSelection = (sel) =>
     deleteSpikesInSelectionFeature(app, sel);
+  /** @type {EditStage["deleteDrInSelection"]} */
   const deleteDrInSelection = (sel) => deleteDrInSelectionFeature(app, sel);
+  /** @type {EditStage["removeOutliers"]} */
   const removeOutliers = () => removeOutliersFeature(app);
+  /** @type {EditStage["flagMuForDeletion"]} */
   const flagMuForDeletion = () => flagMuForDeletionFeature(app);
+  /** @type {EditStage["resetCurrentMuEdits"]} */
   const resetCurrentMuEdits = () => resetCurrentMuEditsFeature(app);
+  /** @type {EditStage["removeDuplicateMus"]} */
   const removeDuplicateMus = () => removeDuplicateMusFeature(app);
+  /** @type {EditStage["duplicateMu"]} */
   const duplicateMu = () => duplicateMuFeature(app);
+  /** @type {EditStage["bindEditCanvas"]} */
   const bindEditCanvas = () => bindEditCanvasFeature(app);
+  /** @type {EditStage["bindEditDrCanvas"]} */
   const bindEditDrCanvas = () => bindEditDrCanvasFeature(app);
+  /** @type {EditStage["bindEditTimeline"]} */
   const bindEditTimeline = () => bindEditTimelineFeature(app);
+  /** @type {EditStage["saveEditedFile"]} */
   const saveEditedFile = () => saveEditedFileFeature(app);
+  /** @type {EditStage["loadDecompositionForEdit"]} */
   const loadDecompositionForEdit = (file, absolutePath) =>
     loadDecompositionForEditFeature(app, file, absolutePath);
 
+  /** @type {EditStage["loadDecompositionForEditByPath"]} */
   function loadDecompositionForEditByPath(path) {
-    const name = path.split("/").pop().split("\\").pop() || path;
+    const name = path.split("/").pop()?.split("\\").pop() || path;
     return loadDecompositionForEdit({ name }, path);
   }
 

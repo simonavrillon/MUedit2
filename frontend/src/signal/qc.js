@@ -22,15 +22,28 @@ import {
 } from "../state/actions.js";
 import { getCurrentGrid, roiStart, roiEnd } from "../state/selectors.js";
 import { nextFrame } from "../view/plots.js";
+import { errorMessage } from "../app/services/error-service.js";
+import { toSpans } from "../api/payloads.js";
 
 /** @typedef {import("../app/context.js").App} App */
+/** @typedef {import("../app/state.js").State} State */
+/** @typedef {import("../app/state.js").ChannelTrace} ChannelTrace */
+/** @typedef {{ channel_index?: number, series: ChannelTrace }} QcChannel */
 
+/**
+ * @param {QcChannel[] | null | undefined} channels
+ * @returns {ChannelTrace[]}
+ */
 function channelsToEnv(channels) {
   return (Array.isArray(channels) ? channels : [])
     .sort((a, b) => (a.channel_index ?? 0) - (b.channel_index ?? 0))
     .map((c) => c.series);
 }
 
+/**
+ * @param {State} state
+ * @param {number} nwin
+ */
 export function syncRois(state, nwin) {
   if (!state.rois) state.rois = [];
   if (state.rois.length > nwin) state.rois = state.rois.slice(0, nwin);
@@ -72,7 +85,7 @@ export async function requestAutoQc(app) {
     if (Array.isArray(data?.bad_channels_per_grid)) {
       setDiscardMasks(state, data.bad_channels_per_grid);
     }
-    setArtifactRegions(state, data?.artifact_regions || []);
+    setArtifactRegions(state, toSpans(data?.artifact_regions));
     setArtifactMode(state, false);
     setChannelTraces(state, []);
 
@@ -93,14 +106,19 @@ export async function requestAutoQc(app) {
     return true;
   } catch (err) {
     console.error(err);
-    setStatus(`Automatic QC failed: ${err.message}`, "error");
+    setStatus(`Automatic QC failed: ${errorMessage(err)}`, "error");
     return false;
   } finally {
     if (els?.qcAutoBtn) els.qcAutoBtn.disabled = false;
   }
 }
 
-/** @param {App} app */
+/**
+ * @param {App} app
+ * @param {number} gridIdx
+ * @param {number} [start]
+ * @param {number | null} [end]
+ */
 export async function requestQcGridWindow(app, gridIdx, start, end) {
   const { state, api, renderChannelQC, setStatus } = app;
   const s = Number.isFinite(start) ? start : 0;
@@ -129,14 +147,17 @@ export async function requestQcGridWindow(app, gridIdx, start, end) {
   } catch (err) {
     console.error(err);
     if (typeof setStatus === "function") {
-      setStatus(`QC window update failed: ${err.message}`, "error");
+      setStatus(`QC window update failed: ${errorMessage(err)}`, "error");
     }
   } finally {
     setQcWindowLoadingForGrid(state, gridIdx, false);
   }
 }
 
-/** @param {App} app */
+/**
+ * @param {App} app
+ * @param {{ silentFailure?: boolean, filepath?: string | null }} [options]
+ */
 export async function requestPreview(app, options = {}) {
   const { silentFailure = false, filepath = null } = options;
   const {
@@ -159,7 +180,7 @@ export async function requestPreview(app, options = {}) {
     applyPreviewMetadata,
   } = app;
 
-  if (!filepath) return;
+  if (!filepath) return false;
   setUploadLoading(true);
   updateProgress(0, "Fetching preview...");
 

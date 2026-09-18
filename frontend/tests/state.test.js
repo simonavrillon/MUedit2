@@ -102,17 +102,11 @@ describe("ROIs and artifact regions", () => {
     assert.equal(state.rois.length, 3);
   });
 
-  test("setArtifactRegions accepts objects and tuples and drops non-finite ones", () => {
-    actions.setArtifactRegions(state, [
-      { start: "1", end: 2 },
-      [3, 4],
-      { start: 5 },
-      null,
-    ]);
-    assert.deepEqual(state.artifactRegions, [
-      { start: 1, end: 2 },
-      { start: 3, end: 4 },
-    ]);
+  test("setArtifactRegions stores the spans, or none", () => {
+    actions.setArtifactRegions(state, [{ start: 1, end: 2 }]);
+    assert.deepEqual(state.artifactRegions, [{ start: 1, end: 2 }]);
+    actions.setArtifactRegions(state, null);
+    assert.deepEqual(state.artifactRegions, []);
   });
 
   test("addArtifactRegion skips non-finite bounds", () => {

@@ -14,6 +14,31 @@
  * it is off, so the two flags must never both be set. Keeping the choice as a
  * single mode here makes that impossible to express.
  */
+/**
+ * @typedef {object} PostprocessMode
+ * @property {string} label
+ * @property {string} hint
+ * @property {{ use_adaptive: number, full_trace: number }} flags
+ */
+
+/**
+ * The run settings as read from the form, before mapping to the wire format.
+ *
+ * @typedef {object} DecomposeInputs
+ * @property {number} niter
+ * @property {number} nwindows
+ * @property {number} duplicatesthresh
+ * @property {number} silVal
+ * @property {number} covVal
+ * @property {boolean} covOn
+ * @property {boolean} peelOn
+ * @property {number} peelWindow  Milliseconds.
+ * @property {string} postprocessMode
+ */
+
+/** @typedef {ReturnType<typeof buildDecomposeParams>} DecomposeParams The /decompose run parameters. */
+
+/** @type {Record<string, PostprocessMode>} */
 export const POSTPROCESS_MODES = {
   windowed: {
     label: "Windowed",
@@ -34,13 +59,20 @@ export const POSTPROCESS_MODES = {
 
 export const DEFAULT_POSTPROCESS_MODE = "windowed";
 
-/** Resolve a mode key to its backend flags, falling back to the default. */
+/**
+ * Resolve a mode key to its backend flags, falling back to the default.
+ *
+ * @param {string} mode
+ */
 export function postprocessFlags(mode) {
   return (
     POSTPROCESS_MODES[mode] || POSTPROCESS_MODES[DEFAULT_POSTPROCESS_MODE]
   ).flags;
 }
 
+/**
+ * @param {DecomposeInputs} raw
+ */
 export function buildDecomposeParams(raw) {
   return {
     niter: raw.niter,

@@ -1,8 +1,16 @@
+/**
+ * @param {number} value
+ * @returns {number | null}
+ */
 function safeNonNegativeInt(value) {
   const n = Number(value);
   return Number.isFinite(n) && n >= 0 ? Math.floor(n) : null;
 }
 
+/**
+ * @param {{ gridNames?: string[], muGridIndex?: number[], muscles?: string[], minimum?: number }} [options]
+ * @returns {number}
+ */
 export function inferGridCount({
   gridNames = [],
   muGridIndex = [],
@@ -22,6 +30,11 @@ export function inferGridCount({
   return count;
 }
 
+/**
+ * @param {(string | null | undefined)[] | null | undefined} gridNames
+ * @param {{ minimumCount?: number }} [options]
+ * @returns {string[]}
+ */
 export function normalizeGridNames(gridNames, { minimumCount = 1 } = {}) {
   const source = Array.isArray(gridNames) ? gridNames : [];
   const count = Math.max(1, Number(minimumCount) || 1, source.length);
@@ -31,6 +44,9 @@ export function normalizeGridNames(gridNames, { minimumCount = 1 } = {}) {
   });
 }
 
+/**
+ * @param {number[][] | null | undefined} coords
+ */
 export function gridDimensionsFor(coords) {
   let maxRow = 0;
   let maxCol = 0;

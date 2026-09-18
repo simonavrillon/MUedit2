@@ -25,6 +25,7 @@ import {
 import { drawSeries } from "../../view/plots.js";
 
 /** @typedef {import("../context.js").App} App */
+/** @typedef {import("../context.js").RunStage} RunStage */
 
 /**
  * @param {App} app
@@ -33,12 +34,14 @@ import { drawSeries } from "../../view/plots.js";
 export function createRunStageService(app) {
   const { state, els } = app;
 
+  /** @type {RunStage["updateStartAvailability"]} */
   function updateStartAvailability() {
     if (els.start) {
       els.start.disabled = !state.file || state.isRunning;
     }
   }
 
+  /** @type {RunStage["buildParams"]} */
   function buildParams() {
     return buildDecomposeParams({
       niter: Number(els.niter?.value) || 150,
@@ -53,10 +56,12 @@ export function createRunStageService(app) {
     });
   }
 
+  /** @type {RunStage["getMuIndicesForGrid"]} */
   function getMuIndicesForGrid(gridIdx) {
     return getRunMuIndicesForGrid(state, gridIdx);
   }
 
+  /** @type {RunStage["renderMuDropdowns"]} */
   function renderMuDropdowns() {
     const model = buildRunMuDropdownModelFeature({
       state,
@@ -77,6 +82,7 @@ export function createRunStageService(app) {
     renderMuDropdownsController(els, model);
   }
 
+  /** @type {RunStage["renderMuExplorer"]} */
   function renderMuExplorer() {
     renderMuDropdowns();
     const model = buildRunMuExplorerModelFeature({

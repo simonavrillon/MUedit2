@@ -1,7 +1,13 @@
 import { parseBidsEntitiesFromLabel } from "../../io/bids.js";
 
 /** @typedef {import("../context.js").App} App */
+/** @typedef {import("../context.js").StageKey} StageKey */
 
+/**
+ * @param {string} fullPath
+ * @param {string} name
+ * @returns {string}
+ */
 function displayNameForPath(fullPath, name) {
   if (String(name || "").toLowerCase() !== "info.rhd") return name;
   const parts = String(fullPath || "")
@@ -12,6 +18,10 @@ function displayNameForPath(fullPath, name) {
   return folder ? `${folder}.rhd` : name;
 }
 
+/**
+ * @param {string} fullPath
+ * @returns {string}
+ */
 function inferProjectFromPath(fullPath) {
   const parts = fullPath.replace(/\\/g, "/").split("/");
   const dataIdx = parts.lastIndexOf("data");
@@ -96,7 +106,7 @@ export function setupImportEvents(app) {
     });
   }
 
-  const openStageFromStepper = (target) => {
+  const openStageFromStepper = (/** @type {StageKey} */ target) => {
     if (!state.file && target !== "edit") {
       setStatus("Import a file first", "muted");
       if (els.landing) els.landing.classList.remove("hidden");

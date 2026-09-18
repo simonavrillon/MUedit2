@@ -22,8 +22,11 @@ import { getCurrentGrid, roiStart, roiEnd } from "../state/selectors.js";
 import { normalizePreviewPayload } from "../api/payloads.js";
 import { getSuggestedNpzName } from "../io/bids.js";
 import { drawGridOverlay } from "../view/plots.js";
+import { errorMessage } from "../app/services/error-service.js";
 
 /** @typedef {import("../app/context.js").App} App */
+/** @typedef {import("../app/context.js").JsonObject} JsonObject */
+/** @typedef {import("../api/payloads.js").PreviewPayload} PreviewPayload */
 
 /** @param {App} app */
 export async function autoSaveRunDecomposition(app) {
@@ -55,7 +58,7 @@ export async function autoSaveRunDecomposition(app) {
     distimes: state.muDistimes || [],
     pulse_trains: state.muPulseTrains || [],
     total_samples: totalSamples,
-    fsamp: Number.isFinite(fs) && fs > 0 ? fs : null,
+    fsamp: fs != null && Number.isFinite(fs) && fs > 0 ? fs : null,
     grid_names: state.gridNames || ["Grid 1"],
     mu_grid_index: state.muGridIndex || [],
     parameters: state.parameters || {},
@@ -79,7 +82,7 @@ export async function autoSaveRunDecomposition(app) {
     }
   } catch (err) {
     console.error(err);
-    setStatus(`Save failed: ${err.message}`, "error");
+    setStatus(`Save failed: ${errorMessage(err)}`, "error");
   } finally {
     setRunDownloadInFlight(state, false);
   }
@@ -157,7 +160,7 @@ export async function runDecomposition(app) {
     try {
       response = await api.decomposeStream(buildRunFormData(), 15 * 60 * 1000);
     } catch (err) {
-      const message = String(err?.message || "");
+      const message = errorMessage(err);
       const sourcePath = state.file?.path;
       if (!message.includes("upload_token") || !sourcePath) throw err;
       setUploadToken(state, null);
@@ -210,7 +213,7 @@ export async function runDecomposition(app) {
     }
   } catch (err) {
     console.error(err);
-    setStatus(`Error: ${err.message}`, "error");
+    setStatus(`Error: ${errorMessage(err)}`, "error");
     updateProgress(0, "Run failed. Check console for details.", "error");
   } finally {
     setIsRunning(state, false);
@@ -218,7 +221,11 @@ export async function runDecomposition(app) {
   }
 }
 
-/** @param {App} app */
+/**
+ * @param {App} app
+ * @param {PreviewPayload} preview
+ * @param {{ skipMuData?: boolean }} [options]
+ */
 function applyPreviewData(app, preview, options = {}) {
   const {
     state,
@@ -251,16 +258,13 @@ function applyPreviewData(app, preview, options = {}) {
     mu_grid_index,
     auxiliary,
     auxiliary_names,
-  } = preview || {};
+  } = preview;
 
   if (total_samples) {
     setSeriesLength(state, total_samples);
   }
-  if (rois && Array.isArray(rois) && rois.length) {
-    setRois(
-      state,
-      rois.map((r) => ({ start: r[0] ?? r.start, end: r[1] ?? r.end })),
-    );
+  if (rois.length) {
+    setRois(state, rois);
     if (els.nwindows) els.nwindows.value = String(state.rois.length);
   }
   if (grid_mean_abs && grid_names) {
@@ -317,6 +321,9 @@ function applyPreviewData(app, preview, options = {}) {
   renderBidsMuscleFields();
 }
 
+/**
+ * @param {{ api: App["api"], token: string, applyPreview: (preview: JsonObject) => void, onError: (err: unknown) => void }} deps
+ */
 async function hydrateBinaryDecomposePreview(deps) {
   const { api, token, applyPreview, onError } = deps;
   try {
@@ -327,7 +334,10 @@ async function hydrateBinaryDecomposePreview(deps) {
   }
 }
 
-/** @param {App} app */
+/**
+ * @param {App} app
+ * @param {JsonObject} msg  One NDJSON progress event from the run stream.
+ */
 export function handleStreamMessage(app, msg) {
   const {
     state,
@@ -398,7 +408,11 @@ export function handleStreamMessage(app, msg) {
     const mapping = previewMapping.length ? previewMapping : stateMapping;
     const gridCount = Math.max(
       gridNames.length,
-      mapping.length ? Math.max(...mapping.map((v) => Number(v) || 0)) + 1 : 0,
+      mapping.length
+        ? Math.max(
+            ...mapping.map((/** @type {number} */ v) => Number(v) || 0),
+          ) + 1
+        : 0,
       totalMu > 0 ? 1 : 0,
     );
     const counts = new Array(gridCount).fill(0);

@@ -13,7 +13,17 @@ import {
 } from "./binary-payloads.js";
 import { normalizePreviewPayload } from "./payloads.js";
 
+/** @typedef {import("../app/context.js").JsonObject} JsonObject */
+
+/**
+ * @param {{ apiFetch: typeof import("../app/http.js").apiFetch, apiJson: typeof import("../app/http.js").apiJson, API_BASE: string }} deps
+ */
 export function createApiClient({ apiFetch, apiJson, API_BASE }) {
+  /**
+   * @param {string} url
+   * @param {JsonObject} body
+   * @param {number} [timeoutMs]
+   */
   function postJson(url, body, timeoutMs) {
     return apiJson(
       url,
@@ -27,6 +37,10 @@ export function createApiClient({ apiFetch, apiJson, API_BASE }) {
   }
 
   return {
+    /**
+     * @param {JsonObject} payload
+     * @param {{ preferBinary?: boolean }} [options]
+     */
     async fetchQcWindow(payload, { preferBinary = true } = {}) {
       if (preferBinary) {
         const res = await apiFetch(
@@ -50,14 +64,24 @@ export function createApiClient({ apiFetch, apiJson, API_BASE }) {
       return postJson(`${API_BASE}${routes.qcWindow}`, payload, 120000);
     },
 
+    /**
+     * @param {JsonObject} payload
+     */
     runAutoQc(payload) {
       return postJson(`${API_BASE}${routes.qcAuto}`, payload, 300000);
     },
 
+    /**
+     * @param {string} path
+     */
     fetchPreviewByPath(path) {
       return postJson(`${API_BASE}${routes.previewByPath}`, { path }, 120000);
     },
 
+    /**
+     * @param {FormData} formData
+     * @param {number} [timeoutMs]
+     */
     decomposeStream(formData, timeoutMs) {
       return apiFetch(
         `${API_BASE}${routes.decomposeStream}`,
@@ -66,6 +90,9 @@ export function createApiClient({ apiFetch, apiJson, API_BASE }) {
       );
     },
 
+    /**
+     * @param {string} token
+     */
     async fetchDecomposePreview(token) {
       const res = await apiFetch(
         `${API_BASE}${routes.decomposePreview(token)}`,
@@ -82,26 +109,46 @@ export function createApiClient({ apiFetch, apiJson, API_BASE }) {
       return apiJson(`${API_BASE}${routes.dialogOpenFile}`);
     },
 
+    /**
+     * @param {string} action
+     * @param {JsonObject} payload
+     */
     editAction(action, payload) {
       return postJson(`${API_BASE}${routes.editAction(action)}`, payload);
     },
 
+    /**
+     * @param {string} mode
+     * @param {JsonObject} payload
+     */
     editMode(mode, payload) {
       return postJson(`${API_BASE}${routes.editMode(mode)}`, payload, 120000);
     },
 
+    /**
+     * @param {JsonObject} payload
+     */
     editRemoveOutliers(payload) {
       return postJson(`${API_BASE}${routes.editRemoveOutliers}`, payload);
     },
 
+    /**
+     * @param {JsonObject} payload
+     */
     editRemoveDuplicates(payload) {
       return postJson(`${API_BASE}${routes.editRemoveDuplicates}`, payload);
     },
 
+    /**
+     * @param {JsonObject} payload
+     */
     editFlagMu(payload) {
       return postJson(`${API_BASE}${routes.editFlagMu}`, payload);
     },
 
+    /**
+     * @param {string} filepath
+     */
     async editLoadByPath(filepath) {
       const res = await apiFetch(
         `${API_BASE}${routes.editLoadByPath}`,
@@ -118,6 +165,9 @@ export function createApiClient({ apiFetch, apiJson, API_BASE }) {
       );
     },
 
+    /**
+     * @param {JsonObject} payload
+     */
     editSave(payload) {
       return postJson(`${API_BASE}${routes.editSave}`, payload, 120000);
     },

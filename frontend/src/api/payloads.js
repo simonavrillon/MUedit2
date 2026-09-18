@@ -1,9 +1,79 @@
+/** @typedef {import("../app/context.js").JsonObject} JsonObject */
+/** @typedef {import("../app/context.js").Span} Span */
+
+/**
+ * A decomposition file as loaded for editing; fields beyond these pass through.
+ *
+ * @typedef {JsonObject & {
+ *   pulse_trains: number[][],
+ *   pulse_trains_full: number[][],
+ *   distime_all: number[][],
+ *   grid_names: string[],
+ *   mu_grid_index: number[],
+ *   parameters: JsonObject,
+ *   total_samples: number,
+ *   fsamp: number | null,
+ *   file_label: string,
+ *   edit_signal_token: string,
+ * }} EditLoadPayload
+ */
+
+/**
+ * A signal preview; fields beyond these pass through.
+ *
+ * @typedef {JsonObject & {
+ *   mean_abs: number[],
+ *   grid_mean_abs: number[][],
+ *   grid_names: string[],
+ *   rois: Span[],
+ *   channel_means: number[][],
+ *   coordinates: number[][][],
+ *   metadata: JsonObject,
+ *   muscle: string[],
+ *   pulse_trains_full: number[][],
+ *   pulse_trains_all: number[][],
+ *   distime_all: number[][],
+ *   mu_grid_index: number[],
+ *   auxiliary: number[][],
+ *   auxiliary_names: string[],
+ *   total_samples: number,
+ * }} PreviewPayload
+ */
+
+/**
+ * @param {unknown} value
+ * @param {number} [fallback]
+ * @returns {number}
+ */
 function toFiniteNumber(value, fallback = 0) {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
 }
 
+/**
+ * Regions (ROIs, artifact windows) arrive as `{start, end}` objects or as
+ * `[start, end]` pairs; everything past this point uses `Span` objects only.
+ * Regions with a non-finite bound are dropped.
+ *
+ * @param {unknown} regions
+ * @returns {Span[]}
+ */
+export function toSpans(regions) {
+  if (!Array.isArray(regions)) return [];
+  return regions
+    .map((r) => ({
+      start: Number(Array.isArray(r) ? r[0] : r?.start),
+      end: Number(Array.isArray(r) ? r[1] : r?.end),
+    }))
+    .filter((r) => Number.isFinite(r.start) && Number.isFinite(r.end));
+}
+
+/**
+ * @param {unknown} payload
+ * @returns {EditLoadPayload}
+ */
 export function normalizeEditLoadPayload(payload) {
+  /** @type {JsonObject} */
   const source = payload && typeof payload === "object" ? payload : {};
   const distRaw = source.distime_all || source.distime || [];
   return {
@@ -15,7 +85,7 @@ export function normalizeEditLoadPayload(payload) {
     distime_all: Array.isArray(distRaw)
       ? distRaw.map((row) =>
           Array.isArray(row)
-            ? row.map((v) => toFiniteNumber(v)).filter(Number.isFinite)
+            ? row.map((v) => toFiniteNumber(v, NaN)).filter(Number.isFinite)
             : [],
         )
       : [],
@@ -34,7 +104,12 @@ export function normalizeEditLoadPayload(payload) {
   };
 }
 
+/**
+ * @param {unknown} payload
+ * @returns {PreviewPayload}
+ */
 export function normalizePreviewPayload(payload) {
+  /** @type {JsonObject} */
   const source = payload && typeof payload === "object" ? payload : {};
   return {
     ...source,
@@ -43,7 +118,7 @@ export function normalizePreviewPayload(payload) {
       ? source.grid_mean_abs
       : [],
     grid_names: Array.isArray(source.grid_names) ? source.grid_names : [],
-    rois: Array.isArray(source.rois) ? source.rois : [],
+    rois: toSpans(source.rois),
     channel_means: Array.isArray(source.channel_means)
       ? source.channel_means
       : [],

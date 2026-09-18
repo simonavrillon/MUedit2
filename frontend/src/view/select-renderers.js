@@ -1,6 +1,15 @@
+/** @typedef {{ value: number, label: string }} SelectOption */
+
 /**
  * Render a paired grid/MU dropdown. Both option arrays use {value, label}
  * objects so callers normalize their model shape before calling.
+ *
+ * @param {HTMLSelectElement | null | undefined} gridSel
+ * @param {HTMLSelectElement | null | undefined} muSel
+ * @param {SelectOption[]} gridOptions
+ * @param {SelectOption[]} muOptions
+ * @param {number | undefined} selectedGrid
+ * @param {number | undefined} selectedMu
  */
 export function renderSelectPair(
   gridSel,

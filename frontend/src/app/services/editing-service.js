@@ -45,9 +45,19 @@ import {
 } from "../../state/actions.js";
 
 /** @typedef {import("../context.js").App} App */
+/** @typedef {import("../context.js").RoiAction} RoiAction */
+/** @typedef {import("../context.js").RoiEditRequest} RoiEditRequest */
+/** @typedef {import("../state.js").State} State */
+/** @typedef {import("../state.js").FileRef} FileRef */
+/** @typedef {import("../state.js").EditHistoryEntry} EditHistoryEntry */
+/** @typedef {import("../state.js").Bookmark} Bookmark */
 
 // Compare a motor unit's spike times before/after an edit. The added/removed
 // lists feed the edit-history log so individual edits can be reverted per MU.
+/**
+ * @param {number[]} before
+ * @param {number[]} after
+ */
 function spikesDiff(before, after) {
   const afterSet = new Set(after);
   const beforeSet = new Set(before);
@@ -59,7 +69,12 @@ function spikesDiff(before, after) {
 
 // Assign stable per-grid MU identifiers ("g<grid>_mu<n>") used to correlate
 // motor units with editlog entries across reloads. Numbering restarts per grid.
+/**
+ * @param {number[] | null | undefined} muGridIndex
+ * @returns {string[]}
+ */
 function generateMuUids(muGridIndex) {
+  /** @type {Record<number, number>} */
   const counts = {};
   return (muGridIndex || []).map((gridIdx) => {
     const count = counts[gridIdx] || 0;
@@ -68,12 +83,21 @@ function generateMuUids(muGridIndex) {
   });
 }
 
+/**
+ * @param {State} state
+ * @param {number} muIdx
+ * @param {number} position
+ */
 function setEditBookmarkAndHide(state, muIdx, position) {
   setEditBookmark(state, { muIdx, position });
   setShowBookmark(state, false);
 }
 
-/** @param {App} app */
+/**
+ * @param {App} app
+ * @param {RoiAction} action
+ * @param {RoiEditRequest} payload
+ */
 export async function requestRoiEdit(app, action, payload) {
   const {
     state,
@@ -151,11 +175,13 @@ export async function requestRoiEdit(app, action, payload) {
       }
     } else {
       // Keep existing behavior for other actions
+      /** @type {Record<string, string>} */
       const typeMap = {
         "add-spikes": "add_spikes",
         "delete-dr": "delete_dr",
         "add-artifact": "add_artifact",
       };
+      /** @type {EditHistoryEntry} */
       const entry = { type: typeMap[action] || action, mu_uid: muUid };
       if (isArtifact) {
         const artifactsAfter = state.edit.artifactTimes?.[payload.muIdx] || [];
@@ -193,7 +219,10 @@ export async function requestRoiEdit(app, action, payload) {
   }
 }
 
-/** @param {App} app */
+/**
+ * @param {App} app
+ * @param {string} mode
+ */
 export async function requestFilterUpdate(app, mode) {
   const {
     state,
@@ -251,6 +280,7 @@ export async function requestFilterUpdate(app, mode) {
     const { added, removed } = spikesDiff(distimesBefore, distimesAfter);
     const peeloff = els.editPeelOffToggle?.dataset.state === "on";
     const lockSpikes = els.editLockSpikesToggle?.dataset.state === "on";
+    /** @type {EditHistoryEntry} */
     const entry = {
       type: "update_filter",
       mu_uid: muUid,
@@ -322,7 +352,9 @@ export async function removeOutliers(app) {
     }
     const distimesAfter = state.edit.distimes?.[muIdx] || [];
     const centerPos = distimesAfter.length
-      ? Math.round((distimesAfter[0] + distimesAfter.at(-1)) / 2)
+      ? Math.round(
+          (distimesAfter[0] + distimesAfter[distimesAfter.length - 1]) / 2,
+        )
       : Math.round(pulse.length / 2);
     setEditBookmarkAndHide(state, muIdx, centerPos);
     recomputeEditDirty();
@@ -363,6 +395,7 @@ export async function removeDuplicateMus(app) {
       parameters: state.edit.parameters || {},
     });
 
+    /** @type {number[]} */
     const keptIdx = data.kept_indices || [];
     if (keptIdx.length === distimes.length) {
       setEditStatus("No duplicates found", "muted");
@@ -558,7 +591,11 @@ export async function saveEditedFile(app) {
   }
 }
 
-/** @param {App} app */
+/**
+ * @param {App} app
+ * @param {FileRef} file
+ * @param {string} filepath
+ */
 export async function loadDecompositionForEdit(app, file, filepath) {
   const {
     state,
@@ -660,16 +697,21 @@ export async function loadDecompositionForEdit(app, file, filepath) {
       .find((e) => e.mu_uid);
     let targetMu = 0;
     let targetView = { start: 0, end: total };
+    /** @type {Bookmark | null} */
     let targetBookmark = null;
-    if (lastEntry) {
+    if (lastEntry?.mu_uid) {
       const idx = (state.edit.muUids || []).indexOf(lastEntry.mu_uid);
+      const viewStart = lastEntry.view_start;
+      const viewEnd = lastEntry.view_end;
+      const hasView =
+        typeof viewStart === "number" &&
+        typeof viewEnd === "number" &&
+        Number.isFinite(viewStart) &&
+        Number.isFinite(viewEnd);
       if (idx !== -1) {
         targetMu = idx;
-        if (
-          Number.isFinite(lastEntry.view_start) &&
-          Number.isFinite(lastEntry.view_end)
-        ) {
-          targetView = { start: lastEntry.view_start, end: lastEntry.view_end };
+        if (hasView) {
+          targetView = { start: viewStart, end: viewEnd };
         } else {
           const positions = [
             ...(lastEntry.spikes_added || []),
@@ -695,14 +737,8 @@ export async function loadDecompositionForEdit(app, file, filepath) {
             };
           }
         }
-        if (
-          Number.isFinite(lastEntry.view_start) &&
-          Number.isFinite(lastEntry.view_end) &&
-          !targetBookmark
-        ) {
-          const centerPos = Math.round(
-            (lastEntry.view_start + lastEntry.view_end) / 2,
-          );
+        if (hasView && !targetBookmark) {
+          const centerPos = Math.round((viewStart + viewEnd) / 2);
           targetBookmark = { muIdx: idx, position: centerPos };
         }
       }

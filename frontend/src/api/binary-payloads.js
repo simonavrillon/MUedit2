@@ -9,8 +9,14 @@
  * server fell back to JSON, so the bytes are parsed as text instead. Mirrors the
  * Python `pack_json_f32_payload` packer in `api/binary.py`.
  */
+/** @typedef {import("../app/context.js").JsonObject} JsonObject */
+
 const textDecoder = new TextDecoder();
 
+/**
+ * @param {ArrayBuffer} buffer
+ * @param {string} magic
+ */
 function hasMagic(buffer, magic) {
   if (!buffer || buffer.byteLength < magic.length) return false;
   const sig = new Uint8Array(buffer, 0, magic.length);
@@ -20,6 +26,11 @@ function hasMagic(buffer, magic) {
   return true;
 }
 
+/**
+ * @param {DataView} view
+ * @param {number} offset
+ * @param {number} count
+ */
 function readFloat32Values(view, offset, count) {
   const out = new Float32Array(count);
   let cursor = offset;
@@ -30,6 +41,12 @@ function readFloat32Values(view, offset, count) {
   return out;
 }
 
+/**
+ * @param {Float32Array} raw
+ * @param {number} rows
+ * @param {number} cols
+ * @returns {number[][]}
+ */
 function to2d(raw, rows, cols) {
   const out = [];
   for (let r = 0; r < rows; r++) {
@@ -41,14 +58,25 @@ function to2d(raw, rows, cols) {
   return out;
 }
 
+/**
+ * @param {ArrayBuffer} buffer
+ * @param {string | null} [formatHeader]
+ */
 export function isQcRawF32Payload(buffer, formatHeader = "") {
   return formatHeader === "qc-raw-f32-v1" || hasMagic(buffer, "MQCR");
 }
 
+/**
+ * @param {ArrayBuffer} buffer
+ * @returns {JsonObject}
+ */
 export function decodeQcJsonPayload(buffer) {
   return JSON.parse(textDecoder.decode(new Uint8Array(buffer)));
 }
 
+/**
+ * @param {ArrayBuffer} buffer
+ */
 export function decodeQcRawF32(buffer) {
   // Wire format:
   // 4 bytes magic "MQCR" + uint32 version + fixed metadata fields + repeated channel blocks.
@@ -99,10 +127,19 @@ export function decodeQcRawF32(buffer) {
   };
 }
 
+/**
+ * @param {ArrayBuffer} buffer
+ * @param {string | null} [formatHeader]
+ */
 function isEditLoadF32Payload(buffer, formatHeader = "") {
   return formatHeader === "edit-load-f32-v1" || hasMagic(buffer, "MELD");
 }
 
+/**
+ * @param {ArrayBuffer} buffer
+ * @param {string | null} [formatHeader]
+ * @returns {JsonObject}
+ */
 export function decodeEditLoadPayload(buffer, formatHeader = "") {
   if (!isEditLoadF32Payload(buffer, formatHeader)) {
     const text = textDecoder.decode(new Uint8Array(buffer));
@@ -130,12 +167,21 @@ export function decodeEditLoadPayload(buffer, formatHeader = "") {
   return { ...meta, pulse_trains_full: pulse };
 }
 
+/**
+ * @param {ArrayBuffer} buffer
+ * @param {string | null} [formatHeader]
+ */
 function isDecomposePreviewF32Payload(buffer, formatHeader = "") {
   return (
     formatHeader === "decompose-preview-f32-v1" || hasMagic(buffer, "MDPV")
   );
 }
 
+/**
+ * @param {ArrayBuffer} buffer
+ * @param {string | null} [formatHeader]
+ * @returns {JsonObject}
+ */
 export function decodeDecomposePreviewPayload(buffer, formatHeader = "") {
   if (!isDecomposePreviewF32Payload(buffer, formatHeader)) {
     const text = textDecoder.decode(new Uint8Array(buffer));

@@ -1,5 +1,12 @@
 import { UNIFORM_PULSE_COLOR } from "../config.js";
 
+/** @typedef {import("../app/state.js").State} State */
+/** @typedef {ReturnType<typeof buildRunMuDropdownModel>} RunMuDropdownModel */
+/** @typedef {ReturnType<typeof buildRunMuExplorerModel>} RunMuExplorerModel */
+
+/**
+ * @param {{ state: State, getMuIndicesForGrid: (gridIdx: number) => number[] }} deps
+ */
 export function buildRunMuDropdownModel(deps) {
   const { state, getMuIndicesForGrid } = deps;
   const gridOptions = (state.gridNames || []).map((name, idx) => ({
@@ -34,6 +41,9 @@ export function buildRunMuDropdownModel(deps) {
   };
 }
 
+/**
+ * @param {{ state: State, fsamp?: number | null }} deps
+ */
 export function buildRunMuExplorerModel(deps) {
   const { state, fsamp = null } = deps;
   const allPulses = Array.isArray(state.muPulseTrains)
@@ -69,6 +79,6 @@ export function buildRunMuExplorerModel(deps) {
     metaText,
     color,
     markerVals,
-    fsamp: Number.isFinite(fsamp) && fsamp > 0 ? fsamp : null,
+    fsamp: fsamp != null && Number.isFinite(fsamp) && fsamp > 0 ? fsamp : null,
   };
 }

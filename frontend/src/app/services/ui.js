@@ -15,6 +15,7 @@ import {
 import { switchStage as switchStageController } from "../stages/lifecycle.js";
 
 /** @typedef {import("../context.js").App} App */
+/** @typedef {import("../context.js").UiService} UiService */
 
 /**
  * @param {App} app
@@ -23,20 +24,29 @@ import { switchStage as switchStageController } from "../stages/lifecycle.js";
 export function createUiService(app) {
   const { els } = app;
 
+  /** @type {UiService["setStatus"]} */
   function setStatus(text, tone = "muted") {
     setStatusController(els, text, tone);
   }
 
+  /** @type {UiService["setEditStatus"]} */
   function setEditStatus(text, tone = "muted") {
     if (!els.editStatus) return;
     els.editStatus.textContent = text;
     els.editStatus.dataset.tone = tone;
   }
 
+  /** @type {UiService["updateWorkflowStepper"]} */
   const updateWorkflowStepper = (targetStage) =>
     updateWorkflowStepperController(app, targetStage);
+  /** @type {UiService["updateStepAvailability"]} */
   const updateStepAvailability = () => updateStepAvailabilityController(app);
 
+  /**
+   * @param {number | undefined} pct
+   * @param {string} [message]
+   * @param {string} [stage]
+   */
   function setRunPhase(pct, message = "", stage = "") {
     if (!els.runPhase) return;
     const stageText =
@@ -64,6 +74,7 @@ export function createUiService(app) {
     els.runPhase.textContent = phase;
   }
 
+  /** @type {UiService["updateProgress"]} */
   function updateProgress(pct, message = "", stage = "") {
     if (els.progressBar && pct !== undefined) {
       const clamped = Math.max(0, Math.min(100, pct));
@@ -77,27 +88,40 @@ export function createUiService(app) {
     }
   }
 
+  /** @type {UiService["scheduleLayoutRerender"]} */
   const scheduleLayoutRerender = (delay = 90) =>
     scheduleLayoutRerenderController(app, delay);
+  /** @type {UiService["initLayoutResizePolicy"]} */
   const initLayoutResizePolicy = () => initLayoutResizePolicyController(app);
+  /** @type {UiService["setSettingsOpen"]} */
   const setSettingsOpen = (open) => setSettingsOpenController(app, open);
+  /** @type {UiService["toggleSettingsOpen"]} */
   const toggleSettingsOpen = () => toggleSettingsOpenController(app);
+  /** @type {UiService["ensureSettingsToggleIcon"]} */
   const ensureSettingsToggleIcon = () =>
     ensureSettingsToggleIconController(els);
+  /** @type {UiService["switchStage"]} */
   const switchStage = (target) => switchStageController(app, target);
+  /** @type {UiService["populateGridTabs"]} */
   const populateGridTabs = () => populateGridTabsController(app);
+  /** @type {UiService["showWorkspace"]} */
   const showWorkspace = (options = {}) => showWorkspaceController(app, options);
 
+  /**
+   * @param {HTMLElement | null | undefined} btn
+   * @param {boolean} on
+   */
   function applyToggle(btn, on) {
     if (!btn) return;
     const label =
-      btn.dataset.label || btn.textContent.split(":")[0] || "Toggle";
+      btn.dataset.label || (btn.textContent || "").split(":")[0] || "Toggle";
     btn.dataset.state = on ? "on" : "off";
     btn.setAttribute("aria-pressed", on ? "true" : "false");
     btn.classList.toggle("on", on);
     btn.textContent = `${label}: ${on ? "On" : "Off"}`;
   }
 
+  /** @type {UiService["applyLabeledToggle"]} */
   function applyLabeledToggle(btn, on, { shortSel, fullSel, prefix }) {
     if (!btn) return;
     btn.dataset.state = on ? "on" : "off";
@@ -110,10 +134,12 @@ export function createUiService(app) {
     if (fullEl) fullEl.textContent = `${prefix}: ${label}`;
   }
 
+  /** @type {UiService["isToggleOn"]} */
   function isToggleOn(btn) {
     return btn?.dataset.state === "on";
   }
 
+  /** @type {UiService["toggleConditional"]} */
   function toggleConditional(id, show) {
     const el = document.getElementById(id);
     if (el) {
@@ -121,6 +147,7 @@ export function createUiService(app) {
     }
   }
 
+  /** @type {UiService["setupToggle"]} */
   function setupToggle(btn, onChange) {
     if (!btn) return;
     btn.setAttribute("tabindex", "0");
@@ -141,6 +168,7 @@ export function createUiService(app) {
     });
   }
 
+  /** @type {UiService["setupLockedOnToggle"]} */
   function setupLockedOnToggle(btn, onChange) {
     if (!btn) return;
     btn.setAttribute("tabindex", "0");
@@ -160,12 +188,14 @@ export function createUiService(app) {
     });
   }
 
+  /** @type {UiService["setEditActionBusy"]} */
   function setEditActionBusy(button, busy) {
     if (!button) return;
     button.classList.toggle("is-running", !!busy);
     button.setAttribute("aria-busy", busy ? "true" : "false");
   }
 
+  /** @type {UiService["runEditAction"]} */
   async function runEditAction(button, fn) {
     if (!button) return fn();
     if (button.dataset.busy === "1") return undefined;

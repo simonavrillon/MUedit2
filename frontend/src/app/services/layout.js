@@ -2,11 +2,16 @@ import { renderActiveStage } from "../stages/lifecycle.js";
 
 /** @typedef {import("../context.js").App} App */
 
+/** @type {ReturnType<typeof setTimeout> | null} */
 let layoutRerenderTimer = null;
+/** @type {ReturnType<typeof setTimeout> | null} */
 let layoutSettleTimer = null;
 let layoutResizePolicyInitialized = false;
 
-/** @param {App} app @param {boolean} open */
+/**
+ * @param {App} app
+ * @param {boolean} open
+ */
 export function setSettingsOpen(app, open) {
   const { els } = app;
   if (!els.workspace) return;
@@ -101,7 +106,7 @@ export function initLayoutResizePolicy(app) {
     document.querySelector(".edit-top-row"),
     ...document.querySelectorAll(".stage-edit .edit-full"),
     els.settingsPanel,
-  ].filter(Boolean);
+  ].filter((node) => node != null);
 
   if ("ResizeObserver" in window && targets.length) {
     const resizeObserver = new ResizeObserver(() => {

@@ -7,12 +7,15 @@ export function setupLayoutEvents(app) {
 
   app.ensureSettingsToggleIcon();
 
+  /** @type {NodeListOf<HTMLElement> | HTMLElement[]} */
   const sectionHeaders =
     els.settingsPanel?.querySelectorAll(".section-header") || [];
   sectionHeaders.forEach((head) => {
     head.setAttribute("tabindex", "0");
     const toggle = () => {
-      const isCollapsed = head.parentElement.classList.toggle("collapsed");
+      const section = head.parentElement;
+      if (!section) return;
+      const isCollapsed = section.classList.toggle("collapsed");
       head.setAttribute("aria-expanded", isCollapsed ? "false" : "true");
     };
     head.addEventListener("click", toggle);
