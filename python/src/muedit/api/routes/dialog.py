@@ -76,7 +76,7 @@ def _open_dialog_tkinter() -> str | None:
     kwargs: dict = {}
     if sys.platform == "win32":
         # Suppress the console window that would briefly flash on Windows
-        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW  # type: ignore[attr-defined]
+        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
     result = subprocess.run(
         [sys.executable, "-c", _TKINTER_SCRIPT],
         capture_output=True,
