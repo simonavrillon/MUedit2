@@ -89,7 +89,11 @@ def _log_result(dataset: str, params: DecompositionParameters, results: dict[str
         "parameters": asdict(params),
         "results": results,
     }
-    data = json.loads(LEADERBOARD_PATH.read_text()) if LEADERBOARD_PATH.exists() else []
+    data = (
+        json.loads(LEADERBOARD_PATH.read_text(encoding="utf-8"))
+        if LEADERBOARD_PATH.exists()
+        else []
+    )
     for i, existing in enumerate(data):
         if existing.get("dataset") == dataset and existing.get("parameters") == entry["parameters"]:
             data[i] = entry

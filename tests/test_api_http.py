@@ -244,7 +244,7 @@ class TestRouteTable:
 
     def test_frontend_static_routes_are_live(self) -> None:
         """Every literal path in ``routes.js`` is covered by this tier."""
-        js = (REPO_ROOT / "frontend" / "src" / "api" / "routes.js").read_text()
+        js = (REPO_ROOT / "frontend" / "src" / "api" / "routes.js").read_text(encoding="utf-8")
         static = set(re.findall(r':\s*"(/[^"]+)"', js))
         assert static, "no routes parsed from routes.js"
         assert static <= {p for _, p in LIVE_ENDPOINTS}

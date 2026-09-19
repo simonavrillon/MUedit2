@@ -458,7 +458,7 @@ def _resolve_grids(
     sidecar = rec.directory / _GRID_SIDECAR
     if sidecar.exists():
         try:
-            payload = json.loads(sidecar.read_text())
+            payload = json.loads(sidecar.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             raise OSError(f"Cannot read grid sidecar {sidecar}: {exc}") from exc
         sidecar_names = [str(g) for g in _as_list(payload.get("gridname"))]

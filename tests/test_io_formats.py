@@ -117,7 +117,7 @@ def recording(request: pytest.FixtureRequest) -> tuple[Format, SignalImport]:
 
 
 def _read_tsv(path: Path) -> list[dict[str, str]]:
-    with path.open(newline="") as f:
+    with path.open(newline="", encoding="utf-8") as f:
         return list(csv.DictReader(f, delimiter="\t"))
 
 
@@ -190,7 +190,7 @@ def test_bids_export_round_trip(recording: tuple[Format, SignalImport], tmp_path
 
     for key in ("edf", "emg_json", "channels_tsv", "electrodes_tsv"):
         assert out[key].exists(), key
-    emg_json = json.loads(out["emg_json"].read_text())
+    emg_json = json.loads(out["emg_json"].read_text(encoding="utf-8"))
     assert float(emg_json["SamplingFrequency"]) == sig.fsamp
     assert int(emg_json["EMGChannelCount"]) == data.shape[0]
 

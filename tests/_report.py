@@ -90,7 +90,7 @@ def write_csvs() -> list[Path]:
             continue
         path = out / f"{name}.csv"
         cols = _columns(rows)
-        with path.open("w", newline="") as f:
+        with path.open("w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=cols)
             writer.writeheader()
             for row in rows:

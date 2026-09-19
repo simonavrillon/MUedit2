@@ -28,8 +28,14 @@ jobs:
       - run: uv run --locked --extra dev ruff format --check .
 
   python:
-    name: Python · mypy + pytest
-    runs-on: ubuntu-latest
+    name: Python · mypy + pytest (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Users launch MUedit on all three through the .bat/.command/.ps1
+        # launchers, so path, encoding and BLAS differences surface here.
+        os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v7

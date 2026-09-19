@@ -576,7 +576,7 @@ class TestEditRoutes:
             {"type": "remove_flagged", "on_save": True, "removed_mu_uids": ["g0_mu1"]},
             {"type": "remove_duplicates", "on_save": True, "removed_mu_uids": ["g0_mu3"]},
         ]
-        editlog = json.loads(Path(data["path"]).with_suffix(".json").read_text())
+        editlog = json.loads(Path(data["path"]).with_suffix(".json").read_text(encoding="utf-8"))
         assert editlog["mu_uids"] == data["mu_uids"]
         assert editlog["history"] == data["edit_history"]
 

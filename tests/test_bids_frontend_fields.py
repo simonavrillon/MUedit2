@@ -111,20 +111,20 @@ def _frontend_edit_save_payload(
 def _read_emg_json(bids_root: Path) -> dict[str, Any]:
     paths = list(bids_root.rglob("*_emg.json"))
     assert paths, f"no *_emg.json under {bids_root}"
-    return json.loads(paths[0].read_text())
+    return json.loads(paths[0].read_text(encoding="utf-8"))
 
 
 def _read_channels(bids_root: Path) -> list[dict[str, str]]:
     paths = list(bids_root.rglob("*_channels.tsv"))
     assert paths, f"no *_channels.tsv under {bids_root}"
-    with paths[0].open() as f:
+    with paths[0].open(encoding="utf-8") as f:
         return list(csv.DictReader(f, delimiter="\t"))
 
 
 def _read_participants(bids_root: Path) -> list[dict[str, str]]:
     path = bids_root / "participants.tsv"
     assert path.exists(), f"no participants.tsv under {bids_root}"
-    with path.open() as f:
+    with path.open(encoding="utf-8") as f:
         return list(csv.DictReader(f, delimiter="\t"))
 
 
