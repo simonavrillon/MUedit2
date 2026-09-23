@@ -15,7 +15,9 @@ const filenamesPlugin = {
           Program(node) {
             const filename = context.filename;
             if (!filename) return;
-            const stem = filename.split("/").pop().replace(/\.js$/, "");
+            // Split on both separators: on Windows, ESLint hands us
+            // backslash-joined absolute paths, not just "/"-joined ones.
+            const stem = filename.split(/[/\\]/).pop().replace(/\.js$/, "");
             if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(stem)) {
               context.report({
                 node,
