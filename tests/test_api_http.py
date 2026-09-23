@@ -35,6 +35,8 @@ LIVE_ENDPOINTS: list[tuple[str, str]] = [
     ("GET", "/decompose_preview/{token}"),
     ("POST", "/edit/load-by-path"),
     ("POST", "/edit/save"),
+    ("POST", "/edit/session/duplicate"),
+    ("POST", "/edit/session/row"),
     ("POST", "/edit/update-filter"),
     ("POST", "/edit/add-spikes"),
     ("POST", "/edit/add-artifact"),
@@ -187,7 +189,7 @@ def _err(resp: Response, status: int, code: str | None = None) -> dict[str, Any]
 
 
 def _unpack_json_f32(
-    blob: bytes, magic: bytes, n_arrays: int
+    blob: bytes, magic: bytes, n_arrays: int, bytes_per_value: int = 4
 ) -> tuple[dict, list[tuple[int, int]]]:
     """Decode ``pack_json_f32_payload`` output; check the byte length adds up."""
     assert blob[:4] == magic
@@ -196,7 +198,7 @@ def _unpack_json_f32(
     shapes = [struct.unpack("<II", blob[12 + 8 * i : 20 + 8 * i]) for i in range(n_arrays)]
     head = 12 + 8 * n_arrays
     meta = json.loads(blob[head : head + meta_len])
-    assert len(blob) == head + meta_len + sum(4 * r * c for r, c in shapes)
+    assert len(blob) == head + meta_len + sum(bytes_per_value * r * c for r, c in shapes)
     return meta, shapes
 
 
@@ -564,8 +566,8 @@ EDIT_LOAD_KEYS = {
 
 def _check_meld(resp: Response) -> dict[str, Any]:
     assert resp.status_code == 200
-    assert resp.headers["x-muedit-format"] == "edit-load-f32-v1"
-    meta, shapes = _unpack_json_f32(resp.content, b"MELD", 1)
+    assert resp.headers["x-muedit-format"] == "edit-load-f64-v1"
+    meta, shapes = _unpack_json_f32(resp.content, b"MELD", 1, bytes_per_value=8)
     assert set(meta) >= EDIT_LOAD_KEYS
     assert meta["pulse_binary"] is True
     assert shapes == [(2, N_SAMPLES)] == [tuple(meta["pulse_shape"])]
