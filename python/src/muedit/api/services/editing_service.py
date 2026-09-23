@@ -14,8 +14,10 @@ from fastapi.responses import Response
 
 from muedit.api.binary import pack_json_f32_payload
 from muedit.api.cache import (
+    _get_edit_session,
     _get_edit_signal_context,
     _get_edit_signal_context_by_label,
+    _store_edit_session,
     _store_edit_signal_context,
 )
 from muedit.api.common import (
@@ -24,6 +26,7 @@ from muedit.api.common import (
     require_existing_path,
 )
 from muedit.api.config import DATA_ROOT, resolve_bids_root
+from muedit.api.edit_session import EditSession, RowUnavailableError, UnknownMuError
 from muedit.api.schemas import (
     EditDeduplicatePayload,
     EditFilterPayload,
@@ -31,6 +34,8 @@ from muedit.api.schemas import (
     EditOutliersPayload,
     EditRoiPayload,
     EditSavePayload,
+    EditSessionDuplicatePayload,
+    EditSessionRowPayload,
 )
 from muedit.api.services.bids_helpers import (
     _infer_bids_root_from_decomp_path,
@@ -88,6 +93,7 @@ class EditLoadResult:
     decomposition: LoadedDecomposition
     file_label: str
     edit_signal_token: str | None = None  # set when the file embeds the raw EMG
+    session_token: str | None = None  # server-side reference copy of the pulse trains
     project: str | None = None  # BIDS project folder, when the file sits in one
     # Restored from the ``.json`` edit log saved next to the decomposition.
     mu_uids: list[Any] | None = None
@@ -102,6 +108,7 @@ class EditLoadResult:
         out["file_label"] = self.file_label
         session = {
             "edit_signal_token": self.edit_signal_token,
+            "session_token": self.session_token,
             "project": self.project,
             "mu_uids": self.mu_uids,
             "edit_history": self.edit_history,
@@ -112,35 +119,43 @@ class EditLoadResult:
         return out
 
 
-def _encode_edit_load_f32(loaded: dict[str, Any]) -> bytes | None:
-    """Custom MELD v1 binary: JSON metadata header + float32 pulse matrix."""
+def _encode_edit_load_f64(loaded: dict[str, Any]) -> bytes | None:
+    """Custom MELD v1 binary: JSON metadata header + float64 pulse matrix.
+
+    Only the legacy fallback path (no session could be opened) ever sends the
+    full matrix this way; the display copy is exactly what is on disk, so this
+    costs nothing in fidelity. It costs little in size either: at 8 bytes per
+    sample instead of 4, this only doubles what a modern connection moves in a
+    handful of milliseconds — see the /edit/session/row rationale below.
+    """
     pulse_raw = loaded.get("pulse_trains_full")
     if pulse_raw is None:
         return None
-    pulse = np.asarray(pulse_raw, dtype=np.float32)
+    pulse = np.asarray(pulse_raw, dtype=np.float64)
     if pulse.ndim != 2:
         return None
     metadata = dict(loaded)
     metadata.pop("pulse_trains_full", None)
     metadata["pulse_shape"] = [int(pulse.shape[0]), int(pulse.shape[1])]
-    metadata["pulse_dtype"] = "float32"
+    metadata["pulse_dtype"] = "float64"
     metadata["pulse_binary"] = True
-    return pack_json_f32_payload(b"MELD", metadata, pulse)
+    return pack_json_f32_payload(b"MELD", metadata, pulse, dtype="<f8")
 
 
 def _wrap_edit_load_binary(loaded: dict[str, Any]) -> Response | dict[str, Any]:
-    """Encode a loaded decomposition as f32 binary, falling back to JSON when not encodable."""
-    blob = _encode_edit_load_f32(loaded)
+    """Encode a loaded decomposition as f64 binary, falling back to JSON when not encodable."""
+    blob = _encode_edit_load_f64(loaded)
     if blob is None:
-        return loaded
+        return make_json_safe(loaded)
     return Response(
         content=blob,
         media_type="application/octet-stream",
-        headers={"x-muedit-format": "edit-load-f32-v1"},
+        headers={"x-muedit-format": "edit-load-f64-v1"},
     )
 
 
-def load_decomposition_from_path(filepath: str) -> dict[str, Any]:
+def _build_edit_load_result(filepath: str) -> EditLoadResult:
+    """Load a decomposition and its edit-session fields, arrays left as NumPy arrays."""
     if require_existing_path(filepath).suffix.lower() not in {".npz", ".mat"}:
         raise HTTPException(
             status_code=400,
@@ -204,12 +219,99 @@ def load_decomposition_from_path(filepath: str) -> dict[str, Any]:
         except (OSError, ValueError, KeyError):
             pass  # best-effort; missing or corrupt editlog is non-fatal
 
-    return make_json_safe(result.to_dict())
+    _open_edit_session(result, filepath)
+    return result
+
+
+def _open_edit_session(result: EditLoadResult, filepath: str) -> None:
+    """Keep the loaded matrix server-side and give the editor a token to refer to it.
+
+    Motor units are identified by id, so the ids are settled here (from the edit log
+    when it matches the file, otherwise generated) and returned to the editor.
+    """
+    decomp = result.decomposition
+    matrix = decomp.pulse_trains_full
+    n_mu = len(decomp.distime_all)
+    if matrix.ndim != 2 or matrix.size == 0 or matrix.shape[0] != n_mu:
+        return  # nothing to keep: saving falls back to the matrix the editor sends
+    uids = [str(uid) for uid in result.mu_uids or []]
+    if len(uids) != n_mu or len(set(uids)) != n_mu:
+        uids = _generate_mu_uids(decomp.mu_grid_index)
+    result.mu_uids = uids
+    result.session_token = _store_edit_session(EditSession.from_matrix(filepath, matrix, uids))
+
+
+def load_decomposition_from_path(filepath: str) -> dict[str, Any]:
+    """JSON flavour of the edit load: the matrix becomes nested lists."""
+    return make_json_safe(_build_edit_load_result(filepath).to_dict())
+
+
+def load_decomposition_lazy_from_path(filepath: str) -> dict[str, Any]:
+    """Light flavour of the edit load: metadata and session token, no pulse-train matrix.
+
+    The editor then asks for one motor unit's row at a time (``get_session_row``), so the
+    size of the file no longer limits what the browser has to hold. When no session could
+    be opened the full matrix is still sent, since the editor has nothing to ask for.
+    """
+    result = _build_edit_load_result(filepath)
+    out = result.to_dict()
+    if result.session_token:
+        out.pop("pulse_trains_full", None)
+        out["lazy_rows"] = True
+    return make_json_safe(out)
+
+
+def get_session_row(payload: EditSessionRowPayload) -> Response:
+    """One motor unit's row at a given revision as raw little-endian float64.
+
+    Sent at the session's own precision, not narrowed to float32: one row is at
+    most a few million samples (tens of MB at 8 bytes each), so the display copy
+    costs the browser nothing extra to hold or draw, and this removes the last
+    place where a value shown to the user could differ from what is on disk.
+    """
+    session = _require_edit_session(payload.session_token)
+    row = _session_row(session, payload.mu_uid, payload.row_rev)
+    return Response(
+        content=np.asarray(row, dtype="<f8").tobytes(),
+        media_type="application/octet-stream",
+        headers={"x-muedit-format": "edit-row-f64-v1"},
+    )
+
+
+def _session_row(session: EditSession, mu_uid: str, row_rev: int) -> np.ndarray:
+    """A row of the session (read-only float64), with HTTP errors for unknown ids/revisions."""
+    try:
+        return session.row(mu_uid, row_rev)
+    except UnknownMuError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"field": "mu_uid", "reason": f"Unknown motor unit id: {exc.args[0]}"},
+        ) from exc
+    except RowUnavailableError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"field": "row_rev", "reason": f"Row version unavailable ({exc})."},
+        ) from exc
+
+
+def _edit_pulse(
+    pulse_train: list[float] | None,
+    session_token: str | None,
+    mu_uid: str | None,
+    row_rev: int | None,
+) -> np.ndarray:
+    """The pulse train an edit acts on: the session's row when given, else the uploaded one."""
+    if session_token and mu_uid:
+        session = _require_edit_session(session_token)
+        return np.asarray(_session_row(session, mu_uid, row_rev or 0), dtype=float)
+    if pulse_train is None:
+        raise HTTPException(status_code=400, detail="pulse_train is required")
+    return np.array(pulse_train, dtype=float)
 
 
 def load_decomposition_binary_from_path(filepath: str) -> Response | dict[str, Any]:
-    loaded = load_decomposition_from_path(filepath)
-    return _wrap_edit_load_binary(loaded)
+    """Binary flavour: the matrix goes straight from the array to the wire format."""
+    return _wrap_edit_load_binary(_build_edit_load_result(filepath).to_dict())
 
 
 def _dedup(
@@ -237,6 +339,60 @@ def _dedup(
 
 def _clean_distimes(spikes: list[int]) -> list[int]:
     return sorted({int(v) for v in spikes if int(v) >= 0})
+
+
+def _require_edit_session(token: str | None) -> EditSession:
+    """The live edit session for ``token``, or a 404 telling the user to reopen the file."""
+    session = _get_edit_session(token)
+    if session is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "field": "session_token",
+                "reason": "Edit session expired or unknown; reopen the file to continue.",
+            },
+        )
+    return session
+
+
+def _resolve_save_session(payload: EditSavePayload, total_samples: int) -> EditSession | None:
+    """The session to save from: a token without an uploaded matrix means "use the server's"."""
+    if payload.pulse_trains is not None or not payload.session_token:
+        return None
+    session = _require_edit_session(payload.session_token)
+    if session.n_samples != total_samples:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "field": "total_samples",
+                "reason": (
+                    f"The session holds {session.n_samples} samples per motor unit, "
+                    f"the request says {total_samples}."
+                ),
+            },
+        )
+    return session
+
+
+def _assemble_session_rows(
+    session: EditSession, mu_uids: list[str], row_revs: dict[str, int] | None
+) -> np.ndarray:
+    """The saved matrix: one float64 row per surviving motor unit, in saved order."""
+    try:
+        return session.assemble(mu_uids, row_revs)
+    except UnknownMuError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"field": "mu_uids", "reason": f"Unknown motor unit id: {exc.args[0]}"},
+        ) from exc
+    except RowUnavailableError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "field": "row_revs",
+                "reason": f"A recomputed row is no longer available ({exc}); reopen the file.",
+            },
+        ) from exc
 
 
 def _export_bids_from_mat_context(
@@ -343,20 +499,26 @@ def save_edits(payload: EditSavePayload) -> dict[str, Any]:
     if muscle_names and not parameters.get("target_muscle"):
         parameters["target_muscle"] = muscle_names if len(muscle_names) > 1 else muscle_names[0]
 
-    pulse_trains = None
-    if pulse_trains_raw is not None:
-        try:
-            pulse_trains = np.array(pulse_trains_raw, dtype=float)
-        except (TypeError, ValueError):
-            pulse_trains = None
-    if (
-        pulse_trains is None
-        or pulse_trains.size == 0
-        or pulse_trains.ndim != 2
-        or pulse_trains.shape[0] != len(distimes)
-        or pulse_trains.shape[1] != total_samples
-    ):
-        pulse_trains = build_pulse_trains_from_distimes(distimes, total_samples)
+    # With an edit session the matrix is not uploaded: the rows are assembled from
+    # the server's reference copy once the surviving motor units are known.
+    edit_session = _resolve_save_session(payload, total_samples)
+    pulse_trains = np.zeros((0, total_samples))
+    if edit_session is None:
+        candidate = None
+        if pulse_trains_raw is not None:
+            try:
+                candidate = np.array(pulse_trains_raw, dtype=float)
+            except (TypeError, ValueError):
+                candidate = None
+        if (
+            candidate is None
+            or candidate.size == 0
+            or candidate.ndim != 2
+            or candidate.shape[0] != len(distimes)
+            or candidate.shape[1] != total_samples
+        ):
+            candidate = build_pulse_trains_from_distimes(distimes, total_samples)
+        pulse_trains = candidate
 
     mu_uids_raw = payload.mu_uids
     mu_uids: list[str] = (
@@ -385,7 +547,8 @@ def save_edits(payload: EditSavePayload) -> dict[str, Any]:
         distimes = [distimes[i] for i in keep_idx]
         mu_grid_index = [mu_grid_index[i] for i in keep_idx]
         mu_uids = [mu_uids[i] for i in keep_idx]
-        pulse_trains = pulse_trains[keep_idx, :] if pulse_trains.size else pulse_trains
+        if edit_session is None:
+            pulse_trains = pulse_trains[keep_idx, :] if pulse_trains.size else pulse_trains
         artifact_times_all = [artifact_times_all[i] for i in keep_idx]
         kept_mus = [kept_mus[i] for i in keep_idx]
         if removed_uids:
@@ -395,7 +558,8 @@ def save_edits(payload: EditSavePayload) -> dict[str, Any]:
         kept_idx = _dedup(distimes, mu_grid_index, parameters, fsamp, total_samples)
         kept_set = set(kept_idx)
         removed_uids = [uid for i, uid in enumerate(mu_uids) if i not in kept_set]
-        pulse_trains = pulse_trains[kept_idx, :] if kept_idx else np.zeros((0, total_samples))
+        if edit_session is None:
+            pulse_trains = pulse_trains[kept_idx, :] if kept_idx else np.zeros((0, total_samples))
         distimes = [_clean_distimes(distimes[i]) for i in kept_idx]
         mu_grid_index = [mu_grid_index[i] for i in kept_idx]
         mu_uids = [mu_uids[i] for i in kept_idx]
@@ -403,6 +567,9 @@ def save_edits(payload: EditSavePayload) -> dict[str, Any]:
         kept_mus = [kept_mus[i] for i in kept_idx]
         if removed_uids:
             edit_history.append(_save_removal_entry("remove_duplicates", removed_uids))
+
+    if edit_session is not None:
+        pulse_trains = _assemble_session_rows(edit_session, mu_uids, payload.row_revs)
 
     bids_root = resolve_bids_root(payload.project)
     file_label = payload.file_label or ""
@@ -644,35 +811,72 @@ def update_filter(payload: EditFilterPayload) -> dict[str, Any]:
 
     pulse_train = payload.pulse_train
     updated_pulse = None
-    if pulse_train is not None:
+    row_rev: int | None = None
+    edit_session = _require_edit_session(payload.session_token) if payload.session_token else None
+    pulse_arr: np.ndarray | None = None
+    if edit_session is not None and payload.mu_uid:
+        # The server's copy is authoritative: merge into the row version the editor shows.
+        row_rev = payload.row_rev or 0
+        pulse_arr = np.array(_session_row(edit_session, payload.mu_uid, row_rev), dtype=float)
+    elif pulse_train is not None:
         try:
             pulse_arr = np.array(pulse_train, dtype=float)
         except (TypeError, ValueError):
             pulse_arr = None
-        if pulse_arr is not None and pt is not None:
-            edge = int(round(0.1 * fsamp))
-            seg_start = view_start + edge
-            seg_end = min(view_start + len(pt) - edge, pulse_arr.shape[0])
-            if seg_end > seg_start and len(pt) > 2 * edge:
-                pulse_arr[seg_start:seg_end] = pt[edge : edge + (seg_end - seg_start)]
-            updated_pulse = pulse_arr
+    if pulse_arr is not None and pt is not None:
+        changed = _merge_filter_window(pulse_arr, pt, view_start, fsamp)
+        updated_pulse = pulse_arr
+        if changed and edit_session is not None and payload.mu_uid:
+            row_rev = edit_session.add_version(payload.mu_uid, pulse_arr)
 
-    return make_json_safe(
-        {
-            "fsamp": fsamp,
-            "distimes": updated,
-            "pulse_train": (
-                updated_pulse.tolist() if isinstance(updated_pulse, np.ndarray) else pulse_train
-            ),
-        }
-    )
+    response: dict[str, Any] = {"fsamp": fsamp, "distimes": updated}
+    if not (payload.omit_pulse_train and edit_session is not None):
+        response["pulse_train"] = (
+            updated_pulse.tolist() if isinstance(updated_pulse, np.ndarray) else pulse_train
+        )
+    if row_rev is not None:
+        response["row_rev"] = row_rev
+    return make_json_safe(response)
+
+
+def _merge_filter_window(
+    pulse_arr: np.ndarray, pt: np.ndarray, view_start: int, fsamp: float
+) -> bool:
+    """Write the recomputed window ``pt`` into ``pulse_arr`` (minus its edge samples)."""
+    edge = int(round(0.1 * fsamp))
+    seg_start = view_start + edge
+    seg_end = min(view_start + len(pt) - edge, pulse_arr.shape[0])
+    if seg_end > seg_start and len(pt) > 2 * edge:
+        pulse_arr[seg_start:seg_end] = pt[edge : edge + (seg_end - seg_start)]
+        return True
+    return False
+
+
+def duplicate_session_row(payload: EditSessionDuplicatePayload) -> dict[str, Any]:
+    """Register a duplicated motor unit in the edit session (its row is shared, not copied)."""
+    session = _require_edit_session(payload.session_token)
+    try:
+        session.duplicate(payload.source_uid, payload.source_rev, payload.new_uid)
+    except UnknownMuError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"field": "source_uid", "reason": f"Unknown motor unit id: {exc.args[0]}"},
+        ) from exc
+    except RowUnavailableError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"field": "source_rev", "reason": f"Row version unavailable ({exc})."},
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400, detail={"field": "new_uid", "reason": str(exc)}
+        ) from exc
+    return {"duplicated": payload.new_uid}
 
 
 def add_spikes(payload: EditRoiPayload) -> dict[str, Any]:
     """Add spikes in ROI for selected motor unit."""
-    pulse_train = payload.pulse_train
-    if pulse_train is None:
-        raise HTTPException(status_code=400, detail="pulse_train is required")
+    pulse = _edit_pulse(payload.pulse_train, payload.session_token, payload.mu_uid, payload.row_rev)
     distimes = normalize_distimes(payload.distimes or [])
     fsamp = payload.fsamp or 0.0
     if fsamp <= 0:
@@ -684,16 +888,13 @@ def add_spikes(payload: EditRoiPayload) -> dict[str, Any]:
     if mu_index < 0 or mu_index >= len(distimes):
         raise HTTPException(status_code=400, detail="mu_index out of range")
 
-    pulse = np.array(pulse_train, dtype=float)
     updated = add_spikes_in_roi(pulse, distimes[mu_index], fsamp, x_start, x_end, y_min)
     return make_json_safe({"distimes": updated})
 
 
 def add_artifact(payload: EditRoiPayload) -> dict[str, Any]:
     """Mark a peak in the ROI as an artifact for the selected motor unit."""
-    pulse_train = payload.pulse_train
-    if pulse_train is None:
-        raise HTTPException(status_code=400, detail="pulse_train is required")
+    pulse = _edit_pulse(payload.pulse_train, payload.session_token, payload.mu_uid, payload.row_rev)
     fsamp = payload.fsamp or 0.0
     if fsamp <= 0:
         raise HTTPException(status_code=400, detail="fsamp is required")
@@ -704,16 +905,13 @@ def add_artifact(payload: EditRoiPayload) -> dict[str, Any]:
     artifact_times_raw = payload.artifact_times or []
     artifact_times = list(artifact_times_raw)
 
-    pulse = np.array(pulse_train, dtype=float)
     updated = add_artifact_in_roi(pulse, artifact_times, fsamp, x_start, x_end, y_min)
     return make_json_safe({"artifact_times": updated})
 
 
 def delete_spikes(payload: EditRoiPayload) -> dict[str, Any]:
     """Delete spikes and artifacts in ROI for selected motor unit."""
-    pulse_train = payload.pulse_train
-    if pulse_train is None:
-        raise HTTPException(status_code=400, detail="pulse_train is required")
+    pulse = _edit_pulse(payload.pulse_train, payload.session_token, payload.mu_uid, payload.row_rev)
     distimes = normalize_distimes(payload.distimes or [])
     x_start = payload.x_start
     x_end = payload.x_end
@@ -723,7 +921,6 @@ def delete_spikes(payload: EditRoiPayload) -> dict[str, Any]:
     if mu_index < 0 or mu_index >= len(distimes):
         raise HTTPException(status_code=400, detail="mu_index out of range")
 
-    pulse = np.array(pulse_train, dtype=float)
     updated_distimes = delete_spikes_in_roi(pulse, distimes[mu_index], x_start, x_end, y_min, y_max)
 
     # Also delete artifacts in the same ROI
@@ -744,9 +941,7 @@ def delete_spikes(payload: EditRoiPayload) -> dict[str, Any]:
 
 def delete_dr(payload: EditRoiPayload) -> dict[str, Any]:
     """Delete spikes with high discharge rates inside ROI for selected MU."""
-    pulse_train = payload.pulse_train
-    if pulse_train is None:
-        raise HTTPException(status_code=400, detail="pulse_train is required")
+    pulse = _edit_pulse(payload.pulse_train, payload.session_token, payload.mu_uid, payload.row_rev)
     distimes = normalize_distimes(payload.distimes or [])
     fsamp = payload.fsamp or 0.0
     if fsamp <= 0:
@@ -758,7 +953,6 @@ def delete_dr(payload: EditRoiPayload) -> dict[str, Any]:
     if mu_index < 0 or mu_index >= len(distimes):
         raise HTTPException(status_code=400, detail="mu_index out of range")
 
-    pulse = np.array(pulse_train, dtype=float)
     updated = delete_high_discharge_rate_spikes_in_roi(
         pulse, distimes[mu_index], fsamp, x_start, x_end, y_min
     )
@@ -767,9 +961,7 @@ def delete_dr(payload: EditRoiPayload) -> dict[str, Any]:
 
 def remove_outliers(payload: EditOutliersPayload) -> dict[str, Any]:
     """Remove discharge-rate outlier spikes and return removal count."""
-    pulse_train = payload.pulse_train
-    if pulse_train is None:
-        raise HTTPException(status_code=400, detail="pulse_train is required")
+    pulse = _edit_pulse(payload.pulse_train, payload.session_token, payload.mu_uid, payload.row_rev)
     distimes = normalize_distimes(payload.distimes or [])
     fsamp = payload.fsamp or 0.0
     if fsamp <= 0:
@@ -778,7 +970,6 @@ def remove_outliers(payload: EditOutliersPayload) -> dict[str, Any]:
     if mu_index < 0 or mu_index >= len(distimes):
         raise HTTPException(status_code=400, detail="mu_index out of range")
 
-    pulse = np.array(pulse_train, dtype=float)
     source = sorted({int(x) for x in distimes[mu_index]})
     updated = remove_discharge_rate_outliers(pulse, source, fsamp)
     removed = max(0, len(source) - len(updated))

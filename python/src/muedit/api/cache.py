@@ -11,6 +11,7 @@ from typing import TypeVar
 
 import numpy as np
 
+from muedit.api.edit_session import EditSession
 from muedit.models import EditSignalContext, FloatArray, IntArray, SignalImport
 
 logger = logging.getLogger(__name__)
@@ -19,6 +20,9 @@ UPLOAD_CACHE_TTL_SEC = 20 * 60
 UPLOAD_CACHE_MAX_ITEMS = 3
 EDIT_SIGNAL_CONTEXT_TTL_SEC = 12 * 60 * 60
 EDIT_SIGNAL_CONTEXT_MAX_ITEMS = 1
+# One open decomposition at a time: opening another file releases the previous session.
+EDIT_SESSION_TTL_SEC = 12 * 60 * 60
+EDIT_SESSION_MAX_ITEMS = 1
 
 DECOMP_PREVIEW_BINARY_TTL_SEC = 10 * 60
 DECOMP_PREVIEW_BINARY_MAX_ITEMS = 8
@@ -84,12 +88,22 @@ class _EditContextEntry(_Entry):
         return self.context.nbytes
 
 
+@dataclass
+class _EditSessionEntry(_Entry):
+    session: EditSession
+
+    @property
+    def nbytes(self) -> int:
+        return self.session.nbytes
+
+
 _E = TypeVar("_E", bound=_Entry)
 
 _UPLOAD_SESSION_CACHE: dict[str, _UploadEntry] = {}
 _DECOMP_PREVIEW_BINARY_CACHE: dict[str, _PreviewBinaryEntry] = {}
 _EDIT_SIGNAL_CONTEXT_CACHE: dict[str, _EditContextEntry] = {}
 _EDIT_SIGNAL_LABEL_INDEX: dict[str, str] = {}
+_EDIT_SESSION_CACHE: dict[str, _EditSessionEntry] = {}
 
 
 def _purge_expired_caches_locked() -> None:
@@ -104,6 +118,9 @@ def _purge_expired_caches_locked() -> None:
     expired_edit = {
         token for token, entry in _EDIT_SIGNAL_CONTEXT_CACHE.items() if entry.expires_at <= now
     }
+    for token, session in list(_EDIT_SESSION_CACHE.items()):
+        if session.expires_at <= now:
+            _EDIT_SESSION_CACHE.pop(token, None)
     for token in expired_edit:
         _EDIT_SIGNAL_CONTEXT_CACHE.pop(token, None)
     if expired_edit:
@@ -321,3 +338,27 @@ def _get_edit_signal_context_by_label(file_label: str | None) -> EditSignalConte
             if _EDIT_SIGNAL_LABEL_INDEX.get(label) == token:
                 _EDIT_SIGNAL_LABEL_INDEX.pop(label, None)
     return result
+
+
+def _store_edit_session(session: EditSession) -> str:
+    """Keep ``session`` (the reference copy of an open decomposition) and return its token."""
+    token = uuid.uuid4().hex
+    entry = _EditSessionEntry(expires_at=time.time() + EDIT_SESSION_TTL_SEC, session=session)
+    with _CACHE_LOCK:
+        _purge_expired_caches_locked()
+        _EDIT_SESSION_CACHE[token] = entry
+        _evict_to_budget_locked(_EDIT_SESSION_CACHE, EDIT_SESSION_MAX_ITEMS, protect=token)
+    return token
+
+
+def _get_edit_session(token: str | None) -> EditSession | None:
+    """Resolve an edit-session token (not a copy: the session is shared), refreshing its TTL."""
+    if not token:
+        return None
+    with _CACHE_LOCK:
+        _purge_expired_caches_locked()
+        entry = _EDIT_SESSION_CACHE.get(token)
+        if entry is None:
+            return None
+        entry.expires_at = time.time() + EDIT_SESSION_TTL_SEC
+        return entry.session

@@ -15,6 +15,8 @@ from muedit.api.schemas import (
     EditOutliersPayload,
     EditRoiPayload,
     EditSavePayload,
+    EditSessionDuplicatePayload,
+    EditSessionRowPayload,
     PathPayload,
 )
 from muedit.api.services.editing_service import (
@@ -22,9 +24,12 @@ from muedit.api.services.editing_service import (
     add_spikes,
     delete_dr,
     delete_spikes,
+    duplicate_session_row,
     flag_mu,
+    get_session_row,
     load_decomposition_binary_from_path,
     load_decomposition_from_path,
+    load_decomposition_lazy_from_path,
     remove_duplicates_service,
     remove_outliers,
     save_edits,
@@ -42,6 +47,8 @@ async def load_decomposition_by_path_endpoint(
     path = payload.path
     if not path:
         raise HTTPException(status_code=400, detail="path is required")
+    if request.headers.get("x-muedit-lazy-rows") == "1":
+        return success_payload(load_decomposition_lazy_from_path(path))
     wants_binary = request.headers.get("x-muedit-binary", "1") != "0"
     if wants_binary:
         return load_decomposition_binary_from_path(path)
@@ -53,6 +60,18 @@ async def save_edits_endpoint(payload: EditSavePayload) -> dict[str, Any]:
     """Persist edited decomposition to BIDS source tree."""
     result = save_edits(payload)
     return success_payload(result)
+
+
+@router.post("/edit/session/duplicate")
+async def duplicate_session_row_endpoint(payload: EditSessionDuplicatePayload) -> dict[str, Any]:
+    """Register a duplicated motor unit in the edit session so it can be saved from there."""
+    return success_payload(duplicate_session_row(payload))
+
+
+@router.post("/edit/session/row", response_model=None)
+async def session_row_endpoint(payload: EditSessionRowPayload) -> Response:
+    """One motor unit's row from the edit session, as raw float32 for display."""
+    return get_session_row(payload)
 
 
 @router.post("/edit/update-filter")

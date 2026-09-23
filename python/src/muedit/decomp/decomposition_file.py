@@ -565,10 +565,12 @@ def load_decomposition_file(filepath: str) -> LoadedDecomposition:
     if not mu_grid_index or len(mu_grid_index) != len(distimes):
         mu_grid_index = [0] * len(distimes)
 
-    pulse_trains_full = [list(map(float, row)) for row in pulse_matrix.tolist()]
-
+    # Keep the matrix as the NumPy array: turning it into nested Python lists here
+    # multiplied its size several times over (~9 GB for a 378x727,400 matrix) and
+    # was the main cause of out-of-memory failures on large files. Callers that
+    # need JSON convert it with make_json_safe() at the point they need it.
     return LoadedDecomposition(
-        pulse_trains_full=pulse_trains_full,
+        pulse_trains_full=pulse_matrix,
         distime_all=distimes,
         fsamp=d.fsamp,
         grid_names=grid_names,

@@ -15,6 +15,15 @@ class PathPayload(BaseModel):
     path: str
 
 
+class EditSessionDuplicatePayload(BaseModel):
+    """Register a duplicated motor unit as a copy of a row of the edit session."""
+
+    session_token: str
+    source_uid: str
+    source_rev: int = 0
+    new_uid: str
+
+
 class QcWindowPayload(BaseModel):
     """Typed request body for QC channel-window retrieval."""
 
@@ -56,6 +65,11 @@ class EditSavePayload(BaseModel):
     artifact_times: list[list[int]] | None = None
     artifact_regions: list[Any] | None = None
     edit_signal_token: str | None = None
+    # Save from the server-side session instead of an uploaded ``pulse_trains``
+    # matrix: ``row_revs`` says which recomputed version of a motor unit's row is
+    # in force (missing id = the row as read from the file).
+    session_token: str | None = None
+    row_revs: dict[str, int] | None = None
     participant_meta: dict[str, Any] | None = None
     powerline_freq: float | None = None
     manufacturer: str | None = None
@@ -78,6 +92,12 @@ class EditFilterPayload(BaseModel):
     distimes: list[list[int]]
     mu_grid_index: list[int] | None = None
     pulse_train: list[float] | None = None
+    # With a session, the server merges the recomputed window into its own copy of
+    # the row (``row_rev`` = the version the editor is currently showing).
+    session_token: str | None = None
+    mu_uid: str | None = None
+    row_rev: int | None = None
+    omit_pulse_train: bool = False  # the editor refetches the row instead of taking it inline
     view_start: int = 0
     view_end: int = 0
     nbextchan: int = DEFAULT_NBEXTCHAN
@@ -94,6 +114,10 @@ class EditRoiPayload(BaseModel):
     distimes: list[list[int]]
     mu_index: int = 0
     pulse_train: list[float] | None = None
+    # With a session the pulse train is read server-side (row ``mu_uid`` at ``row_rev``).
+    session_token: str | None = None
+    mu_uid: str | None = None
+    row_rev: int | None = None
     fsamp: float | None = None
     x_start: int = 0
     x_end: int = 0
@@ -108,6 +132,10 @@ class EditOutliersPayload(BaseModel):
     distimes: list[list[int]]
     mu_index: int = 0
     pulse_train: list[float] | None = None
+    # With a session the pulse train is read server-side (row ``mu_uid`` at ``row_rev``).
+    session_token: str | None = None
+    mu_uid: str | None = None
+    row_rev: int | None = None
     fsamp: float | None = None
 
 
@@ -128,3 +156,11 @@ class EditFlagPayload(BaseModel):
     distimes: list[list[int]]
     mu_index: int = 0
     flag: bool | None = None
+
+
+class EditSessionRowPayload(BaseModel):
+    """Ask the edit session for one motor unit's row (float32, for display)."""
+
+    session_token: str
+    mu_uid: str
+    row_rev: int = 0

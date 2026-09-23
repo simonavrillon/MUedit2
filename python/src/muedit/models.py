@@ -204,7 +204,7 @@ class EditSignalContext:
 class LoadedDecomposition:
     """Decomposition state loaded from a .npz or .mat file for the interactive editing stage."""
 
-    pulse_trains_full: list[list[float]] = field(default_factory=list)
+    pulse_trains_full: np.ndarray = field(default_factory=lambda: np.zeros((0, 0)))
     distime_all: list[list[int]] = field(default_factory=list)
     fsamp: float | None = None
     grid_names: list[str] = field(default_factory=list)
@@ -216,7 +216,7 @@ class LoadedDecomposition:
     sil: list[float] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
-        """Serialise to a JSON-safe dictionary."""
+        """Serialise to a dict; ``pulse_trains_full`` stays a NumPy array (not JSON-safe)."""
         return {
             "pulse_trains_full": self.pulse_trains_full,
             "distime_all": self.distime_all,
