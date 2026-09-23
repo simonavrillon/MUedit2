@@ -281,12 +281,35 @@ export function drawSeries(
     ctx.strokeStyle = color;
     ctx.lineWidth = 1.4;
     ctx.beginPath();
-    sliced.forEach((v, idx) => {
-      const x = toCanvasX(idx);
-      const y = toCanvasY(v);
-      if (idx === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    });
+    const columns = Math.max(1, Math.floor(plotWidth));
+    if (sliced.length > columns * 4) {
+      // Many more samples than pixels: draw, for each pixel column, the line from
+      // its minimum to its maximum. Every peak stays visible (unlike subsampling)
+      // and the cost follows the width of the plot, not the length of the recording.
+      const n = sliced.length;
+      for (let c = 0; c < columns; c++) {
+        const from = Math.floor((c * n) / columns);
+        const to = Math.max(from + 1, Math.floor(((c + 1) * n) / columns));
+        let lo = Infinity;
+        let hi = -Infinity;
+        for (let i = from; i < to; i++) {
+          const v = sliced[i];
+          if (v < lo) lo = v;
+          if (v > hi) hi = v;
+        }
+        const x = padding.left + ((c + 0.5) * plotWidth) / columns;
+        ctx.moveTo(x, toCanvasY(lo));
+        // A flat column still needs some width to show up (e.g. a flagged MU).
+        ctx.lineTo(lo === hi ? x + 1 : x, toCanvasY(hi));
+      }
+    } else {
+      sliced.forEach((v, idx) => {
+        const x = toCanvasX(idx);
+        const y = toCanvasY(v);
+        if (idx === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+    }
     ctx.stroke();
   }
 

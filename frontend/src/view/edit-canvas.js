@@ -16,7 +16,12 @@ import {
   setEditView,
   setShowBookmark,
 } from "../state/actions.js";
-import { computeInstantaneousDr } from "../editing/operations.js";
+import {
+  computeInstantaneousDr,
+  ensureEditRow,
+} from "../editing/operations.js";
+import { handleError } from "../app/services/error-service.js";
+import { rowIsCurrent } from "../state/selectors.js";
 import { renderSelectPair } from "./select-renderers.js";
 
 /** @typedef {import("../app/context.js").App} App */
@@ -169,6 +174,30 @@ export function renderEditExplorer(app) {
 
   renderEditDropdowns();
   const muIdx = state.edit.currentMu ?? 0;
+  if (!rowIsCurrent(state, muIdx)) {
+    // Lazy mode: the row is on the server. Ask for it and draw again on arrival;
+    // meanwhile a previous version of the row (if any) stays on screen.
+    ensureEditRow(app, muIdx)
+      .then(() => app.renderEditExplorer())
+      .catch((err) =>
+        handleError(err, app.setEditStatus, "Loading the pulse train failed"),
+      );
+    if (!state.edit.pulseTrains?.[muIdx]?.length) {
+      drawSeries(
+        els.editPulseCanvas,
+        [],
+        UNIFORM_PULSE_COLOR,
+        [],
+        [],
+        0,
+        null,
+        null,
+        true,
+        { noDataText: "Loading pulse train..." },
+      );
+      return;
+    }
+  }
   const pulse = getDisplayPulse(muIdx);
   const spikes = state.edit.distimes?.[muIdx] || [];
   if (!state.edit.view || (pulse && state.edit.view.end > pulse.length)) {

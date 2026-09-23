@@ -78,3 +78,43 @@ export function getEditMuIndicesForGrid(state, gridIdx) {
     gridIdx,
   );
 }
+
+/**
+ * Server-side revision in force for a motor unit (0 = as read from the file).
+ * @param {State} state
+ * @param {number} muIdx
+ * @returns {number}
+ */
+export function rowRevOf(state, muIdx) {
+  return state.edit.rowRevs?.[muUidFor(state, muIdx)] ?? 0;
+}
+
+/**
+ * How a request names the pulse train it acts on: the server-side session row
+ * (id + revision) when there is a session, otherwise the uploaded values.
+ * @param {State} state
+ * @param {number} muIdx
+ * @param {number[]} pulse Values held by the editor, used only without a session.
+ * @returns {Record<string, unknown>}
+ */
+export function pulseSource(state, muIdx, pulse) {
+  if (!state.edit.sessionToken) return { pulse_train: pulse };
+  return {
+    session_token: state.edit.sessionToken,
+    mu_uid: muUidFor(state, muIdx),
+    row_rev: rowRevOf(state, muIdx),
+  };
+}
+
+/**
+ * Whether the row held by the editor for this MU is the one the server has in
+ * force (always true outside lazy mode, where every row is held).
+ * @param {State} state
+ * @param {number} muIdx
+ * @returns {boolean}
+ */
+export function rowIsCurrent(state, muIdx) {
+  if (!state.edit.lazyRows) return true;
+  const held = state.edit.rowCacheRevs[muUidFor(state, muIdx)];
+  return held !== undefined && held === rowRevOf(state, muIdx);
+}

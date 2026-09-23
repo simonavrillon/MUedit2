@@ -8,7 +8,7 @@ import { handleError } from "./error-service.js";
 import { normalizeEditLoadPayload } from "../../api/payloads.js";
 import { inferGridCount, normalizeGridNames } from "../../io/grid.js";
 import { getSuggestedNpzName } from "../../io/bids.js";
-import { muUidFor } from "../../state/selectors.js";
+import { muUidFor, pulseSource } from "../../state/selectors.js";
 import { spikesDiff } from "../../editing/operations.js";
 import {
   clearAllEditSelections,
@@ -29,6 +29,7 @@ import {
   setEditFlagForMu,
   setEditFlaggedArray,
   setEditFsamp,
+  setEditLazyRows,
   setEditGridNames,
   setEditHistory,
   keepEditMus,
@@ -39,6 +40,8 @@ import {
   setEditParameters,
   setEditPulseTrainForMu,
   setEditPulseTrains,
+  setEditRowRev,
+  setEditSessionToken,
   setEditSignalToken,
   setEditTotalSamples,
   setEditView,
@@ -106,7 +109,7 @@ export async function requestRoiEdit(app, action, payload) {
     const data = await api.editAction(action, {
       distimes: state.edit.distimes,
       mu_index: payload.muIdx,
-      pulse_train: payload.pulse,
+      ...pulseSource(state, payload.muIdx, payload.pulse),
       fsamp: payload.fs,
       x_start: payload.xStart,
       x_end: payload.xEnd,
@@ -248,7 +251,10 @@ export async function requestFilterUpdate(app, mode) {
       mu_index: muIdx,
       distimes: state.edit.distimes,
       mu_grid_index: state.edit.muGridIndex || [],
-      pulse_train: pulse,
+      ...pulseSource(state, muIdx, pulse),
+      // The row lives on the server: the editor refetches it instead of taking
+      // a 700k-value JSON array back.
+      omit_pulse_train: !!state.edit.sessionToken,
       view_start: start,
       view_end: end,
       use_peeloff: els.editPeelOffToggle?.dataset.state === "on",
@@ -259,6 +265,9 @@ export async function requestFilterUpdate(app, mode) {
     setEditDistimesForMu(state, muIdx, data.distimes || []);
     if (data.pulse_train && Array.isArray(data.pulse_train)) {
       setEditPulseTrainForMu(state, muIdx, data.pulse_train);
+    }
+    if (state.edit.sessionToken && typeof data.row_rev === "number") {
+      setEditRowRev(state, muUidFor(state, muIdx), data.row_rev);
     }
     ensureEditFlagged();
     setEditFlagForMu(state, muIdx, false);
@@ -321,7 +330,7 @@ export async function removeOutliers(app) {
     const data = await api.editRemoveOutliers({
       distimes: state.edit.distimes,
       mu_index: muIdx,
-      pulse_train: pulse,
+      ...pulseSource(state, muIdx, pulse),
       fsamp: state.edit.fsamp || 0,
     });
     setEditDistimesForMu(state, muIdx, data.distimes || []);
@@ -484,12 +493,15 @@ export async function saveEditedFile(app) {
     return;
   }
   const muscleNames = getBidsMuscleNames();
-  const maxSpike = Math.max(
-    0,
-    ...distimes
-      .flatMap((d) => d || [])
-      .map((v) => (Number.isFinite(v) ? v : 0)),
-  );
+  // A plain loop, not Math.max(0, ...spikes): spreading every spike index of a
+  // large file as call arguments exceeds the engine's argument limit and throws
+  // before the "Saving..." status is shown (this sits above the try block).
+  let maxSpike = 0;
+  for (const d of distimes) {
+    for (const v of d || []) {
+      if (Number.isFinite(v) && v > maxSpike) maxSpike = v;
+    }
+  }
   const totalSamples =
     state.edit.totalSamples ||
     (state.edit.pulseTrains?.[0]?.length ?? 0) ||
@@ -502,7 +514,14 @@ export async function saveEditedFile(app) {
   const payload = {
     distimes,
     flagged: state.edit.flagged || [],
-    pulse_trains: state.edit.pulseTrains || [],
+    // With a server session the file is written from the reference (float64)
+    // rows held there; the browser only names which revision of each row to use.
+    ...(state.edit.sessionToken
+      ? {
+          session_token: state.edit.sessionToken,
+          row_revs: state.edit.rowRevs || {},
+        }
+      : { pulse_trains: state.edit.pulseTrains || [] }),
     total_samples: totalSamples,
     fsamp: state.edit.fsamp,
     grid_names: state.edit.gridNames,
@@ -597,16 +616,22 @@ export async function loadDecompositionForEdit(app, file, filepath) {
     if (els.bidsProject) els.bidsProject.value = loadedProject;
     setEditProject(state, loadedProject);
     setEditSignalToken(state, data.edit_signal_token || "");
+    setEditSessionToken(state, data.session_token || "");
     setEditFile(state, file);
     setEditFilename(state, file.name || data.file_label || "decomposition");
-    setEditPulseTrains(
-      state,
-      data.pulse_trains_full || data.pulse_trains || [],
-    );
-    setEditOriginalPulseTrains(
-      state,
-      (state.edit.pulseTrains || []).map((row) => (row ? [...row] : row)),
-    );
+    if (data.lazy_rows) {
+      // Pulse trains stay on the server; the editor fetches the row it shows.
+      setEditLazyRows(state, (data.distime_all || data.distime || []).length);
+    } else {
+      setEditPulseTrains(
+        state,
+        data.pulse_trains_full || data.pulse_trains || [],
+      );
+      setEditOriginalPulseTrains(
+        state,
+        (state.edit.pulseTrains || []).map((row) => (row ? [...row] : row)),
+      );
+    }
     const dist = data.distime_all || data.distime || [];
     setEditDistimes(
       state,

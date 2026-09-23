@@ -9,7 +9,6 @@ import {
   decodeQcJsonPayload,
   decodeQcRawF32,
   decodeDecomposePreviewPayload,
-  decodeEditLoadPayload,
 } from "./binary-payloads.js";
 import { normalizePreviewPayload } from "./payloads.js";
 
@@ -150,18 +149,20 @@ export function createApiClient({ apiFetch, apiJson, API_BASE }) {
      * @param {string} filepath
      */
     async editLoadByPath(filepath) {
-      const res = await apiFetch(
+      // Light load: metadata + session token, rows are fetched one at a time
+      // (editSessionRow). When no session could be opened the server sends the
+      // full matrix instead (as JSON), which the editor then holds as before.
+      return apiJson(
         `${API_BASE}${routes.editLoadByPath}`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            "X-Muedit-Lazy-Rows": "1",
+          },
           body: JSON.stringify({ path: filepath }),
         },
         120000,
-      );
-      return decodeEditLoadPayload(
-        await res.arrayBuffer(),
-        res.headers.get("x-muedit-format"),
       );
     },
 
@@ -170,6 +171,37 @@ export function createApiClient({ apiFetch, apiJson, API_BASE }) {
      */
     editSave(payload) {
       return postJson(`${API_BASE}${routes.editSave}`, payload, 120000);
+    },
+
+    /**
+     * @param {JsonObject} payload
+     */
+    editSessionDuplicate(payload) {
+      return postJson(
+        `${API_BASE}${routes.editSessionDuplicate}`,
+        payload,
+        30000,
+      );
+    },
+
+    /**
+     * One motor unit's row (float64 on the wire) from the server-side session.
+     * @param {JsonObject} payload
+     * @returns {Promise<number[]>}
+     */
+    async editSessionRow(payload) {
+      const res = await apiFetch(
+        `${API_BASE}${routes.editSessionRow}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        },
+        60000,
+      );
+      // Sent at the session's own precision (float64), not narrowed to
+      // float32: see the row rationale in the backend route.
+      return Array.from(new Float64Array(await res.arrayBuffer()));
     },
 
     healthUrl() {

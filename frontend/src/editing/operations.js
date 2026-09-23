@@ -11,10 +11,13 @@ import {
   setEditFlagForMu,
   setEditFlaggedArray,
   setEditPulseTrainForMu,
+  setEditCachedRow,
+  setEditRowRev,
   setEditTotalSamples,
   dropEditHistoryForMuSince,
 } from "../state/actions.js";
-import { muUidFor } from "../state/selectors.js";
+import { muUidFor, rowIsCurrent, rowRevOf } from "../state/selectors.js";
+import { handleError } from "../app/services/error-service.js";
 
 /** @typedef {import("../app/state.js").State} State */
 /** @typedef {import("../app/state.js").Selection} Selection */
@@ -69,12 +72,52 @@ export function backupEditMu(state) {
     muIdx,
     distimes: [...(state.edit.distimes?.[muIdx] || [])],
     flagged: !!state.edit.flagged?.[muIdx],
-    pulseTrain: state.edit.pulseTrains?.[muIdx]
-      ? [...state.edit.pulseTrains[muIdx]]
-      : null,
+    // With a session the previous row is still on the server (see rowRev): no copy.
+    pulseTrain:
+      !state.edit.sessionToken && state.edit.pulseTrains?.[muIdx]
+        ? [...state.edit.pulseTrains[muIdx]]
+        : null,
     artifactTimes: [...(state.edit.artifactTimes?.[muIdx] || [])],
     historyLength: state.edit.editHistory?.length ?? 0,
+    rowRev: rowRevOf(state, muIdx),
   });
+}
+
+// Rows being fetched, so that two renders asking for the same row share one request.
+/** @type {Map<string, Promise<void>>} */
+const rowLoads = new Map();
+
+/**
+ * Lazy mode: make sure the editor holds the current revision of a MU's row,
+ * fetching it from the server session if not. Resolves once it is held.
+ * @param {App} app
+ * @param {number} muIdx
+ * @returns {Promise<void>}
+ */
+export function ensureEditRow(app, muIdx) {
+  const { state, api } = app;
+  if (rowIsCurrent(state, muIdx)) return Promise.resolve();
+  const token = state.edit.sessionToken;
+  const uid = muUidFor(state, muIdx);
+  const rev = rowRevOf(state, muIdx);
+  const key = `${token}|${uid}|${rev}`;
+  let pending = rowLoads.get(key);
+  if (!pending) {
+    pending = api
+      .editSessionRow({ session_token: token, mu_uid: uid, row_rev: rev })
+      .then((row) => {
+        // The user may have moved on (reopened a file, undone the edit) meanwhile.
+        const idx = (state.edit.muUids || []).indexOf(uid);
+        if (state.edit.sessionToken === token && idx !== -1) {
+          if (rowRevOf(state, idx) === rev) {
+            setEditCachedRow(state, idx, row, rev);
+          }
+        }
+      })
+      .finally(() => rowLoads.delete(key));
+    rowLoads.set(key, pending);
+  }
+  return pending;
 }
 
 /** @param {App} app */
@@ -102,6 +145,10 @@ export function restoreEditBackup(app) {
     setEditPulseTrainForMu(state, muIdx, backup.pulseTrain);
   }
   const muUid = muUidFor(state, muIdx);
+  // Undo is a revision number too: the server still holds the previous row.
+  if (state.edit.sessionToken && typeof backup.rowRev === "number") {
+    setEditRowRev(state, muUid, backup.rowRev);
+  }
   dropEditHistoryForMuSince(state, muUid, backup.historyLength);
   setEditBackup(state, null);
   clearAllEditSelections(state);
@@ -416,9 +463,10 @@ export function computeInstantaneousDr(spikes, fsamp, totalSamples) {
 }
 
 /** @param {App} app */
-export function duplicateMu(app) {
+export async function duplicateMu(app) {
   const {
     state,
+    api,
     setEditStatus,
     ensureEditFlagged,
     recomputeEditDirty,
@@ -444,11 +492,33 @@ export function duplicateMu(app) {
     existingCounts.length > 0 ? Math.max(...existingCounts) + 1 : 0;
   const newUid = `${prefix}${newCount}`;
 
+  const sourceUid = muUidFor(state, muIdx);
+  // The copy must exist on the server too, or it could not be saved from there.
+  if (state.edit.sessionToken) {
+    try {
+      await api.editSessionDuplicate({
+        session_token: state.edit.sessionToken,
+        source_uid: sourceUid,
+        source_rev: rowRevOf(state, muIdx),
+        new_uid: newUid,
+      });
+    } catch (err) {
+      handleError(err, setEditStatus, "Duplicate failed");
+      return;
+    }
+  }
+
   const newIdx = state.edit.distimes.length;
-  appendEditMu(state, { distimes, pulseTrain: pulse, gridIdx, uid: newUid });
+  // In lazy mode the copy's row is fetched from the session when it is shown.
+  const copiedPulse = state.edit.lazyRows ? [] : pulse;
+  appendEditMu(state, {
+    distimes,
+    pulseTrain: copiedPulse,
+    gridIdx,
+    uid: newUid,
+  });
   ensureEditFlagged();
 
-  const sourceUid = muUidFor(state, muIdx);
   app.appendEditHistory({
     type: "duplicate_mu",
     mu_uid: newUid,
@@ -478,9 +548,13 @@ export function resetCurrentMuEdits(app) {
   const wasFlagged = !!state.edit.flagged?.[muIdx];
   setEditDistimesForMu(state, muIdx, baseline);
   setEditArtifactTimesForMu(state, muIdx, []);
-  if (state.edit.originalPulseTrains?.[muIdx]) {
+  // An empty entry is a lazy-mode placeholder, not a real row to restore: leave
+  // pulseTrains alone and let the rowRev reset below pull the real one back.
+  if (state.edit.originalPulseTrains?.[muIdx]?.length) {
     setEditPulseTrainForMu(state, muIdx, state.edit.originalPulseTrains[muIdx]);
   }
+  // Revision 0 is the row as read from the file, always kept by the server.
+  if (state.edit.sessionToken) setEditRowRev(state, muUidFor(state, muIdx), 0);
   ensureEditFlagged();
   setEditFlagForMu(state, muIdx, false);
   /** @type {EditHistoryEntry} */

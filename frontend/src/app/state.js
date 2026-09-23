@@ -20,6 +20,7 @@ import { GRID_COLORS } from "../config.js";
  * @property {number[] | null} pulseTrain
  * @property {number[]} artifactTimes
  * @property {number} historyLength Edit-log length when the backup was taken.
+ * @property {number} rowRev Server-side revision of the row when the backup was taken.
  */
 
 /**
@@ -72,6 +73,11 @@ import { GRID_COLORS } from "../config.js";
  * @property {string} bidsRoot
  * @property {string} project
  * @property {string} editSignalToken
+ * @property {string} sessionToken Server-side edit session holding the reference pulse trains.
+ * @property {Record<string, number>} rowRevs Row revision in force per MU id (missing = as read from the file).
+ * @property {boolean} lazyRows Rows are fetched one at a time from the session (pulseTrains holds only a few).
+ * @property {Record<string, number>} rowCacheRevs Revision of each row currently held in pulseTrains, by MU id.
+ * @property {string[]} rowCacheOrder MU ids of the rows held, oldest first (bounds browser memory).
  * @property {string[]} muUids
  * @property {EditHistoryEntry[]} editHistory
  * @property {Bookmark | null} bookmarkPosition
@@ -149,6 +155,11 @@ export function createEditSlice() {
     bidsRoot: "",
     project: "",
     editSignalToken: "",
+    sessionToken: "",
+    rowRevs: {},
+    lazyRows: false,
+    rowCacheRevs: {},
+    rowCacheOrder: [],
     muUids: [],
     editHistory: [],
     bookmarkPosition: null,

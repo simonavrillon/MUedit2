@@ -108,6 +108,25 @@ export function setEditProject(state, value) {
  * @param {State} state
  * @param {string | null | undefined} value
  */
+export function setEditSessionToken(state, value) {
+  state.edit.sessionToken = String(value || "").trim();
+  state.edit.rowRevs = {};
+}
+
+/**
+ * Record the server-side revision now in force for one motor unit.
+ * @param {State} state
+ * @param {string} muUid
+ * @param {number} rev
+ */
+export function setEditRowRev(state, muUid, rev) {
+  state.edit.rowRevs[muUid] = rev;
+}
+
+/**
+ * @param {State} state
+ * @param {string | null | undefined} value
+ */
 export function setEditSignalToken(state, value) {
   state.edit.editSignalToken = String(value || "").trim();
 }
@@ -401,7 +420,51 @@ export function setEditFilename(state, filename) {
  * @param {number[][] | null | undefined} pulseTrains
  */
 export function setEditPulseTrains(state, pulseTrains) {
+  state.edit.lazyRows = false;
   state.edit.pulseTrains = Array.isArray(pulseTrains) ? pulseTrains : [];
+}
+
+// How many pulse-train rows the editor keeps at once in lazy mode: the one on
+// screen plus the ones just visited, so going back to a MU is instant.
+const EDIT_ROW_CACHE_SIZE = 4;
+
+/**
+ * Lazy mode: the pulse trains stay on the server. `pulseTrains` becomes one
+ * empty placeholder per motor unit, filled in by `setEditCachedRow`.
+ * @param {State} state
+ * @param {number} muCount
+ */
+export function setEditLazyRows(state, muCount) {
+  state.edit.lazyRows = true;
+  state.edit.pulseTrains = Array.from({ length: muCount }, () => []);
+  // One empty placeholder per MU, not an empty array: appendEditMu (duplicate)
+  // pushes onto the end and must land on the new MU's own index, not MU 0's.
+  state.edit.originalPulseTrains = Array.from({ length: muCount }, () => []);
+  state.edit.rowCacheRevs = {};
+  state.edit.rowCacheOrder = [];
+}
+
+/**
+ * Hold a row fetched from the server, dropping the oldest held row(s) beyond the cache size.
+ * @param {State} state
+ * @param {number} muIdx
+ * @param {number[]} row
+ * @param {number} rev Revision of the row on the server.
+ */
+export function setEditCachedRow(state, muIdx, row, rev) {
+  const e = state.edit;
+  const uid = e.muUids?.[muIdx] ?? `mu${muIdx}`;
+  e.pulseTrains[muIdx] = row;
+  e.rowCacheRevs[uid] = rev;
+  e.rowCacheOrder = e.rowCacheOrder.filter((u) => u !== uid);
+  e.rowCacheOrder.push(uid);
+  while (e.rowCacheOrder.length > EDIT_ROW_CACHE_SIZE) {
+    const stale = e.rowCacheOrder.shift();
+    if (stale === undefined) break;
+    delete e.rowCacheRevs[stale];
+    const idx = (e.muUids || []).indexOf(stale);
+    if (idx !== -1) e.pulseTrains[idx] = [];
+  }
 }
 
 /**

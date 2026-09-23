@@ -1,13 +1,18 @@
 /**
- * Decoders for the compact binary transport the API uses for large float32
+ * Decoders for the compact binary transport the API uses for large float
  * matrices (pulse trains). Each payload is either plain JSON or a binary frame:
  *
  *   magic(4 bytes) | uint32 version | uint32 metaLen | (uint32 rows, uint32 cols)
- *   per array | JSON metadata (metaLen bytes) | float32 array data
+ *   per array | JSON metadata (metaLen bytes) | array data
  *
- * All integers/floats are little-endian. When the magic prefix is absent the
- * server fell back to JSON, so the bytes are parsed as text instead. Mirrors the
- * Python `pack_json_f32_payload` packer in `api/binary.py`.
+ * All integers/floats are little-endian. The array element width depends on
+ * the payload: the edit-load frame (MELD) carries float64 — a display copy of
+ * one file's worth of pulse trains costs nothing extra to widen, and it means
+ * a value shown to the user never differs from what is on disk. QC/preview
+ * frames stay float32, sized for many more samples at once. When the magic
+ * prefix is absent the server fell back to JSON, so the bytes are parsed as
+ * text instead. Mirrors the Python `pack_json_f32_payload` packer in
+ * `api/binary.py`.
  */
 /** @typedef {import("../app/context.js").JsonObject} JsonObject */
 
@@ -42,7 +47,22 @@ function readFloat32Values(view, offset, count) {
 }
 
 /**
- * @param {Float32Array} raw
+ * @param {DataView} view
+ * @param {number} offset
+ * @param {number} count
+ */
+function readFloat64Values(view, offset, count) {
+  const out = new Float64Array(count);
+  let cursor = offset;
+  for (let i = 0; i < count; i++) {
+    out[i] = view.getFloat64(cursor, true);
+    cursor += 8;
+  }
+  return out;
+}
+
+/**
+ * @param {Float32Array | Float64Array} raw
  * @param {number} rows
  * @param {number} cols
  * @returns {number[][]}
@@ -131,8 +151,8 @@ export function decodeQcRawF32(buffer) {
  * @param {ArrayBuffer} buffer
  * @param {string | null} [formatHeader]
  */
-function isEditLoadF32Payload(buffer, formatHeader = "") {
-  return formatHeader === "edit-load-f32-v1" || hasMagic(buffer, "MELD");
+function isEditLoadF64Payload(buffer, formatHeader = "") {
+  return formatHeader === "edit-load-f64-v1" || hasMagic(buffer, "MELD");
 }
 
 /**
@@ -141,7 +161,7 @@ function isEditLoadF32Payload(buffer, formatHeader = "") {
  * @returns {JsonObject}
  */
 export function decodeEditLoadPayload(buffer, formatHeader = "") {
-  if (!isEditLoadF32Payload(buffer, formatHeader)) {
+  if (!isEditLoadF64Payload(buffer, formatHeader)) {
     const text = textDecoder.decode(new Uint8Array(buffer));
     return JSON.parse(text);
   }
@@ -163,7 +183,7 @@ export function decodeEditLoadPayload(buffer, formatHeader = "") {
     textDecoder.decode(new Uint8Array(buffer, offset, metaLen)),
   );
   offset += metaLen;
-  const pulse = to2d(readFloat32Values(view, offset, rows * cols), rows, cols);
+  const pulse = to2d(readFloat64Values(view, offset, rows * cols), rows, cols);
   return { ...meta, pulse_trains_full: pulse };
 }
 

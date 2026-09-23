@@ -11,6 +11,8 @@ export const routes = {
   decomposePreview: (/** @type {string} */ token) =>
     `/decompose_preview/${encodeURIComponent(token)}`,
   editSave: "/edit/save",
+  editSessionDuplicate: "/edit/session/duplicate",
+  editSessionRow: "/edit/session/row",
   editAction: (/** @type {string} */ action) => `/edit/${action}`,
   editMode: (/** @type {string} */ mode) => `/edit/${mode}`,
   editRemoveOutliers: "/edit/remove-outliers",

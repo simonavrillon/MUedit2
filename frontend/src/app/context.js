@@ -156,7 +156,7 @@
  * @property {() => Promise<void>} removeOutliers
  * @property {() => Promise<void>} flagMuForDeletion
  * @property {() => void} resetCurrentMuEdits
- * @property {() => void} duplicateMu
+ * @property {() => void | Promise<void>} duplicateMu
  * @property {() => Promise<void>} removeDuplicateMus
  * @property {() => Promise<void>} saveEditedFile
  * @property {(file: FileRef, path: string) => Promise<void>} loadDecompositionForEdit

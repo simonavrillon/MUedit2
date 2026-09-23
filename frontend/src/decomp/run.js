@@ -46,13 +46,19 @@ export async function autoSaveRunDecomposition(app) {
   if (state.lastRunDownloadKey === key) return;
 
   const muscleNames = getBidsMuscleNames();
+  // A plain loop, not Math.max(0, ...spikes): see saveEditedFile in
+  // app/services/editing-service.js.
+  let maxSpike = 0;
+  for (const d of state.muDistimes) {
+    for (const v of d || []) {
+      const n = Number(v) || 0;
+      if (n > maxSpike) maxSpike = n;
+    }
+  }
   const totalSamples =
     state.seriesLength ||
     (state.muPulseTrains?.[0]?.length ?? 0) ||
-    Math.max(
-      0,
-      ...state.muDistimes.flatMap((d) => (d || []).map((v) => Number(v) || 0)),
-    ) + 1;
+    maxSpike + 1;
   const fs = state.fsamp;
   const payload = {
     distimes: state.muDistimes || [],
