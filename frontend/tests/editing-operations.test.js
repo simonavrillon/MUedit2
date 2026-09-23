@@ -500,6 +500,31 @@ describe("resetCurrentMuEdits", () => {
     );
   });
 
+  test("resetting the source MU after duplicating it does not empty its row (lazy/session mode)", async () => {
+    // In lazy mode `originalPulseTrains` holds a placeholder, not real data;
+    // appendEditMu (duplicate) must not push that placeholder onto MU 0's
+    // slot, and reset must never mistake an empty placeholder for real data
+    // to restore (regression: both did, wiping MU 0's row to `[]`).
+    state.edit.sessionToken = "tok1";
+    state.edit.lazyRows = true;
+    state.edit.rowRevs = { g0_mu0: 0, g0_mu1: 0 };
+    state.edit.rowCacheRevs = { g0_mu0: 0, g0_mu1: 0 };
+    state.edit.rowCacheOrder = ["g0_mu0", "g0_mu1"];
+    state.edit.originalPulseTrains = [[], []];
+    app.api = { editSessionDuplicate: async () => ({ duplicated: "g0_mu2" }) };
+
+    await app.duplicateMu();
+    // The new MU's placeholder landed at its own index, not MU 0's.
+    assert.equal(state.edit.originalPulseTrains.length, 3);
+    assert.deepEqual(state.edit.originalPulseTrains[0], []);
+
+    state.edit.currentMu = 0;
+    const before = [...state.edit.pulseTrains[0]];
+    app.resetCurrentMuEdits();
+    assert.deepEqual(state.edit.pulseTrains[0], before);
+    assert.notDeepEqual(state.edit.pulseTrains[0], []);
+  });
+
   test("an MU with no baseline is left alone", () => {
     state.edit.originalDistimes = [];
     state.edit.distimes[0] = [7];

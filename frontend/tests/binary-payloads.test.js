@@ -1,5 +1,6 @@
 // Binary payload decoders, fed frames laid out like the Python packers
-// (`pack_json_f32_payload` in api/binary.py, `_encode_qc_raw_f32` in
+// (`pack_json_f32_payload` in api/binary.py — float32 for MDPV/decompose-preview,
+// float64 for MELD/edit-load — and `_encode_qc_raw_f32` in
 // api/services/preview_service.py).
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
@@ -45,21 +46,43 @@ function f32s(values) {
   return b;
 }
 
-/** Mirror of `pack_json_f32_payload`: magic | v | metaLen | shapes | meta | data. */
-function packJsonF32(magic, meta, matrices, { version = 1 } = {}) {
+function f64s(values) {
+  const b = new Uint8Array(values.length * 8);
+  const view = new DataView(b.buffer);
+  values.forEach((v, i) => view.setFloat64(i * 8, v, true));
+  return b;
+}
+
+/**
+ * Mirror of `pack_json_f32_payload`: magic | v | metaLen | shapes | meta | data.
+ * `elementBytes` picks the element width: 4 (float32, the default — matches
+ * MDPV/decompose-preview) or 8 (float64 — matches MELD/edit-load).
+ */
+function packJsonF32(
+  magic,
+  meta,
+  matrices,
+  { version = 1, elementBytes = 4 } = {},
+) {
   const metaBytes = encoder.encode(JSON.stringify(meta));
   const shapes = matrices.flatMap((m) => [
     u32(m.length),
     u32(m.length ? m[0].length : 0),
   ]);
+  const pack = elementBytes === 8 ? f64s : f32s;
   return concat([
     encoder.encode(magic),
     u32(version),
     u32(metaBytes.byteLength),
     ...shapes,
     metaBytes,
-    ...matrices.map((m) => f32s(m.flat())),
+    ...matrices.map((m) => pack(m.flat())),
   ]);
+}
+
+/** MELD (edit-load) frames are float64 on the wire; a small alias keeps call sites readable. */
+function packMeld(meta, matrices, options = {}) {
+  return packJsonF32("MELD", meta, matrices, { ...options, elementBytes: 8 });
 }
 
 /** Mirror of the MQCR packer: fixed header, then (index, n, samples) per channel. */
@@ -94,25 +117,25 @@ describe("decodeEditLoadPayload", () => {
 
   test("decodes a MELD frame into metadata plus the pulse matrix", () => {
     const meta = { fsamp: 2048, distimes: [[1, 2], [3]] };
-    const out = decodeEditLoadPayload(packJsonF32("MELD", meta, [pulse]));
+    const out = decodeEditLoadPayload(packMeld(meta, [pulse]));
     assert.deepEqual(out, { ...meta, pulse_trains_full: pulse });
   });
 
   test("the format header alone selects the binary path", () => {
-    const buf = packJsonF32("MELD", { a: 1 }, [pulse]);
-    const out = decodeEditLoadPayload(buf, "edit-load-f32-v1");
+    const buf = packMeld({ a: 1 }, [pulse]);
+    const out = decodeEditLoadPayload(buf, "edit-load-f64-v1");
     assert.deepEqual(out.pulse_trains_full, pulse);
   });
 
   test("odd-length metadata leaves the float data unaligned", () => {
     const meta = { name: "xy" };
-    assert.equal(encoder.encode(JSON.stringify(meta)).byteLength % 4, 1);
-    const out = decodeEditLoadPayload(packJsonF32("MELD", meta, [pulse]));
+    assert.notEqual(encoder.encode(JSON.stringify(meta)).byteLength % 8, 0);
+    const out = decodeEditLoadPayload(packMeld(meta, [pulse]));
     assert.deepEqual(out.pulse_trains_full, pulse);
   });
 
   test("an empty matrix decodes to no rows", () => {
-    const out = decodeEditLoadPayload(packJsonF32("MELD", {}, [[]]));
+    const out = decodeEditLoadPayload(packMeld({}, [[]]));
     assert.deepEqual(out.pulse_trains_full, []);
   });
 
@@ -122,14 +145,14 @@ describe("decodeEditLoadPayload", () => {
   });
 
   test("rejects an unsupported version", () => {
-    const buf = packJsonF32("MELD", {}, [pulse], { version: 2 });
+    const buf = packMeld({}, [pulse], { version: 2 });
     assert.throws(() => decodeEditLoadPayload(buf), /version: 2/);
   });
 
   test("rejects a binary header on a frame without the magic", () => {
-    const buf = packJsonF32("XXXX", {}, [pulse]);
+    const buf = packJsonF32("XXXX", {}, [pulse], { elementBytes: 8 });
     assert.throws(
-      () => decodeEditLoadPayload(buf, "edit-load-f32-v1"),
+      () => decodeEditLoadPayload(buf, "edit-load-f64-v1"),
       /Invalid edit-load/,
     );
   });
