@@ -6,6 +6,7 @@ import csv
 import json
 import logging
 import math
+import unicodedata
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
@@ -29,6 +30,9 @@ __all__ = [
     "resolve_bids_emg_path",
     "write_bids_dataset_description",
 ]
+
+
+_EDF_LABEL_LEN = 16
 
 
 def build_entities(
@@ -195,16 +199,30 @@ def export_bids_emg(
     n_total_channels, n_samples = final_data.shape
 
     def _unique_labels(names: list[str] | None, count: int) -> list[str]:
+        # EDF labels are 16 ASCII chars; channels.tsv names must match them.
         labels: list[str] = []
-        seen: dict[str, int] = {}
+        used: set[str] = set()
         for i in range(count):
-            base = names[i] if names and i < len(names) and names[i] else f"Aux{i + 1}"
-            seen[base] = seen.get(base, 0) + 1
-            labels.append(base if seen[base] == 1 else f"{base}_{seen[base]}")
+            raw = names[i] if names and i < len(names) and names[i] else f"Aux{i + 1}"
+            ascii_raw = unicodedata.normalize("NFKD", raw).encode("ascii", "ignore").decode()
+            base = ascii_raw.strip() or f"Aux{i + 1}"
+            label = base[:_EDF_LABEL_LEN].rstrip()
+            n = 1
+            while label in used:
+                n += 1
+                tag = f"_{n}"
+                label = base[: _EDF_LABEL_LEN - len(tag)].rstrip() + tag
+            used.add(label)
+            labels.append(label)
         return labels
 
     n_aux = final_data.shape[0] - data.shape[0]
     aux_labels = _unique_labels(aux_names, n_aux)
+    aux_descriptions = [
+        (aux_names[i] if aux_names and i < len(aux_names) and aux_names[i] else "")
+        or "Auxiliary Channel"
+        for i in range(n_aux)
+    ]
     resolved_aux_units = aux_units or "a.u."
 
     if skip_existing and edf_path.exists():
@@ -352,7 +370,7 @@ def export_bids_emg(
                     name,
                     ctype,
                     resolved_aux_units,
-                    "Auxiliary Channel",
+                    aux_descriptions[i],
                     fsamp,
                     "n/a",
                     "n/a",

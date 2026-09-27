@@ -247,7 +247,14 @@ def load_bids_signal(filepath: str) -> SignalImport:
                 grid_meta[group]["gain"].append(row.get("gain") or "n/a")
             else:
                 aux_channel_indices.append(idx)
-                aux_names.append(row.get("name") or f"Ch{idx:02d}")
+                # name is the 16-char EDF label; description holds the full name.
+                name = (row.get("name") or "").strip()
+                if name.lower() in ("", "n/a"):
+                    name = ""
+                desc = (row.get("description") or "").strip()
+                if desc.lower() in ("", "n/a", "auxiliary channel"):
+                    desc = ""
+                aux_names.append(name or desc or f"Ch{idx:02d}")
                 aux_low_cutoff.append(row.get("low_cutoff") or "n/a")
                 aux_high_cutoff.append(row.get("high_cutoff") or "n/a")
                 aux_gain.append(row.get("gain") or "n/a")
