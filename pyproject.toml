@@ -55,6 +55,9 @@ notebook = [
 ]
 research = [
   "optuna>=4.3",
+  # Phase 0 memory benchmark (research/desktop/bench_memory.py).  No Windows
+  # wheels, so it stays out of ``dev``: the CI memory test uses tracemalloc.
+  "memray>=1.17",
 ]
 
 [project.scripts]
