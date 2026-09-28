@@ -112,7 +112,7 @@ export function populateGridTabs(app) {
  * @param {StageKey} stage
  * @returns {{ view: Span | null, total: number }}
  */
-export function getViewForStage(state, stage) {
+function getViewForStage(state, stage) {
   if (stage === "edit") {
     const pulse = state.edit.pulseTrains?.[state.edit.currentMu] || [];
     if (!state.edit.view && pulse.length) {
@@ -135,7 +135,7 @@ export function getViewForStage(state, stage) {
  * @param {StageKey} stage
  * @param {Span | null} view
  */
-export function setViewForStage(app, stage, view) {
+function setViewForStage(app, stage, view) {
   const { state } = app;
   if (stage === "edit") {
     setEditView(state, view);
@@ -154,7 +154,7 @@ export function setViewForStage(app, stage, view) {
  * @param {ViewAction} action
  * @returns {Span | null}
  */
-export function adjustView(view, total, action) {
+function adjustView(view, total, action) {
   if (!view || total <= 0) return view;
   const span = Math.max(1, view.end - view.start);
   const center = view.start + span / 2;
@@ -201,7 +201,7 @@ export function adjustView(view, total, action) {
  * @param {"prev" | "next"} direction
  * @param {StageKey} stage
  */
-export function goToMu(app, direction, stage) {
+function goToMu(app, direction, stage) {
   const { state } = app;
   if (stage === "edit") {
     const gridIdx = state.edit.currentMuGrid || 0;

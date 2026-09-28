@@ -33,6 +33,20 @@ function resolveCanvas(canvas) {
   );
 }
 
+/**
+ * Size a canvas's backing store to its layout box and clear it.
+ * @param {CanvasRef} canvas
+ */
+function prepareCanvas(canvas) {
+  const canvasEl = resolveCanvas(canvas);
+  const ctx = canvasEl?.getContext("2d");
+  if (!canvasEl || !ctx) return null;
+  canvasEl.width = canvasEl.clientWidth || canvasEl.width || 1;
+  canvasEl.height = canvasEl.clientHeight || canvasEl.height || 220;
+  ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
+  return { canvasEl, ctx };
+}
+
 /** Resolve after the browser's next paint, once layout has settled. */
 export function nextFrame() {
   return new Promise((/** @type {(value?: void) => void} */ resolve) => {
@@ -150,15 +164,9 @@ export function drawSeries(
   drawLine = true,
   options = {},
 ) {
-  const canvasEl = resolveCanvas(canvas);
-  if (!canvasEl) return;
-  const ctx = canvasEl.getContext("2d");
-  if (!ctx) return;
-  const w = canvasEl.clientWidth || canvasEl.width || 1;
-  canvasEl.width = w;
-  const h = canvasEl.clientHeight || canvasEl.height || 220;
-  canvasEl.height = h;
-  ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
+  const prepared = prepareCanvas(canvas);
+  if (!prepared) return;
+  const { canvasEl, ctx } = prepared;
 
   if (!series || !series.length) {
     const noDataText = options.noDataText ?? "No data";
@@ -290,22 +298,27 @@ export function drawSeries(
     ctx.stroke();
   }
 
+  // Canvas point for marker `idx` at sample `m`; null when outside the view.
+  // Without explicit values the marker sits on the trace.
+  const markerPoint = (
+    /** @type {number} */ m,
+    /** @type {number} */ idx,
+    /** @type {number[] | null | undefined} */ values,
+  ) => {
+    if (m < clampedStart || m >= clampedEnd) return null;
+    const relIdx = m - clampedStart;
+    const x = Math.min(padding.left + plotWidth, toCanvasX(relIdx));
+    const val = values && values.length ? values[idx] : sliced[relIdx];
+    return { x, y: toCanvasY(val) };
+  };
+
   if (markers && markers.length) {
+    ctx.fillStyle = markerColor;
     markers.forEach((m, idx) => {
-      if (m < clampedStart || m >= clampedEnd) return;
-      const relIdx = m - clampedStart;
-      const x = Math.min(
-        padding.left + plotWidth,
-        padding.left + (relIdx / Math.max(1, sliced.length - 1)) * plotWidth,
-      );
-      const val =
-        markerValues && markerValues.length
-          ? markerValues[idx]
-          : sliced[relIdx];
-      const y = toCanvasY(val);
-      ctx.fillStyle = markerColor;
+      const pt = markerPoint(m, idx, markerValues);
+      if (!pt) return;
       ctx.beginPath();
-      ctx.arc(x, y, 3, 0, Math.PI * 2);
+      ctx.arc(pt.x, pt.y, 3, 0, Math.PI * 2);
       ctx.fill();
     });
   }
@@ -315,14 +328,9 @@ export function drawSeries(
       if (!positions || !positions.length) return;
       ctx.fillStyle = color || COLORS.secondary;
       positions.forEach((m, idx) => {
-        if (m < clampedStart || m >= clampedEnd) return;
-        const relIdx = m - clampedStart;
-        const x = Math.min(
-          padding.left + plotWidth,
-          padding.left + (relIdx / Math.max(1, sliced.length - 1)) * plotWidth,
-        );
-        const val = values && values.length ? values[idx] : sliced[relIdx];
-        const y = toCanvasY(val);
+        const pt = markerPoint(m, idx, values);
+        if (!pt) return;
+        const { x, y } = pt;
         ctx.beginPath();
         ctx.arc(x, y, 4, 0, Math.PI * 2);
         ctx.fill();
@@ -356,15 +364,9 @@ export function drawGridOverlay(
   selections = [],
   totalSamples = null,
 ) {
-  const canvasEl = resolveCanvas(canvas);
-  if (!canvasEl) return;
-  const ctx = canvasEl.getContext("2d");
-  if (!ctx) return;
-  const w = canvasEl.clientWidth || canvasEl.width || 1;
-  canvasEl.width = w;
-  const h = canvasEl.clientHeight || canvasEl.height || 220;
-  canvasEl.height = h;
-  ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
+  const prepared = prepareCanvas(canvas);
+  if (!prepared) return;
+  const { canvasEl, ctx } = prepared;
 
   const validSeries = (seriesList || []).filter(
     (s) => Array.isArray(s) && s.length,

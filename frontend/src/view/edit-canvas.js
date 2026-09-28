@@ -32,6 +32,45 @@ const TIMELINE_BAR_TOP = 4;
 const TIMELINE_BAR_H = 12;
 
 /**
+ * Map a canvas x pixel to the sample it sits over within `view`.
+ * @param {HTMLCanvasElement} canvas
+ * @param {number} px
+ * @param {Span} view
+ */
+function pxToViewSample(canvas, px, view) {
+  const metrics = getCanvasPlotMetrics(canvas, true, { hideYAxis: false });
+  const clamped = Math.max(
+    metrics.padding.left,
+    Math.min(metrics.padding.left + metrics.plotWidth, px),
+  );
+  const frac = metrics.plotWidth
+    ? (clamped - metrics.padding.left) / metrics.plotWidth
+    : 0;
+  return Math.round(view.start + frac * Math.max(0, view.end - view.start));
+}
+
+/**
+ * Place a `span`-wide view at `start`, shifted to stay inside [0, total].
+ * @param {number} start
+ * @param {number} span
+ * @param {number} total
+ * @returns {Span}
+ */
+function clampView(start, span, total) {
+  let s = start;
+  let e = s + span;
+  if (s < 0) {
+    e -= s;
+    s = 0;
+  }
+  if (e > total) {
+    s = Math.max(0, s - (e - total));
+    e = total;
+  }
+  return { start: s, end: e };
+}
+
+/**
  * @param {HTMLCanvasElement} canvas
  * @param {State} state
  * @param {number} muIdx
@@ -281,19 +320,12 @@ export function bindEditCanvas(app) {
 
   const getPulse = () => getRawPulse(state.edit.currentMu ?? 0);
 
-  const pxToSample = (/** @type {number} */ px) => {
-    const pulse = getPulse();
-    const metrics = getCanvasPlotMetrics(canvas, true, { hideYAxis: false });
-    const view = state.edit.view || { start: 0, end: pulse.length || 0 };
-    const clamped = Math.max(
-      metrics.padding.left,
-      Math.min(metrics.padding.left + metrics.plotWidth, px),
+  const pxToSample = (/** @type {number} */ px) =>
+    pxToViewSample(
+      canvas,
+      px,
+      state.edit.view || { start: 0, end: getPulse().length || 0 },
     );
-    const frac = metrics.plotWidth
-      ? (clamped - metrics.padding.left) / metrics.plotWidth
-      : 0;
-    return Math.round(view.start + frac * Math.max(0, view.end - view.start));
-  };
 
   const drag = createDragState(canvas, getCanvasPlotMetrics, pxToSample);
 
@@ -494,17 +526,7 @@ export function bindEditTimeline(app) {
     const delta = Math.round(((e.clientX - startClientX) / bw) * total);
     const view = state.edit.view || { start: 0, end: total };
     const span = view.end - view.start;
-    let s = dragViewStart + delta;
-    let e2 = s + span;
-    if (s < 0) {
-      e2 -= s;
-      s = 0;
-    }
-    if (e2 > total) {
-      s = Math.max(0, s - (e2 - total));
-      e2 = total;
-    }
-    setEditView(state, { start: s, end: e2 });
+    setEditView(state, clampView(dragViewStart + delta, span, total));
     renderEditExplorer();
   });
 
@@ -517,17 +539,10 @@ export function bindEditTimeline(app) {
     const view = state.edit.view || { start: 0, end: total };
     const span = view.end - view.start;
     const frac = fracFromClientX(e.clientX);
-    let s = Math.round(frac * total - span / 2);
-    let e2 = s + span;
-    if (s < 0) {
-      e2 -= s;
-      s = 0;
-    }
-    if (e2 > total) {
-      s = Math.max(0, s - (e2 - total));
-      e2 = total;
-    }
-    setEditView(state, { start: s, end: e2 });
+    setEditView(
+      state,
+      clampView(Math.round(frac * total - span / 2), span, total),
+    );
     renderEditExplorer();
   });
 }
@@ -545,19 +560,12 @@ export function bindEditDrCanvas(app) {
   const canvas = els.editDrCanvas;
   if (!canvas) return;
 
-  const pxToSample = (/** @type {number} */ px) => {
-    const metrics = getCanvasPlotMetrics(canvas, true, { hideYAxis: false });
-    const total = getEditTotalSamples();
-    const view = state.edit.view || { start: 0, end: total };
-    const clamped = Math.max(
-      metrics.padding.left,
-      Math.min(metrics.padding.left + metrics.plotWidth, px),
+  const pxToSample = (/** @type {number} */ px) =>
+    pxToViewSample(
+      canvas,
+      px,
+      state.edit.view || { start: 0, end: getEditTotalSamples() },
     );
-    const frac = metrics.plotWidth
-      ? (clamped - metrics.padding.left) / metrics.plotWidth
-      : 0;
-    return Math.round(view.start + frac * Math.max(0, view.end - view.start));
-  };
 
   const drag = createDragState(canvas, getCanvasPlotMetrics, pxToSample);
 

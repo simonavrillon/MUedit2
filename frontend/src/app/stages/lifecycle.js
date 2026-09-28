@@ -27,7 +27,7 @@ import { renderArtifactControls } from "../../view/qc-renderer.js";
  */
 
 /** @type {Record<StageKey, StageDefinition>} */
-export const STAGES = {
+const STAGES = {
   qc: {
     panel: "stageQc",
     blocked: ({ state }) => (state.file ? null : ""),

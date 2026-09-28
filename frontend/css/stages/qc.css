@@ -11,7 +11,8 @@
   flex: 1;
 }
 
-.qc-run-btn {
+.qc-run-btn,
+.qc-auto-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -29,7 +30,8 @@
   line-height: normal;
 }
 
-.qc-run-btn svg {
+.qc-run-btn svg,
+.qc-auto-btn svg {
   width: 16px;
   height: 16px;
 }
@@ -42,26 +44,7 @@
 /* Automatic QC shares the run-button shape but takes the QC stage's green
    so it reads as part of the quality-check step, not as "run". */
 .qc-auto-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  width: auto;
-  margin-top: 0;
-  padding: 8px 14px;
-  border: 1px solid var(--border);
-  background: var(--surface);
   color: var(--mu-2);
-  border-radius: var(--radius-sm);
-  font-weight: var(--fw-bold);
-  font-size: var(--fs-md);
-  letter-spacing: 0;
-  text-transform: none;
-  line-height: normal;
-}
-
-.qc-auto-btn svg {
-  width: 16px;
-  height: 16px;
 }
 
 .qc-auto-btn:hover {

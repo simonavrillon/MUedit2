@@ -311,13 +311,12 @@ describe("selection to ROI request", () => {
     assert.equal(payload.fs, 2000);
   });
 
-  test("delete-dr assumes 2000 Hz when the rate is unknown", () => {
+  test("delete-dr sends fs 0 when the rate is unknown, like the other ROI edits", () => {
     state.edit.fsamp = null;
     state.edit.distimes[0] = [0, 100];
     app.deleteDrInSelection({ start: 0, end: 100, yMin: 0, yMax: 50 });
     const [[, payload]] = app.requestRoiEdit.calls;
-    assert.equal(payload.fs, 2000);
-    assertClose(payload.yMin, 10, "half of 20 Hz");
+    assert.equal(payload.fs, 0);
   });
 
   test("delete-dr needs two discharges", () => {

@@ -331,23 +331,17 @@ export function deleteDrInSelection(app, sel) {
   if (spikes.length < 2) return;
   backupEditMu();
   const height = getDrPlotHeight();
-  const yMinPx = Math.min(sel.yMin ?? 0, sel.yMax ?? height);
-  const yMaxPx = Math.max(sel.yMin ?? 0, sel.yMax ?? height);
-  const fs = state.edit.fsamp || 2000;
-  const pulse = getRawPulse(muIdx);
-  let maxDr = 0;
-  for (let i = 0; i < spikes.length - 1; i++) {
-    const isi = spikes[i + 1] - spikes[i];
-    if (isi <= 0) continue;
-    const dr = fs / isi;
-    if (dr > maxDr) maxDr = dr;
-  }
-  const span = maxDr || 1;
-
-  const yMin = 0 + (1 - Math.max(yMinPx, yMaxPx) / height) * span;
+  const yLowPx = Math.max(sel.yMin ?? 0, sel.yMax ?? height);
+  const fs = state.edit.fsamp || 0;
+  // Same scale the DR plot draws: 0 Hz at the bottom, the fastest rate on top.
+  const maxDr = isiRates(spikes, fs).reduce(
+    (m, { rate }) => Math.max(m, rate),
+    0,
+  );
+  const yMin = (1 - yLowPx / height) * (maxDr || 1);
   requestRoiEdit("delete-dr", {
     muIdx,
-    pulse,
+    pulse: getRawPulse(muIdx),
     xStart: Math.min(sel.start, sel.end),
     xEnd: Math.max(sel.start, sel.end),
     yMin,
@@ -400,19 +394,28 @@ export function computeInstantaneousDr(spikes, fsamp, totalSamples) {
   const series = new Array(totalSamples).fill(0);
   const markers = [];
   const markerVals = [];
+  for (const { at, rate } of isiRates(spikes, fsamp)) {
+    const mid = Math.min(totalSamples - 1, Math.max(0, Math.round(at)));
+    series[mid] = rate;
+    markers.push(mid);
+    markerVals.push(rate);
+  }
+  return { series, markers, markerVals };
+}
+
+/**
+ * Rate (Hz, 0 when fsamp is unknown) and midpoint of each positive inter-spike interval.
+ * @param {number[]} spikes
+ * @param {number | null} fsamp
+ */
+function isiRates(spikes, fsamp) {
+  const out = [];
   for (let i = 0; i < spikes.length - 1; i++) {
     const isi = spikes[i + 1] - spikes[i];
     if (isi <= 0) continue;
-    const dr = fsamp ? fsamp / isi : 0;
-    const mid = Math.min(
-      totalSamples - 1,
-      Math.max(0, Math.round(spikes[i] + isi / 2)),
-    );
-    series[mid] = dr;
-    markers.push(mid);
-    markerVals.push(dr);
+    out.push({ at: spikes[i] + isi / 2, rate: fsamp ? fsamp / isi : 0 });
   }
-  return { series, markers, markerVals };
+  return out;
 }
 
 /** @param {App} app */
