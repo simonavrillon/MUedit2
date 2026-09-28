@@ -446,15 +446,16 @@ All elements are registered in `dom.js` as `els.*` properties.
 
 | Function | [A/?] | Called By |
 |---|---|---|
-| `hasMagic` | [A] | isQcRawF32Payload, isEditLoadF32Payload, isDecomposePreviewF32Payload |
-| `readFloat32Values` | [A] | decodeQcRawF32 |
-| `to2d` | [A] | decodeQcRawF32 |
+| `hasMagic` | [A] | isQcRawF32Payload, isFrame, decodeFrame |
+| `to2d` | [A] | frameRows |
 | `isQcRawF32Payload` | [A] | fetchQcWindow |
 | `decodeQcJsonPayload` | [A] | fetchQcWindow (JSON fallback) |
 | `decodeQcRawF32` | [A] | fetchQcWindow (binary) |
-| `isEditLoadF32Payload` | [A] | editLoadByPath |
+| `isFrame` | [A] | decodeEditLoadPayload, decodeDecomposePreviewPayload |
+| `decodeFrame` | [A] | decodeEditLoadPayload, decodeDecomposePreviewPayload |
+| `encodeFrame` | [A] | editSave |
+| `frameRows` | [A] | decodeEditLoadPayload, decodeDecomposePreviewPayload |
 | `decodeEditLoadPayload` | [A] | editLoadByPath |
-| `isDecomposePreviewF32Payload` | [A] | fetchDecomposePreview |
 | `decodeDecomposePreviewPayload` | [A] | fetchDecomposePreview |
 
 ---

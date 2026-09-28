@@ -107,6 +107,7 @@ import { GRID_COLORS } from "../config.js";
  * @property {number} currentMu
  * @property {boolean} runDownloadInFlight
  * @property {string} lastRunDownloadKey
+ * @property {string} runResultToken
  * @property {Span | null} runView
  * @property {Span | null} roiDraft
  * @property {Span[]} artifactRegions
@@ -185,6 +186,7 @@ export const state = {
   currentMu: 0,
   runDownloadInFlight: false,
   lastRunDownloadKey: "",
+  runResultToken: "",
   runView: null,
   roiDraft: null,
   artifactRegions: [],

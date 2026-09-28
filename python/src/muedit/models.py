@@ -32,6 +32,13 @@ def _as_2d_float_array(value: Any) -> FloatArray:
     return arr
 
 
+def _readonly(arr: np.ndarray) -> np.ndarray:
+    """A non-writable view of ``arr``: no data copy, and writes through it raise."""
+    view = arr.view()
+    view.flags.writeable = False
+    return view
+
+
 def _as_name_list(value: str | Iterable[Any] | None) -> list[str]:
     """Normalize a name or sequence of names to a list of strings."""
     if value is None:
@@ -123,6 +130,30 @@ class SignalImport:
             metadata=dict(self.metadata),
         )
 
+    def readonly_view(self) -> SignalImport:
+        """Share the arrays read-only; lists and top-level metadata are independent copies."""
+        return SignalImport(
+            data=_readonly(self.data),
+            fsamp=self.fsamp,
+            gridname=list(self.gridname),
+            muscle=list(self.muscle),
+            auxiliary=_readonly(self.auxiliary),
+            auxiliaryname=list(self.auxiliaryname),
+            metadata=dict(self.metadata),
+        )
+
+    def without_data(self) -> SignalImport:
+        """Everything but the EMG samples, so a holder does not keep the recording alive."""
+        return SignalImport(
+            data=np.zeros((0, self.data.shape[1] if self.data.ndim == 2 else 0)),
+            fsamp=self.fsamp,
+            gridname=self.gridname,
+            muscle=self.muscle,
+            auxiliary=self.auxiliary,
+            auxiliaryname=self.auxiliaryname,
+            metadata=self.metadata,
+        )
+
     @property
     def nbytes(self) -> int:
         """Resident size of the EMG and auxiliary arrays."""
@@ -188,6 +219,21 @@ class EditSignalContext:
             loader_meta=dict(self.loader_meta),
         )
 
+    def readonly_view(self) -> EditSignalContext:
+        """Share the arrays read-only; lists and metadata are independent copies."""
+        return EditSignalContext(
+            data=_readonly(self.data),
+            fsamp=self.fsamp,
+            grid_names=list(self.grid_names),
+            emgmask=[_readonly(m) for m in self.emgmask],
+            coordinates=[_readonly(c) for c in self.coordinates],
+            ied=list(self.ied) if self.ied is not None else None,
+            aux_data=_readonly(self.aux_data) if self.aux_data is not None else None,
+            aux_names=list(self.aux_names),
+            artifact_mask=_readonly(self.artifact_mask) if self.artifact_mask is not None else None,
+            loader_meta=dict(self.loader_meta),
+        )
+
     @property
     def nbytes(self) -> int:
         """Resident size of all arrays in the context."""
@@ -204,7 +250,7 @@ class EditSignalContext:
 class LoadedDecomposition:
     """Decomposition state loaded from a .npz or .mat file for the interactive editing stage."""
 
-    pulse_trains_full: list[list[float]] = field(default_factory=list)
+    pulse_trains_full: FloatArray = field(default_factory=lambda: np.zeros((0, 0)))  # (n_mu, T)
     distime_all: list[list[int]] = field(default_factory=list)
     fsamp: float | None = None
     grid_names: list[str] = field(default_factory=list)

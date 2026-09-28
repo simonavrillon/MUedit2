@@ -22,6 +22,8 @@ EDIT_SIGNAL_CONTEXT_MAX_ITEMS = 1
 
 DECOMP_PREVIEW_BINARY_TTL_SEC = 10 * 60
 DECOMP_PREVIEW_BINARY_MAX_ITEMS = 8
+RUN_RESULT_TTL_SEC = 30 * 60
+RUN_RESULT_MAX_ITEMS = 1
 
 UPLOAD_CACHE_MAX_BYTES = 1024 * 1024 * 1024
 DECOMP_PREVIEW_BINARY_MAX_BYTES = 512 * 1024 * 1024
@@ -68,11 +70,20 @@ class _UploadEntry(_Entry):
 
 @dataclass
 class _PreviewBinaryEntry(_Entry):
-    payload: bytes
+    payload: bytes | memoryview
 
     @property
     def nbytes(self) -> int:
         return len(self.payload)
+
+
+@dataclass
+class _RunResultEntry(_Entry):
+    pulse_trains: FloatArray  # float32, (n_mu, n_samples)
+
+    @property
+    def nbytes(self) -> int:
+        return int(self.pulse_trains.nbytes)
 
 
 @dataclass
@@ -88,6 +99,7 @@ _E = TypeVar("_E", bound=_Entry)
 
 _UPLOAD_SESSION_CACHE: dict[str, _UploadEntry] = {}
 _DECOMP_PREVIEW_BINARY_CACHE: dict[str, _PreviewBinaryEntry] = {}
+_RUN_RESULT_CACHE: dict[str, _RunResultEntry] = {}
 _EDIT_SIGNAL_CONTEXT_CACHE: dict[str, _EditContextEntry] = {}
 _EDIT_SIGNAL_LABEL_INDEX: dict[str, str] = {}
 
@@ -101,6 +113,9 @@ def _purge_expired_caches_locked() -> None:
     for token, preview in list(_DECOMP_PREVIEW_BINARY_CACHE.items()):
         if preview.expires_at <= now:
             _DECOMP_PREVIEW_BINARY_CACHE.pop(token, None)
+    for token, run in list(_RUN_RESULT_CACHE.items()):
+        if run.expires_at <= now:
+            _RUN_RESULT_CACHE.pop(token, None)
     expired_edit = {
         token for token, entry in _EDIT_SIGNAL_CONTEXT_CACHE.items() if entry.expires_at <= now
     }
@@ -166,7 +181,7 @@ def _get_upload_source_path(token: str | None) -> str | None:
 
 
 def _get_upload_signal(token: str | None) -> SignalImport | None:
-    """Resolve upload token to a copy of the stored signal, refreshing TTL on hit."""
+    """Resolve upload token to a read-only view of the stored signal, refreshing TTL on hit."""
     if not token:
         return None
     with _CACHE_LOCK:
@@ -176,7 +191,7 @@ def _get_upload_signal(token: str | None) -> SignalImport | None:
             return None
         entry.expires_at = time.time() + UPLOAD_CACHE_TTL_SEC
         stored = entry.signal
-    return stored.clone()
+    return stored.readonly_view()
 
 
 def _store_qc_signal(
@@ -241,7 +256,7 @@ def _get_qc_signal(token: str | None) -> QCSignal | None:
     )
 
 
-def _store_decomp_preview_binary(payload: bytes) -> str:
+def _store_decomp_preview_binary(payload: bytes | memoryview) -> str:
     """Store binary decompose-preview payload and return short-lived token."""
     token = uuid.uuid4().hex
     with _CACHE_LOCK:
@@ -259,17 +274,48 @@ def _store_decomp_preview_binary(payload: bytes) -> str:
     return token
 
 
-def _get_decomp_preview_binary(token: str | None) -> bytes | None:
-    """Resolve decompose-preview binary payload by token, refreshing TTL on hit."""
+def _pop_decomp_preview_binary(token: str | None) -> bytes | memoryview | None:
+    """Remove and return the decompose-preview payload: the frontend fetches it once."""
     if not token:
         return None
     with _CACHE_LOCK:
         _purge_expired_caches_locked()
-        entry = _DECOMP_PREVIEW_BINARY_CACHE.get(token)
-        if not entry:
+        entry = _DECOMP_PREVIEW_BINARY_CACHE.pop(token, None)
+    return entry.payload if entry is not None else None
+
+
+def _store_run_result(pulse_trains: FloatArray) -> str:
+    """Keep a finished run's pulse trains so the run save need not send them back."""
+    token = uuid.uuid4().hex
+    with _CACHE_LOCK:
+        _purge_expired_caches_locked()
+        _RUN_RESULT_CACHE[token] = _RunResultEntry(
+            expires_at=time.time() + RUN_RESULT_TTL_SEC,
+            pulse_trains=pulse_trains,
+        )
+        _evict_to_budget_locked(_RUN_RESULT_CACHE, RUN_RESULT_MAX_ITEMS, protect=token)
+    return token
+
+
+def _get_run_result(token: str | None) -> FloatArray | None:
+    """Read-only view of a stored run's pulse trains."""
+    if not token:
+        return None
+    with _CACHE_LOCK:
+        _purge_expired_caches_locked()
+        entry = _RUN_RESULT_CACHE.get(token)
+        if entry is None:
             return None
-        entry.expires_at = time.time() + DECOMP_PREVIEW_BINARY_TTL_SEC
-        return entry.payload
+        pulse = entry.pulse_trains.view()
+    pulse.flags.writeable = False
+    return pulse
+
+
+def _drop_run_result(token: str | None) -> None:
+    """Forget a run's pulse trains once they are saved."""
+    if token:
+        with _CACHE_LOCK:
+            _RUN_RESULT_CACHE.pop(token, None)
 
 
 def _store_edit_signal_context(context: EditSignalContext, file_label: str | None = None) -> str:
@@ -294,7 +340,7 @@ def _store_edit_signal_context(context: EditSignalContext, file_label: str | Non
 
 
 def _get_edit_signal_context(token: str | None) -> EditSignalContext | None:
-    """Resolve edit signal context token to a copy, refreshing TTL on hit."""
+    """Resolve edit signal context token to a read-only view, refreshing TTL on hit."""
     if not token:
         return None
     with _CACHE_LOCK:
@@ -304,7 +350,7 @@ def _get_edit_signal_context(token: str | None) -> EditSignalContext | None:
             return None
         entry.expires_at = time.time() + EDIT_SIGNAL_CONTEXT_TTL_SEC
         stored = entry.context
-    return stored.compact_copy()
+    return stored.readonly_view()
 
 
 def _get_edit_signal_context_by_label(file_label: str | None) -> EditSignalContext | None:

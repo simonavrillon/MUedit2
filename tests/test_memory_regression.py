@@ -43,12 +43,12 @@ RAW_MB = N_CHANNELS * N_SAMPLES * 8 / 1e6
 EXT_WINDOW_MB = EXT_ROWS * ROI_SAMPLES * 8 / 1e6
 EXT_FULL_MB = EXT_ROWS * N_SAMPLES * 8 / 1e6
 
-# ── Per-stage budgets (stage-0 baseline x 1.25) ───────────────────────────────
+# ── Per-stage budgets (latest baseline x 1.25) ────────────────────────────────
 #
 # Each budget is ``factor x working-set MB`` where the working set is the
 # smallest full-size array the stage must materialise.  The factors are the
-# stage-0 tracemalloc baseline on this input plus 25% headroom; tighten them as
-# the memory-plan stages land.  A factor that grows means the stage started
+# tracemalloc baseline on this input plus 25% headroom, re-measured when a
+# memory-plan stage lowers them (stage 3: preprocess, edit_load, update_filter).  A factor that grows means the stage started
 # keeping an extra full copy.
 
 BUDGETS_MB: dict[str, float] = {
@@ -56,14 +56,14 @@ BUDGETS_MB: dict[str, float] = {
     "preview": 6.3 * RAW_MB,
     "qc_window": 3.2 * RAW_MB,
     "qc_auto": 5.7 * RAW_MB,
-    "preprocess": 7.5 * RAW_MB,
+    "preprocess": 5.0 * RAW_MB,
     "decompose": 3.9 * EXT_WINDOW_MB,
     "post_windowed": 2.6 * EXT_WINDOW_MB,
     "save": 2.8 * RAW_MB,
     "post_full": 1.35 * EXT_FULL_MB,
     "post_adaptive": 3.9 * EXT_FULL_MB,
-    "edit_load": 2.3 * RAW_MB,
-    "update_filter": 17.5 * RAW_MB,
+    "edit_load": 2.0 * RAW_MB,
+    "update_filter": 14.1 * RAW_MB,
 }
 
 

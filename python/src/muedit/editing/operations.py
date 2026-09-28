@@ -172,7 +172,10 @@ def update_motor_unit_filter_window(
     artifact_mask: BoolArray | None = None,
 ) -> FilterUpdateResult:
     """Update a motor-unit pulse train and spikes inside a time window."""
-    emg_sel = emg[emg_mask == 0, :] if emg_mask.size else emg
+    slice_start, slice_end = start - emg_offset, end - emg_offset
+    if 0 <= slice_start < slice_end <= emg.shape[1]:
+        emg, emg_offset = emg[:, slice_start:slice_end], start
+    emg_sel = np.asarray(emg[emg_mask == 0, :] if emg_mask.size else emg, dtype=float)
     pt, updated = _recompute_spikes_in_window(
         emg_sel,
         spike_times,

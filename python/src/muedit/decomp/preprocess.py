@@ -224,7 +224,7 @@ def _export_raw_emg_bids(
         )
 
     export_bids_emg(
-        data,
+        np.asarray(data, dtype=np.float64),
         fsamp,
         grid_names,
         coordinates,
@@ -287,13 +287,15 @@ def load_step(
     preloaded_signal: SignalImport | None,
     progress_cb: Callable[[str, dict[str, Any]], None] | None,
 ) -> LoadStepOutput:
-    """Load input signal data from disk, or copy a preloaded signal."""
+    """Load input signal data from disk, or share a preloaded signal read-only."""
     filename = file_label or Path(filepath).name
     logger.info("Processing %s...", filename)
     if progress_cb:
         progress_cb("start", {"message": "Loading signal", "pct": 5, "file": filename})
 
-    signal = preloaded_signal.clone() if preloaded_signal is not None else load_signal(filepath)
+    signal = (
+        preloaded_signal.readonly_view() if preloaded_signal is not None else load_signal(filepath)
+    )
     logger.info("Loaded data: %s, Fs=%s", signal.data.shape, signal.fsamp)
     return LoadStepOutput(
         full_path=filepath,
@@ -338,7 +340,6 @@ def preprocess_step(
 ) -> PreprocessStepOutput:
     """Apply channel formatting, filtering, ROI selection, and optional BIDS raw export."""
     data = np.array(loaded.data, dtype=np.float64, copy=True)
-    raw_data = np.array(data, copy=True)
     grid_names = loaded.signal.gridname
     if not grid_names:
         raise ValueError(
@@ -370,7 +371,7 @@ def preprocess_step(
         bids_root=bids_root,
         bids_entities=bids_entities,
         bids_metadata=bids_metadata,
-        data=raw_data,
+        data=loaded.data,  # unfiltered: ``data`` above is filtered in place
         fsamp=loaded.fsamp,
         grid_names=grid_names,
         coordinates=coordinates,
@@ -438,7 +439,7 @@ def preprocess_step(
         )
 
     return PreprocessStepOutput(
-        signal=loaded.signal,
+        signal=loaded.signal.without_data(),
         data=data,
         fsamp=loaded.fsamp,
         grid_names=grid_names,

@@ -40,7 +40,8 @@ class EditSavePayload(BaseModel):
     flagged: list[bool] | None = None
     remove_flagged: bool | None = None
     remove_duplicates: bool | None = None
-    pulse_trains: list[list[float]] | None = None
+    # Pulse trains travel as a MUB1 frame array, or stay on the server under this token.
+    run_result_token: str | None = None
     total_samples: int
     fsamp: float | None = None
     grid_names: list[str] | None = None

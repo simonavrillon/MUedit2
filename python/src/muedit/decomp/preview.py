@@ -48,7 +48,7 @@ def build_preview_payload(
 
     if pulse_t.size > 0:
         if include_full_preview:
-            pulse_full_all = np.asarray(pulse_t, dtype=np.float32)
+            pulse_full_all = pulse_t  # the API frame casts to float32 while packing
         for i in range(pulse_t.shape[0]):
             if not include_full_preview:
                 ds = downsample_vector(pulse_t[i, :], fsamp)

@@ -5,7 +5,10 @@
  * helpers imported from `state/actions.js`.
  */
 import { handleError } from "./error-service.js";
-import { normalizeEditLoadPayload } from "../../api/payloads.js";
+import {
+  normalizeEditLoadPayload,
+  totalSamplesFromDistimes,
+} from "../../api/payloads.js";
 import { inferGridCount, normalizeGridNames } from "../../io/grid.js";
 import { getSuggestedNpzName } from "../../io/bids.js";
 import { muUidFor } from "../../state/selectors.js";
@@ -484,16 +487,10 @@ export async function saveEditedFile(app) {
     return;
   }
   const muscleNames = getBidsMuscleNames();
-  const maxSpike = Math.max(
-    0,
-    ...distimes
-      .flatMap((d) => d || [])
-      .map((v) => (Number.isFinite(v) ? v : 0)),
-  );
   const totalSamples =
     state.edit.totalSamples ||
     (state.edit.pulseTrains?.[0]?.length ?? 0) ||
-    maxSpike + 1;
+    totalSamplesFromDistimes(distimes);
   const originalFilename = state.edit.filename || "decomposition";
   const originalStem = originalFilename.replace(/\.[^.]+$/, "");
   const entityLabel = originalStem.includes("_grid-")
@@ -502,7 +499,6 @@ export async function saveEditedFile(app) {
   const payload = {
     distimes,
     flagged: state.edit.flagged || [],
-    pulse_trains: state.edit.pulseTrains || [],
     total_samples: totalSamples,
     fsamp: state.edit.fsamp,
     grid_names: state.edit.gridNames,
@@ -525,7 +521,11 @@ export async function saveEditedFile(app) {
   };
   try {
     setEditStatus("Saving edited file...", "muted");
-    const saved = await persistNpzBySaveTarget(payload, payload.file_label);
+    const saved = await persistNpzBySaveTarget(
+      payload,
+      payload.file_label,
+      state.edit.pulseTrains || [],
+    );
     // Mirror the saved file: the backend drops flagged and duplicate MUs and logs it.
     if (Array.isArray(saved?.editHistory)) {
       setEditHistory(state, saved.editHistory);

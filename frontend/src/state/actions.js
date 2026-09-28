@@ -614,6 +614,14 @@ export function setLastRunDownloadKey(state, key) {
 
 /**
  * @param {State} state
+ * @param {unknown} token  Server handle on the finished run's pulse trains.
+ */
+export function setRunResultToken(state, token) {
+  state.runResultToken = typeof token === "string" ? token : "";
+}
+
+/**
+ * @param {State} state
  * @param {boolean} isRunning
  */
 export function setIsRunning(state, isRunning) {

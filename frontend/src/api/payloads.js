@@ -69,6 +69,24 @@ export function toSpans(regions) {
 }
 
 /**
+ * Samples needed to hold every discharge: the last spike + 1, or 1 with none.
+ *
+ * @param {(number[] | null | undefined)[]} distimes
+ * @returns {number}
+ */
+export function totalSamplesFromDistimes(distimes) {
+  // Not Math.max(...spikes): millions of arguments throw a RangeError.
+  let maxSpike = 0;
+  for (const mu of distimes) {
+    for (const v of mu || []) {
+      const n = Number(v);
+      if (n > maxSpike) maxSpike = n;
+    }
+  }
+  return maxSpike + 1;
+}
+
+/**
  * @param {unknown} payload
  * @returns {EditLoadPayload}
  */

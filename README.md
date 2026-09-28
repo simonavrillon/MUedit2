@@ -206,10 +206,11 @@ in and validate the result.
 
 ## When something goes wrong
 
-If the browser never opens, go to <http://localhost:8080> manually. If the
-launcher complains that a port is already in use, something else on your machine
-has taken it — set `MUEDIT_BACKEND_PORT` or `MUEDIT_FRONTEND_PORT` to free
-numbers and relaunch.
+If the browser never opens, go to <http://localhost:8080> manually. MUedit needs
+ports 8000 and 8080 free. If the launcher complains that a port is already in
+use, the usual culprit is an earlier MUedit still running in another terminal
+window: close that window and relaunch. Otherwise, quit whatever other program
+holds the port.
 
 If the app tells you the backend is unreachable, the Python process behind the
 interface has stopped. Close the terminal and run the launcher again; your saved

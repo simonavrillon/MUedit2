@@ -31,9 +31,12 @@ Extras: `dev` (`build`, `twine`, `pytest`, `pytest-cov`, `httpx`, `ruff`, `mypy`
 
 ```
 cli.serve_api()
-  → app_factory.create_app(title="MUedit API", version="2.1.0")
+  → app_factory.create_app(title="MUedit API", version="2.1.0", allowed_origins, allowed_hosts)
       → FastAPI(...)
-      → CORSMiddleware (allow_origins=["*"], methods=["*"], headers=["*"])
+      → CORSMiddleware (allow_origins: MUEDIT_ALLOWED_ORIGINS, or
+        http://localhost:<frontend port> and http://127.0.0.1:<frontend port>)
+      → TrustedHostMiddleware (localhost, 127.0.0.1), only when bound to loopback:
+        rejects DNS-rebound requests, which arrive same-origin and bypass CORS
       → errors.register_exception_handlers(app)
   → routes.include_routers(app)
       → app.include_router(preview_router)    # /api/v1: health, preview-by-path, qc/*
@@ -41,7 +44,7 @@ cli.serve_api()
       → app.include_router(editing_router)    # /api/v1: edit/*
       → app.include_router(dialog_router)   # /api/v1/dialog: open-file
   → uvicorn.run(app, host, port)
-      → host: MUEDIT_HOST env (default 0.0.0.0)
+      → host: MUEDIT_HOST env (default 127.0.0.1)
       → port: MUEDIT_PORT or MUEDIT_BACKEND_PORT env (default 8000)
       → log_level: warning, access_log: off
 ```
@@ -133,7 +136,7 @@ filter updates and BIDS export.
 | `artifact_mask` | `BoolArray \| None` | `None` |
 | `loader_meta` | `dict[str, Any]` | `{}` (the `LOADER_BIDS_META_KEYS` the file recorded) |
 
-Methods: `compact_copy()` (independent copy, EMG/aux as float32), `nbytes` (property)
+Methods: `compact_copy()` (independent copy, EMG/aux as float32), `readonly_view()` (shares arrays read-only), `nbytes` (property)
 
 ### `LoadedDecomposition`
 Decomposition state loaded from `.npz`/`.mat` for editing. Returned by
@@ -141,7 +144,7 @@ Decomposition state loaded from `.npz`/`.mat` for editing. Returned by
 
 | Field | Type | Default |
 |---|---|---|
-| `pulse_trains_full` | `list[list[float]]` | `[]` |
+| `pulse_trains_full` | `FloatArray` `(n_mu, total_samples)` | empty `(0, 0)` |
 | `distime_all` | `list[list[int]]` | `[]` |
 | `fsamp` | `float | None` | `None` |
 | `grid_names` | `list[str]` | `[]` |
@@ -203,7 +206,7 @@ Methods: `to_dict()`
 | `services/edit_helpers.py` | Payload normalization helpers for edits |
 | `schemas.py` | Pydantic request models (9 models) |
 | `contracts.py` | `success_payload()` response envelope |
-| `binary.py` | `pack_json_f32_payload()` binary wire format packer |
+| `binary.py` | `pack_frame()` / `unpack_frame()`: the MUB1 wire format |
 | `cache.py` | In-memory TTL cache (4 caches, thread-safe, budget-based eviction) |
 | `common.py` | JSON parsing, param building, serialization, path checks |
 | `config.py` | `DATA_ROOT`, `resolve_bids_root()` |
@@ -281,9 +284,10 @@ Returns `DATA_ROOT / project` (or `DATA_ROOT / "muedit_out"` if project is empty
 | Variable | Default | Used by |
 |---|---|---|
 | `MUEDIT_DATA_ROOT` | `<repo>/data` | BIDS output root |
-| `MUEDIT_HOST` | `0.0.0.0` | API server bind host |
+| `MUEDIT_HOST` | `127.0.0.1` | API and static frontend bind host; `0.0.0.0` opens both to the network and drops the Host check |
+| `MUEDIT_ALLOWED_ORIGINS` | `http://localhost:<frontend port>`, `http://127.0.0.1:<frontend port>` | Comma-separated CORS origins, e.g. for a LAN setup |
 | `MUEDIT_PORT` | `8000` | API server bind port |
 | `MUEDIT_BACKEND_PORT` | `8000` | Fallback API port; the launchers copy it into `MUEDIT_PORT` |
-| `MUEDIT_FRONTEND_PORT` | `8080` | Static frontend port (launchers) |
+| `MUEDIT_FRONTEND_PORT` | `8080` | Static frontend port (launchers) and the default CORS origin; `config.js` still assumes 8080 → 8000 |
 | `MUEDIT_OPEN_BROWSER` | `1` | Open the browser once both servers answer (launchers) |
 | `MUEDIT_NO_UV` | `0` | `1` makes the launchers use the active `python` instead of `uv run` |

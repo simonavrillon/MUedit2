@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 from typing import Any
 
 import numpy as np
@@ -50,6 +51,8 @@ def run_decomposition(
         bids_metadata=bids_metadata,
         artifact_regions=artifact_regions,
     )
+    # Only the filtered copy is needed from here on; let the raw samples go.
+    loaded = replace(loaded, signal=preprocessed.signal, data=preprocessed.signal.data)
     decomposed = decompose_step(
         prep=preprocessed,
         params=params,

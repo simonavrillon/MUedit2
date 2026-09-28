@@ -294,7 +294,7 @@ so you can confirm the dataset is fully compliant before distribution.
 | File won't load | Check the extension is supported; for BIDS files confirm the `_channels.tsv` sidecar exists alongside the `.bdf/.edf` |
 | Update Filter fails | Ensure the **Project** field is set and the original EMG file is accessible |
 | Save fails | Check the **Project** field is set — output is written to `data/<project>/` |
-| Port already in use | Set `MUEDIT_BACKEND_PORT` / `MUEDIT_FRONTEND_PORT` to free ports before launching |
+| Port already in use | MUedit needs ports 8000 and 8080. Close any earlier MUedit terminal window, or quit the program holding the port, then relaunch |
 | "Backend unreachable — please restart the app" | The Python backend is not running or crashed; stop and relaunch MUedit (`MUedit.command` / `MUedit.bat`, or `scripts/run_MUedit.sh` / `.ps1`) |
 | "Session expired, reloading file..." during a run | The backend lost its cached copy of the signal (e.g. after a restart); MUedit reloads the file from its original path and retries once. If the file was moved, reopen it |
-| Browser does not open | Navigate manually to `http://localhost:8080` (or the port shown in the terminal) |
+| Browser does not open | Navigate manually to `http://localhost:8080` |

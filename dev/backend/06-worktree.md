@@ -145,7 +145,8 @@ Use this to trace what the user can reach.
 | `app_factory.create_app()` | App-internal | Called by `cli.serve_api` |
 | `routes.include_routers()` | App-internal | Called by `cli.serve_api` |
 | `contracts.success_payload()` | App-internal | Called by all route handlers |
-| `binary.pack_json_f32_payload()` | App-internal | Called by preview/decompose/edit services |
+| `binary.pack_frame()` | App-internal | Called by decompose/edit services |
+| `binary.unpack_frame()` | App-internal | Called by the `/edit/save` route and the decompose service |
 | `errors.register_exception_handlers()` | App-internal | Called by `create_app` |
 | `errors.error_payload()` | App-internal | Called by exception handlers |
 | `errors.http_exception_handler` | App-internal | Registered on app |
@@ -169,7 +170,10 @@ Use this to trace what the user can reach.
 | `cache._store_qc_signal()` | App-internal | Called by preview service |
 | `cache._get_qc_signal()` | App-internal | Called by preview service |
 | `cache._store_decomp_preview_binary()` | App-internal | Called by decompose service |
-| `cache._get_decomp_preview_binary()` | App-internal | Called by decompose service |
+| `cache._pop_decomp_preview_binary()` | App-internal | Called by decompose service |
+| `cache._store_run_result()` | App-internal | Called by decompose service |
+| `cache._get_run_result()` | App-internal | Called by editing service |
+| `cache._drop_run_result()` | App-internal | Called by editing service |
 | `cache._store_edit_signal_context()` | App-internal | Called by editing service |
 | `cache._get_edit_signal_context()` | App-internal | Called by editing service |
 | `cache._get_edit_signal_context_by_label()` | App-internal | Called by editing service |

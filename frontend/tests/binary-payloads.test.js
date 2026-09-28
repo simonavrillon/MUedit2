@@ -1,14 +1,15 @@
-// Binary payload decoders, fed frames laid out like the Python packers
-// (`pack_json_f32_payload` in api/binary.py, `_encode_qc_raw_f32` in
-// api/services/preview_service.py).
+// Binary payload codecs: MUB1 frames (api/binary.py) and the MQCR QC window
+// (`_encode_qc_raw_f32` in api/services/preview_service.py).
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 
 import {
   decodeDecomposePreviewPayload,
   decodeEditLoadPayload,
+  decodeFrame,
   decodeQcJsonPayload,
   decodeQcRawF32,
+  encodeFrame,
   isQcRawF32Payload,
 } from "../src/api/binary-payloads.js";
 
@@ -45,23 +46,6 @@ function f32s(values) {
   return b;
 }
 
-/** Mirror of `pack_json_f32_payload`: magic | v | metaLen | shapes | meta | data. */
-function packJsonF32(magic, meta, matrices, { version = 1 } = {}) {
-  const metaBytes = encoder.encode(JSON.stringify(meta));
-  const shapes = matrices.flatMap((m) => [
-    u32(m.length),
-    u32(m.length ? m[0].length : 0),
-  ]);
-  return concat([
-    encoder.encode(magic),
-    u32(version),
-    u32(metaBytes.byteLength),
-    ...shapes,
-    metaBytes,
-    ...matrices.map((m) => f32s(m.flat())),
-  ]);
-}
-
 /** Mirror of the MQCR packer: fixed header, then (index, n, samples) per channel. */
 function packQcRaw(header, channels, { magic = "MQCR", version = 1 } = {}) {
   return concat([
@@ -86,34 +70,121 @@ function jsonBuffer(obj) {
   return encoder.encode(JSON.stringify(obj)).buffer;
 }
 
+describe("MUB1 frames", () => {
+  test("encode then decode round-trips metadata and every array", () => {
+    const meta = { fsamp: 2048, names: ["a", "b"] };
+    const buf = encodeFrame(meta, {
+      pulse: {
+        dtype: "f4",
+        shape: [2, 3],
+        rows: [
+          [0.5, -1.25, 2],
+          [3, 4.5, -0.75],
+        ],
+      },
+      spikes: { dtype: "i4", shape: [3], data: [7, -1, 2 ** 30] },
+      flags: { dtype: "u1", shape: [2], data: [0, 255] },
+      grid: { dtype: "i2", shape: [1], data: [-300] },
+    });
+    const { meta: gotMeta, arrays } = decodeFrame(buf);
+    assert.deepEqual(gotMeta, meta);
+    assert.deepEqual(
+      Array.from(arrays.pulse.data),
+      [0.5, -1.25, 2, 3, 4.5, -0.75],
+    );
+    assert.deepEqual(arrays.pulse.shape, [2, 3]);
+    assert.deepEqual(Array.from(arrays.spikes.data), [7, -1, 2 ** 30]);
+    assert.deepEqual(Array.from(arrays.flags.data), [0, 255]);
+    assert.deepEqual(Array.from(arrays.grid.data), [-300]);
+  });
+
+  test("decoded arrays are views into the buffer, 8-byte aligned", () => {
+    const buf = encodeFrame(
+      { name: "odd" },
+      {
+        a: { dtype: "u1", shape: [3], data: [1, 2, 3] },
+        b: { dtype: "f4", shape: [2], data: [1, 2] },
+      },
+    );
+    const { arrays } = decodeFrame(buf);
+    for (const arr of Object.values(arrays)) {
+      assert.equal(arr.data.buffer, buf);
+      assert.equal(arr.data.byteOffset % 8, 0);
+    }
+  });
+
+  test("empty arrays keep their shape", () => {
+    const buf = encodeFrame(
+      {},
+      { p: { dtype: "f4", shape: [0, 5], rows: [] } },
+    );
+    const { arrays } = decodeFrame(buf);
+    assert.deepEqual(arrays.p.shape, [0, 5]);
+    assert.equal(arrays.p.data.length, 0);
+  });
+
+  test("rejects a buffer without the magic", () => {
+    assert.throws(() => decodeFrame(jsonBuffer({ a: 1 })), /Invalid MUB1/);
+  });
+
+  test("rejects an array that runs past the end", () => {
+    const buf = encodeFrame(
+      {},
+      { a: { dtype: "f4", shape: [2], data: [1, 2] } },
+    );
+    assert.throws(
+      () => decodeFrame(buf.slice(0, buf.byteLength - 4)),
+      /past the end/,
+    );
+  });
+
+  test("rejects an unknown dtype", () => {
+    const header = encoder.encode(
+      JSON.stringify({
+        meta: {},
+        arrays: [{ name: "a", dtype: "f8", shape: [1], offset: 0 }],
+      }),
+    );
+    const buf = concat([
+      encoder.encode("MUB1"),
+      u32(header.byteLength),
+      header,
+    ]);
+    assert.throws(() => decodeFrame(buf), /Unsupported MUB1 dtype: f8/);
+  });
+});
+
 describe("decodeEditLoadPayload", () => {
   const pulse = [
     [0.5, -1.25, 2],
     [3, 4.5, -0.75],
   ];
+  const frame = (meta) =>
+    encodeFrame(meta, {
+      pulse_trains_full: { dtype: "f4", shape: [2, 3], rows: pulse },
+    });
 
-  test("decodes a MELD frame into metadata plus the pulse matrix", () => {
-    const meta = { fsamp: 2048, distimes: [[1, 2], [3]] };
-    const out = decodeEditLoadPayload(packJsonF32("MELD", meta, [pulse]));
-    assert.deepEqual(out, { ...meta, pulse_trains_full: pulse });
+  test("decodes a frame into metadata plus the pulse matrix", () => {
+    const meta = { fsamp: 2048, distime_all: [[1, 2], [3]] };
+    assert.deepEqual(decodeEditLoadPayload(frame(meta)), {
+      ...meta,
+      pulse_trains_full: pulse,
+    });
   });
 
-  test("the format header alone selects the binary path", () => {
-    const buf = packJsonF32("MELD", { a: 1 }, [pulse]);
-    const out = decodeEditLoadPayload(buf, "edit-load-f32-v1");
-    assert.deepEqual(out.pulse_trains_full, pulse);
-  });
-
-  test("odd-length metadata leaves the float data unaligned", () => {
-    const meta = { name: "xy" };
-    assert.equal(encoder.encode(JSON.stringify(meta)).byteLength % 4, 1);
-    const out = decodeEditLoadPayload(packJsonF32("MELD", meta, [pulse]));
+  test("the format header alone selects the frame path", () => {
+    const out = decodeEditLoadPayload(frame({ a: 1 }), "mub1");
     assert.deepEqual(out.pulse_trains_full, pulse);
   });
 
   test("an empty matrix decodes to no rows", () => {
-    const out = decodeEditLoadPayload(packJsonF32("MELD", {}, [[]]));
-    assert.deepEqual(out.pulse_trains_full, []);
+    const buf = encodeFrame(
+      {},
+      {
+        pulse_trains_full: { dtype: "f4", shape: [0, 0], rows: [] },
+      },
+    );
+    assert.deepEqual(decodeEditLoadPayload(buf).pulse_trains_full, []);
   });
 
   test("falls back to JSON without magic or header", () => {
@@ -121,16 +192,10 @@ describe("decodeEditLoadPayload", () => {
     assert.deepEqual(decodeEditLoadPayload(jsonBuffer(payload)), payload);
   });
 
-  test("rejects an unsupported version", () => {
-    const buf = packJsonF32("MELD", {}, [pulse], { version: 2 });
-    assert.throws(() => decodeEditLoadPayload(buf), /version: 2/);
-  });
-
-  test("rejects a binary header on a frame without the magic", () => {
-    const buf = packJsonF32("XXXX", {}, [pulse]);
+  test("rejects a frame header on a body without the magic", () => {
     assert.throws(
-      () => decodeEditLoadPayload(buf, "edit-load-f32-v1"),
-      /Invalid edit-load/,
+      () => decodeEditLoadPayload(jsonBuffer({}), "mub1"),
+      /Invalid MUB1/,
     );
   });
 });
@@ -146,9 +211,12 @@ describe("decodeDecomposePreviewPayload", () => {
     [-5, -6],
   ];
 
-  test("reads both matrices in order with their own shapes", () => {
+  test("reads both matrices with their own shapes", () => {
     const meta = { iteration: 3, sil: [0.91, 0.95] };
-    const buf = packJsonF32("MDPV", meta, [full, all]);
+    const buf = encodeFrame(meta, {
+      pulse_trains_full: { dtype: "f4", shape: [2, 4], rows: full },
+      pulse_trains_all: { dtype: "f4", shape: [3, 2], rows: all },
+    });
     assert.deepEqual(decodeDecomposePreviewPayload(buf), {
       ...meta,
       pulse_trains_full: full,
@@ -156,30 +224,11 @@ describe("decodeDecomposePreviewPayload", () => {
     });
   });
 
-  test("the format header alone selects the binary path", () => {
-    const buf = packJsonF32("MDPV", { name: "x" }, [full, all]);
-    const out = decodeDecomposePreviewPayload(buf, "decompose-preview-f32-v1");
-    assert.deepEqual(out.pulse_trains_all, all);
-  });
-
   test("falls back to JSON without magic or header", () => {
     const payload = { pulse_trains_full: [], pulse_trains_all: [] };
     assert.deepEqual(
       decodeDecomposePreviewPayload(jsonBuffer(payload)),
       payload,
-    );
-  });
-
-  test("rejects an unsupported version", () => {
-    const buf = packJsonF32("MDPV", {}, [full, all], { version: 7 });
-    assert.throws(() => decodeDecomposePreviewPayload(buf), /version: 7/);
-  });
-
-  test("rejects a binary header on a frame without the magic", () => {
-    const buf = packJsonF32("XXXX", {}, [full, all]);
-    assert.throws(
-      () => decodeDecomposePreviewPayload(buf, "decompose-preview-f32-v1"),
-      /Invalid decompose-preview/,
     );
   });
 });

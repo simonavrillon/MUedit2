@@ -245,7 +245,7 @@ export function createFileSessionService(app) {
   }
 
   /** @type {FileSessionService["persistNpzBySaveTarget"]} */
-  async function persistNpzBySaveTarget(payload, fallbackName) {
+  async function persistNpzBySaveTarget(payload, fallbackName, pulseTrains) {
     const { subject, task, session, run, acquisition } = getBidsEntityInputs();
     const entityLabel =
       buildEntityLabelFromSession({
@@ -256,12 +256,15 @@ export function createFileSessionService(app) {
         acq: acquisition,
       }) || payload.entity_label;
 
-    const data = await api.editSave({
-      ...payload,
-      file_label: payload.file_label || fallbackName || "decomposition.npz",
-      entity_label: entityLabel,
-      ...getBidsSaveFields(),
-    });
+    const data = await api.editSave(
+      {
+        ...payload,
+        file_label: payload.file_label || fallbackName || "decomposition.npz",
+        entity_label: entityLabel,
+        ...getBidsSaveFields(),
+      },
+      pulseTrains,
+    );
     app.setStatus("Saved", "success");
     return {
       mode: "saved",

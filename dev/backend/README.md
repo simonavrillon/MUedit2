@@ -40,7 +40,7 @@ python/src/muedit/
 ├── models.py                                SignalImport, LoadedDecomposition, DecompositionExport
 │
 ├── api/
-│   ├── app_factory.py                       FastAPI app construction + CORS
+│   ├── app_factory.py                       FastAPI app construction, CORS and Host restrictions
 │   ├── routes/
 │   │   ├── __init__.py                       include_routers()
 │   │   ├── preview.py                        /preview-by-path, /qc/window, /qc/auto, /health
@@ -55,7 +55,7 @@ python/src/muedit/
 │   │   └── edit_helpers.py                   Normalization helpers for edit payloads
 │   ├── schemas.py                            Pydantic request models
 │   ├── contracts.py                          Response envelope
-│   ├── binary.py                             Binary payload packer (MDPV, MELD, MQCR)
+│   ├── binary.py                             MUB1 frame packer and unpacker
 │   ├── cache.py                              In-memory TTL cache (upload, QC, preview, edit context)
 │   ├── common.py                             Shared parsing + serialization utilities
 │   ├── config.py                             DATA_ROOT, resolve_bids_root()

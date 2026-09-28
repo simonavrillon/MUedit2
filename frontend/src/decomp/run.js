@@ -15,11 +15,15 @@ import {
   setPreviewSeries,
   setRois,
   setRunDownloadInFlight,
+  setRunResultToken,
   setSeriesLength,
   setUploadToken,
 } from "../state/actions.js";
 import { getCurrentGrid, roiStart, roiEnd } from "../state/selectors.js";
-import { normalizePreviewPayload } from "../api/payloads.js";
+import {
+  normalizePreviewPayload,
+  totalSamplesFromDistimes,
+} from "../api/payloads.js";
 import { getSuggestedNpzName } from "../io/bids.js";
 import { drawGridOverlay } from "../view/plots.js";
 import { errorMessage } from "../app/services/error-service.js";
@@ -49,14 +53,11 @@ export async function autoSaveRunDecomposition(app) {
   const totalSamples =
     state.seriesLength ||
     (state.muPulseTrains?.[0]?.length ?? 0) ||
-    Math.max(
-      0,
-      ...state.muDistimes.flatMap((d) => (d || []).map((v) => Number(v) || 0)),
-    ) + 1;
+    totalSamplesFromDistimes(state.muDistimes);
   const fs = state.fsamp;
   const payload = {
     distimes: state.muDistimes || [],
-    pulse_trains: state.muPulseTrains || [],
+    run_result_token: state.runResultToken || null,
     total_samples: totalSamples,
     fsamp: fs != null && Number.isFinite(fs) && fs > 0 ? fs : null,
     grid_names: state.gridNames || ["Grid 1"],
@@ -69,7 +70,12 @@ export async function autoSaveRunDecomposition(app) {
   setRunDownloadInFlight(state, true);
   try {
     setStatus("Saving decomposition...", "muted");
-    const saved = await persistNpzBySaveTarget(payload, suggestedName);
+    // The server kept this run's pulse trains; send them only if that token is gone.
+    const saved = await persistNpzBySaveTarget(
+      payload,
+      suggestedName,
+      state.runResultToken ? undefined : state.muPulseTrains,
+    );
     setLastRunDownloadKey(state, key);
     setStatus(
       saved?.path
@@ -118,6 +124,7 @@ export async function runDecomposition(app) {
   setParameters(state, buildParams());
   setMuPreviewData(state, [], [], []);
   setLastRunDownloadKey(state, "");
+  setRunResultToken(state, "");
 
   setStatus("Running decomposition...", "muted");
   updateProgress(5, "Starting decomposition");
@@ -367,6 +374,7 @@ export function handleStreamMessage(app, msg) {
   }
 
   if (msg.preview) {
+    setRunResultToken(state, msg.preview.run_result_token);
     if (msg.preview.preview_binary_token && api) {
       const previewNoToken = { ...msg.preview };
       delete previewNoToken.preview_binary_token;

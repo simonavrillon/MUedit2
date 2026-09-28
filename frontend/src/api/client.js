@@ -10,6 +10,8 @@ import {
   decodeQcRawF32,
   decodeDecomposePreviewPayload,
   decodeEditLoadPayload,
+  encodeFrame,
+  FRAME_MEDIA_TYPE,
 } from "./binary-payloads.js";
 import { normalizePreviewPayload } from "./payloads.js";
 
@@ -166,10 +168,33 @@ export function createApiClient({ apiFetch, apiJson, API_BASE }) {
     },
 
     /**
+     * Pulse trains go as a float32 MUB1 array, never as JSON: at 20 min the
+     * JSON text would exceed V8's maximum string length.
+     *
      * @param {JsonObject} payload
+     * @param {ArrayLike<number>[]} [pulseTrains] one row of `total_samples` values per MU
      */
-    editSave(payload) {
-      return postJson(`${API_BASE}${routes.editSave}`, payload, 120000);
+    editSave(payload, pulseTrains) {
+      const url = `${API_BASE}${routes.editSave}`;
+      const cols = Number(payload.total_samples) || 0;
+      if (
+        !pulseTrains?.length ||
+        pulseTrains.some((row) => row?.length !== cols)
+      ) {
+        return postJson(url, payload, 120000);
+      }
+      const body = encodeFrame(payload, {
+        pulse_trains: {
+          dtype: "f4",
+          shape: [pulseTrains.length, cols],
+          rows: pulseTrains,
+        },
+      });
+      return apiJson(
+        url,
+        { method: "POST", headers: { "Content-Type": FRAME_MEDIA_TYPE }, body },
+        120000,
+      );
     },
 
     healthUrl() {

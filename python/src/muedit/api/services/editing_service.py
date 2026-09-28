@@ -12,10 +12,12 @@ import numpy as np
 from fastapi import HTTPException
 from fastapi.responses import Response
 
-from muedit.api.binary import pack_json_f32_payload
+from muedit.api.binary import FRAME_FORMAT, FRAME_MEDIA_TYPE, pack_frame
 from muedit.api.cache import (
+    _drop_run_result,
     _get_edit_signal_context,
     _get_edit_signal_context_by_label,
+    _get_run_result,
     _store_edit_signal_context,
 )
 from muedit.api.common import (
@@ -112,35 +114,7 @@ class EditLoadResult:
         return out
 
 
-def _encode_edit_load_f32(loaded: dict[str, Any]) -> bytes | None:
-    """Custom MELD v1 binary: JSON metadata header + float32 pulse matrix."""
-    pulse_raw = loaded.get("pulse_trains_full")
-    if pulse_raw is None:
-        return None
-    pulse = np.asarray(pulse_raw, dtype=np.float32)
-    if pulse.ndim != 2:
-        return None
-    metadata = dict(loaded)
-    metadata.pop("pulse_trains_full", None)
-    metadata["pulse_shape"] = [int(pulse.shape[0]), int(pulse.shape[1])]
-    metadata["pulse_dtype"] = "float32"
-    metadata["pulse_binary"] = True
-    return pack_json_f32_payload(b"MELD", metadata, pulse)
-
-
-def _wrap_edit_load_binary(loaded: dict[str, Any]) -> Response | dict[str, Any]:
-    """Encode a loaded decomposition as f32 binary, falling back to JSON when not encodable."""
-    blob = _encode_edit_load_f32(loaded)
-    if blob is None:
-        return loaded
-    return Response(
-        content=blob,
-        media_type="application/octet-stream",
-        headers={"x-muedit-format": "edit-load-f32-v1"},
-    )
-
-
-def load_decomposition_from_path(filepath: str) -> dict[str, Any]:
+def _load_edit_result(filepath: str) -> EditLoadResult:
     if require_existing_path(filepath).suffix.lower() not in {".npz", ".mat"}:
         raise HTTPException(
             status_code=400,
@@ -204,12 +178,25 @@ def load_decomposition_from_path(filepath: str) -> dict[str, Any]:
         except (OSError, ValueError, KeyError):
             pass  # best-effort; missing or corrupt editlog is non-fatal
 
-    return make_json_safe(result.to_dict())
+    return result
 
 
-def load_decomposition_binary_from_path(filepath: str) -> Response | dict[str, Any]:
-    loaded = load_decomposition_from_path(filepath)
-    return _wrap_edit_load_binary(loaded)
+def load_decomposition_from_path(filepath: str) -> dict[str, Any]:
+    """Edit load as JSON, pulse matrix included."""
+    return make_json_safe(_load_edit_result(filepath).to_dict())
+
+
+def load_decomposition_binary_from_path(filepath: str) -> Response:
+    """Edit load as a MUB1 frame: the JSON fields as metadata, the pulse matrix as float32."""
+    loaded = _load_edit_result(filepath).to_dict()
+    pulse = np.asarray(loaded.pop("pulse_trains_full"))
+    if pulse.ndim != 2:
+        pulse = np.zeros((0, 0))
+    return Response(
+        content=pack_frame(loaded, {"pulse_trains_full": (pulse, "f4")}),
+        media_type=FRAME_MEDIA_TYPE,
+        headers={"x-muedit-format": FRAME_FORMAT},
+    )
 
 
 def _dedup(
@@ -324,9 +311,9 @@ def _save_removal_entry(entry_type: str, removed_uids: list[str]) -> dict[str, A
     }
 
 
-def save_edits(payload: EditSavePayload) -> dict[str, Any]:
+def save_edits(payload: EditSavePayload, pulse_trains: np.ndarray | None = None) -> dict[str, Any]:
+    """Save edits; pulse trains come from the request frame, else the stored run result."""
     distimes = normalize_distimes(payload.distimes or payload.discharge_times or [])
-    pulse_trains_raw = payload.pulse_trains
     total_samples = payload.total_samples
     if total_samples <= 0:
         raise HTTPException(status_code=400, detail="total_samples is required to save edits")
@@ -343,20 +330,12 @@ def save_edits(payload: EditSavePayload) -> dict[str, Any]:
     if muscle_names and not parameters.get("target_muscle"):
         parameters["target_muscle"] = muscle_names if len(muscle_names) > 1 else muscle_names[0]
 
-    pulse_trains = None
-    if pulse_trains_raw is not None:
-        try:
-            pulse_trains = np.array(pulse_trains_raw, dtype=float)
-        except (TypeError, ValueError):
-            pulse_trains = None
-    if (
-        pulse_trains is None
-        or pulse_trains.size == 0
-        or pulse_trains.ndim != 2
-        or pulse_trains.shape[0] != len(distimes)
-        or pulse_trains.shape[1] != total_samples
+    if pulse_trains is None:
+        pulse_trains = _get_run_result(payload.run_result_token)
+    if pulse_trains is not None and (
+        pulse_trains.size == 0 or pulse_trains.shape != (len(distimes), total_samples)
     ):
-        pulse_trains = build_pulse_trains_from_distimes(distimes, total_samples)
+        pulse_trains = None  # rebuilt from the discharge times once the kept MUs are known
 
     mu_uids_raw = payload.mu_uids
     mu_uids: list[str] = (
@@ -385,7 +364,6 @@ def save_edits(payload: EditSavePayload) -> dict[str, Any]:
         distimes = [distimes[i] for i in keep_idx]
         mu_grid_index = [mu_grid_index[i] for i in keep_idx]
         mu_uids = [mu_uids[i] for i in keep_idx]
-        pulse_trains = pulse_trains[keep_idx, :] if pulse_trains.size else pulse_trains
         artifact_times_all = [artifact_times_all[i] for i in keep_idx]
         kept_mus = [kept_mus[i] for i in keep_idx]
         if removed_uids:
@@ -395,7 +373,6 @@ def save_edits(payload: EditSavePayload) -> dict[str, Any]:
         kept_idx = _dedup(distimes, mu_grid_index, parameters, fsamp, total_samples)
         kept_set = set(kept_idx)
         removed_uids = [uid for i, uid in enumerate(mu_uids) if i not in kept_set]
-        pulse_trains = pulse_trains[kept_idx, :] if kept_idx else np.zeros((0, total_samples))
         distimes = [_clean_distimes(distimes[i]) for i in kept_idx]
         mu_grid_index = [mu_grid_index[i] for i in kept_idx]
         mu_uids = [mu_uids[i] for i in kept_idx]
@@ -403,6 +380,12 @@ def save_edits(payload: EditSavePayload) -> dict[str, Any]:
         kept_mus = [kept_mus[i] for i in kept_idx]
         if removed_uids:
             edit_history.append(_save_removal_entry("remove_duplicates", removed_uids))
+
+    pulse_trains = (
+        pulse_trains[kept_mus]
+        if pulse_trains is not None
+        else build_pulse_trains_from_distimes(distimes, total_samples)
+    )
 
     bids_root = resolve_bids_root(payload.project)
     file_label = payload.file_label or ""
@@ -451,6 +434,7 @@ def save_edits(payload: EditSavePayload) -> dict[str, Any]:
         extras={"artifact_mask": artifact_mask} if artifact_mask is not None else None,
     )
     save_editlog(out_path.with_suffix(".json"), mu_uids, edit_history, artifact_times_all or None)
+    _drop_run_result(payload.run_result_token)
 
     participant_meta = payload.participant_meta or {}
     try:
@@ -559,7 +543,7 @@ def update_filter(payload: EditFilterPayload) -> dict[str, Any]:
                 status_code=400,
                 detail="No BIDS EMG available. Reload decomposition MAT and retry filter update.",
             )
-        data = np.asarray(ctx.data, dtype=float)
+        data = ctx.data  # read-only float32; the operation copies only the view window
         if data.size == 0:
             raise HTTPException(
                 status_code=400,

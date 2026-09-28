@@ -5,8 +5,11 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import Response
+from pydantic import ValidationError
 
+from muedit.api.binary import FRAME_MEDIA_TYPE, unpack_frame
 from muedit.api.contracts import success_payload
 from muedit.api.schemas import (
     EditDeduplicatePayload,
@@ -48,11 +51,35 @@ async def load_decomposition_by_path_endpoint(
     return success_payload(load_decomposition_from_path(path))
 
 
-@router.post("/edit/save")
-async def save_edits_endpoint(payload: EditSavePayload) -> dict[str, Any]:
-    """Persist edited decomposition to BIDS source tree."""
-    result = save_edits(payload)
-    return success_payload(result)
+@router.post(
+    "/edit/save",
+    openapi_extra={
+        "requestBody": {
+            "content": {
+                "application/json": {"schema": EditSavePayload.model_json_schema()},
+                FRAME_MEDIA_TYPE: {"schema": {"type": "string", "format": "binary"}},
+            },
+            "required": True,
+        }
+    },
+)
+async def save_edits_endpoint(request: Request) -> dict[str, Any]:
+    """Persist edits; the body is JSON, or a MUB1 frame with float32 ``pulse_trains``."""
+    body = await request.body()
+    pulse_trains = None
+    try:
+        if request.headers.get("content-type", "").startswith(FRAME_MEDIA_TYPE):
+            try:
+                meta, arrays = unpack_frame(body)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=f"Invalid frame: {exc}") from exc
+            payload = EditSavePayload.model_validate(meta)
+            pulse_trains = arrays.get("pulse_trains")
+        else:
+            payload = EditSavePayload.model_validate_json(body)
+    except ValidationError as exc:
+        raise RequestValidationError(exc.errors(include_url=False)) from exc
+    return success_payload(save_edits(payload, pulse_trains))
 
 
 @router.post("/edit/update-filter")

@@ -15,12 +15,13 @@ import numpy as np
 from fastapi import HTTPException
 from fastapi.responses import Response
 
-from muedit.api.binary import pack_json_f32_payload
+from muedit.api.binary import FRAME_FORMAT, FRAME_MEDIA_TYPE, pack_frame, unpack_frame
 from muedit.api.cache import (
-    _get_decomp_preview_binary,
     _get_upload_signal,
     _get_upload_source_path,
+    _pop_decomp_preview_binary,
     _store_decomp_preview_binary,
+    _store_run_result,
 )
 from muedit.api.common import (
     build_params,
@@ -33,39 +34,35 @@ from muedit.api.common import (
 from muedit.decomp.pipeline import run_decomposition
 from muedit.models import SignalImport
 
+PREVIEW_PULSE_KEYS = ("pulse_trains_full", "pulse_trains_all")
 
-def _as_f32_matrix(value: Any) -> np.ndarray:
-    """Coerce a preview pulse payload into a 2-D float32 matrix."""
-    matrix = np.asarray(value if value is not None else [], dtype=np.float32)
+
+def _as_matrix(value: Any) -> np.ndarray:
+    """Coerce a preview pulse payload into a 2-D matrix without copying an ndarray."""
+    matrix = np.asarray(value if value is not None else [])
     if matrix.ndim == 1:
-        matrix = matrix.reshape(1, -1)
+        matrix = matrix.reshape(1, -1) if matrix.size else np.zeros((0, 0))
     if matrix.ndim != 2:
-        matrix = np.zeros((0, 0), dtype=np.float32)
+        matrix = np.zeros((0, 0))
     return matrix
 
 
-def _encode_decompose_preview_f32(preview: dict[str, Any]) -> bytes:
-    """Encode streamed preview arrays as float32 binary payload (MDPV v1)."""
-    rest = dict(preview)
-    pulse_full = _as_f32_matrix(rest.pop("pulse_trains_full", None))
-    pulse_all = _as_f32_matrix(rest.pop("pulse_trains_all", None))
-    preview_copy = make_json_safe(rest)
-
-    preview_copy["pulse_trains_full_shape"] = [int(pulse_full.shape[0]), int(pulse_full.shape[1])]
-    preview_copy["pulse_trains_all_shape"] = [int(pulse_all.shape[0]), int(pulse_all.shape[1])]
-    preview_copy["pulse_dtype"] = "float32"
-    return pack_json_f32_payload(b"MDPV", preview_copy, pulse_full, pulse_all)
+def _encode_decompose_preview(preview: dict[str, Any]) -> memoryview:
+    """Encode the run preview as a MUB1 frame with float32 pulse matrices."""
+    meta = {k: v for k, v in preview.items() if k not in PREVIEW_PULSE_KEYS}
+    arrays = {key: (_as_matrix(preview.get(key)), "f4") for key in PREVIEW_PULSE_KEYS}
+    return pack_frame(meta, arrays)
 
 
 def fetch_decompose_preview_binary(token: str) -> Response:
-    """Resolve a preview token from cache and return binary preview content."""
-    payload = _get_decomp_preview_binary(token)
+    """Return the preview frame for ``token`` and drop it from the cache."""
+    payload = _pop_decomp_preview_binary(token)
     if payload is None:
         raise HTTPException(status_code=404, detail="Preview binary token not found or expired")
     return Response(
         content=payload,
-        media_type="application/octet-stream",
-        headers={"x-muedit-format": "decompose-preview-f32-v1"},
+        media_type=FRAME_MEDIA_TYPE,
+        headers={"x-muedit-format": FRAME_FORMAT},
     )
 
 
@@ -120,18 +117,18 @@ def decomposition_event_stream(
             )
             preview_raw = result.get("preview", {})
             if binary_preview:
-                bin_payload = _encode_decompose_preview_f32(preview_raw)
-                preview_token = _store_decomp_preview_binary(bin_payload)
+                frame = _encode_decompose_preview(preview_raw)
+                # The run save reads the pulse trains from the frame instead of a second copy.
+                pulse_full = unpack_frame(frame)[1]["pulse_trains_full"]
                 preview_payload = make_json_safe(
-                    {
-                        k: v
-                        for k, v in preview_raw.items()
-                        if k not in ("pulse_trains_full", "pulse_trains_all")
-                    }
+                    {k: v for k, v in preview_raw.items() if k not in PREVIEW_PULSE_KEYS}
                 )
-                preview_payload["preview_binary_token"] = preview_token
+                preview_payload["preview_binary_token"] = _store_decomp_preview_binary(frame)
             else:
+                pulse_full = _as_matrix(preview_raw.get("pulse_trains_full")).astype(np.float32)
                 preview_payload = make_json_safe(preview_raw)
+            if pulse_full.size:
+                preview_payload["run_result_token"] = _store_run_result(pulse_full)
             q.put(
                 {
                     "stage": "done",

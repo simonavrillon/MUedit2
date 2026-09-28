@@ -22,7 +22,7 @@ All HTTP endpoints used by the frontend, their payloads, and binary formats.
 | 14 | POST | `/edit/remove-outliers` | `api.editRemoveOutliers(payload)` | `removeOutliers` | 120s | Remove outlier spikes from current MU |
 | 15 | POST | `/edit/remove-duplicates` | `api.editRemoveDuplicates(payload)` | `removeDuplicateMus` | 120s | Remove duplicate MUs |
 | 16 | POST | `/edit/flag-mu` | `api.editFlagMu(payload)` | `flagMuForDeletion` | 120s | Toggle MU deletion flag |
-| 17 | POST | `/edit/save` | `api.editSave(payload)` | `saveEditedFile`, `autoSaveRunDecomposition` | 120s | Save edited decomposition to .npz |
+| 17 | POST | `/edit/save` | `api.editSave(payload, pulseTrains?)` | `saveEditedFile`, `autoSaveRunDecomposition` | 120s | Save edited decomposition to .npz |
 
 > Files are only ever opened by path through the native dialog. The browser-upload routes (`POST /preview`, `POST /edit/load`) and their client code were removed (audit F2/F4); `tests/test_api_http.py` fails if `routes.js` names a route the backend does not serve.
 
@@ -135,7 +135,7 @@ Response: NDJSON stream (one JSON object per line):
 
 ```
 Headers: Accept: application/octet-stream
-Response (binary MDPV format or JSON fallback):
+Response (MUB1 frame or JSON fallback; the server serves it once):
   {
     ...meta,
     pulse_trains_full: number[][],
@@ -148,7 +148,7 @@ Response (binary MDPV format or JSON fallback):
 ```
 Request:  { path: string }
 Headers: Accept: application/octet-stream (implied)
-Response (binary MELD format or JSON fallback):
+Response (MUB1 frame or JSON fallback):
   {
     pulse_trains: number[][],
     pulse_trains_full: number[][],
@@ -276,10 +276,14 @@ Response: { flag: boolean }
 ### POST /edit/save
 
 ```
-Request: {
+Request: MUB1 frame (application/x-muedit-frame) with this object as meta and
+         `pulse_trains` as an f4 [n_mu, total_samples] array; or plain JSON
+         when there are no pulse trains to send (the run save sends
+         `run_result_token` instead, and the server uses its stored copy)
+{
   distimes: number[][],
   flagged: boolean[],
-  pulse_trains: number[][],
+  run_result_token?: string,
   total_samples: number,
   fsamp: number,
   grid_names: string[],
@@ -356,34 +360,20 @@ Offset  Size  Field
   36+8  n*4   float32[n] samples
 ```
 
-### MELD (Edit-Load Float32) — `/edit/load-by-path` response
+### MUB1 frame — `/edit/load-by-path`, `/decompose_preview/{token}`, `/edit/save` request
 
 ```
-Offset  Size    Field
-0       4       magic "MELD"
-4       4       uint32 version (must be 1)
-8       4       uint32 metaLen
-12      4       uint32 rows
-16      4       uint32 cols
-20      metaLen bytes   JSON metadata
-20+m    rows*cols*4    float32[rows*cols] pulse train data
+Offset      Size        Field
+0           4           magic "MUB1"
+4           4           uint32 headerLen
+8           headerLen   JSON {meta, arrays: [{name, dtype, shape, offset}]}
+aligned 8   ...         array data; each array at dataStart + offset (8-byte aligned)
 ```
 
-### MDPV (Decompose-Preview Float32) — `/decompose_preview/{token}` response
-
-```
-Offset  Size    Field
-0       4       magic "MDPV"
-4       4       uint32 version (must be 1)
-8       4       uint32 metaLen
-12      4       uint32 rowsFull
-16      4       uint32 colsFull
-20      4       uint32 rowsAll
-24      4       uint32 colsAll
-28      metaLen bytes   JSON metadata
-28+m    rowsFull*colsFull*4  float32 full pulse trains
-28+m+a  rowsAll*colsAll*4   float32 all pulse trains
-```
+`decodeFrame` returns typed-array views into the response buffer (no copy);
+`encodeFrame` writes rows straight into one `ArrayBuffer`. dtypes: `f4`,
+`i4`, `i8`, `u1`, `i2`. Pulse matrices are still turned into `number[][]` for
+state until the edit session moves server-side.
 
 ---
 

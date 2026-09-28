@@ -19,7 +19,7 @@ if ((Get-Command uv -ErrorAction SilentlyContinue) -and ($env:MUEDIT_NO_UV -ne '
 }
 
 $env:PYTHONPATH           = "$BackendDir\src" + $(if ($env:PYTHONPATH) { ";$env:PYTHONPATH" } else { '' })
-$env:MUEDIT_HOST          = if ($env:MUEDIT_HOST) { $env:MUEDIT_HOST } else { '0.0.0.0' }
+$env:MUEDIT_HOST          = if ($env:MUEDIT_HOST) { $env:MUEDIT_HOST } else { '127.0.0.1' }
 $env:MUEDIT_PORT          = if ($env:MUEDIT_BACKEND_PORT) { $env:MUEDIT_BACKEND_PORT } else { '8000' }
 $env:MUEDIT_FRONTEND_PORT = if ($env:MUEDIT_FRONTEND_PORT) { $env:MUEDIT_FRONTEND_PORT } else { '8080' }
 $env:MUEDIT_OPEN_BROWSER  = if ($env:MUEDIT_OPEN_BROWSER) { $env:MUEDIT_OPEN_BROWSER } else { '1' }
@@ -35,10 +35,10 @@ $BackendJob = Start-Job -ScriptBlock {
 Write-Host "Backend started (Job $($BackendJob.Id)) on :$($env:MUEDIT_PORT)"
 
 $FrontendJob = Start-Job -ScriptBlock {
-    param($dir, $port, $exe, $pyargs)
+    param($dir, $port, $bind, $exe, $pyargs)
     Set-Location $dir
-    & $exe @pyargs -m http.server $port
-} -ArgumentList $FrontendDir, $env:MUEDIT_FRONTEND_PORT, $PyExe, (, $PyArgs)
+    & $exe @pyargs -m http.server $port --bind $bind
+} -ArgumentList $FrontendDir, $env:MUEDIT_FRONTEND_PORT, $env:MUEDIT_HOST, $PyExe, (, $PyArgs)
 Write-Host "Frontend started (Job $($FrontendJob.Id)) on :$($env:MUEDIT_FRONTEND_PORT)"
 
 if ($env:MUEDIT_OPEN_BROWSER -eq '1') {

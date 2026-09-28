@@ -276,7 +276,7 @@ Validates MU index and returns requested flag status without mutating spike time
 ## 10. Save Edits (`save_edits`)
 
 ```python
-def save_edits(payload: EditSavePayload) -> dict[str, Any]
+def save_edits(payload: EditSavePayload, pulse_trains: np.ndarray | None = None) -> dict[str, Any]
 ```
 
 Full save pipeline:
@@ -287,7 +287,7 @@ Full save pipeline:
 4. Generate MU UIDs via `_generate_mu_uids()`
 5. Remove flagged MUs unless `remove_flagged=False`; append a `remove_flagged` editlog entry (`on_save: true`) naming the dropped uids
 6. Deduplicate unless `remove_duplicates=False` via `_dedup()`; append a `remove_duplicates` entry (`on_save: true`) if any were dropped
-7. Build pulse trains from distimes via `build_pulse_trains_from_distimes()` when the payload's `pulse_trains` are missing or mis-shaped
+7. Index the pulse matrix once with the final kept indices. It comes from the request frame, else from the run result named by `run_result_token`; when neither matches `(n_mu, total_samples)`, the kept MUs' trains are built from distimes via `build_pulse_trains_from_distimes()`
 8. Build artifact mask from `payload.artifact_regions` via `build_manual_artifact_mask()`; fall back to cached signal context mask if no manual regions
 9. Save NPZ via `decomposition_file.save_decomposition_npz()` (includes `artifact_mask` extra) to BIDS derivatives layout
 10. Write editlog JSON via `save_editlog()` (mu_uids, edit_history, artifact_times)
@@ -326,7 +326,7 @@ Load pipeline:
 | `mu_uids`, `edit_history`, `artifact_times` | `list \| None` | The editlog JSON provides them |
 | `sidecar_meta` | `dict[str, Any]` | Merged at top level (participant + hardware fields) |
 
-Binary variant (`load_decomposition_binary_from_path`): encodes as MELD f32 binary if 2-D `pulse_trains_full` exists, falls back to JSON.
+Binary variant (`load_decomposition_binary_from_path`): a MUB1 frame, the JSON fields as metadata and `pulse_trains_full` as an f4 array cast straight from the loaded matrix (no list conversion).
 
 ---
 

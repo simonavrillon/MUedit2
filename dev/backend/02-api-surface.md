@@ -22,16 +22,19 @@ The non-streaming `POST /decompose`, `GET /config`, and the multipart upload rou
 | Method | Path | Accepts | Returns | Service |
 |---|---|---|---|---|
 | POST | `/decompose_stream` | form fields: `upload_token` (required; 400 with `field: upload_token` when missing or expired), `params`, `duration`, `persist_output`, `roi_start: int`, `roi_end: int`, `rois` (JSON str), `discard_channels`, `bids_export: bool`, `project: str`, `bids_entities` (JSON str), `bids_metadata` (JSON str), `full_preview`, `artifact_regions` (JSON str) | `StreamingResponse` NDJSON (`application/x-ndjson`) | `decomposition_event_stream()` |
-| GET | `/decompose_preview/{token}` | path param `token: str` | Binary MDPV (`x-muedit-format: decompose-preview-f32-v1`) | `fetch_decompose_preview_binary(token)` |
+| GET | `/decompose_preview/{token}` | path param `token: str` | MUB1 frame (`x-muedit-format: mub1`); served once, then 404 | `fetch_decompose_preview_binary(token)` |
 
 Header `x-muedit-binary` (default `"1"`) controls binary vs JSON preview encoding in stream mode.
+When the run has a full-length pulse matrix (`full_preview`), the `done` event's preview carries
+`run_result_token`: the server keeps that float32 matrix (30 min, latest run only) so the run
+save sends the token instead of the pulse trains.
 
 ### Editing Router (`routes/editing.py`)
 
 | Method | Path | Accepts | Returns | Service |
 |---|---|---|---|---|
-| POST | `/edit/load-by-path` | JSON: `PathPayload`; header `x-muedit-binary` | JSON or Binary MELD (`x-muedit-format: edit-load-f32-v1`) | `load_decomposition_binary_from_path(path)` / `load_decomposition_from_path(path)` |
-| POST | `/edit/save` | JSON: `EditSavePayload` | JSON: `{saved, path, kept_indices, mu_uids, edit_history, bids_emg_paths?, bids_deriv_paths?}` | `save_edits(payload)` |
+| POST | `/edit/load-by-path` | JSON: `PathPayload`; header `x-muedit-binary` | JSON or MUB1 frame (`x-muedit-format: mub1`) | `load_decomposition_binary_from_path(path)` / `load_decomposition_from_path(path)` |
+| POST | `/edit/save` | JSON `EditSavePayload`, or a MUB1 frame (`application/x-muedit-frame`) whose meta is that JSON and whose `pulse_trains` array is f4 `(n_mu, total_samples)` | JSON: `{saved, path, kept_indices, mu_uids, edit_history, bids_emg_paths?, bids_deriv_paths?}` | `save_edits(payload, pulse_trains)` |
 | POST | `/edit/update-filter` | JSON: `EditFilterPayload` | JSON: `{fsamp, distimes, pulse_train}` | `update_filter(payload)` |
 | POST | `/edit/add-spikes` | JSON: `EditRoiPayload` | JSON: `{distimes}` | `add_spikes(payload)` |
 | POST | `/edit/add-artifact` | JSON: `EditRoiPayload` | JSON: `{artifact_times}` | `add_artifact(payload)` |
@@ -196,24 +199,29 @@ Registered via `register_exception_handlers(app)`. Never leaks tracebacks.
 
 ## Binary Wire Formats (`binary.py`)
 
-### `pack_json_f32_payload(magic, meta, *arrays)` — Generic packer
+### MUB1 frame — `pack_frame(meta, arrays)` / `unpack_frame(body)`
 
-Used by MDPV and MELD. All values little-endian.
+The one format for array transfers, in both directions (memory plan §5). Little-endian.
 
 ```
-magic(4B) | version<uint32=1> | meta_len<uint32> |
-  [arr0_rows<uint32> | arr0_cols<uint32>] x N_arrays |
-  meta_bytes(UTF-8 JSON) |
-  arr0_data(float32, C-order) | arr1_data | ...
+"MUB1" | header_len<uint32> | header (UTF-8 JSON) | pad to 8 |
+  array data; each array starts at an 8-byte-aligned offset from the data start
+header = {"meta": {...}, "arrays": [{"name", "dtype", "shape", "offset"}, ...]}
+dtype ∈ f4, i4, i8, u1, i2
 ```
+
+`pack_frame(meta, {name: (array, dtype)})` sizes one `bytearray` up front and casts each array
+straight into it (`np.copyto`, `same_kind`), returning a `memoryview` that `Response` sends
+without another copy. `unpack_frame` validates the header and bounds and returns `np.frombuffer`
+views. The alignment lets the client read every array as a zero-copy typed-array view.
+Media type `application/x-muedit-frame`; response header `x-muedit-format: mub1`.
 
 ### Format Catalog
 
 | Name | Magic | Header `x-muedit-format` | Used by | Encoding |
 |---|---|---|---|---|
-| MDPV | `b"MDPV"` | `decompose-preview-f32-v1` | Decompose preview (streamed) | `pack_json_f32_payload` — 2 f32 matrices (`pulse_trains_full`, `pulse_trains_all`) + JSON meta |
-| MELD | `b"MELD"` | `edit-load-f32-v1` | Edit load (loaded decomposition) | `pack_json_f32_payload` — 1 f32 matrix (`pulse_trains_full`) + JSON meta |
-| MQCR | `b"MQCR"` | `qc-raw-f32-v1` | QC channel-window raw traces | Custom encoding (see below) |
+| MUB1 | `b"MUB1"` | `mub1` | Decompose preview (`pulse_trains_full`, `pulse_trains_all`), edit load (`pulse_trains_full`), edit save request (`pulse_trains`) | `pack_frame` — JSON meta + f4 arrays |
+| MQCR | `b"MQCR"` | `qc-raw-f32-v1` | QC channel-window raw traces | Custom encoding (see below); replaced when QC moves to viewport envelopes |
 
 ### MQCR Custom Encoding
 
@@ -235,7 +243,8 @@ Thread-safe (single `threading.Lock`), TTL-based, with budget-driven eviction (m
 | Cache | Key | TTL | Max Items | Max Bytes | Stores |
 |---|---|---|---|---|---|
 | `_UPLOAD_SESSION_CACHE` | UUID token | 20 min | 3 | 1 GB | Uploaded signals + QC data |
-| `_DECOMP_PREVIEW_BINARY_CACHE` | UUID token | 10 min | 8 | 512 MB | Binary preview blobs |
+| `_DECOMP_PREVIEW_BINARY_CACHE` | UUID token | 10 min | 8 | 512 MB | Preview frames, removed on first fetch |
+| `_RUN_RESULT_CACHE` | UUID token | 30 min | 1 | — | Last run's float32 pulse matrix, for the run save |
 | `_EDIT_SIGNAL_CONTEXT_CACHE` | UUID token | 12 hours | 1 | — | Raw MAT signal context for editing |
 | `_EDIT_SIGNAL_LABEL_INDEX` | file_label | (follows context) | — | — | Maps file_label to edit_signal_token |
 
@@ -244,18 +253,21 @@ Thread-safe (single `threading.Lock`), TTL-based, with budget-driven eviction (m
 | Function | Description |
 |---|---|
 | `_store_upload_signal(signal, source_path=None) -> token` | Store a copy of the signal, return UUID token; `source_path` records the original file path |
-| `_get_upload_signal(token) -> SignalImport \| None` | Get a copy of the signal, refresh TTL on hit |
+| `_get_upload_signal(token) -> SignalImport \| None` | Get a read-only view of the signal, refresh TTL on hit |
 | `_store_qc_signal(token, data, fsamp, grid_names, discard_channels)` | Attach QC arrays to upload session |
 | `_get_qc_signal(token) -> QCSignal \| None` | Get QC arrays (`data` is a read-only view) |
 | `_store_decomp_preview_binary(payload) -> token` | Store binary preview blob |
-| `_get_decomp_preview_binary(token) -> bytes \| None` | Get binary preview |
+| `_pop_decomp_preview_binary(token) -> bytes \| memoryview \| None` | Remove and return the preview frame |
+| `_store_run_result(pulse_trains) -> token` | Keep a run's float32 pulse matrix |
+| `_get_run_result(token) -> FloatArray \| None` | Read-only view of the stored pulse matrix |
+| `_drop_run_result(token)` | Forget it after a successful save |
 | `_store_edit_signal_context(context: EditSignalContext, file_label) -> token` | Store a float32 copy of the context, index by label |
-| `_get_edit_signal_context(token) -> EditSignalContext \| None` | Get a copy of the context |
+| `_get_edit_signal_context(token) -> EditSignalContext \| None` | Get a read-only view of the context |
 | `_get_edit_signal_context_by_label(file_label) -> EditSignalContext \| None` | Resolve context by label |
 
-Upload signals are copied with `SignalImport.clone()` on store and on read, and
-edit contexts with `EditSignalContext.compact_copy()`, so callers never share
-arrays with the cache.
+Stores copy once (`SignalImport.clone()`, `EditSignalContext.compact_copy()`). Reads return
+`readonly_view()`: the arrays are shared with the cache but not writable, and lists and metadata
+dicts are fresh copies. A caller that must modify data copies only the slice it changes.
 
 Each cache holds a small entry dataclass (`_UploadEntry`, `_PreviewBinaryEntry`,
 `_EditContextEntry`) with an `expires_at` time and an `nbytes` property, which

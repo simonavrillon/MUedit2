@@ -52,12 +52,27 @@ def _parse_rois(value: str) -> list[tuple[int, int]]:
     return rois
 
 
+LOOPBACK_HOSTS = ("127.0.0.1", "localhost")
+
+
 def serve_api() -> None:
     """Start the FastAPI backend server."""
-    app = create_app(title="MUedit API", version="2.1.0")
-    include_routers(app)
-    host = os.environ.get("MUEDIT_HOST", "0.0.0.0")  # noqa: S104
+    # /preview-by-path reads any local path, so only this machine's frontend may call it.
+    host = os.environ.get("MUEDIT_HOST", "127.0.0.1")
     port = int(os.environ.get("MUEDIT_PORT") or os.environ.get("MUEDIT_BACKEND_PORT", "8000"))
+    frontend_port = os.environ.get("MUEDIT_FRONTEND_PORT", "8080")
+    origins = os.environ.get("MUEDIT_ALLOWED_ORIGINS")
+    app = create_app(
+        title="MUedit API",
+        version="2.1.0",
+        allowed_origins=(
+            [o.strip() for o in origins.split(",") if o.strip()]
+            if origins
+            else [f"http://{h}:{frontend_port}" for h in LOOPBACK_HOSTS]
+        ),
+        allowed_hosts=LOOPBACK_HOSTS if host in LOOPBACK_HOSTS else None,
+    )
+    include_routers(app)
     uvicorn.run(app, host=host, port=port, log_level="warning", access_log=False)
 
 

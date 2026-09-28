@@ -16,7 +16,7 @@ else
 fi
 
 export PYTHONPATH="$BACKEND_DIR/src:${PYTHONPATH:-}"
-export MUEDIT_HOST="${MUEDIT_HOST:-0.0.0.0}"
+export MUEDIT_HOST="${MUEDIT_HOST:-127.0.0.1}"
 export MUEDIT_PORT="${MUEDIT_BACKEND_PORT:-8000}"
 export MUEDIT_FRONTEND_PORT="${MUEDIT_FRONTEND_PORT:-8080}"
 export MUEDIT_OPEN_BROWSER="${MUEDIT_OPEN_BROWSER:-1}"
@@ -27,7 +27,7 @@ BACK_PID=$!
 echo "Backend started (PID $BACK_PID) on :$MUEDIT_PORT"
 
 cd "$FRONTEND_DIR"
-"${PY[@]}" -m http.server "$MUEDIT_FRONTEND_PORT" 2>/dev/null &
+"${PY[@]}" -m http.server "$MUEDIT_FRONTEND_PORT" --bind "$MUEDIT_HOST" 2>/dev/null &
 FRONT_PID=$!
 echo "Frontend started (PID $FRONT_PID) on :$MUEDIT_FRONTEND_PORT"
 

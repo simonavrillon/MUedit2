@@ -2,21 +2,33 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from muedit.api.errors import register_exception_handlers
 
 
-def create_app(title: str = "MUedit API", version: str = "2.1.0") -> FastAPI:
-    """Create FastAPI app with CORS and canonical exception handlers."""
+def create_app(
+    title: str = "MUedit API",
+    version: str = "2.1.0",
+    allowed_origins: Sequence[str] = (),
+    allowed_hosts: Sequence[str] | None = None,
+) -> FastAPI:
+    """Create the FastAPI app with origin/host restrictions and canonical exception handlers."""
     app = FastAPI(title=title, version=version)
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=False,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    if allowed_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=list(allowed_origins),
+            allow_credentials=False,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+    if allowed_hosts is not None:
+        # DNS rebinding makes a hostile page same-origin, so CORS cannot stop it; the Host header can.
+        app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(allowed_hosts))
     register_exception_handlers(app)
     return app

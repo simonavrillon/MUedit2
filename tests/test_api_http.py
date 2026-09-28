@@ -17,6 +17,9 @@ from fastapi import FastAPI
 from httpx import Response
 from starlette.testclient import TestClient
 
+from muedit.api import cache
+from muedit.api.binary import FRAME_FORMAT, FRAME_MEDIA_TYPE, pack_frame, unpack_frame
+from tests._synthetic_emg import motor_unit_emg
 from tests.conftest import REPO_ROOT
 
 FSAMP = 2000.0
@@ -152,6 +155,39 @@ def stream_events(client: TestClient, upload_token: str) -> list[dict[str, Any]]
 
 
 @pytest.fixture(scope="module")
+def mu_run(client: TestClient, workspace: Path) -> dict[str, Any]:
+    """A full-preview run on synthetic data that yields motor units, as the app starts it."""
+    n_samples = 20_000
+    path = workspace / "motor_units.mat"
+    scipy.io.savemat(
+        path,
+        {
+            "signal": {
+                "data": motor_unit_emg(seed=3, n_samples=n_samples, fsamp=FSAMP),
+                "fsamp": FSAMP,
+                "gridname": GRID,
+                "muscle": "ta",
+                "auxiliary": np.zeros((0, n_samples)),
+                "auxiliaryname": [],
+            }
+        },
+    )
+    token = _ok(client.post(f"{API}/preview-by-path", json={"path": str(path)}))["upload_token"]
+    resp = client.post(
+        f"{API}/decompose_stream",
+        data={
+            "upload_token": token,
+            "params": json.dumps({"niter": 10, "nbextchan": 400}),
+            "full_preview": "true",
+        },
+    )
+    done = json.loads(resp.text.splitlines()[-1])
+    assert done["stage"] == "done", done
+    assert done["summary"]["mu_count"] > 0
+    return done
+
+
+@pytest.fixture(scope="module")
 def edit_signal_token(client: TestClient, decomp_npz: Path) -> str:
     data = _ok(
         client.post(
@@ -186,18 +222,12 @@ def _err(resp: Response, status: int, code: str | None = None) -> dict[str, Any]
     return err
 
 
-def _unpack_json_f32(
-    blob: bytes, magic: bytes, n_arrays: int
-) -> tuple[dict, list[tuple[int, int]]]:
-    """Decode ``pack_json_f32_payload`` output; check the byte length adds up."""
-    assert blob[:4] == magic
-    version, meta_len = struct.unpack("<II", blob[4:12])
-    assert version == 1
-    shapes = [struct.unpack("<II", blob[12 + 8 * i : 20 + 8 * i]) for i in range(n_arrays)]
-    head = 12 + 8 * n_arrays
-    meta = json.loads(blob[head : head + meta_len])
-    assert len(blob) == head + meta_len + sum(4 * r * c for r, c in shapes)
-    return meta, shapes
+def _unpack_frame_response(resp: Response) -> tuple[dict[str, Any], dict[str, np.ndarray]]:
+    """Assert a MUB1 frame response and decode it."""
+    assert resp.status_code == 200, resp.text
+    assert resp.headers["content-type"] == FRAME_MEDIA_TYPE
+    assert resp.headers["x-muedit-format"] == FRAME_FORMAT
+    return unpack_frame(resp.content)
 
 
 def _unpack_mqcr(blob: bytes) -> dict[str, Any]:
@@ -470,6 +500,14 @@ class TestDecomposeStream:
         assert isinstance(preview["preview_binary_token"], str)
         assert "pulse_trains_full" not in preview
         assert "pulse_trains_all" not in preview
+        assert "run_result_token" not in preview  # no motor units, nothing to save
+
+    def test_full_run_keeps_its_pulse_trains_for_the_save(self, mu_run: dict[str, Any]) -> None:
+        token = mu_run["preview"]["run_result_token"]
+        pulse = cache._get_run_result(token)
+        assert pulse is not None
+        assert pulse.dtype == np.float32
+        assert pulse.shape == (mu_run["summary"]["mu_count"], mu_run["preview"]["total_samples"])
 
     def test_json_preview_when_binary_disabled(self, client: TestClient, upload_token: str) -> None:
         resp = client.post(
@@ -531,15 +569,20 @@ class TestDecomposeStream:
 
 
 class TestDecomposePreview:
-    def test_binary_payload(self, client: TestClient, stream_events: list[dict[str, Any]]) -> None:
-        token = stream_events[-1]["preview"]["preview_binary_token"]
-        resp = client.get(f"{API}/decompose_preview/{token}")
-        assert resp.status_code == 200
-        assert resp.headers["x-muedit-format"] == "decompose-preview-f32-v1"
-        meta, shapes = _unpack_json_f32(resp.content, b"MDPV", 2)
-        assert meta["pulse_dtype"] == "float32"
-        declared = [meta["pulse_trains_full_shape"], meta["pulse_trains_all_shape"]]
-        assert [tuple(s) for s in declared] == shapes
+    def test_binary_payload_is_served_once(
+        self, client: TestClient, mu_run: dict[str, Any]
+    ) -> None:
+        token = mu_run["preview"]["preview_binary_token"]
+        meta, arrays = _unpack_frame_response(client.get(f"{API}/decompose_preview/{token}"))
+        assert meta["distime_all"] == mu_run["preview"]["distime_all"]
+        full = arrays["pulse_trains_full"]
+        assert full.dtype == np.float32
+        assert full.shape == (mu_run["summary"]["mu_count"], meta["total_samples"])
+        np.testing.assert_array_equal(
+            full, cache._get_run_result(mu_run["preview"]["run_result_token"])
+        )
+        assert arrays["pulse_trains_all"].shape == (0, 0)
+        _err(client.get(f"{API}/decompose_preview/{token}"), 404)
 
     def test_unknown_token_is_404(self, client: TestClient) -> None:
         _err(client.get(f"{API}/decompose_preview/not-a-token"), 404)
@@ -562,22 +605,19 @@ EDIT_LOAD_KEYS = {
 }
 
 
-def _check_meld(resp: Response) -> dict[str, Any]:
-    assert resp.status_code == 200
-    assert resp.headers["x-muedit-format"] == "edit-load-f32-v1"
-    meta, shapes = _unpack_json_f32(resp.content, b"MELD", 1)
-    assert set(meta) >= EDIT_LOAD_KEYS
-    assert meta["pulse_binary"] is True
-    assert shapes == [(2, N_SAMPLES)] == [tuple(meta["pulse_shape"])]
-    assert len(meta["distime_all"]) == 2
-    return meta
-
-
 class TestEditLoad:
     def test_by_path_binary(self, client: TestClient, decomp_npz: Path) -> None:
-        meta = _check_meld(client.post(f"{API}/edit/load-by-path", json={"path": str(decomp_npz)}))
+        meta, arrays = _unpack_frame_response(
+            client.post(f"{API}/edit/load-by-path", json={"path": str(decomp_npz)})
+        )
+        assert set(meta) >= EDIT_LOAD_KEYS | {"project"}
+        assert "pulse_trains_full" not in meta
         assert meta["file_label"] == decomp_npz.name
-        assert "project" in meta
+        assert len(meta["distime_all"]) == 2
+        with np.load(decomp_npz, allow_pickle=True) as z:
+            saved = z["pulse_trains"]
+        assert arrays["pulse_trains_full"].dtype == np.float32
+        np.testing.assert_array_equal(arrays["pulse_trains_full"], saved.astype(np.float32))
 
     def test_by_path_json(self, client: TestClient, decomp_npz: Path) -> None:
         data = _ok(
@@ -652,6 +692,92 @@ class TestEditSave:
             assert {"pulse_trains", "discharge_times", "fsamp", "artifact_mask"} <= set(z.files)
             assert int(z["artifact_mask"].sum()) == 20
 
+    def test_frame_body_saves_the_sent_pulse_trains_of_kept_mus(
+        self, client: TestClient, decomp_npz: Path
+    ) -> None:
+        pulse = np.random.default_rng(2).random((3, N_SAMPLES)).astype(np.float32)
+        meta = {
+            "distimes": [[1000, 1400], [1200], [3000]],
+            "flagged": [False, True, False],
+            "remove_duplicates": False,
+            "total_samples": N_SAMPLES,
+            "fsamp": FSAMP,
+            "grid_names": [GRID],
+            "project": "smoke",
+            "file_label": decomp_npz.name,
+        }
+        data = _ok(
+            client.post(
+                f"{API}/edit/save",
+                content=bytes(pack_frame(meta, {"pulse_trains": (pulse, "f4")})),
+                headers={"content-type": FRAME_MEDIA_TYPE},
+            )
+        )
+        assert data["kept_indices"] == [0, 2]
+        with np.load(data["path"], allow_pickle=True) as z:
+            np.testing.assert_array_equal(z["pulse_trains"], pulse[[0, 2]])
+
+    def test_run_save_uses_the_stored_run_result(
+        self, client: TestClient, mu_run: dict[str, Any]
+    ) -> None:
+        preview = mu_run["preview"]
+        token = preview["run_result_token"]
+        stored = np.array(cache._get_run_result(token))
+        data = _ok(
+            client.post(
+                f"{API}/edit/save",
+                json={
+                    "distimes": preview["distime_all"],
+                    "remove_duplicates": False,
+                    "total_samples": preview["total_samples"],
+                    "fsamp": FSAMP,
+                    "grid_names": [GRID],
+                    "mu_grid_index": preview["mu_grid_index"],
+                    "project": "smoke",
+                    "file_label": "motor_units_decomposition.npz",
+                    "run_result_token": token,
+                },
+            )
+        )
+        with np.load(data["path"], allow_pickle=True) as z:
+            np.testing.assert_array_equal(z["pulse_trains"], stored)
+        assert cache._get_run_result(token) is None
+
+    def test_mismatched_pulse_trains_fall_back_to_discharge_times(
+        self, client: TestClient, decomp_npz: Path
+    ) -> None:
+        meta = {
+            "distimes": [[1000, 1400]],
+            "total_samples": N_SAMPLES,
+            "fsamp": FSAMP,
+            "project": "smoke",
+            "file_label": decomp_npz.name,
+        }
+        data = _ok(
+            client.post(
+                f"{API}/edit/save",
+                content=bytes(pack_frame(meta, {"pulse_trains": (np.ones((1, 10)), "f4")})),
+                headers={"content-type": FRAME_MEDIA_TYPE},
+            )
+        )
+        with np.load(data["path"], allow_pickle=True) as z:
+            assert z["pulse_trains"].shape == (1, N_SAMPLES)
+            assert np.flatnonzero(z["pulse_trains"][0]).tolist() == [1000, 1400]
+
+    def test_malformed_frame_is_400(self, client: TestClient) -> None:
+        resp = client.post(
+            f"{API}/edit/save", content=b"MUB1junk", headers={"content-type": FRAME_MEDIA_TYPE}
+        )
+        assert "Invalid frame" in _err(resp, 400)["message"]
+
+    def test_frame_without_total_samples_is_422(self, client: TestClient) -> None:
+        resp = client.post(
+            f"{API}/edit/save",
+            content=bytes(pack_frame({"distimes": [[1]]}, {})),
+            headers={"content-type": FRAME_MEDIA_TYPE},
+        )
+        _err(resp, 422, "validation_error")
+
     def test_missing_total_samples_is_422(self, client: TestClient) -> None:
         _err(client.post(f"{API}/edit/save", json={"distimes": [[1]]}), 422, "validation_error")
 
@@ -682,3 +808,71 @@ class TestEditUpdateFilter:
         assert data["fsamp"] == FSAMP
         assert data["distimes"] == sorted(data["distimes"])
         assert len(data["pulse_train"]) == N_SAMPLES
+
+
+# ── Origin and host restrictions (serve_api) ─────────────────────────────────
+
+
+def _served_app(monkeypatch: pytest.MonkeyPatch, **env: str) -> tuple[FastAPI, str]:
+    """The app and host ``serve_api`` would run with ``env``, without starting uvicorn."""
+    import muedit.cli as cli
+
+    served: dict[str, Any] = {}
+    monkeypatch.setattr(
+        cli.uvicorn, "run", lambda app, host, **_: served.update(app=app, host=host)
+    )
+    for key in ("MUEDIT_HOST", "MUEDIT_FRONTEND_PORT", "MUEDIT_ALLOWED_ORIGINS"):
+        monkeypatch.delenv(key, raising=False)
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    cli.serve_api()
+    return served["app"], served["host"]
+
+
+def _preflight(client: TestClient, origin: str) -> Response:
+    return client.options(
+        f"{API}/preview-by-path",
+        headers={"Origin": origin, "Access-Control-Request-Method": "POST"},
+    )
+
+
+class TestOriginAndHost:
+    def test_binds_loopback_by_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _, host = _served_app(monkeypatch)
+        assert host == "127.0.0.1"
+
+    def test_only_the_frontend_origin_is_allowed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        app, _ = _served_app(monkeypatch)
+        with TestClient(app, base_url="http://127.0.0.1:8000") as c:
+            for origin in ("http://localhost:8080", "http://127.0.0.1:8080"):
+                r = _preflight(c, origin)
+                assert r.status_code == 200
+                assert r.headers["access-control-allow-origin"] == origin
+            r = _preflight(c, "https://evil.example")
+            assert r.status_code == 400
+            assert "access-control-allow-origin" not in r.headers
+
+    def test_frontend_port_and_origin_overrides(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        app, _ = _served_app(monkeypatch, MUEDIT_FRONTEND_PORT="9090")
+        with TestClient(app, base_url="http://127.0.0.1:8000") as c:
+            assert _preflight(c, "http://localhost:9090").status_code == 200
+            assert _preflight(c, "http://localhost:8080").status_code == 400
+        app, _ = _served_app(monkeypatch, MUEDIT_ALLOWED_ORIGINS="http://lab-pc:8080, ")
+        with TestClient(app, base_url="http://127.0.0.1:8000") as c:
+            assert _preflight(c, "http://lab-pc:8080").status_code == 200
+            assert _preflight(c, "http://localhost:8080").status_code == 400
+
+    def test_rebound_host_is_rejected_on_loopback(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        app, _ = _served_app(monkeypatch)
+        with TestClient(app, base_url="http://127.0.0.1:8000") as c:
+            assert c.get(f"{API}/health").status_code == 200
+            assert c.get(f"{API}/health", headers={"Host": "localhost:8000"}).status_code == 200
+            assert c.get(f"{API}/health", headers={"Host": "evil.example:8000"}).status_code == 400
+
+    def test_explicit_all_interfaces_skips_the_host_check(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        app, host = _served_app(monkeypatch, MUEDIT_HOST="0.0.0.0")  # noqa: S104
+        assert host == "0.0.0.0"  # noqa: S104
+        with TestClient(app, base_url="http://192.168.1.20:8000") as c:
+            assert c.get(f"{API}/health").status_code == 200

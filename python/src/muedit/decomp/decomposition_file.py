@@ -565,10 +565,8 @@ def load_decomposition_file(filepath: str) -> LoadedDecomposition:
     if not mu_grid_index or len(mu_grid_index) != len(distimes):
         mu_grid_index = [0] * len(distimes)
 
-    pulse_trains_full = [list(map(float, row)) for row in pulse_matrix.tolist()]
-
     return LoadedDecomposition(
-        pulse_trains_full=pulse_trains_full,
+        pulse_trains_full=pulse_matrix,
         distime_all=distimes,
         fsamp=d.fsamp,
         grid_names=grid_names,
