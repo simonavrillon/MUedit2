@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from typing import Any
 
 import numpy as np
 from scipy.linalg import eigh, inv
@@ -19,6 +20,7 @@ from muedit.signal.decomp_primitives import (
     signed_square,
     split_by_amplitude,
 )
+from muedit.signal.streaming import SampleSource, StreamedExtender, extend_mask
 
 logger = logging.getLogger(__name__)
 
@@ -28,13 +30,17 @@ _MIN_ISI_SEC = DECOMP_MIN_ISI_SEC
 _KMEANS_ITER = 10
 DEDUP_MAXLAG_RATIO: int = 40
 DEDUP_JITTER: float = 0.00025
+_CHUNK_BYTES = 32 * 1024 * 1024
+_FULL_TRACE_BATCH_BYTES = 64 * 1024 * 1024
 
 __all__ = [
     "DEDUP_JITTER",
     "DEDUP_MAXLAG_RATIO",
     "FIXED_POINT_MAXITER",
     "batch_process_filters",
+    "column_energy",
     "compute_silhouette",
+    "covariance",
     "extend_signal",
     "fixed_point_alg",
     "get_spikes",
@@ -43,12 +49,50 @@ __all__ = [
     "rem_duplicates",
     "subtract_mu_waveforms",
     "whiten_extended_signal",
+    "whiten_inplace",
 ]
 
 
-def pca_extended_signal(signal: FloatArray) -> tuple[FloatArray, FloatArray]:
+def _chunk_cols(n_rows: int) -> int:
+    """Columns per chunk so one float64 chunk stays near ``_CHUNK_BYTES``."""
+    return max(1, _CHUNK_BYTES // (8 * max(1, n_rows)))
+
+
+def _column_chunks(
+    n_cols: int, n_rows: int, columns: IntArray | None = None
+) -> list[slice] | list[IntArray]:
+    """Split all columns, or the given column indices, into memory-bounded chunks."""
+    step = _chunk_cols(n_rows)
+    if columns is None:
+        return [slice(c, min(c + step, n_cols)) for c in range(0, n_cols, step)]
+    return [columns[c : c + step] for c in range(0, columns.size, step)]
+
+
+def covariance(signal: FloatArray, columns: IntArray | None = None) -> FloatArray:
+    """Biased row covariance of ``signal`` (or of its ``columns``), built in column chunks."""
+    n_rows, n_cols = signal.shape
+    chunks = _column_chunks(n_cols, n_rows, columns)
+    n = n_cols if columns is None else columns.size
+    if columns is None:
+        mean = signal.mean(axis=1)
+    else:
+        mean = np.zeros(n_rows)
+        for cols in chunks:
+            mean += signal[:, cols].sum(axis=1)
+        mean /= n
+    cov = np.zeros((n_rows, n_rows))
+    for cols in chunks:
+        block = signal[:, cols] - mean[:, None]
+        cov += block @ block.T
+    cov /= n
+    return cov
+
+
+def pca_extended_signal(
+    signal: FloatArray, columns: IntArray | None = None
+) -> tuple[FloatArray, FloatArray]:
     """Estimate PCA basis/eigenvalues for extended signal whitening."""
-    cov_matrix = np.cov(signal, bias=True)
+    cov_matrix = covariance(signal, columns)
     eigenvalues, eigenvectors = eigh(cov_matrix)
 
     idx = np.argsort(eigenvalues)[::-1]
@@ -79,14 +123,33 @@ def whiten_extended_signal(
     signal: FloatArray,
     eigenvectors: FloatArray,
     eigenvalues_diag: FloatArray,
+    inplace: bool = False,
 ) -> tuple[FloatArray, FloatArray]:
     """Whiten extended signal and return the whitening matrix."""
     inv_sqrt_d = inv(np.sqrt(eigenvalues_diag))
 
     whitening_matrix = eigenvectors @ inv_sqrt_d @ eigenvectors.T
-    whiten_signals = whitening_matrix @ signal
+    if not inplace:
+        return whitening_matrix @ signal, whitening_matrix
+    return whiten_inplace(signal, whitening_matrix), whitening_matrix
 
-    return whiten_signals, whitening_matrix
+
+def whiten_inplace(signal: FloatArray, whitening_matrix: FloatArray) -> FloatArray:
+    """Overwrite ``signal`` with ``whitening_matrix @ signal``, one column chunk at a time."""
+    # Each output column depends only on the same input column, so chunks can
+    # be written back without a second full-size array.
+    for cols in _column_chunks(signal.shape[1], signal.shape[0]):
+        signal[:, cols] = whitening_matrix @ signal[:, cols]
+    return signal
+
+
+def column_energy(x: FloatArray) -> FloatArray:
+    """``np.sum(x * x, axis=0)`` without a full-size temporary (bit-identical)."""
+    out = np.empty(x.shape[1])
+    for cols in _column_chunks(x.shape[1], x.shape[0]):
+        block = x[:, cols]
+        out[cols] = np.sum(block * block, axis=0)
+    return out
 
 
 def fixed_point_alg(
@@ -240,25 +303,69 @@ def subtract_mu_waveforms(
     spikes: IntArray,
     fsamp: float,
     win: float,
-) -> FloatArray:
-    """Subtract averaged MU waveform estimate from multichannel signal."""
+) -> None:
+    """Subtract the averaged MU waveform from ``x`` at every spike, in place."""
     window_l = int(np.round(win * fsamp))
     n_cols = x.shape[1]
 
     spikes = np.asarray(spikes, dtype=int)
     valid_spikes = spikes[(spikes >= window_l) & (spikes < n_cols - window_l)]
     if valid_spikes.size == 0:
-        return x
+        return
 
     offsets = np.arange(-window_l, window_l + 1, dtype=int)
     idx = valid_spikes[:, None] + offsets[None, :]  # (n_spikes, window_size)
     waveforms = x[:, idx].mean(axis=1)  # (n_rows, window_size)
 
-    emg_temp = np.zeros_like(x)
     for s in valid_spikes:
-        emg_temp[:, s - window_l : s + window_l + 1] += waveforms
+        x[:, s - window_l : s + window_l + 1] -= waveforms
 
-    return x - emg_temp
+
+def _dewhitened_filters(
+    filters: FloatArray,
+    whiten_mat: FloatArray,
+    win_mean: FloatArray | None,
+    ex_factor: int,
+) -> tuple[FloatArray, FloatArray | None]:
+    """Filters applicable to the raw extension, and the cumulative window-mean correction."""
+    w_dewhite = whiten_mat.T @ filters  # (n_ext, n_mu)
+    if win_mean is None:
+        return w_dewhite, None
+    n_ch = win_mean.size
+    # Delay k of sample t sees win_mean only when t >= k, so the correction of the
+    # first ex_factor - 1 samples (recording start) is a partial sum.
+    per_delay = np.einsum("kcm,c->km", w_dewhite.reshape(ex_factor, n_ch, -1), win_mean)
+    return w_dewhite, np.cumsum(per_delay, axis=0)
+
+
+def _stream_full_trace(
+    source: StreamedExtender,
+    w_dewhite: FloatArray,
+    corr_cum: FloatArray | None,
+    out: FloatArray,
+    rows: IntArray,
+) -> None:
+    """Write the signed-squared projection of every filter over the whole trace into ``out[rows]``."""
+    step = max(source.ex_factor, _FULL_TRACE_BATCH_BYTES // (8 * source.n_extended))
+    last_delay = source.ex_factor - 1
+    for start in range(0, source.n_samples, step):
+        stop = min(start + step, source.n_samples)
+        pt = w_dewhite.T @ source.read(start, stop)
+        if corr_cum is not None:
+            pt -= corr_cum[np.minimum(np.arange(start, stop), last_delay)].T
+        out[rows, start:stop] = signed_square(pt)
+
+
+def _detect_row(pt: FloatArray, fsamp: float, artifact_mask: BoolArray | None) -> IntArray:
+    """Mask and detect one pulse train (global peak picking + k-means split)."""
+    if artifact_mask is not None:
+        pt[artifact_mask] = 0.0
+    spikes = find_refractory_peaks(pt, fsamp, min_isi_sec=POSTPROC_MIN_ISI_SEC)
+    if len(spikes) > 1:
+        spikes, _, _ = split_by_amplitude(pt, spikes, kmeans_iter=_KMEANS_ITER)
+    if artifact_mask is not None and len(spikes) > 0:
+        spikes = spikes[~artifact_mask[spikes]]
+    return spikes
 
 
 def batch_process_filters(
@@ -268,93 +375,91 @@ def batch_process_filters(
     ltime: int,
     fsamp: float,
     whiten_mat_by_window: dict[int, FloatArray] | None = None,
-    build_full_extended: Callable[[int], FloatArray] | None = None,
+    grid_data: Mapping[int, SampleSource] | None = None,
     window_to_grid: dict[int, int] | None = None,
     win_means_by_window: dict[int, FloatArray] | None = None,
     artifact_mask: BoolArray | None = None,
+    pulse_dtype: type[np.floating[Any]] = np.float32,
 ) -> tuple[FloatArray, list[IntArray]]:
-    """Apply MU filters across windows and reconstruct pulse trains/spike times."""
+    """Apply MU filters over their windows, or streamed over each grid's ``grid_data`` (full trace)."""
+    sorted_wins = sorted(mu_filters_by_window.keys())
+    first_row: dict[int, int] = {}
     total_mus = 0
-    for nwin in mu_filters_by_window:
+    for nwin in sorted_wins:
+        first_row[nwin] = total_mus
         if mu_filters_by_window[nwin].size > 0:
             total_mus += mu_filters_by_window[nwin].shape[1]
 
     if total_mus == 0:
         return np.array([]), []
 
-    pulse_t = np.zeros((total_mus, ltime))
-    distime = []
-
-    mu_nb = 0
-    sorted_wins = sorted(mu_filters_by_window.keys())
-
-    use_full = build_full_extended is not None and whiten_mat_by_window is not None
-    cur_grid: int | None = None
-    raw_ext: FloatArray | None = None
-
+    by_grid: dict[int, list[int]] = {}
     for nwin in sorted_wins:
-        filters = mu_filters_by_window[nwin]
-        n_filters = filters.shape[1]
-
-        if use_full:
-            assert build_full_extended is not None and whiten_mat_by_window is not None
+        if mu_filters_by_window[nwin].size > 0:
             g = window_to_grid[nwin] if window_to_grid is not None else 0
-            if g != cur_grid:
-                raw_ext = build_full_extended(g)
-                cur_grid = g
+            by_grid.setdefault(g, []).append(nwin)
+    ex_by_grid = {
+        g: mu_filters_by_window[wins[0]].shape[0] // grid_data[g].shape[0]
+        if grid_data is not None
+        else 1
+        for g, wins in by_grid.items()
+    }
+    mask_by_grid = {
+        g: None if artifact_mask is None else extend_mask(artifact_mask, ex)
+        for g, ex in ex_by_grid.items()
+    }
 
-        for j in range(n_filters):
-            current_filter = filters[:, j]
+    pulse_t = np.zeros((total_mus, ltime), dtype=pulse_dtype)
+    spikes_by_row: dict[int, IntArray] = {}
 
-            if use_full:
-                assert raw_ext is not None and whiten_mat_by_window is not None
-                w_dewhite = current_filter @ whiten_mat_by_window[nwin]
-                pt_full = w_dewhite @ raw_ext
-                if win_means_by_window is not None:
-                    win_mean = win_means_by_window[nwin]
-                    n_ch = win_mean.size
-                    ex_factor = w_dewhite.size // n_ch
-                    ext_cols = raw_ext.shape[1]
-                    n_samples = ext_cols - ex_factor + 1
-                    s = np.array(
-                        [w_dewhite[k * n_ch : (k + 1) * n_ch] @ win_mean for k in range(ex_factor)]
-                    )
-                    corr = np.zeros(ext_cols)
-                    for k in range(ex_factor):
-                        corr[k : n_samples + k] += s[k]
-                    pt_full = pt_full - corr
-                pulse_t[mu_nb, :ltime] = pt_full[:ltime]
-            else:
-                start = coordinates[nwin * 2]
-                w_win = (
-                    whitened_windows(nwin) if callable(whitened_windows) else whitened_windows[nwin]
+    if grid_data is not None and whiten_mat_by_window is not None:
+        for g, wins in by_grid.items():
+            source = StreamedExtender(grid_data[g], ex_by_grid[g])
+            w_parts: list[FloatArray] = []
+            corr_parts: list[FloatArray] = []
+            rows: list[IntArray] = []
+            for nwin in wins:
+                filters = mu_filters_by_window[nwin]
+                w_dewhite, corr_cum = _dewhitened_filters(
+                    filters,
+                    whiten_mat_by_window[nwin],
+                    win_means_by_window[nwin] if win_means_by_window is not None else None,
+                    source.ex_factor,
                 )
-                segment_len = w_win.shape[1]
-                pt_segment = np.dot(current_filter, w_win)
-                pulse_t[mu_nb, start : start + segment_len] = pt_segment[: ltime - start]
-
-            pulse_t[mu_nb, :] = signed_square(pulse_t[mu_nb, :])
-            if artifact_mask is not None:
-                pulse_t[mu_nb, artifact_mask] = 0.0
-            spikes = find_refractory_peaks(
-                pulse_t[mu_nb, :], fsamp, min_isi_sec=POSTPROC_MIN_ISI_SEC
+                w_parts.append(w_dewhite)
+                if corr_cum is not None:
+                    corr_parts.append(corr_cum)
+                rows.append(first_row[nwin] + np.arange(filters.shape[1]))
+            unit_rows = np.concatenate(rows)
+            _stream_full_trace(
+                source,
+                np.hstack(w_parts),
+                np.hstack(corr_parts) if corr_parts else None,
+                pulse_t,
+                unit_rows,
             )
+            for mu_nb in unit_rows:
+                pt = pulse_t[mu_nb].astype(np.float64)
+                spikes_by_row[int(mu_nb)] = _detect_row(pt, fsamp, mask_by_grid[g])
+                pulse_t[mu_nb] = pt
+        return pulse_t, [spikes_by_row[i] for i in range(total_mus)]
 
-            if len(spikes) > 1:
-                high_spikes, _, _ = split_by_amplitude(
-                    pulse_t[mu_nb, :], spikes, kmeans_iter=_KMEANS_ITER
-                )
-                if artifact_mask is not None and len(high_spikes) > 0:
-                    high_spikes = high_spikes[~artifact_mask[high_spikes]]
-                distime.append(high_spikes)
-            else:
-                if artifact_mask is not None and len(spikes) > 0:
-                    spikes = spikes[~artifact_mask[spikes]]
-                distime.append(spikes)
+    for g, wins in by_grid.items():
+        for nwin in wins:
+            filters = mu_filters_by_window[nwin]
+            start = coordinates[nwin * 2]
+            w_win = whitened_windows(nwin) if callable(whitened_windows) else whitened_windows[nwin]
+            segment_len = w_win.shape[1]
+            for j in range(filters.shape[1]):
+                pt = np.zeros(ltime)
+                pt[start : start + segment_len] = (filters[:, j] @ w_win)[: ltime - start]
+                pt = signed_square(pt)
+                spikes_by_row[first_row[nwin] + j] = _detect_row(pt, fsamp, mask_by_grid[g])
+                pulse_t[first_row[nwin] + j] = pt
+            # Released before the next window is reconstructed, not when the name rebinds.
+            del w_win
 
-            mu_nb += 1
-
-    return pulse_t, distime
+    return pulse_t, [spikes_by_row[i] for i in range(total_mus)]
 
 
 def rem_duplicates(

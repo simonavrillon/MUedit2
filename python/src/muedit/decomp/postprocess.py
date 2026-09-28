@@ -17,6 +17,7 @@ from muedit.decomp.algorithm import (
     batch_process_filters,
     extend_signal,
     rem_duplicates,
+    whiten_inplace,
 )
 from muedit.decomp.decomposition_file import pack_object_array, save_decomposition_npz
 from muedit.decomp.preview import build_preview_payload
@@ -29,6 +30,7 @@ from muedit.decomp.types import (
 )
 from muedit.models import DecompositionExport, DecompositionSignalExport, FloatArray, IntArray
 from muedit.signal.filters import demean
+from muedit.signal.streaming import RowSelection
 
 logger = logging.getLogger(__name__)
 
@@ -102,8 +104,8 @@ def _reconstruct_window_signal(
     params: DecompositionParameters,
     win_global: int,
     whiten_mat: FloatArray,
-) -> tuple[FloatArray, FloatArray]:
-    """Recompute ``(win_data, w_sig)`` for one window from ``prep.data`` + ``whiten_mat``."""
+) -> FloatArray:
+    """Recompute the whitened window ``w_sig`` from ``prep.data`` + ``whiten_mat``."""
     nwindows = len(prep.roi_list)
     grid_idx = win_global // max(1, nwindows)
 
@@ -127,37 +129,7 @@ def _reconstruct_window_signal(
     e_sig = extend_signal(demean(win_data_arr), ex_factor)
     if trim_edges:
         e_sig = e_sig[:, edge_samples:-edge_samples]
-        win_data = win_data_arr[:, edge_samples:-edge_samples]
-    else:
-        win_data = win_data_arr
-
-    w_sig = whiten_mat @ e_sig
-    return win_data, w_sig
-
-
-def _make_window_reconstructors(
-    prep: PreprocessStepOutput,
-    params: DecompositionParameters,
-    decomposed: DecomposeStepOutput,
-) -> tuple[Callable[[int], FloatArray], Callable[[int], FloatArray]]:
-    """Return ``(get_win_data, get_w_sig)`` callables with a one-window cache."""
-    cache: dict[int, tuple[FloatArray, FloatArray]] = {}
-
-    def _get(nwin: int) -> tuple[FloatArray, FloatArray]:
-        if nwin not in cache:
-            cache.clear()
-            cache[nwin] = _reconstruct_window_signal(
-                prep, params, nwin, decomposed.whiten_mat[nwin]
-            )
-        return cache[nwin]
-
-    def get_win_data(nwin: int) -> FloatArray:
-        return _get(nwin)[0]
-
-    def get_w_sig(nwin: int) -> FloatArray:
-        return _get(nwin)[1]
-
-    return get_win_data, get_w_sig
+    return whiten_inplace(e_sig, whiten_mat)
 
 
 def postprocess_step(
@@ -173,30 +145,28 @@ def postprocess_step(
 
     nwindows = len(prep.roi_list)
     adaptive_losses: dict[int, Any] = {}
-    get_win_data, get_w_sig = _make_window_reconstructors(prep, params, decomposed)
+
+    def get_w_sig(nwin: int) -> FloatArray:
+        return _reconstruct_window_signal(prep, params, nwin, decomposed.whiten_mat[nwin])
+
+    # Kept channels of each grid, read batch by batch by the streamed passes.
+    grid_data: dict[int, RowSelection] = {}
+    ch_idx_g = 0
+    for i in range(prep.ngrid):
+        mask = np.array(prep.discard_channels[i]).astype(int)
+        grid_data[i] = RowSelection(prep.data, ch_idx_g + np.where(mask == 0)[0])
+        ch_idx_g += mask.size
 
     if params.use_adaptive:
-        grid_data: dict[int, FloatArray] = {}
-        ch_idx_g = 0
-        for i in range(prep.ngrid):
-            mask = np.array(prep.discard_channels[i]).astype(int)
-            n_ch_g = mask.size
-            keep_idx = np.where(mask == 0)[0]
-            raw = prep.data[ch_idx_g + keep_idx, :]
-            grid_data[i] = raw
-            ch_idx_g += n_ch_g
-
         pulse_t, distime, adaptive_losses = adaptive_batch_process(
             decomposed.mu_filters,
-            get_w_sig,
-            get_win_data,
             decomposed.whiten_mat,
             grid_data,
             decomposed.coordinates_plateau,
             prep.data.shape[1],
             prep.fsamp,
             nwindows,
-            win_means_by_window=decomposed.win_means,
+            decomposed.win_means,
             batch_ms=params.adapt_batch_ms,
             adapt_wh=params.adapt_wh,
             adapt_sv=params.adapt_sv,
@@ -208,41 +178,18 @@ def postprocess_step(
             artifact_mask=prep.artifact_mask,
         )
     else:
-        build_full_extended: Callable[[int], FloatArray] | None = None
-        window_to_grid: dict[int, int] | None = None
         if params.full_trace:
-            ch_idx_g = 0
-            keep_idx_by_grid: dict[int, IntArray] = {}
-            ch_offset_by_grid: dict[int, int] = {}
-            ex_factor_by_grid: dict[int, int] = {}
-            for i in range(prep.ngrid):
-                mask = np.array(prep.discard_channels[i]).astype(int)
-                n_ch_g = mask.size
-                keep_idx_by_grid[i] = np.where(mask == 0)[0]
-                ex_factor_by_grid[i] = int(
-                    round(params.nbextchan / max(1, keep_idx_by_grid[i].size))
-                )
-                ch_offset_by_grid[i] = ch_idx_g
-                ch_idx_g += n_ch_g
-
-            def _build_full_extended(grid_idx: int) -> FloatArray:
-                grid_raw = prep.data[ch_offset_by_grid[grid_idx] + keep_idx_by_grid[grid_idx], :]
-                return extend_signal(grid_raw, ex_factor_by_grid[grid_idx])
-
-            build_full_extended = _build_full_extended
-            window_to_grid = {nwin: nwin // max(1, nwindows) for nwin in decomposed.mu_filters}
             logger.info("Applying MU filters over the full trace (dewhitened).")
-
         pulse_t, distime = batch_process_filters(
             decomposed.mu_filters,
             get_w_sig,
             decomposed.coordinates_plateau,
             prep.data.shape[1],
             prep.fsamp,
-            whiten_mat_by_window=decomposed.whiten_mat if build_full_extended else None,
-            build_full_extended=build_full_extended,
-            window_to_grid=window_to_grid,
-            win_means_by_window=decomposed.win_means if build_full_extended else None,
+            whiten_mat_by_window=decomposed.whiten_mat if params.full_trace else None,
+            grid_data=grid_data,
+            window_to_grid={nwin: nwin // max(1, nwindows) for nwin in decomposed.mu_filters},
+            win_means_by_window=decomposed.win_means if params.full_trace else None,
             artifact_mask=prep.artifact_mask,
         )
 

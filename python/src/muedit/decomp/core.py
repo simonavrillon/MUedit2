@@ -10,6 +10,7 @@ import numpy as np
 
 from muedit.decomp.algorithm import (
     FIXED_POINT_MAXITER,
+    column_energy,
     compute_silhouette,
     extend_signal,
     fixed_point_alg,
@@ -84,8 +85,7 @@ def decompose_step(
                 coordinates_plateau[win_global * 2] += edge_samples
                 coordinates_plateau[win_global * 2 + 1] -= edge_samples
 
-            win_artifact = False
-            clean_cols: slice | IntArray = slice(None)
+            clean_cols: IntArray | None = None
             win_clean = None
             if prep.artifact_mask is not None:
                 win_mask_raw = np.asarray(prep.artifact_mask[start:end], dtype=bool)
@@ -96,33 +96,33 @@ def decompose_step(
                 if trim_edges:
                     win_mask_ext = win_mask_ext[edge_samples:-edge_samples]
                 if win_mask_ext.any() and not win_mask_ext.all():
-                    win_artifact = True
                     clean_cols = np.where(~win_mask_ext)[0]
                     win_clean = ~win_mask_ext
 
-            e_sig_clean = e_sig[:, clean_cols] if win_artifact else e_sig
-            eigenvectors, eigenvalues_diag = pca_extended_signal(e_sig_clean)
-            w_sig_win, whiten_mat_win = whiten_extended_signal(
-                e_sig, eigenvectors, eigenvalues_diag
+            eigenvectors, eigenvalues_diag = pca_extended_signal(e_sig, clean_cols)
+            # Whitened in place: e_sig becomes the private working copy that
+            # peel-off modifies, so the loop holds one extended-size array.
+            x, whiten_mat_win = whiten_extended_signal(
+                e_sig, eigenvectors, eigenvalues_diag, inplace=True
             )
             whiten_mat[win_global] = whiten_mat_win
 
-            basis = np.zeros((w_sig_win.shape[0], params.niter))
-            filter_matrix = np.zeros((w_sig_win.shape[0], params.niter))
+            basis = np.zeros((x.shape[0], params.niter))
+            filter_matrix = np.zeros((x.shape[0], params.niter))
             sil_scores = np.zeros(params.niter)
             cov_scores = np.zeros(params.niter)
             fitted = np.zeros(params.niter, dtype=bool)
-            x = w_sig_win
 
             use_activity_init = not params.initialization
             refractory = max(1, int(round(prep.fsamp * DECOMP_MIN_ISI_SEC)))
             consumed = np.zeros(x.shape[1] if use_activity_init else 0, dtype=bool)
+            energy = column_energy(x) if use_activity_init else None
 
             for j in range(params.niter):
                 w: FloatArray = rng.standard_normal(int(x.shape[0]))
 
-                if use_activity_init:
-                    act_ind = np.sum(x * x, axis=0)
+                if energy is not None:
+                    act_ind = energy.copy()
                     act_ind[consumed] = -1.0
                     if win_clean is not None:
                         act_ind[~win_clean] = -1.0
@@ -172,7 +172,9 @@ def decompose_step(
                     _, _, sil_val = compute_silhouette(x, w_final, prep.fsamp)
                     sil_scores[j] = sil_val
                     if params.peel_off_enabled and sil_val >= params.sil_thr:
-                        x = subtract_mu_waveforms(x, spikes_final, prep.fsamp, params.peel_off_win)
+                        subtract_mu_waveforms(x, spikes_final, prep.fsamp, params.peel_off_win)
+                        if energy is not None:
+                            energy = column_energy(x)
                 else:
                     basis[:, j] = w
 
@@ -196,6 +198,8 @@ def decompose_step(
             mu_filters[win_global] = filter_matrix[:, good_indices]
             sil_by_window[win_global] = sil_scores[good_indices].tolist()
             mu_grid_index.extend([i] * int(np.sum(good_indices)))
+            # Freed before the next window is extended, not when the names rebind.
+            del e_sig, x
 
             if progress_cb:
                 pct = min(90, int(10 + (win_global + 1) * span))

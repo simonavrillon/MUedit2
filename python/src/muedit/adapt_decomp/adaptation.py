@@ -3,18 +3,34 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
 
 from muedit.adapt_decomp.config import Config
-from muedit.signal.decomp_primitives import (
-    extend_signal,
-    find_refractory_peaks,
-    signed_square,
-)
+from muedit.signal.decomp_primitives import find_refractory_peaks, signed_square
+from muedit.signal.streaming import StreamedExtender
 
 logger = logging.getLogger(__name__)
+
+_CALIB_CHUNK = 4096
+
+#: ``sink(start, ipts, spikes)`` receives each processed segment: samples
+#: ``[start, start + len(ipts))``, ipts ``(n, n_mu)`` float32, spikes ``(n, n_mu)`` 0/1.
+BatchSink = Callable[[int, np.ndarray, np.ndarray], None]
+
+
+@dataclass
+class Calibration:
+    """Whitening covariance and loss baselines fitted once on the calibration window."""
+
+    whitening_covariance: np.ndarray
+    kl_div_calib_mean: float
+    kl_div_calib_std: float
+    contrast_calib_mean: np.ndarray | None = None
+    contrast_calib_std: np.ndarray | None = None
 
 
 class AdaptiveDecomp:
@@ -22,15 +38,16 @@ class AdaptiveDecomp:
 
     def __init__(
         self,
-        emg: np.ndarray,
+        emg: np.ndarray | StreamedExtender,
         whitening: np.ndarray,
         sep_vectors: np.ndarray,
         base_centr: np.ndarray,
         spikes_centr: np.ndarray,
-        emg_calib: np.ndarray,
+        emg_calib: np.ndarray | tuple[int, int] | Calibration,
         config: Config,
         artifact_mask: np.ndarray | None = None,
     ) -> None:
+        """Set up one pass; ``emg_calib`` is raw samples, a sample range of ``emg``, or a ``Calibration``."""
         self.config = config
         self.whitening = whitening.astype(np.float32, copy=True)
         self.sep_vectors = sep_vectors.astype(np.float32, copy=True)
@@ -41,22 +58,45 @@ class AdaptiveDecomp:
         self.n_extended = whitening.shape[0]
         self.identity = np.eye(self.n_extended, dtype=np.float32)
 
-        self.emg_extended = extend_signal(
-            emg.astype(np.float32), config.ex_factor, samples_first=True
-        )
-
-        self.artifact_mask: np.ndarray | None
-        if artifact_mask is not None:
-            n_ext_samples = self.emg_extended.shape[0]
-            self.artifact_mask = np.zeros(n_ext_samples, dtype=bool)
-            n = min(len(artifact_mask), n_ext_samples)
-            self.artifact_mask[:n] = artifact_mask[:n]
+        # A samples-first float32 extender carries its own artifact mask.
+        if isinstance(emg, StreamedExtender):
+            if emg.ex_factor != max(1, config.ex_factor):
+                raise ValueError("extender ex_factor differs from config.ex_factor")
+            self.source = emg
         else:
-            self.artifact_mask = None
+            self.source = StreamedExtender(
+                np.asarray(emg).T,
+                config.ex_factor,
+                dtype=np.float32,
+                samples_first=True,
+                artifact_mask=artifact_mask,
+            )
+        self.n_samples = self.source.n_samples
 
-        self._init_whitening_calibration(emg_calib.astype(np.float32), config)
-        if config.compute_loss:
-            self._init_contrast_calibration(emg_calib.astype(np.float32), config)
+        if isinstance(emg_calib, Calibration):
+            self.whitening_covariance = emg_calib.whitening_covariance.copy()
+            self.kl_div_calib_mean = emg_calib.kl_div_calib_mean
+            self.kl_div_calib_std = emg_calib.kl_div_calib_std
+            if config.compute_loss:
+                assert emg_calib.contrast_calib_mean is not None
+                assert emg_calib.contrast_calib_std is not None
+                self.contrast_calib_mean = emg_calib.contrast_calib_mean.copy()
+                self.contrast_calib_std = emg_calib.contrast_calib_std.copy()
+        elif isinstance(emg_calib, tuple):
+            self._calibrate(self.source, *emg_calib)
+        else:
+            calib = np.asarray(emg_calib, dtype=np.float32)
+            source = StreamedExtender(
+                calib.T, config.ex_factor, dtype=np.float32, samples_first=True
+            )
+            self._calibrate(source, 0, source.n_samples)
+        self.calibration = Calibration(
+            whitening_covariance=self.whitening_covariance.copy(),
+            kl_div_calib_mean=self.kl_div_calib_mean,
+            kl_div_calib_std=self.kl_div_calib_std,
+            contrast_calib_mean=getattr(self, "contrast_calib_mean", None),
+            contrast_calib_std=getattr(self, "contrast_calib_std", None),
+        )
 
         logger.info(
             "AdaptiveDecomp initialized: %d motor units, %d extended channels",
@@ -64,20 +104,33 @@ class AdaptiveDecomp:
             self.n_extended,
         )
 
-    def _init_whitening_calibration(self, emg_calib: np.ndarray, config: Config) -> None:
-        """Initialise whitening covariance from calibration batches and compute KL divergence stats."""
-        emg_extended = extend_signal(emg_calib, config.ex_factor, samples_first=True)
-        whitened_emg = emg_extended @ self.whitening.T
+    def _calibrate(self, source: StreamedExtender, start: int, stop: int) -> None:
+        """Fit the whitening covariance and loss baselines on ``source`` samples ``[start, stop)``."""
+        config = self.config
+        start = max(start, source.first_complete)
+        n = stop - start
 
-        batch_size = config.batch_size
-        warmup = config.ex_factor - 1
-        whitened_emg = whitened_emg[warmup:]
-        self.whitening_covariance = np.cov(whitened_emg.T).astype(np.float32)
+        # Whitened batches are summed in float64 rather than stacked, so the
+        # calibration never holds more than one chunk of the extended window.
+        total = np.zeros(self.n_extended)
+        outer = np.zeros((self.n_extended, self.n_extended))
+        for lo in range(start, stop, _CALIB_CHUNK):
+            whitened = (source.read(lo, min(lo + _CALIB_CHUNK, stop)) @ self.whitening.T).astype(
+                np.float64
+            )
+            total += whitened.sum(axis=0)
+            outer += whitened.T @ whitened
+        mean = total / n
+        self.whitening_covariance = ((outer - n * np.outer(mean, mean)) / max(n - 1, 1)).astype(
+            np.float32
+        )
 
         kl_divs: list[float] = []
-        for start_idx in range(0, len(whitened_emg) - batch_size + 1, batch_size):
-            batch = whitened_emg[start_idx : start_idx + batch_size]
-            batch_cov = np.cov(batch.T).astype(np.float32)
+        contrast_values: list[np.ndarray] = []
+        batch_size = config.batch_size
+        for lo in range(start, stop - batch_size + 1, batch_size):
+            whitened = self.whitening @ source.read(lo, lo + batch_size).T
+            batch_cov = np.cov(whitened).astype(np.float32)
             self.whitening_covariance = (
                 1 - config.cov_alpha
             ) * self.whitening_covariance + config.cov_alpha * batch_cov
@@ -85,6 +138,11 @@ class AdaptiveDecomp:
                 kl = self._kl_divergence()
                 if not np.isnan(kl):
                     kl_divs.append(kl)
+                ipts_batch = self._separate(whitened)
+                spikes_batch = self._detect_spikes(
+                    signed_square(ipts_batch), update_centroids=False
+                )
+                contrast_values.append(self._contrast_value(ipts_batch, spikes_batch))
 
         if config.compute_loss and kl_divs:
             self.kl_div_calib_mean = float(np.mean(kl_divs))
@@ -93,25 +151,8 @@ class AdaptiveDecomp:
             self.kl_div_calib_mean = 0.0
             self.kl_div_calib_std = 1.0
 
-    def _init_contrast_calibration(self, emg_calib: np.ndarray, config: Config) -> None:
-        """Compute contrast calibration stats (mean/std per MU) from the calibration segment."""
-        emg_extended = extend_signal(emg_calib, config.ex_factor, samples_first=True)
-        whitened = self.whitening @ emg_extended.T  # (n_extended, n_calib)
-
-        batch_size = config.batch_size
-        warmup = config.ex_factor - 1
-        n_batches = (emg_extended.shape[0] - warmup) // batch_size
-        contrast_values: list[np.ndarray] = []
-
-        for b in range(n_batches):
-            start = warmup + b * batch_size
-            end = start + batch_size
-            ipts_batch = (self.sep_vectors @ whitened[:, start:end]).T  # (batch, n_mu)
-            ipts_sq = signed_square(ipts_batch)
-            spikes_batch = self._detect_spikes(ipts_sq, update_centroids=False)
-            contrast = self._contrast_value(ipts_batch, spikes_batch)
-            contrast_values.append(contrast)
-
+        if not config.compute_loss:
+            return
         if contrast_values:
             arr = np.stack(contrast_values, axis=0)  # (n_batches, n_mu)
             self.contrast_calib_mean = np.nanmean(arr, axis=0).astype(np.float32)
@@ -121,15 +162,31 @@ class AdaptiveDecomp:
             self.contrast_calib_mean = np.zeros(self.n_motor_units, dtype=np.float32)
             self.contrast_calib_std = np.ones(self.n_motor_units, dtype=np.float32)
 
-    def run(self) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
-        """Process the full signal and return ipts, spikes, and per-batch losses."""
-        n_samples = self.emg_extended.shape[0]
-        batch_size = self.config.batch_size
-        n_batches = n_samples // batch_size
-        extension_factor = self.config.ex_factor
+    def _batch_bounds(self, start: int, stop: int, reverse: bool) -> list[tuple[int, int]]:
+        """Batches of ``[start, stop)`` in processing order; the partial one is processed last."""
+        bs = self.config.batch_size
+        n_full = (stop - start) // bs
+        if reverse:
+            bounds = [(stop - (k + 1) * bs, stop - k * bs) for k in range(n_full)]
+            partial = (start, stop - n_full * bs)
+        else:
+            bounds = [(start + k * bs, start + (k + 1) * bs) for k in range(n_full)]
+            partial = (start + n_full * bs, stop)
+        if partial[1] > partial[0]:
+            bounds.append(partial)
+        return bounds
 
-        ipts_output = np.zeros((n_samples, self.n_motor_units), dtype=np.float32)
-        spikes_output = np.zeros((n_samples, self.n_motor_units), dtype=np.int32)
+    def run(
+        self,
+        start: int = 0,
+        stop: int | None = None,
+        reverse: bool = False,
+        sink: BatchSink | None = None,
+    ) -> dict[str, Any]:
+        """Adapt over ``[start, stop)`` forward or backward; returns per-batch losses in processing order."""
+        stop = self.n_samples if stop is None else stop
+        bounds = self._batch_bounds(start, stop, reverse)
+        n_batches = len(bounds)
 
         wh_losses: np.ndarray | None = None
         sv_losses: np.ndarray | None = None
@@ -139,37 +196,48 @@ class AdaptiveDecomp:
             sv_losses = np.full((n_batches, self.n_motor_units), np.nan, dtype=np.float32)
             total_losses = np.full(n_batches, np.nan, dtype=np.float32)
 
-        for batch_idx in range(n_batches):
-            start_idx = batch_idx * batch_size
-            end_idx = (batch_idx + 1) * batch_size
-            skip = extension_factor - 1 if batch_idx == 0 else 0
+        for batch_idx, (batch_start, seg_end) in enumerate(bounds):
+            full_batch = seg_end - batch_start == self.config.batch_size
+            # The recording start has no look-back: it is never processed (zero output,
+            # no adaptation), and the partial batch never has a loss.
+            seg_start = max(batch_start, self.source.first_complete)
+            if seg_start >= seg_end:
+                continue
 
-            seg_start = start_idx + skip
-            seg_end = end_idx
+            # One read covers the batch and the sample on each side of it, the
+            # context find_peaks needs to see a discharge on a batch edge.
+            read_start = max(0, seg_start - 1)
+            ext = self.source.read(read_start, min(seg_end + 1, self.n_samples))
+            batch = ext[seg_start - read_start : seg_end - read_start]
+            batch_mask = self.source.mask(seg_start, seg_end)
+            batch_artifact = batch_mask is not None and bool(batch_mask.any())
 
-            batch_artifact = False
-            batch_mask: np.ndarray | None = None
-            if self.artifact_mask is not None:
-                batch_mask = self.artifact_mask[seg_start:seg_end]
-                batch_artifact = bool(batch_mask.any())
-
-            # Before _whiten, which updates the whitening in place: the padding
+            # Before _whiten, which updates the whitening in place: the context
             # must be projected with the same matrix as the batch it flanks.
-            edges = self._edge_ipts(seg_start, seg_end, n_samples)
+            edges = (
+                self._project(ext[:1]) if seg_start > 0 else None,
+                self._project(ext[-1:]) if seg_end < self.n_samples else None,
+            )
 
-            if batch_artifact:
-                whitened_batch = self.whitening @ self.emg_extended[seg_start:seg_end].T
+            if not full_batch:
+                whitened_batch = self.whitening @ batch.T
+                ipts_batch = self._separate(whitened_batch)
+                spikes_batch = self._detect_spikes_with_context(
+                    ipts_batch, edges, update_centroids=True
+                )
+                if batch_mask is not None:
+                    spikes_batch[batch_mask] = 0
+                if self.config.adapt_sv and not batch_artifact:
+                    self._update_separation_vectors(whitened_batch, ipts_batch, spikes_batch)
+            elif batch_artifact:
+                whitened_batch = self.whitening @ batch.T
                 ipts_batch = self._separate(whitened_batch)
                 spikes_batch = self._detect_spikes_with_context(
                     ipts_batch, edges, update_centroids=False
                 )
                 spikes_batch[batch_mask] = 0
-                if wh_losses is not None and sv_losses is not None and total_losses is not None:
-                    wh_losses[batch_idx] = np.nan
-                    sv_losses[batch_idx] = np.nan
-                    total_losses[batch_idx] = np.nan
             else:
-                whitened_batch = self._whiten(self.emg_extended[seg_start:seg_end])
+                whitened_batch = self._whiten(batch)
                 ipts_batch = self._separate(whitened_batch)
                 spikes_batch = self._detect_spikes_with_context(
                     ipts_batch, edges, update_centroids=True
@@ -188,39 +256,12 @@ class AdaptiveDecomp:
                 if self.config.adapt_sv:
                     self._update_separation_vectors(whitened_batch, ipts_batch, spikes_batch)
 
-            ipts_output[seg_start:seg_end] = ipts_batch
-            spikes_output[seg_start:seg_end] = spikes_batch
+            if sink is not None:
+                sink(seg_start, ipts_batch, spikes_batch)
 
-        remainder_samples = n_samples - n_batches * batch_size
-        if remainder_samples > 0:
-            start_idx = n_batches * batch_size
-            whitened_batch = self.whitening @ self.emg_extended[start_idx:].T
-            ipts_batch = (self.sep_vectors @ whitened_batch).T
-            # The trailing edge is the end of the signal, so only the leading
-            # sample can be recovered here.
-            edges = self._edge_ipts(start_idx, n_samples, n_samples)
-            spikes_batch = self._detect_spikes_with_context(
-                ipts_batch, edges, update_centroids=True
-            )
-            if self.artifact_mask is not None:
-                rm = self.artifact_mask[start_idx:]
-                spikes_batch[rm] = 0
-            if self.config.adapt_sv and not (
-                self.artifact_mask is not None and bool(self.artifact_mask[start_idx:].any())
-            ):
-                self._update_separation_vectors(whitened_batch, ipts_batch, spikes_batch)
-            ipts_output[start_idx:] = ipts_batch
-            spikes_output[start_idx:] = spikes_batch
-
-        losses: dict[str, Any] = {}
-        if self.config.compute_loss:
-            losses = {
-                "wh_loss": wh_losses,
-                "sv_loss": sv_losses,
-                "total_loss": total_losses,
-            }
-
-        return ipts_output, spikes_output, losses
+        if not self.config.compute_loss:
+            return {}
+        return {"wh_loss": wh_losses, "sv_loss": sv_losses, "total_loss": total_losses}
 
     def _whiten(self, emg_batch: np.ndarray) -> np.ndarray:
         """Apply whitening and optionally update the whitening matrix."""
@@ -243,23 +284,9 @@ class AdaptiveDecomp:
         """Project whitened signal through separation vectors."""
         return (self.sep_vectors @ whitened_signal).T
 
-    def _edge_ipts(
-        self, seg_start: int, seg_end: int, n_samples: int
-    ) -> tuple[np.ndarray | None, np.ndarray | None]:
-        """Project the samples flanking a batch, for peak-picking context only."""
-        # find_peaks needs a lower neighbour on both sides, so a discharge on the
-        # first or last sample of a batch is invisible to a pass seeing only that batch.
-        lo = (
-            self._separate(self.whitening @ self.emg_extended[seg_start - 1 : seg_start].T)
-            if seg_start > 0
-            else None
-        )
-        hi = (
-            self._separate(self.whitening @ self.emg_extended[seg_end : seg_end + 1].T)
-            if seg_end < n_samples
-            else None
-        )
-        return lo, hi
+    def _project(self, emg_rows: np.ndarray) -> np.ndarray:
+        """Project extended samples with the current whitening, without adapting."""
+        return self._separate(self.whitening @ emg_rows.T)
 
     def _detect_spikes_with_context(
         self,
@@ -400,7 +427,7 @@ def run_adaptive_decomposition(
     config: Config,
     artifact_mask: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
-    """Functional entry point for adaptive decomposition."""
+    """Functional entry point: one forward pass over an in-memory ``emg``, dense outputs."""
     model = AdaptiveDecomp(
         emg=emg,
         whitening=whitening,
@@ -411,4 +438,15 @@ def run_adaptive_decomposition(
         config=config,
         artifact_mask=artifact_mask,
     )
-    return model.run()
+    ipts = np.zeros((model.n_samples, model.n_motor_units), dtype=np.float32)
+    spikes = np.zeros((model.n_samples, model.n_motor_units), dtype=np.int32)
+
+    def _dense(start: int, ipts_batch: np.ndarray, spikes_batch: np.ndarray) -> None:
+        ipts[start : start + len(ipts_batch)] = ipts_batch
+        spikes[start : start + len(spikes_batch)] = spikes_batch
+
+    losses = model.run(sink=_dense)
+    if losses and model.n_samples % config.batch_size:
+        # The trailing partial batch never has a loss; keep one entry per full batch.
+        losses = {k: v[:-1] for k, v in losses.items()}
+    return ipts, spikes, losses

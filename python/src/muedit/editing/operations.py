@@ -73,7 +73,7 @@ def _recompute_spikes_in_window(
         if wm.size == (end - start) and wm.any():
             win_artifact_mask = wm
 
-    e_sig_pca = e_sig
+    pca_cols: IntArray | None = None
     if win_artifact_mask is not None:
         n_win = win_artifact_mask.size
         win_mask_ext = np.zeros(n_win + ex_factor - 1, dtype=bool)
@@ -82,16 +82,16 @@ def _recompute_spikes_in_window(
         if win_mask_ext.any() and not win_mask_ext.all():
             clean_cols = np.where(~win_mask_ext)[0]
             if len(clean_cols) > e_sig.shape[0]:
-                e_sig_pca = e_sig[:, clean_cols]
-    eigenvectors, eigenvalues_diag = pca_extended_signal(e_sig_pca)
-    w_sig, _ = whiten_extended_signal(e_sig, eigenvectors, eigenvalues_diag)
+                pca_cols = clean_cols
+    eigenvectors, eigenvalues_diag = pca_extended_signal(e_sig, pca_cols)
+    w_sig, _ = whiten_extended_signal(e_sig, eigenvectors, eigenvalues_diag, inplace=True)
 
     if use_peeloff and peeloff_spike_times:
         for other_spikes in peeloff_spike_times:
             local_spikes = np.asarray(other_spikes, dtype=int) - start
             local_spikes = local_spikes[(local_spikes >= edge) & (local_spikes < (win_len - edge))]
             if local_spikes.size > 0:
-                w_sig = subtract_mu_waveforms(w_sig, local_spikes, fsamp, peeloff_win)
+                subtract_mu_waveforms(w_sig, local_spikes, fsamp, peeloff_win)
 
     if artifact_times:
         local_artifacts = np.asarray(artifact_times, dtype=int) - start
@@ -99,7 +99,7 @@ def _recompute_spikes_in_window(
             (local_artifacts >= edge) & (local_artifacts < (win_len - edge))
         ]
         if local_artifacts.size > 0:
-            w_sig = subtract_mu_waveforms(w_sig, local_artifacts, fsamp, peeloff_win)
+            subtract_mu_waveforms(w_sig, local_artifacts, fsamp, peeloff_win)
 
     mu_filters = np.sum(w_sig[:, spikes2], axis=1)
     norm = float(np.linalg.norm(mu_filters))
