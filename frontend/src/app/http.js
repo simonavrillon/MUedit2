@@ -1,5 +1,20 @@
 /** @typedef {import("../app/context.js").JsonObject} JsonObject */
 
+export const SESSION_HEADER = "X-MUedit-Session";
+
+/** One id per tab: the backend scopes what it caches to it and frees it when the tab closes. */
+export const SESSION_ID = newSessionId();
+
+function newSessionId() {
+  if (typeof globalThis.crypto?.randomUUID === "function") {
+    return globalThis.crypto.randomUUID();
+  }
+  // randomUUID needs a secure context, which a plain-http LAN address is not.
+  return Array.from({ length: 32 }, () =>
+    Math.floor(Math.random() * 16).toString(16),
+  ).join("");
+}
+
 /**
  * @param {Response} res
  * @returns {Promise<string>}
@@ -45,8 +60,14 @@ async function parseApiError(res) {
 export async function apiFetch(url, options = {}, timeoutMs = 120000) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const headers = new Headers(options.headers);
+  headers.set(SESSION_HEADER, SESSION_ID);
   try {
-    const res = await fetch(url, { ...options, signal: controller.signal });
+    const res = await fetch(url, {
+      ...options,
+      headers,
+      signal: controller.signal,
+    });
     if (!res.ok) {
       throw new Error(await parseApiError(res));
     }

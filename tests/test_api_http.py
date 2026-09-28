@@ -27,6 +27,7 @@ N_CHANNELS = 64
 N_SAMPLES = 6000
 GRID = "GR08MM1305"
 API = "/api/v1"
+SESSION_HEADER = "X-MUedit-Session"
 
 LIVE_ENDPOINTS: list[tuple[str, str]] = [
     ("GET", "/health"),
@@ -46,6 +47,8 @@ LIVE_ENDPOINTS: list[tuple[str, str]] = [
     ("POST", "/edit/remove-outliers"),
     ("POST", "/edit/remove-duplicates"),
     ("POST", "/edit/flag-mu"),
+    ("POST", "/session/close"),
+    ("GET", "/debug/memory"),
 ]
 
 ENVELOPE_KEYS = {"data", "meta"}
@@ -135,9 +138,13 @@ def decomp_npz(workspace: Path, emg: np.ndarray) -> Path:
 
 @pytest.fixture(scope="module")
 def upload_token(client: TestClient, signal_mat: Path) -> str:
-    return _ok(client.post(f"{API}/preview-by-path", json={"path": str(signal_mat)}))[
-        "upload_token"
-    ]
+    # Fixtures load files in their own sessions, as separate tabs would: a session keeps one upload.
+    resp = client.post(
+        f"{API}/preview-by-path",
+        json={"path": str(signal_mat)},
+        headers={SESSION_HEADER: "fixture-upload"},
+    )
+    return _ok(resp)["upload_token"]
 
 
 @pytest.fixture(scope="module")
@@ -172,7 +179,12 @@ def mu_run(client: TestClient, workspace: Path) -> dict[str, Any]:
             }
         },
     )
-    token = _ok(client.post(f"{API}/preview-by-path", json={"path": str(path)}))["upload_token"]
+    resp = client.post(
+        f"{API}/preview-by-path",
+        json={"path": str(path)},
+        headers={SESSION_HEADER: "fixture-mu-run"},
+    )
+    token = _ok(resp)["upload_token"]
     resp = client.post(
         f"{API}/decompose_stream",
         data={
@@ -180,6 +192,7 @@ def mu_run(client: TestClient, workspace: Path) -> dict[str, Any]:
             "params": json.dumps({"niter": 10, "nbextchan": 400}),
             "full_preview": "true",
         },
+        headers={SESSION_HEADER: "fixture-mu-run"},
     )
     done = json.loads(resp.text.splitlines()[-1])
     assert done["stage"] == "done", done
@@ -193,7 +206,7 @@ def edit_signal_token(client: TestClient, decomp_npz: Path) -> str:
         client.post(
             f"{API}/edit/load-by-path",
             json={"path": str(decomp_npz)},
-            headers={"x-muedit-binary": "0"},
+            headers={"x-muedit-binary": "0", SESSION_HEADER: "fixture-edit"},
         )
     )
     return data["edit_signal_token"]
@@ -293,6 +306,65 @@ class TestRouteTable:
 
 def test_health(client: TestClient) -> None:
     assert _ok(client.get(f"{API}/health")) == {"status": "ok"}
+
+
+# ── /session/close, /debug/memory ────────────────────────────────────────────
+
+
+class TestSessions:
+    def _preview(self, client: TestClient, path: Path, session: str) -> str:
+        resp = client.post(
+            f"{API}/preview-by-path", json={"path": str(path)}, headers={SESSION_HEADER: session}
+        )
+        return _ok(resp)["upload_token"]
+
+    def _qc_auto(self, client: TestClient, token: str) -> Response:
+        return client.post(f"{API}/qc/auto", json={"upload_token": token})
+
+    def test_loading_the_next_file_releases_the_sessions_upload(
+        self, client: TestClient, signal_mat: Path
+    ) -> None:
+        first = self._preview(client, signal_mat, "tab-next-file")
+        second = self._preview(client, signal_mat, "tab-next-file")
+        _err(self._qc_auto(client, first), 400)
+        _ok(self._qc_auto(client, second))
+
+    def test_closing_a_session_drops_its_data(
+        self, client: TestClient, signal_mat: Path, upload_token: str
+    ) -> None:
+        token = self._preview(client, signal_mat, "tab-closing")
+        resp = client.post(f"{API}/session/close", params={"session": "tab-closing"})
+        assert resp.status_code == 204
+        _err(self._qc_auto(client, token), 400)
+        _ok(self._qc_auto(client, upload_token))
+        sessions = _ok(client.get(f"{API}/debug/memory"))["budget"]["sessions"]
+        assert "tab-closing" not in {s["id"] for s in sessions}
+
+    def test_malformed_session_ids_are_ignored(self, client: TestClient) -> None:
+        resp = client.post(f"{API}/session/close", params={"session": "../default"})
+        assert resp.status_code == 204
+        assert _err(client.post(f"{API}/session/close"), 422, "validation_error")
+
+    def test_a_request_with_a_session_makes_it_active(self, client: TestClient) -> None:
+        client.get(f"{API}/health", headers={SESSION_HEADER: "tab-active"})
+        budget = _ok(client.get(f"{API}/debug/memory"))["budget"]
+        assert budget["active_session"] == "tab-active"
+
+    def test_debug_memory(self, client: TestClient, upload_token: str) -> None:
+        data = _ok(client.get(f"{API}/debug/memory"))
+        assert data["process_bytes"] > 0
+        assert data["physical_memory_bytes"] > data["process_bytes"]
+        budget = data["budget"]
+        assert budget["limit_bytes"] == cache.BUDGET.limit_bytes
+        assert set(budget["caches"]) == {
+            "uploads",
+            "decompose_previews",
+            "run_results",
+            "edit_signal_contexts",
+        }
+        assert budget["used_bytes"] == sum(c["bytes"] for c in budget["caches"].values())
+        fixture = next(s for s in budget["sessions"] if s["id"] == "fixture-upload")
+        assert fixture["entries"] >= 1
 
 
 # ── /dialog/open-file ────────────────────────────────────────────────────────
@@ -851,6 +923,22 @@ class TestOriginAndHost:
             r = _preflight(c, "https://evil.example")
             assert r.status_code == 400
             assert "access-control-allow-origin" not in r.headers
+
+    def test_the_frontend_may_send_its_session_header(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        app, _ = _served_app(monkeypatch)
+        with TestClient(app, base_url="http://127.0.0.1:8000") as c:
+            r = c.options(
+                f"{API}/preview-by-path",
+                headers={
+                    "Origin": "http://localhost:8080",
+                    "Access-Control-Request-Method": "POST",
+                    "Access-Control-Request-Headers": "content-type,x-muedit-session",
+                },
+            )
+            assert r.status_code == 200
+            assert "x-muedit-session" in r.headers["access-control-allow-headers"].lower()
 
     def test_frontend_port_and_origin_overrides(self, monkeypatch: pytest.MonkeyPatch) -> None:
         app, _ = _served_app(monkeypatch, MUEDIT_FRONTEND_PORT="9090")

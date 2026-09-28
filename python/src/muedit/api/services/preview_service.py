@@ -12,6 +12,7 @@ from fastapi.responses import Response
 
 from muedit.api.cache import (
     _get_qc_signal,
+    _release_upload,
     _store_qc_signal,
     _store_upload_signal,
 )
@@ -20,6 +21,7 @@ from muedit.api.common import (
     parse_entity_label,
     require_existing_path,
 )
+from muedit.api.memory import DEFAULT_SESSION
 from muedit.api.schemas import QcAutoPayload, QcWindowPayload
 from muedit.api.services.bids_helpers import (
     _infer_bids_root_from_decomp_path,
@@ -67,12 +69,13 @@ def _encode_qc_raw_f32(
     return b"".join(parts)
 
 
-def _build_preview_core(filepath: str) -> dict[str, Any]:
+def _build_preview_core(filepath: str, session: str = DEFAULT_SESSION) -> dict[str, Any]:
     """Load signal, preprocess EMG grids, cache QC data, and build UI preview payload."""
+    _release_upload(session)
     signal = load_signal(filepath)
     # The cache stores its own copy, so filtering ``signal.data`` in place below
     # leaves the cached raw signal untouched.
-    upload_token = _store_upload_signal(signal, source_path=filepath)
+    upload_token = _store_upload_signal(signal, source_path=filepath, session=session)
     data = signal.data
     fsamp = signal.fsamp
 
@@ -132,7 +135,7 @@ def _decomp_artifact_error(field: str) -> HTTPException:
     )
 
 
-def build_preview_from_path(filepath: str) -> dict[str, Any]:
+def build_preview_from_path(filepath: str, session: str = DEFAULT_SESSION) -> dict[str, Any]:
     """Build preview payload from a file path already available on disk."""
     require_existing_path(filepath)
     try:
@@ -140,7 +143,7 @@ def build_preview_from_path(filepath: str) -> dict[str, Any]:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={"field": "path", "reason": str(exc)}) from exc
     try:
-        result = _build_preview_core(filepath)
+        result = _build_preview_core(filepath, session)
     except (OSError, ValueError) as exc:
         if "contains decomposition fields" in str(exc):
             raise _decomp_artifact_error("path") from exc

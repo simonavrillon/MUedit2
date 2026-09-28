@@ -2,7 +2,7 @@ import { API_BASE } from "../config.js";
 import { createApiClient } from "../api/client.js";
 import { createApp } from "./create-app.js";
 import { els } from "./dom.js";
-import { apiFetch, apiJson, waitForBackend } from "./http.js";
+import { apiFetch, apiJson, SESSION_ID, waitForBackend } from "./http.js";
 import { state } from "./state.js";
 import { setupEditEvents } from "./stages/edit-stage.js";
 import { setupImportEvents } from "./stages/import-stage.js";
@@ -13,7 +13,16 @@ export async function initializeApp() {
   const app = createApp({
     state,
     els,
-    api: createApiClient({ apiFetch, apiJson, API_BASE }),
+    api: createApiClient({
+      apiFetch,
+      apiJson,
+      API_BASE,
+      sessionId: SESSION_ID,
+    }),
+  });
+  window.addEventListener("pagehide", (event) => {
+    // A page kept in the back-forward cache can come back with its tokens.
+    if (!event.persisted) app.api.closeSession();
   });
   setupImportEvents(app);
   setupRunEvents(app);

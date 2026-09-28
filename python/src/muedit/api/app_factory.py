@@ -2,13 +2,25 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from muedit.api.cache import BUDGET
 from muedit.api.errors import register_exception_handlers
+
+
+@asynccontextmanager
+async def _sweep_caches(_app: FastAPI) -> AsyncIterator[None]:
+    """Sweep expired entries and idle sessions while the app runs."""
+    BUDGET.start_sweeper()
+    try:
+        yield
+    finally:
+        BUDGET.stop_sweeper()
 
 
 def create_app(
@@ -18,7 +30,7 @@ def create_app(
     allowed_hosts: Sequence[str] | None = None,
 ) -> FastAPI:
     """Create the FastAPI app with origin/host restrictions and canonical exception handlers."""
-    app = FastAPI(title=title, version=version)
+    app = FastAPI(title=title, version=version, lifespan=_sweep_caches)
     if allowed_origins:
         app.add_middleware(
             CORSMiddleware,

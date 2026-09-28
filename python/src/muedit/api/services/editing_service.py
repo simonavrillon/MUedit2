@@ -18,6 +18,7 @@ from muedit.api.cache import (
     _get_edit_signal_context,
     _get_edit_signal_context_by_label,
     _get_run_result,
+    _release_edit_signal_context,
     _store_edit_signal_context,
 )
 from muedit.api.common import (
@@ -26,6 +27,7 @@ from muedit.api.common import (
     require_existing_path,
 )
 from muedit.api.config import DATA_ROOT, resolve_bids_root
+from muedit.api.memory import DEFAULT_SESSION
 from muedit.api.schemas import (
     EditDeduplicatePayload,
     EditFilterPayload,
@@ -114,7 +116,7 @@ class EditLoadResult:
         return out
 
 
-def _load_edit_result(filepath: str) -> EditLoadResult:
+def _load_edit_result(filepath: str, session: str = DEFAULT_SESSION) -> EditLoadResult:
     if require_existing_path(filepath).suffix.lower() not in {".npz", ".mat"}:
         raise HTTPException(
             status_code=400,
@@ -123,12 +125,13 @@ def _load_edit_result(filepath: str) -> EditLoadResult:
                 "reason": "Unsupported decomposition format. Expected .mat or .npz",
             },
         )
+    _release_edit_signal_context(session)
     file_label = Path(filepath).name
     decomp = load_decomposition_file(filepath)
     result = EditLoadResult(decomposition=decomp, file_label=file_label)
     signal_ctx = load_decomposition_signal_context(filepath)
     if signal_ctx:
-        result.edit_signal_token = _store_edit_signal_context(signal_ctx, file_label)
+        result.edit_signal_token = _store_edit_signal_context(signal_ctx, file_label, session)
 
     bids_root = _infer_bids_root_from_decomp_path(filepath)
     if bids_root is not None:
@@ -139,10 +142,10 @@ def _load_edit_result(filepath: str) -> EditLoadResult:
             result.project = ""
         try:
             entity_label = parse_entity_label(file_label)
-            subject, session = _parse_subject_session_from_entity_label(entity_label)
+            subject, bids_session = _parse_subject_session_from_entity_label(entity_label)
             emg_dir = bids_root / f"sub-{subject}"
-            if session:
-                emg_dir = emg_dir / f"ses-{session}"
+            if bids_session:
+                emg_dir = emg_dir / f"ses-{bids_session}"
             emg_dir = emg_dir / "emg"
             channels_path = emg_dir / f"{entity_label}_channels.tsv"
             if not channels_path.exists():
@@ -181,14 +184,14 @@ def _load_edit_result(filepath: str) -> EditLoadResult:
     return result
 
 
-def load_decomposition_from_path(filepath: str) -> dict[str, Any]:
+def load_decomposition_from_path(filepath: str, session: str = DEFAULT_SESSION) -> dict[str, Any]:
     """Edit load as JSON, pulse matrix included."""
-    return make_json_safe(_load_edit_result(filepath).to_dict())
+    return make_json_safe(_load_edit_result(filepath, session).to_dict())
 
 
-def load_decomposition_binary_from_path(filepath: str) -> Response:
+def load_decomposition_binary_from_path(filepath: str, session: str = DEFAULT_SESSION) -> Response:
     """Edit load as a MUB1 frame: the JSON fields as metadata, the pulse matrix as float32."""
-    loaded = _load_edit_result(filepath).to_dict()
+    loaded = _load_edit_result(filepath, session).to_dict()
     pulse = np.asarray(loaded.pop("pulse_trains_full"))
     if pulse.ndim != 2:
         pulse = np.zeros((0, 0))

@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import Response
 from pydantic import ValidationError
 
 from muedit.api.binary import FRAME_MEDIA_TYPE, unpack_frame
+from muedit.api.common import request_session
 from muedit.api.contracts import success_payload
 from muedit.api.schemas import (
     EditDeduplicatePayload,
@@ -34,12 +35,12 @@ from muedit.api.services.editing_service import (
     update_filter,
 )
 
-router = APIRouter(prefix="/api/v1")
+router = APIRouter(prefix="/api/v1", dependencies=[Depends(request_session)])
 
 
 @router.post("/edit/load-by-path", response_model=None)
 async def load_decomposition_by_path_endpoint(
-    request: Request, payload: PathPayload
+    request: Request, payload: PathPayload, session: str = Depends(request_session)
 ) -> dict[str, Any] | Response:
     """Load a decomposition from an absolute/local path for edit mode."""
     path = payload.path
@@ -47,8 +48,8 @@ async def load_decomposition_by_path_endpoint(
         raise HTTPException(status_code=400, detail="path is required")
     wants_binary = request.headers.get("x-muedit-binary", "1") != "0"
     if wants_binary:
-        return load_decomposition_binary_from_path(path)
-    return success_payload(load_decomposition_from_path(path))
+        return load_decomposition_binary_from_path(path, session)
+    return success_payload(load_decomposition_from_path(path, session))
 
 
 @router.post(

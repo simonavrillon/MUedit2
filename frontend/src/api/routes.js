@@ -18,5 +18,6 @@ export const routes = {
   editFlagMu: "/edit/flag-mu",
   editLoadByPath: "/edit/load-by-path",
   dialogOpenFile: "/dialog/open-file",
+  sessionClose: "/session/close",
   health: "/health",
 };

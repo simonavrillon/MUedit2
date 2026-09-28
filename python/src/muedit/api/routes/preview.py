@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import Response
 
+from muedit.api.common import request_session
 from muedit.api.contracts import success_payload
 from muedit.api.schemas import PathPayload, QcAutoPayload, QcWindowPayload
 from muedit.api.services.preview_service import (
@@ -15,7 +16,7 @@ from muedit.api.services.preview_service import (
     run_auto_qc_on_token,
 )
 
-router = APIRouter(prefix="/api/v1")
+router = APIRouter(prefix="/api/v1", dependencies=[Depends(request_session)])
 
 
 @router.get("/health")
@@ -25,9 +26,11 @@ def health() -> dict[str, Any]:
 
 
 @router.post("/preview-by-path")
-def preview_by_path(payload: PathPayload) -> dict[str, Any]:
+def preview_by_path(
+    payload: PathPayload, session: str = Depends(request_session)
+) -> dict[str, Any]:
     """Build preview data from an existing file path on disk."""
-    return success_payload(build_preview_from_path(payload.path))
+    return success_payload(build_preview_from_path(payload.path, session))
 
 
 @router.post("/qc/window", response_model=None)

@@ -7,9 +7,20 @@ from pathlib import Path
 from typing import Any, get_args
 
 import numpy as np
-from fastapi import HTTPException
+from fastapi import Header, HTTPException
 
+from muedit.api.cache import BUDGET
+from muedit.api.memory import DEFAULT_SESSION, session_id_or_default
 from muedit.decomp.types import ContrastFunc, DecompositionParameters
+
+
+def request_session(x_muedit_session: str | None = Header(None)) -> str:
+    """The calling tab's session id; a request that sends one makes it the active session."""
+    if x_muedit_session is None:
+        return DEFAULT_SESSION
+    session = session_id_or_default(x_muedit_session)
+    BUDGET.touch(session)
+    return session
 
 
 def parse_json(raw: str | None, field_name: str) -> Any:

@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from muedit.api.routes.decompose import router as decompose_router
 from muedit.api.routes.dialog import router as dialog_router
 from muedit.api.routes.editing import router as editing_router
+from muedit.api.routes.memory import router as memory_router
 from muedit.api.routes.preview import router as preview_router
 
 __all__ = ["include_routers"]
@@ -18,3 +19,4 @@ def include_routers(app: FastAPI) -> None:
     app.include_router(decompose_router)
     app.include_router(editing_router)
     app.include_router(dialog_router)
+    app.include_router(memory_router)

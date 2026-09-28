@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Form, Request
+from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import Response, StreamingResponse
 
+from muedit.api.common import request_session
 from muedit.api.config import resolve_bids_root
 from muedit.api.services.decompose_service import (
     decomposition_event_stream,
@@ -13,7 +14,7 @@ from muedit.api.services.decompose_service import (
     resolve_decompose_input,
 )
 
-router = APIRouter(prefix="/api/v1")
+router = APIRouter(prefix="/api/v1", dependencies=[Depends(request_session)])
 
 
 @router.post("/decompose_stream")
@@ -33,6 +34,7 @@ async def decompose_stream(
     full_preview: bool = Form(False),
     upload_token: str | None = Form(None),
     artifact_regions: str | None = Form(None),
+    session: str = Depends(request_session),
 ) -> StreamingResponse:
     """Run decomposition and stream stage/progress events as NDJSON."""
     run_path, preloaded_signal = resolve_decompose_input(upload_token)
@@ -69,6 +71,7 @@ async def decompose_stream(
         preloaded_signal=preloaded_signal,
         binary_preview=wants_binary_preview,
         artifact_regions=artifact_region_list,
+        session=session,
     )
     return StreamingResponse(generator, media_type="application/x-ndjson")
 

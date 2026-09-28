@@ -18,9 +18,9 @@ import { normalizePreviewPayload } from "./payloads.js";
 /** @typedef {import("../app/context.js").JsonObject} JsonObject */
 
 /**
- * @param {{ apiFetch: typeof import("../app/http.js").apiFetch, apiJson: typeof import("../app/http.js").apiJson, API_BASE: string }} deps
+ * @param {{ apiFetch: typeof import("../app/http.js").apiFetch, apiJson: typeof import("../app/http.js").apiJson, API_BASE: string, sessionId: string }} deps
  */
-export function createApiClient({ apiFetch, apiJson, API_BASE }) {
+export function createApiClient({ apiFetch, apiJson, API_BASE, sessionId }) {
   /**
    * @param {string} url
    * @param {JsonObject} body
@@ -105,6 +105,15 @@ export function createApiClient({ apiFetch, apiJson, API_BASE }) {
       return normalizePreviewPayload(
         decodeDecomposePreviewPayload(buf, res.headers.get("x-muedit-format")),
       );
+    },
+
+    /**
+     * Frees what the backend holds for this tab. A beacon, because a normal
+     * request may not get out while the page is being unloaded.
+     */
+    closeSession() {
+      const query = `session=${encodeURIComponent(sessionId)}`;
+      return navigator.sendBeacon(`${API_BASE}${routes.sessionClose}?${query}`);
     },
 
     openFileDialog() {

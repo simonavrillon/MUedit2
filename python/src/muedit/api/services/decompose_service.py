@@ -31,6 +31,7 @@ from muedit.api.common import (
     parse_rois,
     summarize_result,
 )
+from muedit.api.memory import DEFAULT_SESSION
 from muedit.decomp.pipeline import run_decomposition
 from muedit.models import SignalImport
 
@@ -81,6 +82,7 @@ def decomposition_event_stream(
     preloaded_signal: SignalImport | None = None,
     binary_preview: bool = False,
     artifact_regions: list[tuple[int, int]] | None = None,
+    session: str = DEFAULT_SESSION,
 ) -> Iterator[str]:
     """Yield NDJSON progress events while decomposition executes in background thread."""
     q: queue.Queue[dict[str, Any] | None] = queue.Queue()
@@ -123,12 +125,14 @@ def decomposition_event_stream(
                 preview_payload = make_json_safe(
                     {k: v for k, v in preview_raw.items() if k not in PREVIEW_PULSE_KEYS}
                 )
-                preview_payload["preview_binary_token"] = _store_decomp_preview_binary(frame)
+                preview_payload["preview_binary_token"] = _store_decomp_preview_binary(
+                    frame, session
+                )
             else:
                 pulse_full = _as_matrix(preview_raw.get("pulse_trains_full")).astype(np.float32)
                 preview_payload = make_json_safe(preview_raw)
             if pulse_full.size:
-                preview_payload["run_result_token"] = _store_run_result(pulse_full)
+                preview_payload["run_result_token"] = _store_run_result(pulse_full, session)
             q.put(
                 {
                     "stage": "done",
