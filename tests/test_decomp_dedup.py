@@ -155,8 +155,7 @@ def _select_distinct_originals(
     for m in candidates:
         trial = [*selected, m]
         dist = [_gt_in_roi(sim, i) for i in trial]
-        pt = np.zeros((len(trial), n_samples))
-        _, _, kept = rem_duplicates(pt, dist, dist, maxlag, DEDUP_JITTER, tol, fsamp)
+        kept = rem_duplicates(dist, dist, maxlag, DEDUP_JITTER, tol, fsamp, n_samples)
         if len(kept) == len(trial):
             selected.append(m)
         if len(selected) >= n_needed:
@@ -263,9 +262,8 @@ class TestRemDuplicatesCore:
     MAXLAG = round(FSAMP / DEDUP_MAXLAG_RATIO)
 
     def _run(self, dist: list[np.ndarray]) -> tuple[int, list[int]]:
-        pt = np.zeros((len(dist), self.N_SAMPLES))
-        _, _, kept = rem_duplicates(
-            pt, dist, dist, self.MAXLAG, DEDUP_JITTER, _DEDUP_TOL, self.FSAMP
+        kept = rem_duplicates(
+            dist, dist, self.MAXLAG, DEDUP_JITTER, _DEDUP_TOL, self.FSAMP, self.N_SAMPLES
         )
         return len(kept), [int(k) for k in kept]
 

@@ -1,4 +1,4 @@
-"""Old-vs-new parity for the memory rewrites of the decomposition (plan stages 4-5)."""
+"""Old-vs-new parity for the memory rewrites of the decomposition (plan stages 4-7)."""
 
 from __future__ import annotations
 
@@ -15,8 +15,17 @@ from muedit.decomp.algorithm import (
     subtract_mu_waveforms,
     whiten_extended_signal,
 )
+from muedit.decomp.postprocess import remove_duplicates_by_grid
+from muedit.decomp.preview import abs_means
+from muedit.decomp.types import DecompositionParameters
 from muedit.models import FloatArray
 from muedit.signal.decomp_primitives import extend_signal
+from muedit.signal.filters import (
+    bandpass_inplace,
+    bandpass_signals,
+    notch_inplace,
+    notch_signals,
+)
 from muedit.signal.streaming import RowSelection, StreamedExtender, extend_mask
 from tests._synthetic_emg import motor_unit_emg
 
@@ -403,3 +412,150 @@ def test_streamed_calibration_matches_stacked_window(
     np.testing.assert_array_equal(
         shared.calibration.contrast_calib_mean, model.calibration.contrast_calib_mean
     )
+
+
+# ── Stage 6: duplicate removal on spike times ─────────────────────────────────
+
+
+def _legacy_rem_duplicates(
+    distime: list[np.ndarray], maxlag: int, jitter: float, tol: float, fsamp: float, l_sig: int
+) -> list[int]:
+    """The pre-stage-6 duplicate removal: jittered Python sets and a dense lag raster."""
+    jitter_samples = int(round(jitter * fsamp))
+    n_mus = len(distime)
+    jittered: list[np.ndarray] = []
+    for i in range(n_mus):
+        d_times = np.asarray(distime[i], dtype=int)
+        d_times = d_times[d_times < l_sig]
+        expanded_set = set(d_times.tolist())
+        for j in range(1, jitter_samples + 1):
+            expanded_set.update((d_times - j).tolist())
+            expanded_set.update((d_times + j).tolist())
+        expanded = np.array(list(expanded_set), dtype=int)
+        jittered.append(expanded[(expanded >= 0) & (expanded < l_sig)])
+
+    kept: list[int] = []
+    active = np.ones(n_mus, dtype=bool)
+    lags_vec = np.arange(-2 * maxlag, 2 * maxlag + 1)
+    for i in range(n_mus):
+        if not active[i] or len(jittered[i]) == 0:
+            continue
+        ref = jittered[i]
+        duplicates = [i]
+        ref_raster = np.zeros(l_sig, dtype=bool)
+        ref_raster[ref] = True
+        for j in range(i + 1, n_mus):
+            target = jittered[j]
+            if not active[j] or len(target) == 0:
+                continue
+            norm = np.sqrt(max(len(ref), 1) * max(len(target), 1))
+            shifted = target[:, None] + lags_vec[None, :]
+            valid = (shifted >= 0) & (shifted < l_sig)
+            overlap = (ref_raster[np.clip(shifted, 0, l_sig - 1)] & valid).sum(axis=0)
+            max_overlap = int(overlap.max())
+            best_lag = int(lags_vec[int(np.argmax(overlap))]) if max_overlap > 0 else 0
+            best_corr = max_overlap / norm if max_overlap > 0 else 0.0
+            aligned = target + best_lag if best_corr > 0.2 else target
+            common = np.intersect1d(ref, aligned)
+            n_common = 1 + int(np.count_nonzero(np.diff(common) != 1)) if len(common) else 0
+            longest = max(len(distime[i]), len(distime[j]))
+            if (n_common / longest if longest > 0 else 0) >= tol:
+                duplicates.append(j)
+        covs = [algorithm.isi_cov(distime[k], 1.0, fallback=100.0) for k in duplicates]
+        kept.append(duplicates[int(np.argmin(covs))])
+        active[duplicates] = False
+    return kept
+
+
+def _duplicate_trains(seed: int, n_samples: int, fsamp: float) -> list[np.ndarray]:
+    """Units plus lagged, jittered, thinned and merged copies, some spikes off the recording."""
+    rng = np.random.default_rng(seed)
+    jit = int(round(algorithm.DEDUP_JITTER * fsamp))
+    trains: list[np.ndarray] = []
+    for _ in range(6):
+        isi = rng.normal(fsamp / 12, fsamp / 60, size=int(n_samples / (fsamp / 12)) + 5)
+        base = np.cumsum(np.abs(isi)).astype(int) + int(rng.integers(-30, 30))
+        trains.append(base)
+        trains.append(base + int(rng.integers(-int(fsamp) // 20, int(fsamp) // 20)))
+        trains.append(np.sort(base + rng.integers(-jit - 1, jit + 2, size=base.size)))
+        trains.append(base[rng.random(base.size) > rng.uniform(0.1, 0.8)])
+    trains.append(np.sort(np.concatenate([trains[0], trains[4]])))
+    trains.append(np.array([], dtype=int))
+    order = rng.permutation(len(trains))
+    return [trains[k] for k in order]
+
+
+@pytest.mark.parametrize(("seed", "fsamp"), [(0, 2048.0), (1, 10240.0), (2, 4000.0)])
+@pytest.mark.parametrize("tol", [0.3, 0.6])
+def test_rem_duplicates_matches_dense_raster(seed: int, fsamp: float, tol: float) -> None:
+    n_samples = int(20 * fsamp)
+    trains = _duplicate_trains(seed, n_samples, fsamp)
+    maxlag = round(fsamp / algorithm.DEDUP_MAXLAG_RATIO)
+    want = _legacy_rem_duplicates(trains, maxlag, algorithm.DEDUP_JITTER, tol, fsamp, n_samples)
+    got = algorithm.rem_duplicates(
+        trains, trains, maxlag, algorithm.DEDUP_JITTER, tol, fsamp, n_samples
+    )
+    assert got == want
+    assert len(want) < len(trains) - 1
+
+
+def test_remove_duplicates_by_grid_indexes_the_pulse_matrix_once() -> None:
+    fsamp, n_samples = 2048.0, 40_960
+    trains = _duplicate_trains(5, n_samples, fsamp)
+    grids = [k % 2 for k in range(len(trains))]
+    pulse_t = np.random.default_rng(0).standard_normal((len(trains), n_samples))
+    params = DecompositionParameters(duplicatesbgrids=True)
+    maxlag = round(fsamp / algorithm.DEDUP_MAXLAG_RATIO)
+
+    per_grid: list[int] = []
+    per_grid_grids: list[int] = []
+    for g in (0, 1):
+        idx = [k for k, gk in enumerate(grids) if gk == g]
+        local = _legacy_rem_duplicates(
+            [trains[k] for k in idx], maxlag, algorithm.DEDUP_JITTER, 0.3, fsamp, n_samples
+        )
+        per_grid += [idx[k] for k in local]
+        per_grid_grids += [g] * len(local)
+    across = _legacy_rem_duplicates(
+        [trains[k] for k in per_grid], maxlag, algorithm.DEDUP_JITTER, 0.3, fsamp, n_samples
+    )
+    want = [per_grid[k] for k in across]
+
+    out, distime, gidx, kept = remove_duplicates_by_grid(pulse_t, trains, grids, 2, params, fsamp)
+    assert kept == want
+    assert gidx == [per_grid_grids[k] for k in across]
+    np.testing.assert_array_equal(out, pulse_t[want])
+    assert all(d is trains[k] for d, k in zip(distime, want, strict=True))
+
+
+# ── Stage 7: filters and previews by channel block ────────────────────────────
+
+
+@pytest.mark.parametrize("dtype", [np.float64, np.float32])
+def test_block_bandpass_is_bit_identical(dtype: type[np.floating]) -> None:
+    x = np.random.default_rng(0).standard_normal((21, 20_000)).astype(dtype)
+    for fsamp, emg_type in ((2048.0, 1), (10240.0, 2)):
+        y = x.copy()
+        bandpass_inplace(y, fsamp, emg_type)
+        np.testing.assert_array_equal(y, bandpass_signals(x, fsamp, emg_type).astype(dtype))
+
+
+@pytest.mark.parametrize("dtype", [np.float64, np.float32])
+def test_inplace_notch_is_bit_identical(dtype: type[np.floating]) -> None:
+    t = np.arange(20_001) / 2048.0
+    x = np.random.default_rng(1).standard_normal((5, t.size)) + 4 * np.sin(2 * np.pi * 50 * t)
+    x = x.astype(dtype)
+    y = x.copy()
+    notch_inplace(y, 2048.0)
+    np.testing.assert_array_equal(y, notch_signals(x, 2048.0))
+
+
+@pytest.mark.parametrize("dtype", [np.float64, np.float32])
+def test_row_by_row_abs_means_are_bit_identical(dtype: type[np.floating]) -> None:
+    rng = np.random.default_rng(2)
+    x = rng.standard_normal((37, 50_003)).astype(dtype)
+    keep = rng.random(37) > 0.3
+    per_sample, per_row = abs_means(x)
+    np.testing.assert_array_equal(per_sample, np.mean(np.abs(x), axis=0))
+    np.testing.assert_array_equal(per_row, np.mean(np.abs(x), axis=1))
+    np.testing.assert_array_equal(abs_means(x, keep)[0], np.mean(np.abs(x[keep]), axis=0))

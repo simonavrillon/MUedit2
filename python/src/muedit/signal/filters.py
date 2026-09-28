@@ -15,22 +15,74 @@ def demean(signal: FloatArray) -> FloatArray:
     return signal - np.mean(signal, axis=1, keepdims=True)
 
 
-def bandpass_signals(signal: FloatArray, fsamp: float, emg_type: int = 1) -> FloatArray:
-    """Zero-phase Butterworth bandpass: emg_type=1 → 20–500 Hz (surface), 2 → 100–4400 Hz (intramuscular)."""
+FILTER_BLOCK_ROWS: int = 8
+
+
+def _bandpass_coefficients(fsamp: float, emg_type: int) -> tuple[FloatArray, FloatArray]:
+    """Butterworth (b, a) for the surface (1) or intramuscular (2) bandpass."""
     if emg_type == 1:
         if fsamp <= 1000:
             raise ValueError(
                 f"Surface bandpass (20-500 Hz) requires fsamp > 1000 Hz; got {fsamp} Hz."
             )
-        b, a = butter(2, [20, 500], btype="bandpass", fs=fsamp)
-    else:
-        if fsamp <= 8800:
-            raise ValueError(
-                f"Intramuscular bandpass (100-4400 Hz) requires fsamp > 8800 Hz; got {fsamp} Hz."
-            )
-        b, a = butter(3, [100, 4400], btype="bandpass", fs=fsamp)
+        return butter(2, [20, 500], btype="bandpass", fs=fsamp)
+    if fsamp <= 8800:
+        raise ValueError(
+            f"Intramuscular bandpass (100-4400 Hz) requires fsamp > 8800 Hz; got {fsamp} Hz."
+        )
+    return butter(3, [100, 4400], btype="bandpass", fs=fsamp)
 
+
+def bandpass_signals(signal: FloatArray, fsamp: float, emg_type: int = 1) -> FloatArray:
+    """Zero-phase Butterworth bandpass: emg_type=1 → 20–500 Hz (surface), 2 → 100–4400 Hz (intramuscular)."""
+    b, a = _bandpass_coefficients(fsamp, emg_type)
     return filtfilt(b, a, signal, axis=-1)
+
+
+def bandpass_inplace(signal: FloatArray, fsamp: float, emg_type: int = 1) -> None:
+    """``bandpass_signals`` written back into ``signal``, a few rows at a time."""
+    # filtfilt filters each row on its own, so per-block results are bit-identical.
+    b, a = _bandpass_coefficients(fsamp, emg_type)
+    for lo in range(0, signal.shape[0], FILTER_BLOCK_ROWS):
+        rows = slice(lo, lo + FILTER_BLOCK_ROWS)
+        signal[rows] = filtfilt(b, a, signal[rows], axis=-1)
+
+
+def _notch_params(fsamp: float, n_samples: int) -> tuple[int, int]:
+    """Harmonic half-width ``frad`` and median window, both in FFT bins."""
+    frad = int(round(4 / (fsamp / n_samples)))
+    window = max(1, int(round(NOTCH_WINDOW_HZ * n_samples / fsamp)))
+    return frad, window
+
+
+def _remove_line_interference(x: FloatArray, frad: int, window: int) -> FloatArray:
+    """Remove interference from a single-channel signal."""
+    fsignal = np.fft.fft(x)
+    fcorrec = np.zeros_like(fsignal, dtype=complex)
+
+    tstamp: list[int] = []
+
+    for start in range(0, len(fsignal) - window, window):
+        segment = fsignal[start + 1 : start + window + 1]
+        median_freq = np.median(np.abs(segment))
+        std_freq = np.std(np.abs(segment))
+        tstamp2 = np.where(np.abs(segment) > median_freq + 5 * std_freq)[0] + start + 1
+        for j in range(-int(np.floor(frad / 2)), int(np.floor(frad / 2)) + 1):
+            if tstamp2.size:
+                tstamp.extend(list(tstamp2 + j))
+
+    tstamp_arr = np.array(tstamp, dtype=int)
+    tstamp_arr = tstamp_arr[(tstamp_arr > 0) & (tstamp_arr <= len(fsignal) // 2 + 1)]
+    if tstamp_arr.size:
+        fcorrec[tstamp_arr] = fsignal[tstamp_arr]
+
+    n = len(fsignal)
+    correc = n - (n // 2) * 2
+    upper = int(np.ceil(n / 2))
+    for idx in range(1, upper + 1 - correc):
+        fcorrec[-idx] = np.conj(fcorrec[idx])
+
+    return np.real(x - np.fft.ifft(fcorrec))
 
 
 def notch_signals(signal: FloatArray, fsamp: float) -> FloatArray:
@@ -38,41 +90,18 @@ def notch_signals(signal: FloatArray, fsamp: float) -> FloatArray:
     if signal.size == 0:
         return signal
 
-    n_channels, n_samples = signal.shape
-    frad = int(round(4 / (fsamp / n_samples)))
-    window = max(1, int(round(NOTCH_WINDOW_HZ * n_samples / fsamp)))
-
-    def _remove_line_interference(x: FloatArray) -> FloatArray:
-        """Remove interference from a single-channel signal."""
-        fsignal = np.fft.fft(x)
-        fcorrec = np.zeros_like(fsignal, dtype=complex)
-
-        tstamp: list[int] = []
-
-        for start in range(0, len(fsignal) - window, window):
-            segment = fsignal[start + 1 : start + window + 1]
-            median_freq = np.median(np.abs(segment))
-            std_freq = np.std(np.abs(segment))
-            tstamp2 = np.where(np.abs(segment) > median_freq + 5 * std_freq)[0] + start + 1
-            for j in range(-int(np.floor(frad / 2)), int(np.floor(frad / 2)) + 1):
-                if tstamp2.size:
-                    tstamp.extend(list(tstamp2 + j))
-
-        tstamp_arr = np.array(tstamp, dtype=int)
-        tstamp_arr = tstamp_arr[(tstamp_arr > 0) & (tstamp_arr <= len(fsignal) // 2 + 1)]
-        if tstamp_arr.size:
-            fcorrec[tstamp_arr] = fsignal[tstamp_arr]
-
-        n = len(fsignal)
-        correc = n - (n // 2) * 2
-        upper = int(np.ceil(n / 2))
-        for idx in range(1, upper + 1 - correc):
-            fcorrec[-idx] = np.conj(fcorrec[idx])
-
-        return np.real(x - np.fft.ifft(fcorrec))
-
+    frad, window = _notch_params(fsamp, signal.shape[1])
     filtered = np.zeros_like(signal)
-    for ch in range(n_channels):
-        filtered[ch, :] = _remove_line_interference(signal[ch, :])
+    for ch in range(signal.shape[0]):
+        filtered[ch, :] = _remove_line_interference(signal[ch, :], frad, window)
 
     return filtered
+
+
+def notch_inplace(signal: FloatArray, fsamp: float) -> None:
+    """``notch_signals`` written back into ``signal`` channel by channel."""
+    if signal.size == 0:
+        return
+    frad, window = _notch_params(fsamp, signal.shape[1])
+    for ch in range(signal.shape[0]):
+        signal[ch, :] = _remove_line_interference(signal[ch, :], frad, window)

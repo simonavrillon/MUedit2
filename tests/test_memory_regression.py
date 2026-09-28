@@ -48,7 +48,8 @@ EXT_WINDOW_MB = EXT_ROWS * ROI_SAMPLES * 8 / 1e6
 # smallest full-size array the stage must materialise.  The factors are the
 # tracemalloc baseline on this input plus 25% headroom, re-measured when a
 # memory-plan stage lowers them (stage 3: preprocess, edit_load, update_filter;
-# stages 4-5: decompose, update_filter and the three postprocess branches).  A
+# stages 4-5: decompose, update_filter and the three postprocess branches;
+# stages 6-7: preview, preprocess and save).  A
 # factor that grows means the stage started keeping an extra full copy.
 # Full-trace and adaptive stream the recording, so their budgets are no longer
 # multiples of the full-length extension: full-trace holds the float32 pulse
@@ -56,13 +57,13 @@ EXT_WINDOW_MB = EXT_ROWS * ROI_SAMPLES * 8 / 1e6
 
 BUDGETS_MB: dict[str, float] = {
     "load": 1.9 * RAW_MB,
-    "preview": 6.3 * RAW_MB,
+    "preview": 3.3 * RAW_MB,
     "qc_window": 3.2 * RAW_MB,
     "qc_auto": 5.7 * RAW_MB,
-    "preprocess": 5.0 * RAW_MB,
+    "preprocess": 1.75 * RAW_MB,
     "decompose": 1.55 * EXT_WINDOW_MB,
     "post_windowed": 1.45 * EXT_WINDOW_MB,
-    "save": 2.8 * RAW_MB,
+    "save": 1.55 * RAW_MB,
     "post_full": 1.6 * RAW_MB,
     "post_adaptive": 2.2 * RAW_MB,
     "edit_load": 2.0 * RAW_MB,

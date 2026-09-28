@@ -18,7 +18,7 @@ from muedit.io.bids import (
 )
 from muedit.io.factory import load_signal
 from muedit.models import BoolArray, FloatArray, IntArray, SignalImport
-from muedit.signal.filters import bandpass_signals, notch_signals
+from muedit.signal.filters import bandpass_inplace, notch_inplace
 from muedit.signal.grid import format_hdemg_signal
 from muedit.signal.qc_pipeline import run_auto_qc
 
@@ -160,9 +160,8 @@ def _apply_grid_notch_filters(
     ch_idx = 0
     for i in range(len(grid_names)):
         n_channels_grid = coordinates[i].shape[0]
-        grid_data = data[ch_idx : ch_idx + n_channels_grid, :]
         logger.info("Applying notch filter to Grid %d...", i + 1)
-        data[ch_idx : ch_idx + n_channels_grid, :] = notch_signals(grid_data, fsamp)
+        notch_inplace(data[ch_idx : ch_idx + n_channels_grid, :], fsamp)
         ch_idx += n_channels_grid
 
 
@@ -177,16 +176,13 @@ def _apply_grid_bandpass_filters(
     ch_idx = 0
     for i in range(len(grid_names)):
         n_channels_grid = coordinates[i].shape[0]
-        grid_data = data[ch_idx : ch_idx + n_channels_grid, :]
         current_type = emg_type[i] if i < len(emg_type) else 1
         logger.info(
             "Applying bandpass filter to Grid %d (Type %d)...",
             i + 1,
             current_type,
         )
-        data[ch_idx : ch_idx + n_channels_grid, :] = bandpass_signals(
-            grid_data, fsamp, emg_type=current_type
-        )
+        bandpass_inplace(data[ch_idx : ch_idx + n_channels_grid, :], fsamp, current_type)
         ch_idx += n_channels_grid
 
 

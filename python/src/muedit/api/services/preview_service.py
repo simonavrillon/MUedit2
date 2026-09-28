@@ -25,14 +25,14 @@ from muedit.api.services.bids_helpers import (
     _infer_bids_root_from_decomp_path,
     read_bids_sidecar_meta,
 )
-from muedit.decomp.preview import downsample_vector
+from muedit.decomp.preview import abs_means, downsample_vector
 from muedit.io.factory import get_loader, load_signal
 from muedit.signal.downsample import (
     PREVIEW_MOVING_AVG_MS,
     moving_average_ms,
     raw_series_at_fs,
 )
-from muedit.signal.filters import bandpass_signals
+from muedit.signal.filters import bandpass_inplace
 from muedit.signal.grid import format_hdemg_signal
 from muedit.signal.qc_pipeline import run_auto_qc
 
@@ -82,16 +82,13 @@ def _build_preview_core(filepath: str) -> dict[str, Any]:
     ch_idx = 0
     for i in range(len(grid_names)):
         n_channels_grid = coordinates[i].shape[0]
-        grid_data = data[ch_idx : ch_idx + n_channels_grid, :]
         current_type = emg_type[i] if i < len(emg_type) else 1
-        data[ch_idx : ch_idx + n_channels_grid, :] = bandpass_signals(
-            grid_data, fsamp, emg_type=current_type
-        )
+        bandpass_inplace(data[ch_idx : ch_idx + n_channels_grid, :], fsamp, current_type)
         ch_idx += n_channels_grid
 
     _store_qc_signal(upload_token, data, fsamp, grid_names, discard_channels)
 
-    mean_abs = moving_average_ms(np.mean(np.abs(data), axis=0), fsamp, PREVIEW_MOVING_AVG_MS)
+    mean_abs = moving_average_ms(abs_means(data)[0], fsamp, PREVIEW_MOVING_AVG_MS)
     mean_abs_downsampled = downsample_vector(mean_abs, fsamp)
 
     grid_means = []
@@ -99,12 +96,10 @@ def _build_preview_core(filepath: str) -> dict[str, Any]:
     ch_idx = 0
     for i in range(len(grid_names)):
         n_channels_grid = len(discard_channels[i])
-        grid_data = data[ch_idx : ch_idx + n_channels_grid, :]
-        grid_mean_abs = moving_average_ms(
-            np.mean(np.abs(grid_data), axis=0), fsamp, PREVIEW_MOVING_AVG_MS
-        )
+        grid_abs, grid_channel_means = abs_means(data[ch_idx : ch_idx + n_channels_grid, :])
+        grid_mean_abs = moving_average_ms(grid_abs, fsamp, PREVIEW_MOVING_AVG_MS)
         grid_means.append(downsample_vector(grid_mean_abs, fsamp))
-        channel_means.append(np.mean(np.abs(grid_data), axis=1).tolist())
+        channel_means.append(grid_channel_means.tolist())
         ch_idx += n_channels_grid
 
     return make_json_safe(

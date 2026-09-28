@@ -35,6 +35,52 @@ from muedit.signal.streaming import RowSelection
 logger = logging.getLogger(__name__)
 
 
+def dedup_survivors(
+    distime: list[IntArray],
+    mu_grid_index: list[int],
+    ngrid: int,
+    params: DecompositionParameters,
+    fsamp: float,
+    n_samples: int,
+) -> tuple[list[int], list[int]]:
+    """Indices of the MUs kept by duplicate removal within and across grids, in output order, and their grids."""
+    maxlag = round(fsamp / DEDUP_MAXLAG_RATIO)
+    kept: list[int] = []
+    kept_grids: list[int] = []
+
+    for g_idx in range(ngrid):
+        mu_indices = [idx for idx, g in enumerate(mu_grid_index) if g == g_idx]
+        if not mu_indices:
+            continue
+        dist_subset = [distime[idx] for idx in mu_indices]
+        kept_local = rem_duplicates(
+            dist_subset,
+            dist_subset,
+            maxlag,
+            DEDUP_JITTER,
+            params.duplicatesthresh,
+            fsamp,
+            n_samples,
+        )
+        kept.extend(mu_indices[l] for l in kept_local)
+        kept_grids.extend([g_idx] * len(kept_local))
+
+    if params.duplicatesbgrids and kept:
+        dist_kept = [distime[idx] for idx in kept]
+        kept_idx = rem_duplicates(
+            dist_kept,
+            dist_kept,
+            maxlag,
+            DEDUP_JITTER,
+            params.duplicatesthresh,
+            fsamp,
+            n_samples,
+        )
+        return [kept[i] for i in kept_idx], [kept_grids[i] for i in kept_idx]
+
+    return kept, kept_grids
+
+
 def remove_duplicates_by_grid(
     pulse_t: FloatArray,
     distime: list[IntArray],
@@ -47,56 +93,12 @@ def remove_duplicates_by_grid(
     if len(distime) == 0:
         return np.array([]), [], [], []
 
-    filtered_pulses = []
-    filtered_distime: list[IntArray] = []
-    filtered_grid_index: list[int] = []
-    global_indices: list[int] = []
     logger.info("Removing duplicates...")
-
-    for g_idx in range(ngrid):
-        mu_indices = [idx for idx, g in enumerate(mu_grid_index) if g == g_idx]
-        if not mu_indices:
-            continue
-        pulses_subset = pulse_t[mu_indices, :]
-        dist_subset = [distime[idx] for idx in mu_indices]
-        pulses_subset, dist_subset, kept_local = rem_duplicates(
-            pulses_subset,
-            dist_subset,
-            dist_subset,
-            round(fsamp / DEDUP_MAXLAG_RATIO),
-            DEDUP_JITTER,
-            params.duplicatesthresh,
-            fsamp,
-        )
-        if pulses_subset.size == 0:
-            continue
-        filtered_pulses.append(pulses_subset)
-        filtered_distime.extend(dist_subset)
-        filtered_grid_index.extend([g_idx] * pulses_subset.shape[0])
-        global_indices.extend(mu_indices[l] for l in kept_local)
-
-    if params.duplicatesbgrids and filtered_pulses:
-        combined_pulses = np.vstack(filtered_pulses)
-        combined_distime = filtered_distime
-        combined_pulses, combined_distime, kept_idx = rem_duplicates(
-            combined_pulses,
-            combined_distime,
-            combined_distime,
-            round(fsamp / DEDUP_MAXLAG_RATIO),
-            DEDUP_JITTER,
-            params.duplicatesthresh,
-            fsamp,
-        )
-        kept_global = [global_indices[i] for i in kept_idx]
-        return (
-            combined_pulses,
-            combined_distime,
-            [filtered_grid_index[i] for i in kept_idx],
-            kept_global,
-        )
-
-    pulse_t_out = np.vstack(filtered_pulses) if filtered_pulses else np.array([])
-    return pulse_t_out, filtered_distime, filtered_grid_index, global_indices
+    kept, kept_grids = dedup_survivors(
+        distime, mu_grid_index, ngrid, params, fsamp, pulse_t.shape[1]
+    )
+    pulse_t_out = pulse_t[kept] if kept else np.array([])
+    return pulse_t_out, [distime[idx] for idx in kept], kept_grids, kept
 
 
 def _reconstruct_window_signal(

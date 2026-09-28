@@ -6,7 +6,7 @@ from typing import Any
 
 import numpy as np
 
-from muedit.models import FloatArray, IntArray, SignalImport
+from muedit.models import BoolArray, FloatArray, IntArray, SignalImport
 
 
 def downsample_vector(
@@ -22,6 +22,25 @@ def downsample_vector(
         )
     step = max(1, int(np.round(source_fs / target_fs)))
     return vector[::step].astype(float).tolist()
+
+
+def abs_means(data: FloatArray, keep: BoolArray | None = None) -> tuple[FloatArray, FloatArray]:
+    """Mean of ``|data|`` over the kept rows per sample, and over samples per row, one row at a time."""
+    # Rows are accumulated in order, which is bit-identical to np.mean(np.abs(data),
+    # axis=0 / 1) for the C-contiguous arrays used here, without a full-size abs copy.
+    # Fortran-ordered input (e.g. MAT v7.3 or OTB loaders) can differ in the last ulp.
+    n_rows, n_samples = data.shape
+    dtype = data.dtype if np.issubdtype(data.dtype, np.floating) else np.dtype(np.float64)
+    row = np.empty(n_samples, dtype=dtype)
+    total = np.zeros(n_samples, dtype=dtype)
+    row_means = np.empty(n_rows, dtype=dtype)
+    for r in range(n_rows):
+        np.abs(data[r], out=row)
+        row_means[r] = row.mean()
+        if keep is None or keep[r]:
+            total += row
+    total /= n_rows if keep is None else int(np.count_nonzero(keep))
+    return total, row_means
 
 
 def build_preview_payload(
@@ -40,7 +59,7 @@ def build_preview_payload(
     include_full_preview: bool,
 ) -> dict[str, Any]:
     """Build the preview payload dict sent to the frontend after decomposition."""
-    preview_signal = np.mean(np.abs(data), axis=0)
+    preview_signal, _ = abs_means(data)
     pulse_preview: list[list[float]] = []
     pulse_preview_all: list[list[float]] = []
     pulse_full_all: FloatArray | list[list[float]] = []
@@ -84,12 +103,10 @@ def build_preview_payload(
     for i in range(len(grid_names)):
         mask = np.array(discard_channels[i]).astype(int)
         n_channels_grid = mask.size
-        keep_idx = np.where(mask == 0)[0]
         grid_block = data[ch_idx_tmp : ch_idx_tmp + n_channels_grid, :]
-        grid_data = grid_block[keep_idx, :]
-        grid_mean_abs = np.mean(np.abs(grid_data), axis=0)
+        grid_mean_abs, grid_channel_means = abs_means(grid_block, keep=mask == 0)
         grid_means.append(downsample_vector(grid_mean_abs, fsamp))
-        channel_means.append(np.mean(np.abs(grid_block), axis=1).tolist())
+        channel_means.append(grid_channel_means.tolist())
         ch_idx_tmp += n_channels_grid
 
     preview["grid_mean_abs"] = grid_means

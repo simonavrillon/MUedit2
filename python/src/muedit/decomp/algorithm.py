@@ -462,49 +462,47 @@ def batch_process_filters(
     return pulse_t, [spikes_by_row[i] for i in range(total_mus)]
 
 
+def _jittered_times(spikes: IntArray, jitter_samples: int, n_samples: int) -> IntArray:
+    """Sorted unique samples within ``jitter_samples`` of a spike, inside ``[0, n_samples)``."""
+    d = np.asarray(spikes, dtype=np.int64)
+    d = d[d < n_samples]
+    expanded = np.unique((d[:, None] + np.arange(-jitter_samples, jitter_samples + 1)).ravel())
+    return expanded[(expanded >= 0) & (expanded < n_samples)].astype(np.int32)
+
+
+def _lag_overlap(ref: IntArray, target: IntArray, max_lag: int) -> IntArray:
+    """Number of ``target`` samples that land on a ``ref`` sample, per lag in ``[-max_lag, max_lag]``."""
+    # Both are sorted and unique, so the count at a lag is the number of (ref, target)
+    # pairs that differ by it: only pairs within max_lag of each other are formed.
+    lo = np.searchsorted(ref, target - max_lag, side="left")
+    counts = np.searchsorted(ref, target + max_lag, side="right") - lo
+    pair_target = np.repeat(np.arange(target.size), counts)
+    pair_ref = np.repeat(lo - np.cumsum(counts) + counts, counts) + np.arange(counts.sum())
+    return np.bincount(ref[pair_ref] - target[pair_target] + max_lag, minlength=2 * max_lag + 1)
+
+
 def rem_duplicates(
-    pulse_t: FloatArray,
     distime: list[IntArray],
     distime_ref: list[IntArray] | None,
     maxlag: int,
     jitter: float,
     tol: float,
     fsamp: float,
-) -> tuple[FloatArray, list[IntArray], list[int]]:
-    """Remove duplicated motor units based on lag-aware spike-train overlap."""
+    n_samples: int,
+) -> list[int]:
+    """Indices of the motor units kept after removing duplicates by lag-aware spike-train overlap."""
 
     if distime_ref is None:
         distime_ref = distime
 
     jitter_samples = int(round(jitter * fsamp))
+    n_mus = len(distime)
+    jittered_distimes = [_jittered_times(d, jitter_samples, n_samples) for d in distime_ref]
 
-    n_mus = pulse_t.shape[0]
-    l_sig = pulse_t.shape[1]
-
-    jittered_distimes: list[IntArray] = []
     kept_indices: list[int] = []
-
-    for i in range(n_mus):
-        d_times = np.asarray(distime_ref[i], dtype=int)
-        if len(d_times) > 0:
-            d_times = d_times[d_times < l_sig]
-            expanded_set = set(d_times.tolist())
-            for j in range(1, jitter_samples + 1):
-                expanded_set.update((d_times - j).tolist())
-                expanded_set.update((d_times + j).tolist())
-
-            expanded = np.array(list(expanded_set), dtype=int)
-            expanded = expanded[(expanded >= 0) & (expanded < l_sig)]
-            jittered_distimes.append(expanded)
-        else:
-            jittered_distimes.append(np.array([]))
-
-    kept_pulses: list[FloatArray] = []
-    kept_distimes: list[IntArray] = []
     active_mus = np.ones(n_mus, dtype=bool)
 
     lag_gate = 0.2
-    lags_vec = np.arange(-2 * maxlag, 2 * maxlag + 1)
 
     for i in range(n_mus):
         if not active_mus[i]:
@@ -514,8 +512,6 @@ def rem_duplicates(
             logger.debug("rem_duplicates: skipping MU %d (empty spike train)", i)
             continue
         duplicates = [i]
-        ref_raster = np.zeros(l_sig, dtype=bool)
-        ref_raster[ref_expanded] = True
 
         for j in range(i + 1, n_mus):
             if not active_mus[j]:
@@ -524,19 +520,16 @@ def rem_duplicates(
             if len(target_expanded) == 0:
                 continue
             norm = np.sqrt(max(len(ref_expanded), 1) * max(len(target_expanded), 1))
-            shifted = target_expanded[:, None] + lags_vec[None, :]
-            valid = (shifted >= 0) & (shifted < l_sig)
-            overlap = (ref_raster[np.clip(shifted, 0, l_sig - 1)] & valid).sum(axis=0)
-            max_overlap = int(overlap.max()) if overlap.size else 0
+            overlap = _lag_overlap(ref_expanded, target_expanded, 2 * maxlag)
+            max_overlap = int(overlap.max())
             if max_overlap > 0:
-                best_idx = int(np.argmax(overlap))
-                best_lag = int(lags_vec[best_idx])
+                best_lag = int(np.argmax(overlap)) - 2 * maxlag
                 best_corr = max_overlap / norm if norm > 0 else 0.0
             else:
                 best_lag = 0
                 best_corr = 0.0
             aligned_target = target_expanded + best_lag if best_corr > lag_gate else target_expanded
-            common = np.intersect1d(ref_expanded, aligned_target)
+            common = np.intersect1d(ref_expanded, aligned_target, assume_unique=True)
             if len(common) > 0:
                 common = np.sort(common)
                 # Count runs of consecutive samples as one shared discharge.
@@ -557,13 +550,9 @@ def rem_duplicates(
             covs.append(cov)
 
         best_idx_local = int(np.argmin(covs))
-        best_idx = duplicates[best_idx_local]
-
-        kept_distimes.append(distime[best_idx])
-        kept_pulses.append(pulse_t[best_idx, :])
-        kept_indices.append(best_idx)
+        kept_indices.append(duplicates[best_idx_local])
 
         for idx_dup in duplicates:
             active_mus[idx_dup] = False
 
-    return np.array(kept_pulses), kept_distimes, kept_indices
+    return kept_indices

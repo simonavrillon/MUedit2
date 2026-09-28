@@ -60,7 +60,7 @@ from muedit.decomp.decomposition_file import (
     save_decomposition_npz,
     save_editlog,
 )
-from muedit.decomp.postprocess import remove_duplicates_by_grid
+from muedit.decomp.postprocess import dedup_survivors
 from muedit.decomp.preprocess import build_manual_artifact_mask
 from muedit.decomp.types import DEFAULT_PEEL_OFF_WIN_SEC, DecompositionParameters
 from muedit.editing.operations import (
@@ -211,13 +211,13 @@ def _dedup(
         duplicatesthresh=_coerce_dup_tol(parameters.get("duplicatesthresh", 0.3)),
         duplicatesbgrids=_coerce_bool_param(parameters.get("duplicatesbgrids", True)),
     )
-    _, _, _, kept = remove_duplicates_by_grid(
-        build_pulse_trains_from_distimes(distimes, total_samples),
+    kept, _ = dedup_survivors(
         [np.asarray(d, dtype=int) for d in distimes],
         mu_grid_index,
         max(mu_grid_index, default=0) + 1,
         params,
         fsamp,
+        total_samples,
     )
     return sorted(kept)
 
