@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import mmap
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any, TypeAlias, cast
@@ -23,13 +24,27 @@ BoolArray: TypeAlias = NDArray[np.bool_]
 
 
 def _as_2d_float_array(value: Any) -> FloatArray:
-    """Cast value to a 2-D float64 NumPy array, reshaping 1-D input to (1, n)."""
-    arr = np.asarray(value, dtype=float)
+    """Cast value to a 2-D float array, reshaping 1-D input to (1, n).
+
+    float32 input (loader output, memory-mapped or not) is kept without a copy;
+    anything else becomes float64.
+    """
+    arr = np.asarray(value)
+    if arr.dtype != np.float32:
+        arr = arr.astype(np.float64, copy=False)
     if arr.ndim == 1:
         arr = arr.reshape(1, -1)
     if arr.ndim == 0:
         return np.zeros((0, 0), dtype=float)
     return arr
+
+
+def resident_nbytes(arr: np.ndarray) -> int:
+    """Heap bytes ``arr`` holds: 0 for a view of a memory-mapped file, whose pages the OS manages."""
+    base: Any = arr
+    while isinstance(base, np.ndarray):
+        base = base.base
+    return 0 if isinstance(base, mmap.mmap) else int(arr.nbytes)
 
 
 def _readonly(arr: np.ndarray) -> np.ndarray:
@@ -59,7 +74,7 @@ def _ensure_channel_matrix(value: Any, n_samples: int) -> FloatArray:
         return arr
     if arr.shape[1] > n_samples:
         return arr[:, :n_samples]
-    pad = np.zeros((arr.shape[0], n_samples - arr.shape[1]), dtype=float)
+    pad = np.zeros((arr.shape[0], n_samples - arr.shape[1]), dtype=arr.dtype)
     return np.hstack([arr, pad])
 
 
@@ -156,8 +171,8 @@ class SignalImport:
 
     @property
     def nbytes(self) -> int:
-        """Resident size of the EMG and auxiliary arrays."""
-        return int(self.data.nbytes + self.auxiliary.nbytes)
+        """Heap size of the EMG and auxiliary arrays; memory-mapped ones count as 0."""
+        return resident_nbytes(self.data) + resident_nbytes(self.auxiliary)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialise to a plain dictionary suitable for JSON or cache storage."""

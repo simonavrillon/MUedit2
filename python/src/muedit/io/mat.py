@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 import h5py
 import numpy as np
 import scipy.io
 
+from muedit.io.store import ArrayStore, RamStore, sample_blocks, store_signal
 from muedit.models import SignalImport
 
 
@@ -132,7 +134,16 @@ def _raise_if_decomposition_signal_fields(field_names: set[str]) -> None:
         )
 
 
-def _load_mat73_signal(path: str) -> SignalImport:
+def _read_mat73_emg(node: h5py.Dataset, store: ArrayStore) -> np.ndarray:
+    """A numeric ``(samples, channels)`` v7.3 dataset as ``(channels, samples)`` float32, by slices."""
+    n_samples, n_channels = node.shape
+    data = store.allocate("emg", (n_channels, n_samples), np.float32)
+    for start, stop in sample_blocks(n_samples, n_channels):
+        data[:, start:stop] = node[start:stop, :].T
+    return store.seal(data)
+
+
+def _load_mat73_signal(path: str, store: ArrayStore) -> SignalImport:
     with h5py.File(path, "r") as h5f:
         if "signal" not in h5f:
             raise ValueError("Key 'signal' not found in MAT file.")
@@ -144,11 +155,16 @@ def _load_mat73_signal(path: str) -> SignalImport:
         def read_field(name: str, default: Any = None) -> Any:
             return mat73_read(signal_group[name], h5f) if name in signal_group else default
 
-        data = _parse_numeric_array(read_field("data"))
         # MATLAB v7.3 (HDF5) stores 2D arrays transposed (column-major).
         # scipy.io.loadmat (v5) handles this internally; h5py does not.
-        if data.ndim == 2:
-            data = data.T
+        node = signal_group.get("data")
+        in_store = isinstance(node, h5py.Dataset) and node.ndim == 2 and node.dtype.kind in "fiu"
+        if in_store:
+            data = _read_mat73_emg(node, store)
+        else:
+            data = _parse_numeric_array(read_field("data"))
+            if data.ndim == 2:
+                data = data.T
         n_samples = data.shape[1] if data.ndim == 2 else 0
 
         fsamp_raw = read_field("fsamp", 0.0)
@@ -164,7 +180,7 @@ def _load_mat73_signal(path: str) -> SignalImport:
 
         device_name = _parse_text(read_field("device_name")) or None
 
-        return SignalImport.build(
+        signal = SignalImport.build(
             data=data,
             fsamp=fsamp,
             gridname=parse_text_list(read_field("gridname")),
@@ -180,10 +196,19 @@ def _load_mat73_signal(path: str) -> SignalImport:
                 "software_filters": "n/a",
             },
         )
+        if in_store:
+            aux = store.allocate("aux", signal.auxiliary.shape, np.float32)
+            aux[...] = signal.auxiliary
+            return replace(signal, auxiliary=store.seal(aux))
+        return store_signal(signal, store)
 
 
-def load_mat(filepath: str) -> SignalImport:
-    """Load a MATLAB ``signal`` struct (v5 or v7.3) as a ``SignalImport``."""
+def load_mat(filepath: str, store: ArrayStore | None = None) -> SignalImport:
+    """Load a MATLAB ``signal`` struct (v5 or v7.3) as a ``SignalImport``, written into ``store``.
+
+    v7.3 EMG is read in slices; v5 is read whole by scipy, then copied into the store.
+    """
+    store = store if store is not None else RamStore()
     try:
         mat = scipy.io.loadmat(filepath, struct_as_record=False, squeeze_me=True)
         if "signal" in mat:
@@ -200,7 +225,7 @@ def load_mat(filepath: str) -> SignalImport:
 
             data = get_attr(signal_struct, "data")
             n_samples = data.shape[1] if data is not None else 0
-            return SignalImport.build(
+            signal = SignalImport.build(
                 data=data,
                 fsamp=get_attr(signal_struct, "fsamp"),
                 gridname=parse_text_list(get_attr(signal_struct, "gridname")),
@@ -212,14 +237,16 @@ def load_mat(filepath: str) -> SignalImport:
                     "software_versions": "MATLAB",
                 },
             )
+            del mat, signal_struct, data
+            return store_signal(signal, store)
         raise ValueError("Key 'signal' not found in MAT file.")
     except NotImplementedError as exc:
         if "matlab v7.3" not in str(exc).lower() and not h5py.is_hdf5(filepath):
             raise OSError(f"Failed to load MAT file: {exc}") from exc
-        return _load_mat73_signal(filepath)
+        return _load_mat73_signal(filepath, store)
     except ValueError as exc:
         if h5py.is_hdf5(filepath):
-            return _load_mat73_signal(filepath)
+            return _load_mat73_signal(filepath, store)
         raise OSError(f"Failed to load MAT file: {exc}") from exc
     except (OSError, TypeError, KeyError) as exc:
         raise OSError(f"Failed to load MAT file: {exc}") from exc

@@ -13,7 +13,8 @@ import pytest
 
 from muedit.io import load_signal
 from muedit.io.bids import export_bids_emg
-from muedit.models import SignalImport
+from muedit.io.store import SessionStore
+from muedit.models import SignalImport, resident_nbytes
 from muedit.signal.grid import format_hdemg_signal
 
 # Not a whole number of seconds at any fixture's sample rate: EDF/BDF stores
@@ -125,7 +126,7 @@ def test_loads_expected_recording(recording: tuple[Format, SignalImport]) -> Non
     fmt, si = recording
 
     assert si.data.shape[0] == fmt.n_channels
-    assert si.data.shape[1] > 0 and si.data.dtype == np.float64
+    assert si.data.shape[1] > 0 and si.data.dtype == np.float32
     assert float(np.std(si.data)) > 0, "loaded EMG is flat"
     assert si.fsamp == fmt.fsamp
     if isinstance(fmt.grids, int):
@@ -138,6 +139,22 @@ def test_loads_expected_recording(recording: tuple[Format, SignalImport]) -> Non
     assert len(si.auxiliaryname) == si.auxiliary.shape[0]
     for key, expected in fmt.metadata.items():
         assert si.metadata[key] == expected, key
+
+
+def test_session_store_load_matches_the_heap_load(
+    recording: tuple[Format, SignalImport], request: pytest.FixtureRequest
+) -> None:
+    """Loading into a session store writes the same float32 arrays, memory-mapped."""
+    fmt, heap = recording
+    store = SessionStore.create("formats")
+    try:
+        stored = load_signal(str(request.getfixturevalue(fmt.fixture)), store=store)
+        np.testing.assert_array_equal(stored.data, heap.data)
+        np.testing.assert_array_equal(stored.auxiliary, heap.auxiliary)
+        assert stored.auxiliaryname == heap.auxiliaryname
+        assert resident_nbytes(stored.data) == 0
+    finally:
+        store.close()
 
 
 def test_grids_fit_the_data(recording: tuple[Format, SignalImport]) -> None:

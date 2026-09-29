@@ -11,6 +11,7 @@ import pytest
 
 from muedit.api import cache
 from muedit.api.memory import SESSION_IDLE_SEC
+from muedit.io.store import SessionStore
 from muedit.models import EditSignalContext, SignalImport
 
 
@@ -368,3 +369,74 @@ class TestSessions:
         assert session["active"] is True
         assert session["entries"] == 3
         assert session["bytes"] == usage["used_bytes"]
+
+
+# ── T1 session stores owned by cache entries ─────────────────────────────────
+
+
+def _stored_upload(session: str = "tab-a") -> tuple[str, SessionStore]:
+    st = SessionStore.create("upload")
+    data = st.allocate("emg", (4, 100), np.float32)
+    data[:] = 1.0
+    signal = SignalImport(data=st.seal(data), fsamp=2000.0, gridname=["GR08MM1305"])
+    return cache._store_upload_signal(signal, session=session, store=st), st
+
+
+def _stored_run(session: str = "tab-a") -> tuple[str, SessionStore]:
+    st = SessionStore.create("run")
+    pulse = st.allocate("pulse_trains", (2, 50), np.float32, zero=True)
+    return cache._store_run_result(st.seal(pulse), session, st), st
+
+
+class TestSessionStores:
+    def test_upload_shares_its_memory_maps_and_costs_no_budget(self, clock: FakeClock) -> None:
+        token, st = _stored_upload()
+        got = cache._get_upload_signal(token)
+        assert got is not None
+        assert np.shares_memory(got.data, cache._UPLOADS.slots[token].value.signal.data)
+        assert cache.BUDGET.used_bytes == 0
+        assert st.path.exists()
+
+    def test_qc_memory_map_costs_no_budget(self, clock: FakeClock) -> None:
+        token, st = _stored_upload()
+        qc = st.seal(st.allocate("qc", (4, 100), np.float32, zero=True))
+        cache._store_qc_signal(token, qc, 2000.0, ["G"], [np.zeros(4, dtype=int)])
+        stored = cache._get_qc_signal(token)
+        assert stored is not None
+        assert np.shares_memory(stored.data, qc)
+        assert cache.BUDGET.used_bytes == stored.discard_channels[0].nbytes
+
+    @pytest.mark.parametrize("how", ["release", "close", "next_upload", "clear"])
+    def test_dropping_an_upload_deletes_its_store(self, clock: FakeClock, how: str) -> None:
+        token, st = _stored_upload("tab-a")
+        if how == "release":
+            cache._release_upload("tab-a")
+        elif how == "close":
+            cache.close_session("tab-a")
+        elif how == "next_upload":
+            _stored_upload("tab-a")
+        else:
+            cache.BUDGET.clear()
+        assert cache._get_upload_signal(token) is None
+        assert not st.path.exists()
+
+    def test_idle_sessions_lose_their_stores(self, clock: FakeClock) -> None:
+        _, idle = _stored_upload("tab-a")
+        _stored_upload("tab-b")
+        clock.advance(SESSION_IDLE_SEC)
+        cache.BUDGET.sweep()
+        assert not idle.path.exists()
+
+    def test_run_result_keeps_its_store_until_dropped(self, clock: FakeClock) -> None:
+        token, st = _stored_run()
+        got = cache._get_run_result(token)
+        assert got is not None and not got.flags.writeable
+        assert cache.BUDGET.used_bytes == 0
+        cache._drop_run_result(token)
+        assert not st.path.exists()
+
+    def test_the_next_run_deletes_the_previous_store(self, clock: FakeClock) -> None:
+        _, first = _stored_run("tab-a")
+        _, second = _stored_run("tab-a")
+        assert not first.path.exists()
+        assert second.path.exists()

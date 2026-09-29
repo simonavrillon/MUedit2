@@ -29,12 +29,14 @@ from muedit.api.services.bids_helpers import (
 )
 from muedit.decomp.preview import abs_means, downsample_vector
 from muedit.io.factory import get_loader, load_signal
+from muedit.io.store import SessionStore
+from muedit.models import FloatArray
 from muedit.signal.downsample import (
     PREVIEW_MOVING_AVG_MS,
     moving_average_ms,
     raw_series_at_fs,
 )
-from muedit.signal.filters import bandpass_inplace
+from muedit.signal.filters import FILTER_BLOCK_ROWS, bandpass_inplace
 from muedit.signal.grid import format_hdemg_signal
 from muedit.signal.qc_pipeline import run_auto_qc
 
@@ -69,29 +71,53 @@ def _encode_qc_raw_f32(
     return b"".join(parts)
 
 
+def _filter_qc_copy(
+    data: FloatArray,
+    qc: FloatArray,
+    fsamp: float,
+    grid_channels: list[int],
+    emg_type: list[int],
+) -> None:
+    """Write the bandpassed grid channels of ``data`` into ``qc``, a few rows at a time.
+
+    Rows are filtered in float64, as the whole grid used to be; rows past the
+    last grid are copied unfiltered.
+    """
+    ch_idx = 0
+    for i, n_channels_grid in enumerate(grid_channels):
+        current_type = emg_type[i] if i < len(emg_type) else 1
+        for lo in range(ch_idx, ch_idx + n_channels_grid, FILTER_BLOCK_ROWS):
+            hi = min(lo + FILTER_BLOCK_ROWS, ch_idx + n_channels_grid)
+            block = np.array(data[lo:hi], dtype=np.float64)
+            bandpass_inplace(block, fsamp, current_type)
+            qc[lo:hi] = block
+        ch_idx += n_channels_grid
+    qc[ch_idx:] = data[ch_idx:]
+
+
 def _build_preview_core(filepath: str, session: str = DEFAULT_SESSION) -> dict[str, Any]:
-    """Load signal, preprocess EMG grids, cache QC data, and build UI preview payload."""
+    """Load signal into a session store, filter a QC copy beside it, and build the UI preview payload."""
     _release_upload(session)
-    signal = load_signal(filepath)
-    # The cache stores its own copy, so filtering ``signal.data`` in place below
-    # leaves the cached raw signal untouched.
-    upload_token = _store_upload_signal(signal, source_path=filepath, session=session)
-    data = signal.data
+    store = SessionStore.create("upload")
+    try:
+        signal = load_signal(filepath, store=store)
+    except BaseException:
+        store.close()
+        raise
+    upload_token = _store_upload_signal(signal, source_path=filepath, session=session, store=store)
     fsamp = signal.fsamp
 
     grid_names = signal.gridname
     coordinates, _, discard_channels, emg_type = format_hdemg_signal(grid_names)
 
-    ch_idx = 0
-    for i in range(len(grid_names)):
-        n_channels_grid = coordinates[i].shape[0]
-        current_type = emg_type[i] if i < len(emg_type) else 1
-        bandpass_inplace(data[ch_idx : ch_idx + n_channels_grid, :], fsamp, current_type)
-        ch_idx += n_channels_grid
+    qc = store.allocate("qc", signal.data.shape, np.float32)
+    _filter_qc_copy(signal.data, qc, fsamp, [c.shape[0] for c in coordinates], emg_type)
+    data = store.seal(qc)
+    del qc
 
     _store_qc_signal(upload_token, data, fsamp, grid_names, discard_channels)
 
-    mean_abs = moving_average_ms(abs_means(data)[0], fsamp, PREVIEW_MOVING_AVG_MS)
+    mean_abs = moving_average_ms(abs_means(data, dtype=np.float64)[0], fsamp, PREVIEW_MOVING_AVG_MS)
     mean_abs_downsampled = downsample_vector(mean_abs, fsamp)
 
     grid_means = []
@@ -99,7 +125,9 @@ def _build_preview_core(filepath: str, session: str = DEFAULT_SESSION) -> dict[s
     ch_idx = 0
     for i in range(len(grid_names)):
         n_channels_grid = len(discard_channels[i])
-        grid_abs, grid_channel_means = abs_means(data[ch_idx : ch_idx + n_channels_grid, :])
+        grid_abs, grid_channel_means = abs_means(
+            data[ch_idx : ch_idx + n_channels_grid, :], dtype=np.float64
+        )
         grid_mean_abs = moving_average_ms(grid_abs, fsamp, PREVIEW_MOVING_AVG_MS)
         grid_means.append(downsample_vector(grid_mean_abs, fsamp))
         channel_means.append(grid_channel_means.tolist())

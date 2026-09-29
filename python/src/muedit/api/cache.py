@@ -13,7 +13,14 @@ from muedit.api.memory import (
     MemoryBudget,
     default_budget_bytes,
 )
-from muedit.models import EditSignalContext, FloatArray, IntArray, SignalImport
+from muedit.io.store import SessionStore
+from muedit.models import (
+    EditSignalContext,
+    FloatArray,
+    IntArray,
+    SignalImport,
+    resident_nbytes,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +31,7 @@ DECOMP_PREVIEW_BINARY_TTL_SEC = 10 * 60
 class QCSignal:
     """Filtered preview EMG kept with an upload for channel views and auto-QC."""
 
-    data: FloatArray  # float32, (n_channels, n_samples)
+    data: FloatArray  # float32, (n_channels, n_samples); memory-mapped from the upload's store
     fsamp: float
     grid_names: list[str]
     channel_offsets: list[int]  # first row of each grid in ``data``
@@ -32,7 +39,7 @@ class QCSignal:
 
     @property
     def nbytes(self) -> int:
-        return int(self.data.nbytes) + sum(int(m.nbytes) for m in self.discard_channels)
+        return resident_nbytes(self.data) + sum(int(m.nbytes) for m in self.discard_channels)
 
 
 @dataclass
@@ -40,10 +47,27 @@ class _UploadEntry:
     signal: SignalImport
     source_path: str | None
     qc: QCSignal | None = None
+    store: SessionStore | None = None  # T1 folder holding the memory-mapped arrays
 
     @property
     def nbytes(self) -> int:
         return self.signal.nbytes + (self.qc.nbytes if self.qc is not None else 0)
+
+
+@dataclass
+class _RunResult:
+    pulse_trains: FloatArray  # float32, (n_mu, n_samples)
+    store: SessionStore | None = None
+
+    @property
+    def nbytes(self) -> int:
+        return resident_nbytes(self.pulse_trains)
+
+
+def _close_store(entry: _UploadEntry | _RunResult) -> None:
+    """Delete the T1 folder of an entry leaving its cache."""
+    if entry.store is not None:
+        entry.store.close()
 
 
 @dataclass
@@ -56,11 +80,15 @@ class _PreviewBlob:
 
 
 BUDGET = MemoryBudget(default_budget_bytes())
-_UPLOADS: BudgetedLRU[_UploadEntry] = BudgetedLRU("uploads", BUDGET, per_session=1)
+_UPLOADS: BudgetedLRU[_UploadEntry] = BudgetedLRU(
+    "uploads", BUDGET, per_session=1, on_drop=_close_store
+)
 _DECOMP_PREVIEW_BLOBS: BudgetedLRU[_PreviewBlob] = BudgetedLRU(
     "decompose_previews", BUDGET, per_session=1, ttl_sec=DECOMP_PREVIEW_BINARY_TTL_SEC
 )
-_RUN_RESULTS: BudgetedLRU[FloatArray] = BudgetedLRU("run_results", BUDGET, per_session=1)
+_RUN_RESULTS: BudgetedLRU[_RunResult] = BudgetedLRU(
+    "run_results", BUDGET, per_session=1, on_drop=_close_store
+)
 _EDIT_SIGNAL_CONTEXTS: BudgetedLRU[EditSignalContext] = BudgetedLRU(
     "edit_signal_contexts", BUDGET, per_session=1
 )
@@ -81,9 +109,15 @@ def _store_upload_signal(
     signal: SignalImport,
     source_path: str | None = None,
     session: str = DEFAULT_SESSION,
+    store: SessionStore | None = None,
 ) -> str:
-    """Store a copy of ``signal`` (and the file it came from) and return a token."""
-    return _UPLOADS.pin(_UploadEntry(signal=signal.clone(), source_path=source_path), session)
+    """Keep ``signal`` (and the file it came from) and return a token.
+
+    With ``store``, the entry takes over the store ``signal`` was loaded into and
+    deletes it when dropped; otherwise it keeps a copy of ``signal``.
+    """
+    kept = signal if store is not None else signal.clone()
+    return _UPLOADS.pin(_UploadEntry(signal=kept, source_path=source_path, store=store), session)
 
 
 def _get_upload_source_path(token: str | None) -> str | None:
@@ -105,7 +139,10 @@ def _store_qc_signal(
     grid_names: list[str],
     discard_channels: list[IntArray],
 ) -> None:
-    """Attach preprocessed QC arrays to the upload session for ``token``."""
+    """Attach preprocessed QC arrays to the upload session for ``token``.
+
+    float32 ``data`` (the memory-mapped QC array of the upload's store) is kept as is.
+    """
     channel_offsets: list[int] = []
     offset = 0
     for mask in discard_channels:
@@ -113,7 +150,7 @@ def _store_qc_signal(
         offset += int(np.asarray(mask).size)
 
     qc = QCSignal(
-        data=np.array(data, dtype=np.float32),
+        data=np.asarray(data, dtype=np.float32),
         fsamp=float(fsamp),
         grid_names=list(grid_names),
         channel_offsets=channel_offsets,
@@ -161,9 +198,16 @@ def _pop_decomp_preview_binary(token: str | None) -> bytes | memoryview | None:
     return blob.payload if blob is not None else None
 
 
-def _store_run_result(pulse_trains: FloatArray, session: str = DEFAULT_SESSION) -> str:
-    """Keep a finished run's pulse trains so the run save need not send them back."""
-    return _RUN_RESULTS.pin(pulse_trains, session)
+def _store_run_result(
+    pulse_trains: FloatArray,
+    session: str = DEFAULT_SESSION,
+    store: SessionStore | None = None,
+) -> str:
+    """Keep a finished run's pulse trains so the run save need not send them back.
+
+    With ``store`` (the run's T1 folder holding them), the entry deletes it when dropped.
+    """
+    return _RUN_RESULTS.pin(_RunResult(pulse_trains, store), session)
 
 
 def _get_run_result(token: str | None) -> FloatArray | None:
@@ -171,7 +215,7 @@ def _get_run_result(token: str | None) -> FloatArray | None:
     stored = _RUN_RESULTS.get(token)
     if stored is None:
         return None
-    pulse = stored.view()
+    pulse = stored.pulse_trains.view()
     pulse.flags.writeable = False
     return pulse
 

@@ -38,7 +38,7 @@ def _channel_record(native: str, order: int, signal_type: int) -> bytes:
     )
 
 
-def _write_header(path: Path) -> None:
+def _write_header(path: Path, notes: tuple[str, str, str] = ("", "", "")) -> None:
     """Write a version 3.0 RHD header: two amplifier ports, aux, and digital in."""
     buf = struct.pack("<Ihh", 0xC6912702, 3, 0)
     buf += struct.pack("<f", _FSAMP)
@@ -46,7 +46,7 @@ def _write_header(path: Path) -> None:
     buf += struct.pack("<ffffff", 20.0, 10.0, 500.0, 20.0, 10.0, 500.0)
     buf += struct.pack("<h", 1)
     buf += struct.pack("<ff", 1000.0, 1000.0)
-    buf += _qstring("") * 3
+    buf += b"".join(_qstring(note) for note in notes)
     buf += struct.pack("<h", 0)
     buf += struct.pack("<h", 0)
     buf += _qstring("n/a")
@@ -133,7 +133,8 @@ def synthetic_layouts(tmp_path: Path) -> dict[str, Path]:
 
 def test_all_three_layouts_recover_the_same_channels(synthetic_layouts: dict[str, Path]) -> None:
     amp, _, _ = _reference_signals()
-    expected = amp.astype(np.float64) * 0.195e-3
+    # Loaders scale in float64 and store float32, so the result is exactly the cast.
+    expected = (amp.astype(np.float64) * 0.195e-3).astype(np.float32)
 
     loaded = {
         name: load_intan(str(path), grid_names=_GRID) for name, path in synthetic_layouts.items()
@@ -143,7 +144,8 @@ def test_all_three_layouts_recover_the_same_channels(synthetic_layouts: dict[str
         assert sig.data.shape == (_N_PORTS * _N_CH, _N_SAMPLES), name
         assert sig.fsamp == _FSAMP, name
         assert sig.gridname == [_GRID] * _N_PORTS, name
-        np.testing.assert_allclose(sig.data, expected, rtol=0, atol=1e-12, err_msg=name)
+        assert sig.data.dtype == np.float32, name
+        np.testing.assert_array_equal(sig.data, expected, err_msg=name)
 
 
 def test_layouts_agree_on_auxiliary_and_digital(synthetic_layouts: dict[str, Path]) -> None:
@@ -152,13 +154,12 @@ def test_layouts_agree_on_auxiliary_and_digital(synthetic_layouts: dict[str, Pat
     for name, path in synthetic_layouts.items():
         sig = load_intan(str(path), grid_names=_GRID)
         assert sig.auxiliaryname == ["A-AUX1", "B-AUX1", "DIGITAL-IN-01"], name
-        np.testing.assert_allclose(sig.auxiliary[2], digital[0], atol=1e-12, err_msg=name)
+        np.testing.assert_array_equal(sig.auxiliary[2], digital[0], err_msg=name)
+        scaled = (aux[0] * 37.4e-6).astype(np.float32)
         if name == "per_channel":
-            np.testing.assert_allclose(sig.auxiliary[0], aux[0] * 37.4e-6, atol=1e-12, err_msg=name)
+            np.testing.assert_array_equal(sig.auxiliary[0], scaled, err_msg=name)
         else:
-            np.testing.assert_allclose(
-                sig.auxiliary[0, ::4], aux[0, ::4] * 37.4e-6, atol=1e-12, err_msg=name
-            )
+            np.testing.assert_array_equal(sig.auxiliary[0, ::4], scaled[::4], err_msg=name)
 
 
 def test_grid_names_resolve_from_sidecar(synthetic_layouts: dict[str, Path]) -> None:
@@ -187,6 +188,25 @@ def test_intan_adapter_channel_map_is_a_gr08mm1305_permutation() -> None:
     assert sorted(int(v) for v in spec.channel_map.flat if v) == list(range(1, 65))
     otb = _GRID_CATALOG["GR08MM1305"].channel_map
     np.testing.assert_array_equal(spec.channel_map.astype(bool), otb.astype(bool))
+
+
+def test_header_longer_than_the_first_read(tmp_path: Path) -> None:
+    """The header is parsed from a growing prefix, never from the whole recording."""
+    amp, aux, digital = _reference_signals()
+    path = tmp_path / "recording.rhd"
+    _write_traditional(path, amp, aux, digital)
+    long_note = "n" * 50_000  # 100 kB as UTF-16: past the first 64 KiB read
+    short = path.read_bytes()
+    _write_header(path, notes=(long_note, "", ""))
+    header_len = len(path.read_bytes())
+    with open(path, "ab") as handle:
+        _write_header(tmp_path / "plain.rhd")
+        handle.write(short[len((tmp_path / "plain.rhd").read_bytes()) :])
+    assert header_len > 1 << 16
+
+    sig = load_intan(str(path), grid_names=_GRID)
+    assert sig.metadata["intan_notes"] == [long_note]
+    np.testing.assert_array_equal(sig.data, (amp.astype(np.float64) * 0.195e-3).astype(np.float32))
 
 
 def test_rejects_non_intan_file(tmp_path: Path) -> None:

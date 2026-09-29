@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -13,9 +14,10 @@ from muedit.io.loaders import (
     load_otb4,
     load_otb_plus,
 )
+from muedit.io.store import ArrayStore, store_signal
 from muedit.models import SignalImport
 
-LoaderFn = Callable[[str], SignalImport | dict[str, Any]]
+LoaderFn = Callable[..., SignalImport | dict[str, Any]]
 
 
 def _normalize_extension(ext: str) -> str:
@@ -86,10 +88,18 @@ def get_loader(filepath: str | Path) -> LoaderFn:
     return loader
 
 
-def load_signal(filepath: str) -> SignalImport:
-    """Load a raw signal file with the loader registered for its extension."""
+def load_signal(filepath: str, store: ArrayStore | None = None) -> SignalImport:
+    """Load a raw signal file with the loader registered for its extension.
+
+    With a ``store``, the EMG and auxiliary arrays are written into it: built-in
+    loaders write there block by block, other registered loaders are copied in.
+    """
     loader_fn = get_loader(filepath)
-    return _as_signal_import(loader_fn(str(filepath)))
+    if store is None:
+        return _as_signal_import(loader_fn(str(filepath)))
+    if "store" in inspect.signature(loader_fn).parameters:
+        return _as_signal_import(loader_fn(str(filepath), store=store))
+    return store_signal(_as_signal_import(loader_fn(str(filepath))), store)
 
 
 __all__ = [

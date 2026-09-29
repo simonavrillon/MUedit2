@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import shutil
@@ -15,8 +16,11 @@ from typing import Any
 import numpy as np
 import xmltodict
 
+from muedit.io.store import ArrayStore, RamStore, sample_blocks
 from muedit.models import SignalImport
 from muedit.signal.grid import format_hdemg_signal
+
+logger = logging.getLogger(__name__)
 
 
 def _ensure_list(value: Any) -> list[Any]:
@@ -29,14 +33,6 @@ def _safe_gain(gain_value: Any) -> float:
     except (TypeError, ValueError):
         return 1.0
     return g_val if g_val != 0 else 1.0
-
-
-def _sanitize_array(arr: Any) -> np.ndarray:
-    arr64 = np.asarray(arr, dtype=np.float64)
-    finfo = np.finfo(np.float64)
-    arr64 = np.where(np.isnan(arr64), 0.0, arr64)
-    arr64 = np.where(np.isposinf(arr64), finfo.max, arr64)
-    return np.where(np.isneginf(arr64), finfo.min, arr64)
 
 
 def _parse_filter_string(filter_str: str, fsamp: float | None = None) -> str | float:
@@ -84,96 +80,68 @@ def _group_tracks(
     return grouped
 
 
-def _load_signal_file(
-    file_path: str, blocks: list[dict[str, Any]], dtype: np.dtype
-) -> list[tuple[dict[str, Any], np.ndarray]]:
-    n_channels = int(blocks[0]["ChannelsInBlock"])
-    with open(file_path, "rb") as handle:
-        raw = np.fromfile(handle, dtype=dtype)
-    if raw.size % n_channels != 0:
+def _sample_frames(file_path: str, dtype: np.dtype, n_channels: int) -> np.ndarray:
+    """A ``.sig`` file as a read-only ``(samples, channels)`` map: channels are interleaved."""
+    n_values = os.path.getsize(file_path) // dtype.itemsize
+    if n_values % n_channels != 0:
         raise OSError(f"Cannot reshape {os.path.basename(file_path)} into {n_channels} channels")
-    data = raw.reshape((n_channels, -1), order="F").astype(np.float32)
-
-    block_data: list[tuple[dict[str, Any], np.ndarray]] = []
-    for block in blocks:
-        acq_ch = int(block["AcquisitionChannel"])
-        n_block = int(block["NumberOfChannels"])
-        view = data[acq_ch : acq_ch + n_block]
-        gain = _safe_gain(block["Gain"])
-        ad_bits = int(block["ADC_Nbits"])
-        psup = float(block["ADC_Range"])
-        view *= psup / (2**ad_bits) * 1000.0 / gain
-        block_data.append((block, view.copy()))
-    return block_data
+    if n_values == 0:
+        return np.zeros((0, n_channels), dtype=dtype)
+    return np.memmap(file_path, dtype=dtype, mode="r", shape=(n_values // n_channels, n_channels))
 
 
-def _concat_segments(segments: list[np.ndarray], fallback_len: int = 0) -> np.ndarray:
-    if not segments:
-        return np.zeros((0, fallback_len))
-    min_len = min(seg.shape[1] for seg in segments)
-    cropped = [seg[:, :min_len] for seg in segments]
-    return np.concatenate(cropped, axis=0)
+def _write_rows(out: np.ndarray, frames: np.ndarray, rows: np.ndarray, scale: np.ndarray) -> None:
+    """Write channels ``rows`` of ``frames`` times ``scale`` into ``out``, block by block.
+
+    The product is taken in ``scale.dtype``, as the loaders always scaled.
+    """
+    factors = scale[:, None]
+    for start, stop in sample_blocks(out.shape[1], len(rows), scale.dtype.itemsize):
+        block = frames[start:stop, rows].T.astype(scale.dtype)
+        block *= factors
+        out[:, start:stop] = block
 
 
-def _apply_otb_plus_scaling(
-    data: np.ndarray,
-    ch_idx: int,
-    device_name: str,
-    adapter_id: str,
-    gain_array: np.ndarray,
-    ad_bits: int,
-) -> None:
-    """Apply device-specific ADC→mV scaling in-place for one channel row."""
+def _otb_plus_scale(device_name: str, adapter_id: str, gain: float, ad_bits: int) -> float:
+    """Device-specific ADC→mV factor of one channel; 1.0 where the data is already in units."""
     if device_name in {"QUATTROCENTO", "QUATTRO"}:
         if adapter_id == "Direct connection":
-            data[ch_idx] *= 0.1526
-        elif adapter_id == "AdapterControl":
-            pass
-        else:
-            data[ch_idx] *= 0.00050863
-    elif device_name in {"DUE+", "QUATTRO+"}:
+            return 0.1526
+        if adapter_id == "AdapterControl":
+            return 1.0
+        return 0.00050863
+    if device_name in {"DUE+", "QUATTRO+"}:
+        return 1.0 if adapter_id in {"AdapterControl", "AdapterQuaternions"} else 0.00024928
+    if device_name == "DUE":
+        return 1.0 if adapter_id in {"AdapterControl", "AdapterQuaternions"} else 0.00025177
+    if device_name in {"SESSANTAQUATTRO", "SESSANTAQUATTRO+"}:
         if adapter_id in {"AdapterControl", "AdapterQuaternions"}:
-            pass
-        else:
-            data[ch_idx] *= 0.00024928
-    elif device_name == "DUE":
-        if adapter_id in {"AdapterControl", "AdapterQuaternions"}:
-            pass
-        else:
-            data[ch_idx] *= 0.00025177
-    elif device_name in {"SESSANTAQUATTRO", "SESSANTAQUATTRO+"}:
-        if adapter_id in {"AdapterControl", "AdapterQuaternions"}:
-            pass
-        elif adapter_id == "Direct connection to Auxiliary Input":
-            data[ch_idx] *= 0.00014648 if ad_bits == 16 else 0.00000057220
-        else:
-            gain_val = gain_array[ch_idx]
-            if ad_bits == 16:
-                gain_val = {256: 1, 128: 0.5, 64: 0.75}.get(gain_val, gain_val)
-            elif ad_bits == 24:
-                gain_val = {1: 1, 0.5: 2, 0.25: 3, 0.125: 4}.get(gain_val, gain_val)
-            data[ch_idx] *= 4.8 / (2**24) * 1000 / gain_val
-    elif device_name == "SYNCSTATION":
-        if adapter_id in {"Due+", "Quattro+"}:
-            data[ch_idx] *= 0.00024928
-        elif adapter_id == "Direct connection to Syncstation Input":
-            data[ch_idx] *= 0.1526
-        elif adapter_id == "AdapterLoadCell":
-            data[ch_idx] *= 0.00037217
-        elif adapter_id in {"AdapterControl", "AdapterQuaternions"}:
-            pass
-        else:
-            data[ch_idx] *= 0.00028610
-    else:
+            return 1.0
         if adapter_id == "Direct connection to Auxiliary Input":
-            data[ch_idx] *= 0.00000057220
-        elif adapter_id in {"AdapterControl", "AdapterQuaternions"}:
-            pass
-        else:
-            gain_val = gain_array[ch_idx]
-            if gain_val == 0:
-                gain_val = 1.0
-            data[ch_idx] *= 4.8 / (2**24) * 1000 / gain_val
+            return 0.00014648 if ad_bits == 16 else 0.00000057220
+        codes: dict[float, float] = {}
+        if ad_bits == 16:
+            codes = {256: 1, 128: 0.5, 64: 0.75}
+        elif ad_bits == 24:
+            codes = {1: 1, 0.5: 2, 0.25: 3, 0.125: 4}
+        gain_val = codes.get(gain, gain)
+        return 4.8 / (2**24) * 1000 / gain_val
+    if device_name == "SYNCSTATION":
+        if adapter_id in {"Due+", "Quattro+"}:
+            return 0.00024928
+        if adapter_id == "Direct connection to Syncstation Input":
+            return 0.1526
+        if adapter_id == "AdapterLoadCell":
+            return 0.00037217
+        if adapter_id in {"AdapterControl", "AdapterQuaternions"}:
+            return 1.0
+        return 0.00028610
+    if adapter_id == "Direct connection to Auxiliary Input":
+        return 0.00000057220
+    if adapter_id in {"AdapterControl", "AdapterQuaternions"}:
+        return 1.0
+    gain_val = gain if gain != 0 else 1.0
+    return 4.8 / (2**24) * 1000 / gain_val
 
 
 @dataclass
@@ -191,11 +159,43 @@ class _OTB4Channels:
     aux_lpf: list
 
 
-def _parse_otb4_novecento(tmpdir: str, track_list: list[dict[str, Any]]) -> _OTB4Channels:
+@dataclass
+class _Segment:
+    """One track's channels: their columns in a ``.sig`` map and their scale factor."""
+
+    frames: np.ndarray  # (samples, channels) map of the track's .sig file
+    rows: np.ndarray
+    scale: float
+
+
+def _write_segments(
+    store: ArrayStore,
+    name: str,
+    segments: list[_Segment],
+    n_samples: int,
+    n_copy: int,
+    dtype: type[np.floating[Any]],
+) -> np.ndarray:
+    """Stack the segments' channels into one float32 array: ``n_copy`` samples each, zeros after."""
+    out = store.allocate(
+        name, (sum(len(seg.rows) for seg in segments), n_samples), np.float32, zero=True
+    )
+    width = min(n_copy, n_samples)
+    row = 0
+    for seg in segments:
+        scale = np.full(len(seg.rows), seg.scale, dtype=dtype)
+        _write_rows(out[row : row + len(seg.rows), :width], seg.frames, seg.rows, scale)
+        row += len(seg.rows)
+    return store.seal(out)
+
+
+def _parse_otb4_novecento(
+    tmpdir: str, track_list: list[dict[str, Any]], store: ArrayStore
+) -> _OTB4Channels:
     """Parse channel data for the Novecento+ device (grouped int32 signal files)."""
     grouped = _group_tracks(track_list)
-    emg_blocks: list[tuple[str, dict[str, Any]]] = []
-    aux_blocks: list[tuple[str, dict[str, Any]]] = []
+    emg_blocks: list[tuple[str, _Segment, int]] = []
+    aux_blocks: list[tuple[str, _Segment, int]] = []
     emg_gains: list = []
     emg_hpf: list = []
     emg_lpf: list = []
@@ -209,9 +209,17 @@ def _parse_otb4_novecento(tmpdir: str, track_list: list[dict[str, Any]]) -> _OTB
         )
         if not sig_path:
             continue
-        for block, blk_data in _load_signal_file(sig_path, blocks, np.dtype(np.int32)):
+        frames = _sample_frames(sig_path, np.dtype(np.int32), int(blocks[0]["ChannelsInBlock"]))
+        for block in blocks:
+            acq_ch = int(block["AcquisitionChannel"])
+            n_ch_block = int(block["NumberOfChannels"])
+            gain = _safe_gain(block["Gain"])
+            segment = _Segment(
+                frames=frames,
+                rows=np.arange(acq_ch, acq_ch + n_ch_block),
+                scale=float(block["ADC_Range"]) / (2 ** int(block["ADC_Nbits"])) * 1000.0 / gain,
+            )
             title = block.get("Title") or f"block_{block['AcquisitionChannel']}"
-            n_ch_block = blk_data.shape[0]
             block_gain = _safe_gain(block.get("Gain", 1))
             strings_desc = block.get("StringsDescriptions") or {}
             block_fsamp = int(block["SamplingFrequency"])
@@ -221,36 +229,32 @@ def _parse_otb4_novecento(tmpdir: str, track_list: list[dict[str, Any]]) -> _OTB
             desc_name = ""
             if isinstance(desc, dict):
                 desc_name = desc.get("Name") or desc.get("@Name") or ""
-            payload = {
-                "data": blk_data,
-                "fs": block_fsamp,
-            }
             if title.upper().startswith("IN"):
-                emg_blocks.append((title, payload))
+                emg_blocks.append((title, segment, block_fsamp))
                 emg_gains.extend([block_gain] * n_ch_block)
                 emg_hpf.extend([hpf_val] * n_ch_block)
                 emg_lpf.extend([lpf_val] * n_ch_block)
             elif desc_name.upper().startswith("AUX"):
-                aux_blocks.append((desc_name, payload))
+                aux_blocks.append((desc_name, segment, block_fsamp))
                 aux_gains.extend([block_gain] * n_ch_block)
                 aux_hpf.extend([hpf_val] * n_ch_block)
                 aux_lpf.extend([lpf_val] * n_ch_block)
 
-    grid_segments = [p["data"] for _, p in emg_blocks]
-    auxiliary_segments = [p["data"] for _, p in aux_blocks]
-    fs_out = emg_blocks[0][1]["fs"] if emg_blocks else (aux_blocks[0][1]["fs"] if aux_blocks else 0)
-    ref_len = min(seg.shape[1] for seg in grid_segments) if grid_segments else None
-    if ref_len is None and auxiliary_segments:
-        ref_len = min(seg.shape[1] for seg in auxiliary_segments)
-    ref_len = ref_len or 0
-    grid_data = _concat_segments(grid_segments, fallback_len=ref_len)
-    auxiliary = _concat_segments(auxiliary_segments, fallback_len=grid_data.shape[1] or ref_len)
+    grid_segments = [seg for _, seg, _ in emg_blocks]
+    auxiliary_segments = [seg for _, seg, _ in aux_blocks]
+    fs_out = emg_blocks[0][2] if emg_blocks else (aux_blocks[0][2] if aux_blocks else 0)
+    grid_len = min((seg.frames.shape[0] for seg in grid_segments), default=None)
+    aux_len = min((seg.frames.shape[0] for seg in auxiliary_segments), default=0)
+    n_samples = grid_len if grid_len is not None else aux_len
+    # The Novecento loader always scaled in float32.
+    grid_data = _write_segments(store, "emg", grid_segments, n_samples, n_samples, np.float32)
+    auxiliary = _write_segments(store, "aux", auxiliary_segments, n_samples, aux_len, np.float32)
 
     return _OTB4Channels(
         grid_data=grid_data,
-        grid_names=[name for name, _ in emg_blocks],
+        grid_names=[name for name, _, _ in emg_blocks],
         auxiliary=auxiliary,
-        auxiliary_names=[name for name, _ in aux_blocks],
+        auxiliary_names=[name for name, _, _ in aux_blocks],
         fs_out=fs_out,
         emg_gains=emg_gains,
         emg_hpf=emg_hpf,
@@ -261,7 +265,9 @@ def _parse_otb4_novecento(tmpdir: str, track_list: list[dict[str, Any]]) -> _OTB
     )
 
 
-def _parse_otb4_generic(tmpdir: str, track_list: list[dict[str, Any]]) -> _OTB4Channels:
+def _parse_otb4_generic(
+    tmpdir: str, track_list: list[dict[str, Any]], store: ArrayStore
+) -> _OTB4Channels:
     """Parse channel data for generic OTB4 devices (flat int16 signal file)."""
     sig_paths = sorted(
         [
@@ -275,14 +281,14 @@ def _parse_otb4_generic(tmpdir: str, track_list: list[dict[str, Any]]) -> _OTB4C
         raise FileNotFoundError("No .sig files found in OTB4 archive.")
 
     total_channels = sum(int(t["NumberOfChannels"]) for t in track_list)
-    with open(sig_paths[0], "rb") as fd:
-        raw_data = np.fromfile(fd, dtype=np.int16)
-    if raw_data.size % total_channels != 0:
-        raise ValueError("Cannot reshape .sig into channels x samples")
-    data = raw_data.reshape((total_channels, -1), order="F").astype(np.float64)
+    try:
+        frames = _sample_frames(sig_paths[0], np.dtype(np.int16), total_channels)
+    except OSError as exc:
+        raise ValueError("Cannot reshape .sig into channels x samples") from exc
 
-    emg_blocks: list[tuple[str, dict[str, Any]]] = []
-    aux_blocks: list[tuple[str, dict[str, Any]]] = []
+    emg_blocks: list[tuple[str, _Segment, int]] = []
+    aux_blocks: list[tuple[str, _Segment, int, float]] = []
+    all_segments: list[_Segment] = []
     emg_gains: list = []
     emg_hpf: list = []
     emg_lpf: list = []
@@ -290,11 +296,15 @@ def _parse_otb4_generic(tmpdir: str, track_list: list[dict[str, Any]]) -> _OTB4C
     offset = 0
     for block in track_list:
         n_block = int(block["NumberOfChannels"])
-        view = data[offset : offset + n_block]
         gain = _safe_gain(block["Gain"])
         ad_bits = int(block["ADC_Nbits"])
         psup = float(block["ADC_Range"])
-        view *= psup / (2**ad_bits) * 1000.0 / gain
+        segment = _Segment(
+            frames=frames,
+            rows=np.arange(offset, offset + n_block),
+            scale=psup / (2**ad_bits) * 1000.0 / gain,
+        )
+        all_segments.append(segment)
         title = block.get("Title") or f"block_{block['AcquisitionChannel']}"
         grid_name = title
         desc = block.get("Description")
@@ -306,53 +316,47 @@ def _parse_otb4_generic(tmpdir: str, track_list: list[dict[str, Any]]) -> _OTB4C
         block_fsamp = int(block["SamplingFrequency"])
         hpf_val = _parse_filter_string(strings_desc.get("HighPassFilter", "n/a"), block_fsamp)
         lpf_val = _parse_filter_string(strings_desc.get("LowPassFilter", "n/a"), block_fsamp)
-        payload = {
-            "data": view.copy(),
-            "fs": block_fsamp,
-            "gain_val": gain,
-        }
         if title.upper().startswith("IN") or grid_name.upper().startswith(("GR", "HD")):
-            emg_blocks.append((grid_name, payload))
+            emg_blocks.append((grid_name, segment, block_fsamp))
             emg_gains.extend([gain] * n_block)
             emg_hpf.extend([hpf_val] * n_block)
             emg_lpf.extend([lpf_val] * n_block)
         else:
-            aux_blocks.append((title, payload))
+            aux_blocks.append((title, segment, block_fsamp, gain))
         offset += n_block
 
-    grid_segments = [p["data"] for _, p in emg_blocks] or [data]
+    grid_segments = [seg for _, seg, _ in emg_blocks] or all_segments
     filtered_aux = [
-        (name, p)
-        for name, p in aux_blocks
+        (name, seg, gain)
+        for name, seg, _, gain in aux_blocks
         if "AdapterControl" not in name and "AdapterQuaternions" not in name
     ]
     aux_gains: list = []
     aux_hpf: list = []
     aux_lpf: list = []
-    for _, p in filtered_aux:
-        n_ch_block = p["data"].shape[0]
-        aux_gains.extend([p.get("gain_val", 1.0)] * n_ch_block)
+    for _, seg, gain in filtered_aux:
+        n_ch_block = len(seg.rows)
+        aux_gains.extend([gain] * n_ch_block)
         aux_hpf.extend(["n/a"] * n_ch_block)
         aux_lpf.extend(["n/a"] * n_ch_block)
 
-    auxiliary_segments = [p["data"] for _, p in filtered_aux]
     fs_out = (
-        emg_blocks[0][1]["fs"]
+        emg_blocks[0][2]
         if emg_blocks
-        else (aux_blocks[0][1]["fs"] if aux_blocks else int(track_list[0]["SamplingFrequency"]))
+        else (aux_blocks[0][2] if aux_blocks else int(track_list[0]["SamplingFrequency"]))
     )
-    ref_len = min(seg.shape[1] for seg in grid_segments) if grid_segments else 0
-    if auxiliary_segments:
-        aux_len = min(seg.shape[1] for seg in auxiliary_segments)
-        ref_len = min(ref_len, aux_len) if ref_len else aux_len
-    grid_data = _concat_segments(grid_segments, fallback_len=ref_len)
-    auxiliary = _concat_segments(auxiliary_segments, fallback_len=grid_data.shape[1] or ref_len)
+    # Every track lives in the same file, so they all have its length.
+    n_samples = frames.shape[0]
+    grid_data = _write_segments(store, "emg", grid_segments, n_samples, n_samples, np.float64)
+    auxiliary = _write_segments(
+        store, "aux", [seg for _, seg, _ in filtered_aux], n_samples, n_samples, np.float64
+    )
 
     return _OTB4Channels(
         grid_data=grid_data,
-        grid_names=[name for name, _ in emg_blocks],
+        grid_names=[name for name, _, _ in emg_blocks],
         auxiliary=auxiliary,
-        auxiliary_names=[name for name, _ in filtered_aux],
+        auxiliary_names=[name for name, _, _ in filtered_aux],
         fs_out=fs_out,
         emg_gains=emg_gains,
         emg_hpf=emg_hpf,
@@ -363,8 +367,35 @@ def _parse_otb4_generic(tmpdir: str, track_list: list[dict[str, Any]]) -> _OTB4C
     )
 
 
-def load_otb_plus(filepath: str) -> SignalImport:
-    """Load OTB+ archive (.otb+/.zip) and normalize channels/metadata."""
+def _read_sip(path: str, n_samples: int) -> np.ndarray | None:
+    """One ``.sip`` channel (a float64 target or path trace) fitted to the EMG length.
+
+    A longer trace is cut; a shorter one holds its last value to the end, as a force
+    target would. An unreadable or empty file is skipped.
+    """
+    name = os.path.basename(path)
+    try:
+        values = np.fromfile(path, dtype=np.float64)
+    except (OSError, ValueError) as exc:
+        logger.warning("Skipping %s: cannot read it (%s)", name, exc)
+        return None
+    if values.size == 0:
+        logger.warning("Skipping %s: it holds no samples", name)
+        return None
+    if values.size < n_samples:
+        logger.warning(
+            "%s holds %d samples, the EMG %d: holding its last value to the end",
+            name,
+            values.size,
+            n_samples,
+        )
+        return np.concatenate([values, np.full(n_samples - values.size, values[-1])])
+    return values[:n_samples]
+
+
+def load_otb_plus(filepath: str, store: ArrayStore | None = None) -> SignalImport:
+    """Load OTB+ archive (.otb+/.zip) and normalize channels/metadata, written into ``store``."""
+    store = store if store is not None else RamStore()
     with tempfile.TemporaryDirectory() as tmpdir:
         if filepath.endswith(".zip"):
             shutil.unpack_archive(filepath, tmpdir)
@@ -422,14 +453,16 @@ def load_otb_plus(filepath: str) -> SignalImport:
 
         sig_path = os.path.join(tmpdir, sig_file)
         dtype = np.int16 if ad_bits == 16 else np.int32
-        with open(sig_path, "rb") as f:
-            raw_data = np.fromfile(f, dtype=dtype)
-
-        data = raw_data.reshape((n_channels, -1), order="F").astype(np.float64)
+        try:
+            frames = _sample_frames(sig_path, np.dtype(dtype), n_channels)
+        except OSError as exc:
+            raise ValueError(f"cannot reshape {sig_file} into {n_channels} channels") from exc
+        n_samples = frames.shape[0]
 
         channel_cursor = 0
         total_channels = n_channels
         gain_array = np.zeros(total_channels)
+        scale_array = np.ones(total_channels)
         high_pass_array = np.zeros(total_channels)
         low_pass_array = np.zeros(total_channels)
 
@@ -506,15 +539,14 @@ def load_otb_plus(filepath: str) -> SignalImport:
                 if gain_array[channel_cursor] == 0:
                     gain_array[channel_cursor] = 1.0
 
-                _apply_otb_plus_scaling(
-                    data, channel_cursor, device_name, adapter_id, gain_array, ad_bits
+                scale_array[channel_cursor] = _otb_plus_scale(
+                    device_name, adapter_id, float(gain_array[channel_cursor]), ad_bits
                 )
 
                 high_pass_array[channel_cursor] = hpf
                 low_pass_array[channel_cursor] = lpf
                 channel_cursor += 1
 
-        data = data[:channel_cursor, :]
         gain_array = gain_array[:channel_cursor]
         high_pass_array = high_pass_array[:channel_cursor]
         low_pass_array = low_pass_array[:channel_cursor]
@@ -523,7 +555,10 @@ def load_otb_plus(filepath: str) -> SignalImport:
         grid_ids_arr = np.array(grid_ids, dtype=int)
 
         grid_mask = (adapter_types_arr == 3) | (adapter_types_arr == 4)
-        signal_data = data[grid_mask, :]
+        grid_rows = np.flatnonzero(grid_mask)
+        signal_data = store.allocate("emg", (grid_rows.size, n_samples), np.float32)
+        _write_rows(signal_data, frames, grid_rows, scale_array[grid_rows])
+        signal_data = store.seal(signal_data)
 
         grid_names_masked = [grid_names[i] for i in range(len(grid_names)) if grid_mask[i]]
         muscles_masked = [muscles[i] for i in range(len(muscles)) if grid_mask[i]]
@@ -542,25 +577,25 @@ def load_otb_plus(filepath: str) -> SignalImport:
                     unique_muscles.append(muscles_masked[first_idx])
 
         aux_mask = adapter_types_arr == 5
-        auxiliary = data[aux_mask, :]
+        aux_rows = np.flatnonzero(aux_mask)
         aux_names = [grid_names[i] for i in range(len(grid_names)) if aux_mask[i]]
 
+        sips: list[np.ndarray] = []
         sip_files = sorted([f for f in os.listdir(tmpdir) if f.endswith(".sip")])
         if len(sip_files) >= 2:
             for sip in sip_files:
-                try:
-                    sip_path = os.path.join(tmpdir, sip)
-                    with open(sip_path, "rb") as f:
-                        sip_data = np.fromfile(f, dtype=np.float64)
-                    if len(sip_data) > data.shape[1]:
-                        sip_data = sip_data[: data.shape[1]]
-                    if auxiliary.shape[0] == 0:
-                        auxiliary = sip_data.reshape(1, -1)
-                    else:
-                        auxiliary = np.vstack([auxiliary, sip_data])
+                fitted = _read_sip(os.path.join(tmpdir, sip), n_samples)
+                if fitted is not None:
+                    sips.append(fitted)
                     aux_names.append(sip.replace(".sip", ""))
-                except (OSError, ValueError):
-                    pass
+
+        auxiliary = store.allocate(
+            "aux", (aux_rows.size + len(sips), n_samples), np.float32, zero=True
+        )
+        _write_rows(auxiliary[: aux_rows.size], frames, aux_rows, scale_array[aux_rows])
+        for i, sip_data in enumerate(sips):
+            auxiliary[aux_rows.size + i] = sip_data
+        auxiliary = store.seal(auxiliary)
 
         device_meta = parsed_xml.get("Device")
         date_node = device_meta.get("@Date", "") if isinstance(device_meta, dict) else None
@@ -655,8 +690,9 @@ def load_otb_plus(filepath: str) -> SignalImport:
         )
 
 
-def load_otb4(filepath: str) -> SignalImport:
-    """Load OTB4 archives and normalize EMG/aux channels into MUedit format."""
+def load_otb4(filepath: str, store: ArrayStore | None = None) -> SignalImport:
+    """Load OTB4 archives and normalize EMG/aux channels into MUedit format, written into ``store``."""
+    store = store if store is not None else RamStore()
     with tempfile.TemporaryDirectory() as tmpdir:
         if zipfile.is_zipfile(filepath):
             shutil.unpack_archive(filepath, tmpdir)
@@ -684,9 +720,9 @@ def load_otb4(filepath: str) -> SignalImport:
         device = device_field.split(";")[0]
 
         ch = (
-            _parse_otb4_novecento(tmpdir, track_list)
+            _parse_otb4_novecento(tmpdir, track_list, store)
             if device == "Novecento+"
-            else _parse_otb4_generic(tmpdir, track_list)
+            else _parse_otb4_generic(tmpdir, track_list, store)
         )
 
         filters_list = []
@@ -738,10 +774,10 @@ def load_otb4(filepath: str) -> SignalImport:
         }
 
         return SignalImport.build(
-            data=_sanitize_array(ch.grid_data),
+            data=ch.grid_data,
             fsamp=float(ch.fs_out),
             gridname=refined_grid_names,
-            auxiliary=_sanitize_array(ch.auxiliary),
+            auxiliary=ch.auxiliary,
             auxiliaryname=ch.auxiliary_names,
             metadata=metadata,
         )

@@ -235,7 +235,7 @@ class MemoryBudget:
                 if not victims:
                     return  # what is left belongs to the active session; it may exceed the budget
                 _, _, cache, token = min(victims, key=lambda v: (v[0], v[1]))
-                evicted = cache.slots.pop(token)
+                evicted = cache.drop(token)
                 used -= evicted.nbytes
                 logger.debug(
                     "Evicted %s entry %s (%.1f MB); %.1f MB of %.1f MB in use",
@@ -300,10 +300,11 @@ class MemoryBudget:
                 logger.exception("Cache sweep failed")
 
     def clear(self) -> None:
-        """Forget every entry and session."""
+        """Drop every entry and forget every session."""
         with self.lock:
             for cache in self.caches.values():
-                cache.slots.clear()
+                for token in list(cache.slots):
+                    cache.drop(token)
             self.sessions.clear()
             self.active_session = None
 
@@ -344,11 +345,13 @@ class BudgetedLRU(Generic[V]):
         *,
         per_session: int | None = None,
         ttl_sec: float | None = None,
+        on_drop: Callable[[V], None] | None = None,
     ) -> None:
         self.name = name
         self.budget = budget
         self.per_session = per_session
         self.ttl_sec = ttl_sec
+        self.on_drop = on_drop  # releases what an entry holds outside the heap
         self.slots: dict[str, _Slot[V]] = {}
         budget.register(self)
 
@@ -356,6 +359,16 @@ class BudgetedLRU(Generic[V]):
     def nbytes(self) -> int:
         """Bytes held by this cache."""
         return sum(slot.nbytes for slot in self.slots.values())
+
+    def drop(self, token: str) -> _Slot[V]:
+        """Remove the entry for ``token`` and release it; ``pop`` instead hands it to the caller."""
+        slot = self.slots.pop(token)
+        if self.on_drop is not None:
+            try:
+                self.on_drop(slot.value)
+            except Exception:
+                logger.exception("Releasing %s entry %s failed", self.name, token)
+        return slot
 
     def pin(self, value: V, session: str = DEFAULT_SESSION) -> str:
         """Store session data that is never evicted while ``session`` is active, and return its token."""
@@ -374,7 +387,7 @@ class BudgetedLRU(Generic[V]):
             if self.per_session is not None:
                 own = [t for t, slot in self.slots.items() if slot.session == session]
                 for token in own[: max(len(own) - self.per_session + 1, 0)]:
-                    del self.slots[token]
+                    self.drop(token)
             if not pinned and not self.budget.admits(nbytes):
                 return None
             self.budget.make_room(nbytes)
@@ -396,7 +409,7 @@ class BudgetedLRU(Generic[V]):
         if slot is None:
             return None
         if slot.expires_at is not None and slot.expires_at <= self.budget.clock():
-            del self.slots[token]
+            self.drop(token)
             return None
         return slot
 
@@ -423,8 +436,8 @@ class BudgetedLRU(Generic[V]):
     def discard(self, token: str | None) -> None:
         """Remove the entry for ``token`` if there is one."""
         with self.budget.lock:
-            if token:
-                self.slots.pop(token, None)
+            if token and token in self.slots:
+                self.drop(token)
 
     def resize(self, token: str) -> None:
         """Recount the entry for ``token`` after its value grew, evicting others to fit."""
@@ -440,7 +453,7 @@ class BudgetedLRU(Generic[V]):
         """Drop the entries ``session`` holds in this cache."""
         with self.budget.lock:
             for token in [t for t, slot in self.slots.items() if slot.session == session]:
-                del self.slots[token]
+                self.drop(token)
 
     def drop_expired(self, now: float) -> None:
         """Remove the entries whose time to live has passed."""
@@ -451,4 +464,4 @@ class BudgetedLRU(Generic[V]):
                 if slot.expires_at is not None and slot.expires_at <= now
             ]
             for token in expired:
-                del self.slots[token]
+                self.drop(token)

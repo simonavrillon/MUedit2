@@ -11,16 +11,19 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from muedit.api.cache import BUDGET
 from muedit.api.errors import register_exception_handlers
+from muedit.io.store import purge_stale_sessions
 
 
 @asynccontextmanager
 async def _sweep_caches(_app: FastAPI) -> AsyncIterator[None]:
-    """Sweep expired entries and idle sessions while the app runs."""
+    """Sweep expired entries and idle sessions while the app runs; own no session stores after."""
+    purge_stale_sessions()
     BUDGET.start_sweeper()
     try:
         yield
     finally:
         BUDGET.stop_sweeper()
+        BUDGET.clear()
 
 
 def create_app(

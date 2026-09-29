@@ -10,6 +10,7 @@ from typing import Any
 
 import numpy as np
 
+from muedit.io.store import ArrayStore, RamStore
 from muedit.models import SignalImport
 from muedit.signal.grid import format_hdemg_signal
 
@@ -162,8 +163,8 @@ def load_bids_emg_grid(
     return data, fsamp, selection.bad_mask
 
 
-def load_bids_signal(filepath: str) -> SignalImport:
-    """Load a BIDS EMG recording (BDF/EDF + sidecars) as a ``SignalImport``."""
+def load_bids_signal(filepath: str, store: ArrayStore | None = None) -> SignalImport:
+    """Load a BIDS EMG recording (BDF/EDF + sidecars) as a ``SignalImport``, written into ``store``."""
     emg_path = Path(filepath)
 
     if emg_path.is_dir():
@@ -264,41 +265,17 @@ def load_bids_signal(filepath: str) -> SignalImport:
 
     grid_order.sort(key=lambda g: (len(g), g))
 
-    pyedflib = _ensure_pyedflib()
-    all_indices: set[int] = set()
-    for g in grid_order:
-        all_indices.update(grid_meta[g]["channel_indices"])
-    all_indices.update(aux_channel_indices)
-
-    all_data: dict[int, np.ndarray] = {}
-    edf_reader = pyedflib.EdfReader(str(emg_path))
-    try:
-        if fsamp == 0.0:
-            fsamp = float(edf_reader.getSampleFrequency(0))
-        for ch_idx in sorted(all_indices):
-            all_data[ch_idx] = edf_reader.readSignal(ch_idx)
-    finally:
-        edf_reader.close()
-
-    n_samples = next(iter(all_data.values())).shape[0] if all_data else 0
-
-    # Drop the zero padding filling the last data record.
-    declared = _declared_sample_count(bids_sidecar, fsamp)
-    if declared is not None and 0 < declared < n_samples:
-        all_data = {ch_idx: sig[:declared] for ch_idx, sig in all_data.items()}
-        n_samples = declared
-
     grid_type_names: list[str] = []
     grid_muscles: list[str] = []
     grid_bad_masks: list[list[int]] = []
-    grid_segments: list[np.ndarray] = []
+    grid_rows: list[int] = []
     emg_hpf: list[float | str] = []
     emg_lpf: list[float | str] = []
     gains: list[float | str] = []
 
     for g in grid_order:
         meta = grid_meta[g]
-        grid_segments.append(np.vstack([all_data[i] for i in meta["channel_indices"]]))
+        grid_rows.extend(meta["channel_indices"])
         grid_type_names.append(meta["grid_name"])
         muscle = meta["target_muscle"]
         grid_muscles.append("" if (not muscle or muscle == "n/a") else muscle)
@@ -307,13 +284,31 @@ def load_bids_signal(filepath: str) -> SignalImport:
         emg_lpf.extend(meta["high_cutoff"])
         gains.extend(meta["gain"])
 
-    data = np.vstack(grid_segments) if grid_segments else np.zeros((0, n_samples), dtype=float)
+    store = store if store is not None else RamStore()
+    pyedflib = _ensure_pyedflib()
+    edf_reader = pyedflib.EdfReader(str(emg_path))
+    try:
+        if fsamp == 0.0:
+            fsamp = float(edf_reader.getSampleFrequency(0))
+        first = min([*grid_rows, *aux_channel_indices])
+        n_samples = int(edf_reader.getNSamples()[first])
 
-    auxiliary = (
-        np.vstack([all_data[i] for i in aux_channel_indices])
-        if aux_channel_indices
-        else np.zeros((0, n_samples), dtype=float)
-    )
+        # Drop the zero padding filling the last data record.
+        declared = _declared_sample_count(bids_sidecar, fsamp)
+        if declared is not None and 0 < declared < n_samples:
+            n_samples = declared
+
+        # One channel at a time, straight into its row: pyedflib reads per channel anyway.
+        data = store.allocate("emg", (len(grid_rows), n_samples), np.float32)
+        for i, ch_idx in enumerate(grid_rows):
+            data[i] = edf_reader.readSignal(ch_idx, n=n_samples)
+        auxiliary = store.allocate("aux", (len(aux_channel_indices), n_samples), np.float32)
+        for i, ch_idx in enumerate(aux_channel_indices):
+            auxiliary[i] = edf_reader.readSignal(ch_idx, n=n_samples)
+    finally:
+        edf_reader.close()
+    data = store.seal(data)
+    auxiliary = store.seal(auxiliary)
 
     coordinates, ieds, discard_vecs, emg_types = format_hdemg_signal(grid_type_names)
 

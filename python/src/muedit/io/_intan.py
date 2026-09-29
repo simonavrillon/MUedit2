@@ -5,12 +5,14 @@ from __future__ import annotations
 import json
 import struct
 import xml.etree.ElementTree as ET
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
+from muedit.io.store import ArrayStore, RamStore, sample_blocks
 from muedit.models import SignalImport
 from muedit.signal.grid import format_hdemg_signal
 
@@ -58,6 +60,10 @@ _GRID_SIDECAR = "muedit_grids.json"
 _DEFAULT_GRIDS = {64: "INTAN64-1305"}
 
 
+class _TruncatedHeader(OSError):
+    """The header runs past the bytes read so far."""
+
+
 class _HeaderCursor:
     """Little-endian byte cursor over an RHD header block."""
 
@@ -69,7 +75,9 @@ class _HeaderCursor:
         """Read one packed value of ``fmt`` and advance past it."""
         size = struct.calcsize(fmt)
         if self.offset + size > len(self._buf):
-            raise OSError("RHD header ended mid-field; file is truncated or not an RHD header")
+            raise _TruncatedHeader(
+                "RHD header ended mid-field; file is truncated or not an RHD header"
+            )
         (value,) = struct.unpack_from("<" + fmt, self._buf, self.offset)
         self.offset += size
         return value
@@ -80,7 +88,7 @@ class _HeaderCursor:
         if length == 0xFFFFFFFF:
             return ""
         if self.offset + length > len(self._buf):
-            raise OSError("RHD header string ran past end of file")
+            raise _TruncatedHeader("RHD header string ran past end of file")
         text = self._buf[self.offset : self.offset + length].decode("utf-16-le", errors="ignore")
         self.offset += length
         return text
@@ -213,6 +221,22 @@ def _parse_rhd_header(buf: bytes) -> _IntanHeader:
     )
 
 
+def _read_rhd_header(path: Path) -> _IntanHeader:
+    """Parse the header of ``path`` from a prefix grown until it holds the whole header."""
+    # A traditional .rhd carries every sample after the header: never read the whole file.
+    size = 1 << 16
+    with open(path, "rb") as handle:
+        while True:
+            buf = handle.read(size)
+            try:
+                return _parse_rhd_header(buf)
+            except _TruncatedHeader:
+                if len(buf) < size:
+                    raise
+            size *= 4
+            handle.seek(0)
+
+
 def _read_settings_xml(directory: Path) -> dict[str, str]:
     """Read the optional ``settings.xml`` RHX writes beside a recording."""
     path = directory / "settings.xml"
@@ -256,8 +280,7 @@ def _resolve_recording(filepath: str | Path) -> _Recording:
     else:
         raise ValueError(f"Not an Intan recording: {path}")
 
-    with open(header_path, "rb") as handle:
-        header = _parse_rhd_header(handle.read())
+    header = _read_rhd_header(header_path)
 
     settings = _read_settings_xml(directory)
     if header_path.stat().st_size > header.header_bytes:
@@ -280,14 +303,69 @@ def _channel_filename(channel: _IntanChannel) -> str:
     return f"{_FILE_PREFIX[channel.signal_type]}-{channel.native_name}.dat"
 
 
-def _read_per_channel(rec: _Recording) -> tuple[dict[int, np.ndarray], int]:
-    """Read the one-file-per-channel layout."""
+@dataclass
+class _Stream:
+    """One signal type of a recording, read as float64 ``(rows, hi - lo)`` blocks of stored samples."""
+
+    read: Callable[[int, int], np.ndarray]
+    n_rows: int
+    have: int  # samples stored; a sub-sampled stream is repeated up to the amplifier count
+    bias: float = 0.0  # subtracted before scaling (unsigned amplifier words)
+
+
+def _time_samples(rec: _Recording) -> int:
+    """Sample count declared by ``time.dat`` (the per-channel and per-signal-type layouts)."""
     time_path = rec.directory / "time.dat"
     if not time_path.exists():
         raise FileNotFoundError(f"Missing time.dat in Intan recording: {rec.directory}")
-    n_samples = time_path.stat().st_size // np.dtype(np.int32).itemsize
+    return time_path.stat().st_size // np.dtype(np.int32).itemsize
 
-    raw: dict[int, np.ndarray] = {}
+
+def _file_reader(
+    paths: list[Path], dtype: type[np.integer[Any]]
+) -> Callable[[int, int], np.ndarray]:
+    """Read samples ``[lo, hi)`` of one channel per file."""
+    itemsize = np.dtype(dtype).itemsize
+
+    def read(lo: int, hi: int) -> np.ndarray:
+        out = np.empty((len(paths), hi - lo))
+        for row, path in enumerate(paths):
+            out[row] = np.fromfile(path, dtype=dtype, count=hi - lo, offset=lo * itemsize)
+        return out
+
+    return read
+
+
+def _interleaved_reader(
+    path: Path, dtype: type[np.integer[Any]], n_cols: int
+) -> Callable[[int, int], np.ndarray]:
+    """Read samples ``[lo, hi)`` of a file holding ``n_cols`` interleaved channels."""
+    itemsize = np.dtype(dtype).itemsize
+
+    def read(lo: int, hi: int) -> np.ndarray:
+        values = np.fromfile(
+            path, dtype=dtype, count=(hi - lo) * n_cols, offset=lo * n_cols * itemsize
+        )
+        return values.reshape((-1, n_cols)).T.astype(np.float64)
+
+    return read
+
+
+def _digital_reader(
+    read_words: Callable[[int, int], np.ndarray], channels: list[_IntanChannel]
+) -> Callable[[int, int], np.ndarray]:
+    """Read a packed digital word as one 0/1 row per saved channel."""
+
+    def read(lo: int, hi: int) -> np.ndarray:
+        return _split_digital_word(read_words(lo, hi)[0], channels)
+
+    return read
+
+
+def _per_channel_streams(rec: _Recording) -> tuple[dict[int, _Stream], int]:
+    """Streams of the one-file-per-channel layout."""
+    n_samples = _time_samples(rec)
+    streams: dict[int, _Stream] = {}
     for signal_type in (
         _AMPLIFIER,
         _AUX_INPUT,
@@ -300,51 +378,66 @@ def _read_per_channel(rec: _Recording) -> tuple[dict[int, np.ndarray], int]:
         if not channels:
             continue
         dtype = np.int16 if signal_type == _AMPLIFIER else np.uint16
-        block = np.zeros((len(channels), n_samples), dtype=np.float64)
-        for row, channel in enumerate(channels):
+        paths: list[Path] = []
+        for channel in channels:
             path = rec.directory / _channel_filename(channel)
             if not path.exists():
                 raise FileNotFoundError(
                     f"Header lists channel '{channel.native_name}' as saved, but "
                     f"{path.name} is missing from {rec.directory}"
                 )
-            values = np.fromfile(path, dtype=dtype)
-            if values.size < n_samples:
+            stored = path.stat().st_size // np.dtype(dtype).itemsize
+            if stored < n_samples:
                 raise OSError(
-                    f"{path.name} holds {values.size} samples but time.dat declares {n_samples}"
+                    f"{path.name} holds {stored} samples but time.dat declares {n_samples}"
                 )
-            block[row] = values[:n_samples]
-        raw[signal_type] = block
-    return raw, n_samples
+            paths.append(path)
+        streams[signal_type] = _Stream(_file_reader(paths, dtype), len(channels), n_samples)
+    return streams, n_samples
 
 
-def _read_per_signal_type(rec: _Recording) -> tuple[dict[int, np.ndarray], int]:
-    """Read the one-file-per-signal-type layout."""
-    time_path = rec.directory / "time.dat"
-    if not time_path.exists():
-        raise FileNotFoundError(f"Missing time.dat in Intan recording: {rec.directory}")
-    n_samples = time_path.stat().st_size // np.dtype(np.int32).itemsize
-
-    raw: dict[int, np.ndarray] = {}
+def _per_signal_type_streams(rec: _Recording) -> tuple[dict[int, _Stream], int]:
+    """Streams of the one-file-per-signal-type layout."""
+    n_samples = _time_samples(rec)
+    streams: dict[int, _Stream] = {}
     for signal_type, filename in _SIGNAL_TYPE_FILES.items():
         channels = rec.header.enabled_channels(signal_type)
         path = rec.directory / filename
         if not channels or not path.exists():
             continue
         dtype = np.int16 if signal_type == _AMPLIFIER else np.uint16
-        values = np.fromfile(path, dtype=dtype)
-        n_rows = 1 if signal_type in (_DIGITAL_IN, _DIGITAL_OUT) else len(channels)
-        if values.size % n_rows:
-            raise OSError(f"{filename} does not divide into {n_rows} channels")
-        block = values.reshape((-1, n_rows)).T.astype(np.float64)
-        if signal_type in (_DIGITAL_IN, _DIGITAL_OUT):
-            block = _split_digital_word(block[0], channels)
-        raw[signal_type] = _expand_to(block, n_samples)
-    return raw, n_samples
+        digital = signal_type in (_DIGITAL_IN, _DIGITAL_OUT)
+        n_cols = 1 if digital else len(channels)
+        stored = path.stat().st_size // np.dtype(dtype).itemsize
+        if stored % n_cols:
+            raise OSError(f"{filename} does not divide into {n_cols} channels")
+        read = _interleaved_reader(path, dtype, n_cols)
+        if digital:
+            read = _digital_reader(read, channels)
+        streams[signal_type] = _Stream(read, len(channels), stored // n_cols)
+    return streams, n_samples
 
 
-def _read_traditional(rec: _Recording) -> tuple[dict[int, np.ndarray], int]:
-    """Read a monolithic ``.rhd`` with fixed-size data blocks following the header."""
+def _block_field_reader(
+    blocks: np.ndarray, key: str, per_block: int
+) -> Callable[[int, int], np.ndarray]:
+    """Read samples ``[lo, hi)`` of one field of the fixed-size data blocks."""
+
+    def read(lo: int, hi: int) -> np.ndarray:
+        first, last = lo // per_block, -(-hi // per_block)
+        part = np.asarray(blocks[key][first:last])
+        if part.ndim == 3:  # (blocks, channels, samples per block)
+            rows = part.transpose(1, 0, 2).reshape(part.shape[1], -1)
+        else:  # (blocks, samples per block): a digital word
+            rows = part.reshape(1, -1)
+        skip = lo - first * per_block
+        return rows[:, skip : skip + hi - lo].astype(np.float64)
+
+    return read
+
+
+def _traditional_streams(rec: _Recording) -> tuple[dict[int, _Stream], int]:
+    """Streams of a monolithic ``.rhd`` with fixed-size data blocks following the header."""
     header = rec.header
     n_per_block = header.samples_per_block
     counts = {t: len(header.enabled_channels(t)) for t in _SIGNAL_TYPE_FILES}
@@ -373,32 +466,43 @@ def _read_traditional(rec: _Recording) -> tuple[dict[int, np.ndarray], int]:
             f"{rec.data_path.name} holds {file_bytes} data bytes, not a whole number of "
             f"{block_dtype.itemsize}-byte blocks; the file is truncated or the header is stale"
         )
-    with open(rec.data_path, "rb") as handle:
-        handle.seek(header.header_bytes)
-        blocks = np.fromfile(handle, dtype=block_dtype)
+    n_blocks = file_bytes // block_dtype.itemsize
+    blocks = (
+        np.memmap(
+            rec.data_path,
+            dtype=block_dtype,
+            mode="r",
+            offset=header.header_bytes,
+            shape=(n_blocks,),
+        )
+        if n_blocks
+        else np.zeros(0, dtype=block_dtype)
+    )
 
-    n_samples = int(blocks.size) * n_per_block
+    n_samples = n_blocks * n_per_block
     field_names = block_dtype.names or ()
-    raw: dict[int, np.ndarray] = {}
+    streams: dict[int, _Stream] = {}
     for signal_type, key in (
         (_AMPLIFIER, "amplifier"),
         (_AUX_INPUT, "aux"),
         (_SUPPLY_VOLTAGE, "supply"),
         (_BOARD_ADC, "adc"),
+        (_DIGITAL_IN, "digital_in"),
+        (_DIGITAL_OUT, "digital_out"),
     ):
         if key not in field_names:
             continue
-        stacked = np.concatenate(list(blocks[key]), axis=1).astype(np.float64)
-        raw[signal_type] = _expand_to(stacked, n_samples)
-    for signal_type, key in ((_DIGITAL_IN, "digital_in"), (_DIGITAL_OUT, "digital_out")):
-        if key not in field_names:
-            continue
-        words = blocks[key].reshape(-1).astype(np.float64)
-        raw[signal_type] = _split_digital_word(words, header.enabled_channels(signal_type))
-
-    if _AMPLIFIER in raw:
-        raw[_AMPLIFIER] -= 32768.0
-    return raw, n_samples
+        per_block = int(block_dtype[key].shape[-1])
+        read = _block_field_reader(blocks, key, per_block)
+        if signal_type in (_DIGITAL_IN, _DIGITAL_OUT):
+            read = _digital_reader(read, header.enabled_channels(signal_type))
+        streams[signal_type] = _Stream(
+            read,
+            counts[signal_type],
+            n_blocks * per_block,
+            bias=32768.0 if signal_type == _AMPLIFIER else 0.0,
+        )
+    return streams, n_samples
 
 
 def _split_digital_word(words: np.ndarray, channels: list[_IntanChannel]) -> np.ndarray:
@@ -407,21 +511,29 @@ def _split_digital_word(words: np.ndarray, channels: list[_IntanChannel]) -> np.
     return np.vstack([((codes >> c.native_order) & 1).astype(np.float64) for c in channels])
 
 
-def _expand_to(values: np.ndarray, n_samples: int) -> np.ndarray:
-    """Stretch a sub-sampled stream to the amplifier sample count by repetition."""
-    have = values.shape[-1]
-    if have == n_samples:
-        return values
-    if have == 0:
-        return np.zeros((values.shape[0], n_samples), dtype=np.float64)
-    factor = -(-n_samples // have)
-    return np.repeat(values, factor, axis=-1)[..., :n_samples]
+def _write_stream(
+    out: np.ndarray, stream: _Stream, n_samples: int, *, offset: float = 0.0, step: float = 1.0
+) -> None:
+    """Write ``(x - offset) * step`` into ``out`` block by block.
+
+    A sub-sampled stream is stretched to ``n_samples`` by repeating each stored sample.
+    """
+    if stream.have == 0:
+        out[...] = (0.0 - offset) * step
+        return
+    factor = -(-n_samples // stream.have)
+    for start, stop in sample_blocks(n_samples, out.shape[0]):
+        lo, hi = start // factor, (stop - 1) // factor + 1
+        values = stream.read(lo, hi)
+        if factor > 1:
+            values = values[:, np.arange(start, stop) // factor - lo]
+        out[:, start:stop] = (values - offset) * step
 
 
 def _scale_auxiliary(
-    raw: dict[int, np.ndarray], header: _IntanHeader
+    streams: dict[int, _Stream], header: _IntanHeader, n_samples: int, store: ArrayStore
 ) -> tuple[np.ndarray, list[str]]:
-    """Convert every non-amplifier stream to physical units and label it."""
+    """Write every non-amplifier stream in physical units into ``store``, and label it."""
     adc_step = _ADC_STEP_V.get(header.eval_board_mode, _ADC_STEP_DEFAULT)
     adc_offset = _ADC_OFFSET.get(header.eval_board_mode, 0)
     scaling: dict[int, tuple[float, float]] = {
@@ -431,18 +543,20 @@ def _scale_auxiliary(
         _DIGITAL_IN: (1.0, 0.0),
         _DIGITAL_OUT: (1.0, 0.0),
     }
-
-    rows: list[np.ndarray] = []
-    names: list[str] = []
-    for signal_type, (step, offset) in scaling.items():
-        block = raw.get(signal_type)
-        if block is None:
-            continue
-        rows.append((block - offset) * step)
-        names.extend(c.custom_name for c in header.enabled_channels(signal_type))
-    if not rows:
-        return np.zeros((0, 0), dtype=np.float64), []
-    return np.vstack(rows), names
+    present = [t for t in scaling if t in streams]
+    names = [c.custom_name for t in present for c in header.enabled_channels(t)]
+    auxiliary = store.allocate(
+        "aux", (sum(streams[t].n_rows for t in present), n_samples), np.float32
+    )
+    row = 0
+    for signal_type in present:
+        stream = streams[signal_type]
+        step, offset = scaling[signal_type]
+        _write_stream(
+            auxiliary[row : row + stream.n_rows], stream, n_samples, offset=offset, step=step
+        )
+        row += stream.n_rows
+    return store.seal(auxiliary), names
 
 
 def _resolve_grids(
@@ -509,24 +623,23 @@ def load_intan(
     filepath: str,
     grid_names: str | list[str] | None = None,
     muscles: str | list[str] | None = None,
+    store: ArrayStore | None = None,
 ) -> SignalImport:
-    """Load an Intan RHD recording as a ``SignalImport``."""
+    """Load an Intan RHD recording as a ``SignalImport``, written into ``store`` block by block."""
     rec = _resolve_recording(filepath)
     header = rec.header
     if not header.enabled_channels(_AMPLIFIER):
         raise ValueError(f"Intan recording holds no enabled amplifier channels: {filepath}")
 
     readers = {
-        "per_channel": _read_per_channel,
-        "per_signal_type": _read_per_signal_type,
-        "traditional": _read_traditional,
+        "per_channel": _per_channel_streams,
+        "per_signal_type": _per_signal_type_streams,
+        "traditional": _traditional_streams,
     }
-    raw, n_samples = readers[rec.layout](rec)
+    streams, n_samples = readers[rec.layout](rec)
+    store = store if store is not None else RamStore()
 
     amp_channels = header.enabled_channels(_AMPLIFIER)
-    data = raw[_AMPLIFIER] * _AMP_STEP_MV
-    auxiliary, aux_names = _scale_auxiliary(raw, header)
-
     ports: list[str] = []
     channels_per_port: list[int] = []
     for channel in amp_channels:
@@ -535,8 +648,19 @@ def load_intan(
             channels_per_port.append(0)
         channels_per_port[ports.index(channel.port_prefix)] += 1
     order = np.argsort([ports.index(c.port_prefix) for c in amp_channels], kind="stable")
-    data = data[order]
     amp_channels = [amp_channels[i] for i in order]
+
+    amp = streams[_AMPLIFIER]
+    data = store.allocate("emg", (len(amp_channels), n_samples), np.float32)
+    _write_stream(
+        data,
+        _Stream(lambda lo, hi: amp.read(lo, hi)[order], amp.n_rows, amp.have),
+        n_samples,
+        offset=amp.bias,
+        step=_AMP_STEP_MV,
+    )
+    data = store.seal(data)
+    auxiliary, aux_names = _scale_auxiliary(streams, header, n_samples, store)
 
     resolved_grids, resolved_muscles = _resolve_grids(
         rec, ports, channels_per_port, grid_names, muscles
@@ -596,7 +720,7 @@ def load_intan(
         fsamp=float(header.fsamp),
         gridname=resolved_grids,
         muscle=resolved_muscles,
-        auxiliary=auxiliary if auxiliary.size else np.zeros((0, n_samples), dtype=np.float64),
+        auxiliary=auxiliary,
         auxiliaryname=aux_names,
         metadata=metadata,
     )

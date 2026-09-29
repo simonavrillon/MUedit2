@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
+from numpy.typing import DTypeLike
 
 from muedit.models import BoolArray, FloatArray, IntArray, SignalImport
 
@@ -24,13 +25,23 @@ def downsample_vector(
     return vector[::step].astype(float).tolist()
 
 
-def abs_means(data: FloatArray, keep: BoolArray | None = None) -> tuple[FloatArray, FloatArray]:
-    """Mean of ``|data|`` over the kept rows per sample, and over samples per row, one row at a time."""
+def abs_means(
+    data: FloatArray, keep: BoolArray | None = None, dtype: DTypeLike | None = None
+) -> tuple[FloatArray, FloatArray]:
+    """Mean of ``|data|`` over the kept rows per sample, and over samples per row, one row at a time.
+
+    Sums are taken in ``dtype``: by default the data's own float type.
+    """
     # Rows are accumulated in order, which is bit-identical to np.mean(np.abs(data),
     # axis=0 / 1) for the C-contiguous arrays used here, without a full-size abs copy.
     # Fortran-ordered input (e.g. MAT v7.3 or OTB loaders) can differ in the last ulp.
     n_rows, n_samples = data.shape
-    dtype = data.dtype if np.issubdtype(data.dtype, np.floating) else np.dtype(np.float64)
+    if dtype is not None:
+        dtype = np.dtype(dtype)
+    elif np.issubdtype(data.dtype, np.floating):
+        dtype = data.dtype
+    else:
+        dtype = np.dtype(np.float64)
     row = np.empty(n_samples, dtype=dtype)
     total = np.zeros(n_samples, dtype=dtype)
     row_means = np.empty(n_rows, dtype=dtype)

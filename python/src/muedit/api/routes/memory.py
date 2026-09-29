@@ -14,6 +14,7 @@ from muedit.api.memory import (
     process_memory_bytes,
     session_id_or_default,
 )
+from muedit.io.store import store_usage
 
 router = APIRouter(prefix="/api/v1")
 
@@ -28,12 +29,13 @@ def close_session_endpoint(session: str = Query(...)) -> Response:
 
 @router.get("/debug/memory")
 def debug_memory() -> dict[str, Any]:
-    """Process memory, and cache usage per cache and per session."""
+    """Process memory, cache usage per cache and per session, and the session stores on disk."""
     return success_payload(
         {
             "process_bytes": process_memory_bytes(),
             "peak_rss_bytes": peak_rss_bytes(),
             "physical_memory_bytes": physical_memory_bytes(),
             "budget": BUDGET.usage(),
+            "session_store": store_usage(),
         }
     )

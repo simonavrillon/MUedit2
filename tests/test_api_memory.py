@@ -172,3 +172,26 @@ def test_sweeper_thread_runs_until_stopped() -> None:
         time.sleep(0.01)
     budget.stop_sweeper()
     assert not lru.slots
+
+
+class TestOnDrop:
+    def test_runs_when_an_entry_leaves_but_not_on_pop(self, budget: MemoryBudget) -> None:
+        dropped: list[Blob] = []
+        cache: BudgetedLRU[Blob] = BudgetedLRU("c", budget, on_drop=dropped.append)
+        evicted, popped, released = Blob(600), Blob(10), Blob(20)
+        cache.pin(evicted, "a")
+        cache.pin(Blob(600), "b")  # the active session's pin evicts the other one
+        token = cache.pin(popped, "b")
+        assert cache.pop(token) is popped
+        cache.pin(released, "c")
+        cache.release_session("c")
+        assert dropped == [evicted, released]
+
+    def test_a_failing_release_does_not_break_the_cache(self, budget: MemoryBudget) -> None:
+        def boom(_: Blob) -> None:
+            raise OSError("still mapped")
+
+        cache: BudgetedLRU[Blob] = BudgetedLRU("c", budget, on_drop=boom)
+        token = cache.pin(Blob(10), "a")
+        cache.discard(token)
+        assert token not in cache.slots

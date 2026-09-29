@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import shutil
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +41,14 @@ def require_sample(path: Path) -> Path:
             pytest.fail(message)
         pytest.skip(message)
     return path
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Keep session stores in a throwaway folder, not the user's cache."""
+    if not os.environ.get("MUEDIT_CACHE_DIR"):
+        folder = tempfile.mkdtemp(prefix="muedit-test-cache-")
+        os.environ["MUEDIT_CACHE_DIR"] = folder
+        config.add_cleanup(lambda: shutil.rmtree(folder, ignore_errors=True))
 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
