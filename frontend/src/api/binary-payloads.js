@@ -1,5 +1,5 @@
 /**
- * Codecs for the binary transport the API uses for arrays (pulse trains).
+ * Codecs for the binary transport the API uses for arrays (pulse trains, viewport series).
  *
  * MUB1, mirroring `pack_frame` / `unpack_frame` in `api/binary.py`:
  *
@@ -8,7 +8,6 @@
  *
  * Little-endian. The alignment lets every array be read as a typed-array view
  * without copying. A payload without the magic is the server's JSON fallback.
- * The QC window still uses its own MQCR layout.
  */
 /** @typedef {import("../app/context.js").JsonObject} JsonObject */
 
@@ -42,75 +41,6 @@ function to2d(raw, rows, cols) {
     out.push(row);
   }
   return out;
-}
-
-/**
- * @param {ArrayBuffer} buffer
- * @param {string | null} [formatHeader]
- */
-export function isQcRawF32Payload(buffer, formatHeader = "") {
-  return formatHeader === "qc-raw-f32-v1" || hasMagic(buffer, "MQCR");
-}
-
-/**
- * @param {ArrayBuffer} buffer
- * @returns {JsonObject}
- */
-export function decodeQcJsonPayload(buffer) {
-  return JSON.parse(textDecoder.decode(new Uint8Array(buffer)));
-}
-
-/**
- * @param {ArrayBuffer} buffer
- */
-export function decodeQcRawF32(buffer) {
-  // Wire format:
-  // 4 bytes magic "MQCR" + uint32 version + fixed metadata fields + repeated channel blocks.
-  // Each channel block is: int32 channel_index, uint32 n, float32[n] samples.
-  const view = new DataView(buffer);
-  if (!hasMagic(buffer, "MQCR")) {
-    throw new Error("Invalid QC raw payload");
-  }
-  let offset = 4;
-  const version = view.getUint32(offset, true);
-  offset += 4;
-  if (version !== 1) {
-    throw new Error(`Unsupported QC raw payload version: ${version}`);
-  }
-  const grid_index = view.getInt32(offset, true);
-  offset += 4;
-  const channel_index = view.getInt32(offset, true);
-  offset += 4;
-  const start = view.getInt32(offset, true);
-  offset += 4;
-  const end = view.getInt32(offset, true);
-  offset += 4;
-  const total_samples = view.getInt32(offset, true);
-  offset += 4;
-  const fsamp = view.getFloat32(offset, true);
-  offset += 4;
-  const nChannels = view.getUint32(offset, true);
-  offset += 4;
-
-  const channels = [];
-  for (let i = 0; i < nChannels; i++) {
-    const chIdx = view.getInt32(offset, true);
-    offset += 4;
-    const n = view.getUint32(offset, true);
-    offset += 4;
-    const series = new Float32Array(buffer, offset, n);
-    offset += n * 4;
-    channels.push({ channel_index: chIdx, series: Array.from(series) });
-  }
-  return {
-    grid_index,
-    channel_index,
-    start,
-    end,
-    total_samples,
-    fsamp,
-    channels,
-  };
 }
 
 export const FRAME_MEDIA_TYPE = "application/x-muedit-frame";
@@ -274,5 +204,42 @@ export function decodeDecomposePreviewPayload(buffer, formatHeader = "") {
     ...meta,
     pulse_trains_full: frameRows(arrays.pulse_trains_full),
     pulse_trains_all: frameRows(arrays.pulse_trains_all),
+  };
+}
+
+/**
+ * @typedef {{ min: Float32Array, max: Float32Array }} Envelope
+ * @typedef {Envelope | Float32Array} SeriesRow One row of a viewport: min/max per bin, or the samples.
+ * @typedef {{ meta: JsonObject, rows: SeriesRow[] }} SeriesView
+ */
+
+/**
+ * @param {FrameArray | undefined} arr
+ * @returns {Float32Array[]}
+ */
+function frameRowViews(arr) {
+  if (!arr || arr.shape.length !== 2) return [];
+  const [n, cols] = arr.shape;
+  const data = /** @type {Float32Array} */ (arr.data);
+  return Array.from({ length: n }, (_, r) =>
+    data.subarray(r * cols, (r + 1) * cols),
+  );
+}
+
+/**
+ * Decode a `/series/*` frame into one row per channel, as views into `buffer`.
+ *
+ * @param {ArrayBuffer} buffer
+ * @returns {SeriesView}
+ */
+export function decodeSeriesFrame(buffer) {
+  const { meta, arrays } = decodeFrame(buffer);
+  if (meta.kind === "samples") {
+    return { meta, rows: frameRowViews(arrays.samples) };
+  }
+  const maxs = frameRowViews(arrays.max);
+  return {
+    meta,
+    rows: frameRowViews(arrays.min).map((min, r) => ({ min, max: maxs[r] })),
   };
 }

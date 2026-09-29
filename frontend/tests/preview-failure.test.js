@@ -27,8 +27,7 @@ function loadedState() {
   Object.assign(state, {
     file: { name: "old.otb+", path: "/data/old.otb+" },
     uploadToken: "old-token",
-    previewSeries: [1, 2, 3],
-    gridSeries: [[1, 2, 3]],
+    gridSeries: [new Float32Array([1, 2, 3])],
     gridNames: ["GR08MM1305"],
     channelMeans: [[1, 1]],
     channelTraces: [[0.5]],
@@ -80,7 +79,6 @@ describe("raw preview failure", () => {
     assert.equal(ok, false);
     assert.equal(state.file, null);
     assert.equal(state.uploadToken, null);
-    assert.deepEqual(state.previewSeries, []);
     assert.deepEqual(state.gridSeries, []);
     assert.deepEqual(state.gridNames, []);
     assert.deepEqual(state.channelMeans, []);

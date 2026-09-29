@@ -70,8 +70,6 @@ describe("normalizePreviewPayload", () => {
   test("every array field defaults to an empty array", () => {
     const out = normalizePreviewPayload({});
     for (const key of [
-      "mean_abs",
-      "grid_mean_abs",
       "grid_names",
       "rois",
       "channel_means",
@@ -81,8 +79,6 @@ describe("normalizePreviewPayload", () => {
       "pulse_trains_all",
       "distime_all",
       "mu_grid_index",
-      "auxiliary",
-      "auxiliary_names",
     ]) {
       assert.deepEqual(out[key], [], key);
     }

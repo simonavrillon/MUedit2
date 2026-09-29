@@ -2,18 +2,16 @@
 
 from __future__ import annotations
 
-import struct
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 from fastapi import HTTPException
-from fastapi.responses import Response
 
 from muedit.api.cache import (
-    _get_qc_signal,
+    _hold_upload,
     _release_upload,
-    _store_qc_signal,
+    _store_signal_views,
     _store_upload_signal,
 )
 from muedit.api.common import (
@@ -22,81 +20,27 @@ from muedit.api.common import (
     require_existing_path,
 )
 from muedit.api.memory import DEFAULT_SESSION
-from muedit.api.schemas import QcAutoPayload, QcWindowPayload
+from muedit.api.schemas import QcAutoPayload
 from muedit.api.services.bids_helpers import (
     _infer_bids_root_from_decomp_path,
     read_bids_sidecar_meta,
 )
-from muedit.decomp.preview import abs_means, downsample_vector
-from muedit.io.factory import get_loader, load_signal
-from muedit.io.store import SessionStore
-from muedit.models import FloatArray
-from muedit.signal.downsample import (
-    PREVIEW_MOVING_AVG_MS,
-    moving_average_ms,
-    raw_series_at_fs,
+from muedit.api.services.series_service import (
+    bandpassed_rows,
+    build_signal_views,
+    grid_emg_type,
+    grid_rows,
 )
-from muedit.signal.filters import FILTER_BLOCK_ROWS, bandpass_inplace
+from muedit.io.factory import get_loader, load_signal
+from muedit.io.store import ArrayStore, RamStore, SessionStore
+from muedit.models import FloatArray, SignalImport
+from muedit.signal.filters import FILTER_BLOCK_ROWS
 from muedit.signal.grid import format_hdemg_signal
 from muedit.signal.qc_pipeline import run_auto_qc
 
 
-def _encode_qc_raw_f32(
-    *,
-    grid_index: int,
-    channel_index: int,
-    start: int,
-    end: int,
-    total_samples: int,
-    fsamp: float,
-    channels: list[dict[str, Any]],
-) -> bytes:
-    """Encode QC raw traces to compact float32 binary payload (MQCR v1)."""
-    parts: list[bytes] = []
-    parts.append(b"MQCR")
-    parts.append(struct.pack("<I", 1))
-    parts.append(struct.pack("<i", int(grid_index)))
-    parts.append(struct.pack("<i", int(channel_index)))
-    parts.append(struct.pack("<i", int(start)))
-    parts.append(struct.pack("<i", int(end)))
-    parts.append(struct.pack("<i", int(total_samples)))
-    parts.append(struct.pack("<f", float(fsamp)))
-    parts.append(struct.pack("<I", len(channels)))
-    for entry in channels:
-        ch_idx = int(entry.get("channel_index", 0))
-        series = np.asarray(entry.get("series", []), dtype=np.float32)
-        parts.append(struct.pack("<i", ch_idx))
-        parts.append(struct.pack("<I", int(series.size)))
-        parts.append(series.astype("<f4", copy=False).tobytes(order="C"))
-    return b"".join(parts)
-
-
-def _filter_qc_copy(
-    data: FloatArray,
-    qc: FloatArray,
-    fsamp: float,
-    grid_channels: list[int],
-    emg_type: list[int],
-) -> None:
-    """Write the bandpassed grid channels of ``data`` into ``qc``, a few rows at a time.
-
-    Rows are filtered in float64, as the whole grid used to be; rows past the
-    last grid are copied unfiltered.
-    """
-    ch_idx = 0
-    for i, n_channels_grid in enumerate(grid_channels):
-        current_type = emg_type[i] if i < len(emg_type) else 1
-        for lo in range(ch_idx, ch_idx + n_channels_grid, FILTER_BLOCK_ROWS):
-            hi = min(lo + FILTER_BLOCK_ROWS, ch_idx + n_channels_grid)
-            block = np.array(data[lo:hi], dtype=np.float64)
-            bandpass_inplace(block, fsamp, current_type)
-            qc[lo:hi] = block
-        ch_idx += n_channels_grid
-    qc[ch_idx:] = data[ch_idx:]
-
-
 def _build_preview_core(filepath: str, session: str = DEFAULT_SESSION) -> dict[str, Any]:
-    """Load signal into a session store, filter a QC copy beside it, and build the UI preview payload."""
+    """Load a signal into a session store, build the series the QC stage draws, and the preview."""
     _release_upload(session)
     store = SessionStore.create("upload")
     try:
@@ -105,49 +49,23 @@ def _build_preview_core(filepath: str, session: str = DEFAULT_SESSION) -> dict[s
         store.close()
         raise
     upload_token = _store_upload_signal(signal, source_path=filepath, session=session, store=store)
-    fsamp = signal.fsamp
 
-    grid_names = signal.gridname
-    coordinates, _, discard_channels, emg_type = format_hdemg_signal(grid_names)
-
-    qc = store.allocate("qc", signal.data.shape, np.float32)
-    _filter_qc_copy(signal.data, qc, fsamp, [c.shape[0] for c in coordinates], emg_type)
-    data = store.seal(qc)
-    del qc
-
-    _store_qc_signal(upload_token, data, fsamp, grid_names, discard_channels)
-
-    mean_abs = moving_average_ms(abs_means(data, dtype=np.float64)[0], fsamp, PREVIEW_MOVING_AVG_MS)
-    mean_abs_downsampled = downsample_vector(mean_abs, fsamp)
-
-    grid_means = []
-    channel_means = []
-    ch_idx = 0
-    for i in range(len(grid_names)):
-        n_channels_grid = len(discard_channels[i])
-        grid_abs, grid_channel_means = abs_means(
-            data[ch_idx : ch_idx + n_channels_grid, :], dtype=np.float64
-        )
-        grid_mean_abs = moving_average_ms(grid_abs, fsamp, PREVIEW_MOVING_AVG_MS)
-        grid_means.append(downsample_vector(grid_mean_abs, fsamp))
-        channel_means.append(grid_channel_means.tolist())
-        ch_idx += n_channels_grid
+    coordinates, _, _, emg_type = format_hdemg_signal(signal.gridname)
+    views, channel_means = build_signal_views(
+        signal, store, [c.shape[0] for c in coordinates], emg_type
+    )
+    _store_signal_views(upload_token, views)
 
     return make_json_safe(
         {
             "upload_token": upload_token,
-            "mean_abs": mean_abs_downsampled,
-            "grid_mean_abs": grid_means,
-            "grid_names": grid_names,
-            "total_samples": int(data.shape[1]),
-            "fsamp": fsamp,
-            "channel_means": channel_means,
+            "grid_names": signal.gridname,
+            "total_samples": int(signal.data.shape[1]),
+            "fsamp": signal.fsamp,
+            "channel_means": [means.tolist() for means in channel_means],
             "coordinates": [coords.tolist() for coords in coordinates],
             "metadata": signal.metadata,
             "muscle": signal.muscle,
-            "auxiliary": [downsample_vector(row, fsamp) for row in signal.auxiliary]
-            if signal.auxiliary.size > 0
-            else [],
             "auxiliary_names": signal.auxiliaryname,
         }
     )
@@ -189,84 +107,6 @@ def build_preview_from_path(filepath: str, session: str = DEFAULT_SESSION) -> di
     return result
 
 
-def get_qc_window(payload: QcWindowPayload) -> Response:
-    """Return channel-window QC data from cached signal as packed float32 binary."""
-    cached = _get_qc_signal(payload.upload_token)
-    if cached is None:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "field": "upload_token",
-                "reason": "Missing or expired QC cache; request /api/v1/preview-by-path first",
-            },
-        )
-
-    grid_index = payload.grid_index
-    start = payload.start
-    end = payload.end
-    target_fs = payload.target_fs
-    channel_index_raw = payload.channel_index
-
-    data = cached.data
-    fsamp = cached.fsamp
-    offsets = cached.channel_offsets
-    masks = cached.discard_channels
-
-    if grid_index < 0 or grid_index >= len(offsets):
-        raise HTTPException(status_code=400, detail="grid_index out of range")
-
-    n_grid_ch = int(masks[grid_index].size)
-    offset = int(offsets[grid_index])
-    total_samples = int(data.shape[1])
-
-    s = max(0, min(start, max(0, total_samples - 1)))
-    e = max(s + 1, min(end if end > 0 else total_samples, total_samples))
-
-    grid_block = data[offset : offset + n_grid_ch, s:e]
-
-    if channel_index_raw is None:
-        channels_payload = [
-            {
-                "channel_index": ch_idx,
-                "series": raw_series_at_fs(grid_block[ch_idx], fsamp, target_fs),
-            }
-            for ch_idx in range(n_grid_ch)
-        ]
-        payload_bytes = _encode_qc_raw_f32(
-            grid_index=grid_index,
-            channel_index=-1,
-            start=s,
-            end=e,
-            total_samples=total_samples,
-            fsamp=fsamp,
-            channels=channels_payload,
-        )
-        return Response(
-            content=payload_bytes,
-            media_type="application/octet-stream",
-            headers={"x-muedit-format": "qc-raw-f32-v1"},
-        )
-
-    channel_index = channel_index_raw
-    if channel_index < 0 or channel_index >= n_grid_ch:
-        raise HTTPException(status_code=400, detail="channel_index out of range")
-    series = raw_series_at_fs(grid_block[channel_index], fsamp, target_fs)
-    payload_bytes = _encode_qc_raw_f32(
-        grid_index=grid_index,
-        channel_index=channel_index,
-        start=s,
-        end=e,
-        total_samples=total_samples,
-        fsamp=fsamp,
-        channels=[{"channel_index": channel_index, "series": series}],
-    )
-    return Response(
-        content=payload_bytes,
-        media_type="application/octet-stream",
-        headers={"x-muedit-format": "qc-raw-f32-v1"},
-    )
-
-
 def _mask_to_regions(mask: np.ndarray | None) -> list[list[int]]:
     """Convert a boolean sample mask into contiguous ``[start, end)`` ranges."""
     if mask is None or not mask.any():
@@ -277,43 +117,64 @@ def _mask_to_regions(mask: np.ndarray | None) -> list[list[int]]:
     return [[int(s), int(e)] for s, e in zip(starts, ends, strict=True)]
 
 
+def _bandpassed_grids(
+    signal: SignalImport, grid_counts: list[int], emg_types: list[int], store: ArrayStore
+) -> FloatArray:
+    """The grid channels bandpassed into one float32 array of ``store``, a few rows at a time."""
+    n_rows = sum(grid_counts)
+    out = store.allocate("qc-auto", (n_rows, signal.data.shape[1]), np.float32)
+    for grid, (first, stop) in enumerate(grid_rows(grid_counts, n_rows)):
+        for lo in range(first, stop, FILTER_BLOCK_ROWS):
+            hi = min(lo + FILTER_BLOCK_ROWS, stop)
+            out[lo:hi] = bandpassed_rows(signal, lo, hi, grid_emg_type(emg_types, grid))
+    return store.seal(out)
+
+
 def run_auto_qc_on_token(payload: QcAutoPayload) -> dict[str, Any]:
-    """Run the automatic QC pipeline over the cached preview signal."""
-    cached = _get_qc_signal(payload.upload_token)
-    if cached is None:
+    """Run the automatic QC pipeline over the upload's grid channels, bandpassed for the run."""
+    held = _hold_upload(payload.upload_token)
+    if held is None:
         raise HTTPException(
             status_code=400,
             detail={
                 "field": "upload_token",
-                "reason": "Missing or expired QC cache; request /api/v1/preview-by-path first",
+                "reason": "Missing or expired upload; request /api/v1/preview-by-path first",
             },
         )
+    try:
+        return _auto_qc(held.signal, held.store if held.store is not None else RamStore())
+    finally:
+        held.release()
 
-    fsamp = cached.fsamp
-    grid_names = cached.grid_names
-    coordinates, _, _, _ = format_hdemg_signal(grid_names)
+
+def _auto_qc(signal: SignalImport, store: ArrayStore) -> dict[str, Any]:
+    coordinates, _, _, emg_type = format_hdemg_signal(signal.gridname)
     grid_channel_counts = [int(c.shape[0]) for c in coordinates]
     total_declared = sum(grid_channel_counts)
-
-    data = np.asarray(cached.data, dtype=np.float64)
-    if total_declared > data.shape[0]:
+    n_rows, n_samples = signal.data.shape
+    if total_declared > n_rows:
         raise HTTPException(
             status_code=400,
             detail={
                 "field": "upload_token",
                 "reason": (
                     f"Grid catalogue declares {total_declared} channels but the cached "
-                    f"signal has {data.shape[0]}"
+                    f"signal has {n_rows}"
                 ),
             },
         )
 
-    result = run_auto_qc(
-        data[:total_declared],
-        fsamp,
-        grid_channel_counts,
-        grid_coordinates=coordinates,
-    )
+    data = _bandpassed_grids(signal, grid_channel_counts, emg_type, store)
+    try:
+        result = run_auto_qc(
+            data,
+            signal.fsamp,
+            grid_channel_counts,
+            grid_coordinates=coordinates,
+            store=store,
+        )
+    finally:
+        store.discard(data)
     return make_json_safe(
         {
             "bad_channels_per_grid": [
@@ -321,8 +182,8 @@ def run_auto_qc_on_token(payload: QcAutoPayload) -> dict[str, Any]:
             ],
             "artifact_regions": _mask_to_regions(result.artifact_mask),
             "artifact_samples": int(np.asarray(result.artifact_mask).sum()),
-            "total_samples": int(data.shape[1]),
-            "fsamp": fsamp,
-            "grid_names": grid_names,
+            "total_samples": int(n_samples),
+            "fsamp": signal.fsamp,
+            "grid_names": signal.gridname,
         }
     )

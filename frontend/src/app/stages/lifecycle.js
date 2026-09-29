@@ -46,7 +46,7 @@ const STAGES = {
     panel: "stageRun",
     blocked({ state }) {
       if (!state.file) return "";
-      if (!state.previewSeries?.length) {
+      if (!state.gridSeries?.length) {
         return "Run step is locked until preview is loaded";
       }
       return null;

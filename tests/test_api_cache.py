@@ -11,7 +11,8 @@ import pytest
 
 from muedit.api import cache
 from muedit.api.memory import SESSION_IDLE_SEC
-from muedit.io.store import SessionStore
+from muedit.api.services.series_service import build_signal_views
+from muedit.io.store import RamStore, SessionStore
 from muedit.models import EditSignalContext, SignalImport
 
 
@@ -129,47 +130,47 @@ class TestUploadSignal:
         assert cache.BUDGET.used_bytes > cache.BUDGET.limit_bytes
 
 
-# ── QC arrays attached to an upload session ──────────────────────────────────
+# ── QC series attached to an upload session ──────────────────────────────────
 
 
-class TestQcSignal:
-    def _attach(self, token: str, n_samples: int = 100) -> None:
-        cache._store_qc_signal(
-            token,
-            data=np.ones((6, n_samples)),
-            fsamp=2000.0,
-            grid_names=["A", "B"],
-            discard_channels=[np.zeros(4, dtype=int), np.zeros(2, dtype=int)],
-        )
+def _views(store: RamStore | SessionStore, n_samples: int = 2000) -> cache.SignalViews:
+    rng = np.random.default_rng(0)
+    signal = SignalImport(
+        data=rng.normal(size=(6, n_samples)).astype(np.float32),
+        fsamp=2000.0,
+        gridname=["A", "B"],
+        auxiliary=rng.normal(size=(1, n_samples)).astype(np.float32),
+    )
+    views, _ = build_signal_views(signal, store, [4, 2], [1, 1])
+    return views
 
+
+class TestSignalViews:
     def test_round_trip(self, clock: FakeClock) -> None:
         token = _store()
-        self._attach(token)
-        qc = cache._get_qc_signal(token)
-        assert qc is not None
-        assert qc.data.dtype == np.float32
-        assert qc.channel_offsets == [0, 4]
-        assert qc.grid_names == ["A", "B"]
+        views = _views(RamStore())
+        cache._store_signal_views(token, views)
+        assert cache._get_signal_views(token) is views
+        assert views.grid_rows == [(0, 4), (4, 6)]
+        assert views.overview.shape == (2, 2000)
 
-    def test_data_view_is_read_only(self, clock: FakeClock) -> None:
-        token = _store()
-        self._attach(token)
-        qc = cache._get_qc_signal(token)
-        assert qc is not None
+    def test_arrays_are_read_only(self, clock: FakeClock) -> None:
+        views = _views(SessionStore.create("views"))
         with pytest.raises(ValueError):
-            qc.data[0, 0] = 5
+            views.overview[0, 0] = 5
+        with pytest.raises(ValueError):
+            views.emg.levels[0][0, 0, 0] = 5
 
-    def test_without_qc_returns_none(self, clock: FakeClock) -> None:
-        token = _store()
-        assert cache._get_qc_signal(token) is None
+    def test_without_views_returns_none(self, clock: FakeClock) -> None:
+        assert cache._get_signal_views(_store()) is None
 
-    def test_qc_arrays_count_against_the_budget(self, clock: FakeClock) -> None:
+    def test_heap_views_count_against_the_budget(self, clock: FakeClock) -> None:
         token = _store()
         before = cache.BUDGET.used_bytes
-        self._attach(token)
-        qc = cache._get_qc_signal(token)
-        assert qc is not None
-        assert cache.BUDGET.used_bytes == before + qc.nbytes
+        views = _views(RamStore())
+        cache._store_signal_views(token, views)
+        assert views.nbytes > 0
+        assert cache.BUDGET.used_bytes == before + views.nbytes
 
 
 # ── decompose preview binary cache ───────────────────────────────────────────
@@ -397,14 +398,12 @@ class TestSessionStores:
         assert cache.BUDGET.used_bytes == 0
         assert st.path.exists()
 
-    def test_qc_memory_map_costs_no_budget(self, clock: FakeClock) -> None:
+    def test_memory_mapped_views_cost_no_budget(self, clock: FakeClock) -> None:
         token, st = _stored_upload()
-        qc = st.seal(st.allocate("qc", (4, 100), np.float32, zero=True))
-        cache._store_qc_signal(token, qc, 2000.0, ["G"], [np.zeros(4, dtype=int)])
-        stored = cache._get_qc_signal(token)
-        assert stored is not None
-        assert np.shares_memory(stored.data, qc)
-        assert cache.BUDGET.used_bytes == stored.discard_channels[0].nbytes
+        views = _views(st)
+        cache._store_signal_views(token, views)
+        assert views.nbytes == 0
+        assert cache.BUDGET.used_bytes == 0
 
     @pytest.mark.parametrize("how", ["release", "close", "next_upload", "clear"])
     def test_dropping_an_upload_deletes_its_store(self, clock: FakeClock, how: str) -> None:

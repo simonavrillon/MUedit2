@@ -32,7 +32,7 @@ frontend/
     │   ├── client.js                    API client factory (all HTTP calls)
     │   ├── routes.js                    Endpoint path table
     │   ├── payloads.js                  Response normalizers
-    │   └── binary-payloads.js           Binary codecs (MUB1 frames, MQCR)
+    │   └── binary-payloads.js           Binary codecs (MUB1 frames, viewport series)
     ├── app/
     │   ├── container.js                 Entry: builds the app context, wires events
     │   ├── create-app.js                Merges every service into one `app` context

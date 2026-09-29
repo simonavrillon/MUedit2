@@ -9,7 +9,8 @@ All HTTP endpoints used by the frontend, their payloads, and binary formats.
 | 1 | GET | `/health` | `api.healthUrl()` | `initializeApp` → `waitForBackend` | 60s poll | Backend health check |
 | 2 | GET | `/dialog/open-file` | `api.openFileDialog()` | `importStage.handleNativeDialogOpen` | 120s | Open native OS file dialog |
 | 3 | POST | `/preview-by-path` | `api.fetchPreviewByPath(path)` | `qcStage.requestPreview` (with filepath) | 120s | Fetch preview metadata for raw file by path |
-| 4 | POST | `/qc/window` | `api.fetchQcWindow(payload, {preferBinary})` | `qcStage.requestQcGridWindow` | 120s | Fetch QC channel traces for a grid window |
+| 4 | GET | `/series/emg` | `api.fetchSeries("emg", params)` | `qcStage.requestQcGridWindow` | 120s | One min/max envelope per channel of a grid over the ROI (`QC_TRACE_BINS` bins) |
+| 4b | GET | `/series/overview`, `/series/aux` | `api.fetchSeries(kind, params)` | `qcStage.requestPreview` | 120s | Whole-recording envelopes of each grid's mean \|EMG\| and of the aux channels (`OVERVIEW_BINS` bins) |
 | 5 | POST | `/qc/auto` | `api.runAutoQc(payload)` | `qcStage.runAutoQc` | 300s | Run automatic QC: detect bad channels + artifact windows |
 | 6 | POST | `/decompose_stream` | `api.decomposeStream(formData)` | `runStage.runDecomposition` | 15min | Main decomposition (streaming NDJSON response); 409 while another run is active |
 | 6b | POST | `/decompose/cancel` | `api.cancelDecomposition()` | `runStage.cancelDecomposition` (Cancel button) | 120s | Stop this tab's run; its stream ends with `cancelled` |
@@ -31,7 +32,9 @@ All HTTP endpoints used by the frontend, their payloads, and binary formats.
 
 ```javascript
 export const routes = {
-  qcWindow: "/qc/window",
+  seriesEmg: "/series/emg",
+  seriesOverview: "/series/overview",
+  seriesAux: "/series/aux",
   qcAuto: "/qc/auto",
   previewByPath: "/preview-by-path",
   decomposeStream: "/decompose_stream",
@@ -66,8 +69,6 @@ Response: { path: string, name: string }
 Request:  { path: string }
 Response: {
   upload_token: string,
-  mean_abs: number[],            // per-channel mean
-  grid_mean_abs: number[][],     // per-grid mean
   grid_names: string[],
   total_samples: number,
   channel_means: number[][],
@@ -78,7 +79,6 @@ Response: {
     manufacturer?, ...
   },
   muscle: string[],
-  auxiliary: number[][],
   auxiliary_names: string[],
   fsamp: number,
   participant_meta?: { age?, sex?, handedness? },
@@ -86,28 +86,21 @@ Response: {
 }
 ```
 
-### POST /qc/window
+### GET /series/emg, /series/overview, /series/aux
 
 ```
-Request:  {
-  upload_token: string,
-  grid_index: number,
-  start: number,
-  end: number,
-  target_fs: 1000
-}
-Headers: Accept: application/octet-stream (when preferBinary)
-
-Response (binary MQCR format or JSON fallback):
+Query:    upload_token, start (default 0), end (0 = the end), bins (1-8192),
+          grid (emg only)
+Response: MUB1 frame, decoded by decodeSeriesFrame into
   {
-    grid_index: number,
-    channel_index: number,
-    start: number,
-    end: number,
-    total_samples: number,
-    fsamp: number,
-    channels: [{ channel_index: number, series: number[] }]
+    meta: { kind: "envelope" | "samples", start, end, bins, factor,
+            total_samples, fsamp, names, grid? },
+    rows: ({ min: Float32Array, max: Float32Array } | Float32Array)[]
   }
+  One row per channel (emg), grid (overview) or aux channel. "samples" rows
+  come when the window has no more samples than bins. Rows are views into the
+  response buffer. The canvases draw an envelope as a zig-zag through each
+  bin's max and min.
 ```
 
 ### POST /decompose_stream (FormData)
@@ -346,26 +339,7 @@ Mode keys match `POSTPROCESS_MODES` in `decomp/types.py` and the CLI `--postproc
 
 All integers and floats are little-endian. When the magic prefix is absent, the buffer is parsed as JSON text.
 
-### MQCR (QC Raw Float32) — `/qc/window` response
-
-```
-Offset  Size  Field
-0       4     magic "MQCR"
-4       4     uint32 version (must be 1)
-8       4     int32  grid_index
-12      4     int32  channel_index
-16      4     int32  start
-20      4     int32  end
-24      4     int32  total_samples
-28      4     float32 fsamp
-32      4     uint32 nChannels
-36      ...   per channel:
-  36+0  4     int32  channel_index
-  36+4  4     uint32 n
-  36+8  n*4   float32[n] samples
-```
-
-### MUB1 frame — `/edit/load-by-path`, `/decompose_preview/{token}`, `/edit/save` request
+### MUB1 frame — `/series/*`, `/edit/load-by-path`, `/decompose_preview/{token}`, `/edit/save` request
 
 ```
 Offset      Size        Field
@@ -404,7 +378,7 @@ The backend caches the loaded signal under the upload token; it is lost on backe
 2. Calls `POST /preview-by-path` with `state.file.path` to mint a fresh token (ROIs, channel masks and artifact regions stay in frontend state and are reused)
 3. Retries the decomposition once; if the reload fails the original error is shown
 
-The QC-stage calls (`/qc/window`, `/qc/auto`) do not retry; they report the error.
+The QC-stage calls (`/series/*`, `/qc/auto`) do not retry; they report the error.
 
 ### Silent Failure (Ambiguous .mat)
 

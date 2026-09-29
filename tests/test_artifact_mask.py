@@ -160,3 +160,95 @@ def test_multi_grid_masks_are_per_grid_and_ored() -> None:
     assert per_grid[0][center]
     assert not per_grid[1].any()
     np.testing.assert_array_equal(global_mask, per_grid[0] | per_grid[1])
+
+
+# ── Blocks of samples vs the whole-grid detector (plan stage 12) ─────────────
+
+
+def _reference_mask(data: np.ndarray, fsamp: float, cfg: ArtifactMaskConfig) -> np.ndarray:
+    """The detector as it was before stage 12: whole-grid arrays, whole-array medians."""
+    from scipy.ndimage import binary_closing, binary_dilation, maximum_filter1d, median_filter
+
+    def baselines(x: np.ndarray, cols: np.ndarray | None) -> list[tuple[np.ndarray, np.ndarray]]:
+        med = np.median(x, axis=-1, keepdims=True)
+        sigma = 1.4826 * np.median(np.abs(x - med), axis=-1, keepdims=True)
+        out = [(med, np.maximum(sigma, 0.20 * med))]
+        step = max(1, int(round(fsamp * 25 / 1000.0)))
+        xd = x[..., ::step]
+        size = (1,) * (xd.ndim - 1) + (max(3, int(round(2.0 * fsamp / step)) | 1),)
+        med_d = median_filter(xd, size=size, mode="nearest")
+        mad_d = median_filter(np.abs(xd - med_d), size=size, mode="nearest")
+        idx = np.arange(x.shape[-1]) if cols is None else cols
+        idx = np.minimum(idx // step, xd.shape[-1] - 1)
+        med = med_d[..., idx]
+        out.append((med, np.maximum(1.4826 * mad_d[..., idx], 0.20 * med)))
+        return out
+
+    def exceeds(
+        x: np.ndarray, z_thr: float, amp_ratio: float | None, cols: np.ndarray | None = None
+    ) -> np.ndarray:
+        xs = x if cols is None else x[..., cols]
+        out = np.ones(xs.shape, dtype=bool)
+        for med, sigma in baselines(x, cols):
+            hit = (xs - med) / (sigma + 1e-12) > z_thr
+            if amp_ratio is not None:
+                hit |= xs > amp_ratio * (med + 1e-12)
+            out &= hit
+        return out
+
+    n_samples = data.shape[1]
+    ch_win = maximum_filter1d(
+        np.abs(data.astype(np.float32)),
+        size=max(1, int(round(fsamp * cfg.win_ms / 1000.0))),
+        axis=1,
+        mode="nearest",
+    )
+    n_channels = ch_win.shape[0]
+    k = min(max(cfg.min_channels, 1), n_channels)
+    win_stat = np.partition(ch_win, n_channels - k, axis=0)[n_channels - k]
+    candidate = exceeds(win_stat, cfg.z_thr, cfg.amp_ratio)
+    if not candidate.any():
+        return np.zeros(n_samples, dtype=bool)
+    cols = np.flatnonzero(candidate)
+    confirmed = np.zeros(n_samples, dtype=bool)
+    confirmed[cols[exceeds(ch_win, cfg.ch_z_thr, None, cols).sum(axis=0) >= k]] = True
+    if not confirmed.any():
+        return confirmed
+    bridge = max(1, int(round(fsamp * cfg.min_gap_ms / 1000.0)))
+    pad = max(1, int(round(fsamp * cfg.pad_ms / 1000.0)))
+    confirmed = binary_closing(confirmed, structure=np.ones(bridge, dtype=bool))
+    return np.asarray(binary_dilation(confirmed, structure=np.ones(pad, dtype=bool)), dtype=bool)
+
+
+def _artifacted_grid() -> np.ndarray:
+    data = _clean_emg(n_samples=40_000).astype(np.float64)
+    for center in (5_000, 17_000, 30_011):
+        data = _inject_artifact(data, center, channels=slice(0, 40))
+    return _inject_burst(data, 22_000)
+
+
+@pytest.mark.parametrize("block_bytes", [None, 64 * 4 * 997, 64 * 4 * 3000])
+def test_blocks_of_samples_give_the_whole_grid_mask(
+    block_bytes: int | None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from muedit.io import store
+
+    if block_bytes is not None:
+        monkeypatch.setattr(store, "BLOCK_BYTES", block_bytes)
+    data = _artifacted_grid()
+    cfg = ArtifactMaskConfig()
+    want = _reference_mask(data, FSAMP, cfg)
+    assert want.any()
+    np.testing.assert_array_equal(_detect_artifact_mask(data, FSAMP, cfg), want)
+    session = store.SessionStore.create("artifact")
+    np.testing.assert_array_equal(_detect_artifact_mask(data, FSAMP, cfg, store=session), want)
+    assert not any(session.path.glob("artifact-windows*"))  # the working array is deleted
+
+
+def test_kept_rows_give_the_mask_of_the_stacked_rows() -> None:
+    data = _artifacted_grid()
+    rows = np.array([0, 2, 5, 7, 9, *range(12, N_CHANNELS)])
+    want = _reference_mask(data[rows], FSAMP, ArtifactMaskConfig())
+    np.testing.assert_array_equal(_detect_artifact_mask(data, FSAMP, rows=rows), want)
+    per_grid, _ = detect_artifact_masks(data, FSAMP, [rows.size], grid_rows=[rows])
+    np.testing.assert_array_equal(per_grid[0], want)

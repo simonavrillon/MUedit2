@@ -3,25 +3,10 @@
 from __future__ import annotations
 
 import numpy as np
-from scipy.signal import decimate
 
 from muedit.models import FloatArray
 
 PREVIEW_MOVING_AVG_MS: float = 25.0
-
-
-def raw_series_at_fs(series: FloatArray, source_fs: float, target_fs: float) -> list[float]:
-    """Downsample a raw series from source_fs to target_fs with an FIR anti-alias filter."""
-    x = np.asarray(series, dtype=np.float32).reshape(-1)
-    if x.size == 0:
-        return []
-    if source_fs <= 0 or target_fs <= 0:
-        return x.astype(float).tolist()
-    step = max(1, int(np.round(source_fs / target_fs)))
-    if step <= 1:
-        return x.astype(float).tolist()
-    y = decimate(x, step, ftype="fir", zero_phase=True)
-    return y.astype(float).tolist()
 
 
 def moving_average_ms(series: FloatArray, fsamp: float, window_ms: float) -> FloatArray:

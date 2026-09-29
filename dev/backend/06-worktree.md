@@ -19,8 +19,16 @@ Use this to trace what the user can reach.
 | `preview_router` | User-exposed | `include_routers()` |
 | `GET /health` | User-exposed | HTTP |
 | `POST /preview-by-path` | User-exposed | HTTP |
-| `POST /qc/window` | User-exposed | HTTP |
 | `POST /qc/auto` | User-exposed | HTTP |
+
+### `routes/series.py`
+
+| Symbol | Category | Reachable via |
+|---|---|---|
+| `series_router` | User-exposed | `include_routers()` |
+| `GET /series/emg` | User-exposed | HTTP |
+| `GET /series/overview` | User-exposed | HTTP |
+| `GET /series/aux` | User-exposed | HTTP |
 
 ### `routes/decompose.py`
 
@@ -60,12 +68,20 @@ Use this to trace what the user can reach.
 | Symbol | Category | Reachable via |
 |---|---|---|
 | `build_preview_from_path(path)` | App-internal | `POST /preview-by-path` route |
-| `get_qc_window(payload)` | App-internal | `POST /qc/window` route |
 | `run_auto_qc_on_token(payload)` | App-internal | `POST /qc/auto` route |
 | `_build_preview_core(filepath)` | App-internal | Called by `build_preview_from_path` |
-| `_encode_qc_raw_f32(...)` | App-internal | Called by `get_qc_window` |
+| `_bandpassed_grids(...)` | App-internal | Called by `run_auto_qc_on_token`; a temporary store file |
 | `_decomp_artifact_error(field)` | App-internal | Called by `build_preview_from_path` |
 | `_mask_to_regions(mask)` | App-internal | Called by `run_auto_qc_on_token` |
+
+### `services/series_service.py`
+
+| Symbol | Category | Reachable via |
+|---|---|---|
+| `build_signal_views(signal, store, grid_counts, emg_types)` | App-internal | Called by `_build_preview_core`; pyramids, overview and channel means in one pass |
+| `series_frame(kind, upload_token, start, end, bins, grid)` | App-internal | `GET /series/*` routes |
+| `bandpassed_rows(signal, lo, hi, emg_type)` | App-internal | Preview pass and auto-QC |
+| `grid_rows(grid_counts, n_rows)`, `grid_emg_type(emg_types, grid)` | App-internal | Preview and auto-QC |
 
 ### `services/decompose_service.py`
 
@@ -140,7 +156,6 @@ Use this to trace what the user can reach.
 | Symbol | Category | Reachable via |
 |---|---|---|
 | `PathPayload` | User-exposed | `POST /preview-by-path`, `POST /edit/load-by-path` |
-| `QcWindowPayload` | User-exposed | `POST /qc/window` |
 | `EditSavePayload` | User-exposed | `POST /edit/save` |
 | `EditFilterPayload` | User-exposed | `POST /edit/update-filter` |
 | `EditRoiPayload` | User-exposed | `POST /edit/add-spikes`, `/edit/add-artifact`, `/edit/delete-spikes`, `/edit/delete-dr` |
@@ -177,8 +192,8 @@ Use this to trace what the user can reach.
 | `cache._store_upload_signal()` | App-internal | Called by preview service |
 | `cache._get_upload_signal()` | App-internal | Called by decompose service |
 | `cache._get_upload_source_path()` | App-internal | Called by decompose service |
-| `cache._store_qc_signal()` | App-internal | Called by preview service |
-| `cache._get_qc_signal()` | App-internal | Called by preview service |
+| `cache._store_signal_views()` | App-internal | Called by preview service |
+| `cache._get_signal_views()` | App-internal | Called by series service |
 | `cache._store_decomp_preview_binary()` | App-internal | Called by decompose service |
 | `cache._pop_decomp_preview_binary()` | App-internal | Called by decompose service |
 | `cache._store_run_result()` | App-internal | Called by decompose service |
@@ -188,7 +203,7 @@ Use this to trace what the user can reach.
 | `cache._get_edit_signal_context()` | App-internal | Called by editing service |
 | `cache._get_edit_signal_context_by_label()` | App-internal | Called by editing service |
 | `cache._purge_expired_caches_locked()` | App-internal | Called by cache operations |
-| `cache.QCSignal` | App-internal | Returned by `_get_qc_signal`; used by preview service |
+| `cache.SignalViews` | App-internal | Returned by `_get_signal_views`; used by series service |
 | `cache._evict_to_budget_locked()` | App-internal | Called by cache store functions |
 
 ---
@@ -276,8 +291,8 @@ Use this to trace what the user can reach.
 | `find_refractory_peaks()` | App-internal | Called by `decompose_step`, `operations.py` |
 | `split_by_amplitude()` | App-internal | Called by `decompose_step`, `operations.py` |
 | `isi_cov()` | App-internal | Called by `rem_duplicates`, `minimize_isi_covariance` |
-| `raw_series_at_fs()` | App-internal | Called by preview service |
-| `moving_average_ms()` | App-internal | Called by preview service |
+| `MinMaxPyramid`, `view()` (`signal/pyramid.py`) | App-internal | Built by `build_signal_views`; read by `series_frame` |
+| `moving_average_ms()` | App-internal | Called by series service |
 | `get_grid_electrode_metadata()` | App-internal | Called by `export_bids_emg` |
 | `ArtifactMaskConfig` | App-internal | Used by artifact mask functions |
 | `ChannelQCConfig` | App-internal | Used by channel QC functions |

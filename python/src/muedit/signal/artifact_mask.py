@@ -9,9 +9,13 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.ndimage import binary_closing, binary_dilation, maximum_filter1d, median_filter
 
+from muedit.io.store import ArrayStore, RamStore, sample_blocks
 from muedit.models import BoolArray, FloatArray, IntArray
 
 logger = logging.getLogger(__name__)
+
+#: The channels of one grid: a block of rows, or the indices of its kept channels.
+Rows = slice | IntArray
 
 _MAD_TO_STD: float = 1.4826
 _SIGMA_FLOOR_FRAC: float = 0.20
@@ -32,6 +36,19 @@ class ArtifactMaskConfig:
     min_gap_ms: int = 20
 
 
+def _median_and_mad(x: FloatArray) -> tuple[FloatArray, FloatArray]:
+    """Median and median absolute deviation along the last axis (kept), one row at a time."""
+    if x.ndim == 1:
+        med = np.median(x, axis=-1, keepdims=True)
+        return med, np.median(np.abs(x - med), axis=-1, keepdims=True)
+    rows = [np.asarray(row) for row in x]
+    med = np.stack([np.median(row, keepdims=True) for row in rows])
+    mad = np.stack(
+        [np.median(np.abs(row - m), keepdims=True) for row, m in zip(rows, med, strict=True)]
+    )
+    return med, mad
+
+
 def _baselines(
     x: FloatArray,
     fsamp: float,
@@ -39,8 +56,8 @@ def _baselines(
     cols: IntArray | None,
 ) -> Iterator[tuple[FloatArray, FloatArray]]:
     """Yield ``(median, sigma)`` for each baseline, broadcastable to ``x[..., cols]``."""
-    med = np.median(x, axis=-1, keepdims=True)
-    sigma = _MAD_TO_STD * np.median(np.abs(x - med), axis=-1, keepdims=True)
+    med, mad = _median_and_mad(x)
+    sigma = _MAD_TO_STD * mad
     yield med, np.maximum(sigma, _SIGMA_FLOOR_FRAC * med)
 
     if cfg.local_baseline_s is None:
@@ -76,31 +93,60 @@ def _exceeds(
     return out
 
 
+def _window_maxima(
+    data: FloatArray, rows: Rows, win: int, k: int, store: ArrayStore
+) -> tuple[FloatArray, FloatArray]:
+    """Per-channel moving maximum of ``|data[rows]|`` and its ``k``-th largest value per sample.
+
+    Computed over blocks of samples, each read with ``win`` samples of overlap on both sides
+    so the moving maximum inside the block is the one over the whole row.
+    """
+    n_samples = data.shape[1]
+    n_channels = len(range(data.shape[0])[rows]) if isinstance(rows, slice) else len(rows)
+    ch_win = store.allocate("artifact-windows", (n_channels, n_samples), np.float32)
+    win_stat = np.empty(n_samples, dtype=np.float32)
+    for start, stop in sample_blocks(n_samples, n_channels, np.dtype(np.float32).itemsize):
+        lo, hi = max(0, start - win), min(n_samples, stop + win)
+        ch_abs = np.abs(np.asarray(data[rows, lo:hi]).astype(np.float32))
+        block = maximum_filter1d(ch_abs, size=win, axis=1, mode="nearest")[
+            :, start - lo : stop - lo
+        ]
+        ch_win[:, start:stop] = block
+        win_stat[start:stop] = np.partition(block, n_channels - k, axis=0)[n_channels - k]
+    return ch_win, win_stat
+
+
 def _detect_artifact_mask(
     data: FloatArray,
     fsamp: float,
     config: ArtifactMaskConfig | None = None,
+    rows: Rows | None = None,
+    store: ArrayStore | None = None,
 ) -> BoolArray:
-    """Detect a boolean artifact mask for one grid's filtered signal."""
+    """Detect a boolean artifact mask for one grid's filtered signal, ``data[rows]``.
+
+    The per-channel window maxima (one grid-size float32 array) go into ``store`` when one
+    is given.
+    """
     cfg = config or ArtifactMaskConfig()
+    rows = slice(None) if rows is None else rows
     n_samples = data.shape[1] if data.ndim == 2 else 0
-    if data.size == 0 or n_samples == 0:
+    n_channels = len(range(data.shape[0])[rows]) if isinstance(rows, slice) else len(rows)
+    if n_channels == 0 or n_samples == 0:
         return np.zeros(max(n_samples, 0), dtype=bool)
 
-    ch_abs = np.abs(data.astype(np.float32))
     win = max(1, int(round(fsamp * cfg.win_ms / 1000.0)))
-
-    ch_win = maximum_filter1d(ch_abs, size=win, axis=1, mode="nearest")
-    n_channels = ch_win.shape[0]
     k = min(max(cfg.min_channels, 1), n_channels)
-
-    win_stat = np.partition(ch_win, n_channels - k, axis=0)[n_channels - k]
-    candidate = _exceeds(win_stat, fsamp, cfg, cfg.z_thr, cfg.amp_ratio)
-    if not candidate.any():
-        return np.zeros(n_samples, dtype=bool)
-
-    cols = np.flatnonzero(candidate)
-    n_excited = _exceeds(ch_win, fsamp, cfg, cfg.ch_z_thr, None, cols).sum(axis=0)
+    store = store if store is not None else RamStore()
+    ch_win, win_stat = _window_maxima(data, rows, win, k, store)
+    try:
+        candidate = _exceeds(win_stat, fsamp, cfg, cfg.z_thr, cfg.amp_ratio)
+        if not candidate.any():
+            return np.zeros(n_samples, dtype=bool)
+        cols = np.flatnonzero(candidate)
+        n_excited = _exceeds(ch_win, fsamp, cfg, cfg.ch_z_thr, None, cols).sum(axis=0)
+    finally:
+        store.discard(ch_win)
     confirmed = np.zeros(n_samples, dtype=bool)
     confirmed[cols[n_excited >= k]] = True
     if not confirmed.any():
@@ -125,16 +171,22 @@ def detect_artifact_masks(
     fsamp: float,
     grid_channel_counts: list[int],
     config: ArtifactMaskConfig | None = None,
+    grid_rows: list[IntArray] | None = None,
+    store: ArrayStore | None = None,
 ) -> tuple[list[BoolArray], BoolArray]:
-    """Detect artifact masks per grid and return per-grid + global masks."""
+    """Detect artifact masks per grid and return per-grid + global masks.
+
+    Grid ``i`` is ``data[grid_rows[i]]`` when rows are given, else the next
+    ``grid_channel_counts[i]`` rows.
+    """
     n_samples = data.shape[1]
     per_grid_masks: list[BoolArray] = []
     global_mask = np.zeros(n_samples, dtype=bool)
 
     ch_idx = 0
     for grid_idx, n_ch in enumerate(grid_channel_counts):
-        grid_data = data[ch_idx : ch_idx + n_ch, :]
-        mask = _detect_artifact_mask(grid_data, fsamp, config)
+        rows = slice(ch_idx, ch_idx + n_ch) if grid_rows is None else grid_rows[grid_idx]
+        mask = _detect_artifact_mask(data, fsamp, config, rows, store)
         per_grid_masks.append(mask)
         global_mask |= mask
         ch_idx += n_ch

@@ -5,9 +5,7 @@
  */
 import { routes } from "./routes.js";
 import {
-  isQcRawF32Payload,
-  decodeQcJsonPayload,
-  decodeQcRawF32,
+  decodeSeriesFrame,
   decodeDecomposePreviewPayload,
   decodeEditLoadPayload,
   encodeFrame,
@@ -16,6 +14,13 @@ import {
 import { normalizePreviewPayload } from "./payloads.js";
 
 /** @typedef {import("../app/context.js").JsonObject} JsonObject */
+/** @typedef {"emg" | "overview" | "aux"} SeriesKind */
+
+const SERIES_ROUTES = {
+  emg: routes.seriesEmg,
+  overview: routes.seriesOverview,
+  aux: routes.seriesAux,
+};
 
 /**
  * @param {{ apiFetch: typeof import("../app/http.js").apiFetch, apiJson: typeof import("../app/http.js").apiJson, API_BASE: string, sessionId: string }} deps
@@ -40,30 +45,26 @@ export function createApiClient({ apiFetch, apiJson, API_BASE, sessionId }) {
 
   return {
     /**
-     * @param {JsonObject} payload
-     * @param {{ preferBinary?: boolean }} [options]
+     * A viewport of the upload's EMG (one grid), grid overview or auxiliary
+     * channels, as `Float32Array` views: min/max per bin, or the samples
+     * when the window has no more samples than bins.
+     *
+     * @param {SeriesKind} kind
+     * @param {{ upload_token: string, grid?: number, start?: number, end?: number, bins: number }} params
+     * @returns {Promise<import("./binary-payloads.js").SeriesView>}
      */
-    async fetchQcWindow(payload, { preferBinary = true } = {}) {
-      if (preferBinary) {
-        const res = await apiFetch(
-          `${API_BASE}${routes.qcWindow}`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Accept: "application/octet-stream",
-            },
-            body: JSON.stringify(payload),
-          },
-          120000,
-        );
-        const buf = await res.arrayBuffer();
-        if (isQcRawF32Payload(buf, res.headers.get("x-muedit-format"))) {
-          return decodeQcRawF32(buf);
-        }
-        return decodeQcJsonPayload(buf);
+    async fetchSeries(kind, params) {
+      const query = new URLSearchParams();
+      for (const [key, value] of Object.entries(params)) {
+        if (value !== undefined && value !== null)
+          query.set(key, String(value));
       }
-      return postJson(`${API_BASE}${routes.qcWindow}`, payload, 120000);
+      const res = await apiFetch(
+        `${API_BASE}${SERIES_ROUTES[kind]}?${query}`,
+        { method: "GET", headers: { Accept: "application/octet-stream" } },
+        120000,
+      );
+      return decodeSeriesFrame(await res.arrayBuffer());
     },
 
     /**

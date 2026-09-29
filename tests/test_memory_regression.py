@@ -13,8 +13,9 @@ import numpy as np
 import pytest
 import scipy.io
 
-from muedit.api.schemas import EditFilterPayload, QcAutoPayload, QcWindowPayload
+from muedit.api.schemas import EditFilterPayload, QcAutoPayload
 from muedit.api.services import editing_service, preview_service
+from muedit.api.services.series_service import series_frame
 from muedit.decomp.core import decompose_step
 from muedit.decomp.pipeline import run_decomposition
 from muedit.decomp.postprocess import export_step, postprocess_step
@@ -53,19 +54,22 @@ EXT_WINDOW_MB = EXT_ROWS * ROI_SAMPLES * 8 / 1e6
 # stages 4-5: decompose, update_filter and the three postprocess branches;
 # stages 6-7: preview, preprocess and save; stages 9-10: preview, preprocess,
 # full-trace and adaptive, with the loaded, filtered and pulse arrays memory-mapped
-# in session stores).  A factor that grows means the stage started keeping an
+# in session stores; stage 12: qc_auto, and ``series`` replacing ``qc_window``).
+# A factor that grows means the stage started keeping an
 # extra full copy.  ``load`` reads a v5 .mat, which scipy can only read whole;
 # ``load_store`` reads the same recording as v7.3 into a store, slice by slice.
 # Full-trace and adaptive stream the recording, so their budgets are no longer
 # multiples of the full-length extension: full-trace holds one ~64 MB batch,
 # adaptive one calibration chunk; their pulse trains are in the run store.
+# ``series`` reads the min/max pyramids, so it depends on the bins asked for, not on
+# the recording: its budget is in MB.
 
 BUDGETS_MB: dict[str, float] = {
     "load": 1.9 * RAW_MB,
     "load_store": 0.35 * RAW_MB,
     "preview": 0.65 * RAW_MB,
-    "qc_window": 3.2 * RAW_MB,
-    "qc_auto": 5.7 * RAW_MB,
+    "series": 2.0,
+    "qc_auto": 3.2 * RAW_MB,
     "preprocess": 0.47 * RAW_MB,
     "decompose": 1.55 * EXT_WINDOW_MB,
     "post_windowed": 1.45 * EXT_WINDOW_MB,
@@ -251,14 +255,18 @@ def test_preview_stage(mat_path: Path) -> None:
     _check("preview", peak)
 
 
-def test_qc_window_stage(upload_token: str) -> None:
+def test_series_stage(upload_token: str) -> None:
+    """What the QC stage draws for the whole recording: served from the pyramids."""
+
     def _fetch() -> Any:
-        return preview_service.get_qc_window(
-            QcWindowPayload(upload_token=upload_token, grid_index=0, target_fs=1000.0)
-        )
+        return [
+            series_frame("emg", upload_token, 0, 0, 1024),
+            series_frame("overview", upload_token, 0, 0, 1024),
+            series_frame("aux", upload_token, 0, 0, 1024),
+        ]
 
     _, peak = _peak_mb(_fetch)
-    _check("qc_window", peak)
+    _check("series", peak)
 
 
 def test_qc_auto_stage(upload_token: str) -> None:

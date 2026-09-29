@@ -111,7 +111,7 @@ To add a service method: add its signature to the matching typedef in `context.j
 {
   // Import / QC / Run shared
   file, uploadToken, isRunning, seriesLength,
-  rois: [], roiDraft, previewSeries,
+  rois: [], roiDraft,
   artifactRegions: [], artifactDraft, artifactMode,
   gridNames: [], gridSeries: [], gridColors,
   channelMeans: [], coordinates: [],
@@ -170,7 +170,7 @@ To add a service method: add its signature to the matching typedef in `context.j
 │              state (global)                  │
 │                                             │
 │  Import/QC/Run share:                        │
-│    file, rois, previewSeries, gridNames,     │
+│    file, rois, gridNames,                    │
 │    gridSeries, channelMeans, coordinates,    │
 │    discardMasks, artifactRegions, artifactMode,│
 │    currentGrid, fsamp,                         │
@@ -272,7 +272,7 @@ stepEdit.disabled = !hasEditData && (!hasFile || !hasRunResults)
 |---|---|---|
 | import | qc | file loaded (preview succeeds) |
 | import | edit | decomposition file loaded directly |
-| qc | run | previewSeries exists |
+| qc | run | gridSeries exists (the preview's overview envelopes) |
 | qc | edit | edit data loaded |
 | run | edit | auto-transitioned after run completes |
 | any | any (stepper click) | availability checks via `updateStepAvailability` |

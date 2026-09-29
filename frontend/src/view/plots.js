@@ -23,6 +23,100 @@ import { COLORS } from "../config.js";
  */
 
 /**
+ * @param {unknown} x
+ * @returns {x is ArrayLike<number>}
+ */
+function isValues(x) {
+  return (
+    Array.isArray(x) || (ArrayBuffer.isView(x) && !(x instanceof DataView))
+  );
+}
+
+/**
+ * @param {unknown} row
+ * @returns {row is import("../api/binary-payloads.js").Envelope}
+ */
+function isEnvelope(row) {
+  if (!row || typeof row !== "object" || isValues(row)) return false;
+  const env = /** @type {{ min?: unknown, max?: unknown }} */ (row);
+  return isValues(env.min) && isValues(env.max);
+}
+
+/**
+ * Points in a viewport row: its bins, or its samples (0 when it is neither).
+ *
+ * @param {ChannelTrace | null | undefined} row
+ */
+export function seriesPoints(row) {
+  if (isEnvelope(row)) return row.min.length;
+  return isValues(row) ? row.length : 0;
+}
+
+/**
+ * Smallest and largest finite value over viewport rows.
+ *
+ * @param {(ChannelTrace | null | undefined)[]} rows
+ */
+export function seriesRange(rows) {
+  let min = Infinity;
+  let max = -Infinity;
+  for (const row of rows) {
+    /** @type {ArrayLike<number>} */
+    let lows;
+    /** @type {ArrayLike<number>} */
+    let highs;
+    if (isEnvelope(row)) {
+      lows = row.min;
+      highs = row.max;
+    } else if (isValues(row)) {
+      lows = highs = row;
+    } else {
+      continue;
+    }
+    for (let i = 0; i < lows.length; i++) {
+      if (lows[i] < min) min = lows[i];
+    }
+    for (let i = 0; i < highs.length; i++) {
+      if (highs[i] > max) max = highs[i];
+    }
+  }
+  return { min, max };
+}
+
+/**
+ * Stroke one viewport row across `width` pixels from `x0`: a line through the
+ * samples, or a zig-zag through each bin's max and min, which fills the band
+ * the samples cover.
+ *
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {ChannelTrace} row
+ * @param {number} x0
+ * @param {number} width
+ * @param {(v: number) => number} toY
+ */
+export function strokeSeries(ctx, row, x0, width, toY) {
+  const n = seriesPoints(row);
+  if (!n) return;
+  const stepX = width / Math.max(1, n - 1);
+  ctx.beginPath();
+  if (isEnvelope(row)) {
+    for (let i = 0; i < n; i++) {
+      const x = x0 + i * stepX;
+      if (i === 0) ctx.moveTo(x, toY(row.max[i]));
+      else ctx.lineTo(x, toY(row.max[i]));
+      ctx.lineTo(x, toY(row.min[i]));
+    }
+  } else {
+    for (let i = 0; i < n; i++) {
+      const x = x0 + i * stepX;
+      if (i === 0) ctx.moveTo(x, toY(row[i]));
+      else ctx.lineTo(x, toY(row[i]));
+    }
+  }
+  ctx.stroke();
+}
+
+/**
  * @param {CanvasRef} canvas
  * @returns {HTMLCanvasElement | null}
  */
@@ -351,8 +445,11 @@ export function drawSeries(
 }
 
 /**
+ * The smoothed mean |EMG| of each grid over the whole recording, one colour
+ * per grid, behind the ROI and artifact windows.
+ *
  * @param {CanvasRef} canvas
- * @param {number[][]} [seriesList]
+ * @param {ChannelTrace[]} [seriesList]
  * @param {string[]} [colors]
  * @param {Overlay[]} [selections]
  * @param {number | null} [totalSamples]
@@ -368,9 +465,7 @@ export function drawGridOverlay(
   if (!prepared) return;
   const { canvasEl, ctx } = prepared;
 
-  const validSeries = (seriesList || []).filter(
-    (s) => Array.isArray(s) && s.length,
-  );
+  const validSeries = (seriesList || []).filter((s) => seriesPoints(s) > 0);
   if (!validSeries.length) {
     ctx.fillStyle = COLORS.muted;
     ctx.font = "12px sans-serif";
@@ -378,16 +473,7 @@ export function drawGridOverlay(
     return;
   }
 
-  let globalMin = Infinity;
-  let globalMax = -Infinity;
-  validSeries.forEach((arr) => {
-    arr.forEach((v) => {
-      if (Number.isFinite(v)) {
-        if (v < globalMin) globalMin = v;
-        if (v > globalMax) globalMax = v;
-      }
-    });
-  });
+  const { min: globalMin, max: globalMax } = seriesRange(validSeries);
   if (!Number.isFinite(globalMin) || !Number.isFinite(globalMax)) {
     ctx.fillStyle = COLORS.muted;
     ctx.font = "12px sans-serif";
@@ -406,20 +492,12 @@ export function drawGridOverlay(
     );
   }
 
-  validSeries.forEach((arr, idx) => {
-    if (!arr.length) return;
-    const stepX = canvasEl.width / Math.max(1, arr.length - 1);
-    const color = colors[idx % colors.length] || COLORS.primary;
-    ctx.strokeStyle = color;
+  const toY = (/** @type {number} */ v) =>
+    canvasEl.height - ((v - globalMin) / span) * canvasEl.height;
+  validSeries.forEach((row, idx) => {
+    ctx.strokeStyle = colors[idx % colors.length] || COLORS.primary;
     ctx.lineWidth = 1.2;
-    ctx.beginPath();
-    arr.forEach((v, i) => {
-      const x = i * stepX;
-      const y = canvasEl.height - ((v - globalMin) / span) * canvasEl.height;
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    });
-    ctx.stroke();
+    strokeSeries(ctx, row, 0, canvasEl.width, toY);
   });
 }
 
@@ -435,51 +513,20 @@ export function drawMiniSeries(canvas, series, off = false) {
   canvas.width = canvas.clientWidth || 60;
   canvas.height = canvas.clientHeight || 28;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  const hasEnvelope =
-    !!series &&
-    !Array.isArray(series) &&
-    Array.isArray(series.min) &&
-    Array.isArray(series.max);
-  if (!series || (Array.isArray(series) ? !series.length : !hasEnvelope)) {
+  if (!series || !seriesPoints(series)) {
     ctx.fillStyle = COLORS.gridEmpty;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     return;
   }
-  const valuesMin = Array.isArray(series) ? series : series.min;
-  const valuesMax = Array.isArray(series) ? series : series.max;
-  let max = -Infinity;
-  let min = Infinity;
-  for (let i = 0; i < valuesMax.length; i++) {
-    if (valuesMax[i] > max) max = valuesMax[i];
-  }
-  for (let i = 0; i < valuesMin.length; i++) {
-    if (valuesMin[i] < min) min = valuesMin[i];
-  }
+  const { min, max } = seriesRange([series]);
   const span = max - min || 1;
-  const count = Math.max(valuesMin.length, valuesMax.length);
-  const stepX = canvas.width / Math.max(1, count - 1);
   ctx.strokeStyle = off ? COLORS.warning : COLORS.primary;
   ctx.lineWidth = 1;
-  if (hasEnvelope) {
-    for (let idx = 0; idx < count; idx++) {
-      const x = idx * stepX;
-      const vMin = valuesMin[idx] ?? valuesMin[valuesMin.length - 1] ?? 0;
-      const vMax = valuesMax[idx] ?? valuesMax[valuesMax.length - 1] ?? vMin;
-      const y1 = canvas.height - ((vMin - min) / span) * canvas.height;
-      const y2 = canvas.height - ((vMax - min) / span) * canvas.height;
-      ctx.beginPath();
-      ctx.moveTo(x, y1);
-      ctx.lineTo(x, y2);
-      ctx.stroke();
-    }
-  } else {
-    ctx.beginPath();
-    valuesMax.forEach((v, idx) => {
-      const x = idx * stepX;
-      const y = canvas.height - ((v - min) / span) * canvas.height;
-      if (idx === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    });
-    ctx.stroke();
-  }
+  strokeSeries(
+    ctx,
+    series,
+    0,
+    canvas.width,
+    (v) => canvas.height - ((v - min) / span) * canvas.height,
+  );
 }

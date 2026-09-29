@@ -8,7 +8,8 @@ from dataclasses import replace as dc_replace
 
 import numpy as np
 
-from muedit.models import BoolArray, FloatArray
+from muedit.io.store import ArrayStore
+from muedit.models import BoolArray, FloatArray, IntArray
 from muedit.signal.artifact_mask import (
     ArtifactMaskConfig,
     detect_artifact_masks,
@@ -36,8 +37,9 @@ def run_auto_qc(
     grid_coordinates: list[FloatArray] | None = None,
     artifact_config: ArtifactMaskConfig | None = None,
     channel_qc_config: ChannelQCConfig | None = None,
+    store: ArrayStore | None = None,
 ) -> QCPipelineResult:
-    """Run the automatic QC pipeline."""
+    """Run the automatic QC pipeline; ``store`` takes the artifact detector's working array."""
     prelim_config = dc_replace(
         channel_qc_config or ChannelQCConfig(),
         intermittent_amp_ratio=float("inf"),
@@ -61,18 +63,14 @@ def run_auto_qc(
         100.0 * prelim_bad / max(total_ch, 1),
     )
 
-    kept_data, kept_counts, _ = _select_kept_channels(
-        data,
-        grid_channel_counts,
-        prelim_bad_masks,
-        grid_coordinates,
-    )
-
+    kept_rows = _kept_rows(grid_channel_counts, prelim_bad_masks)
     _, artifact_mask = detect_artifact_masks(
-        kept_data,
+        data,
         fsamp,
-        kept_counts,
+        [rows.size for rows in kept_rows],
         artifact_config,
+        grid_rows=kept_rows,
+        store=store,
     )
     logger.info(
         "QC stage 1 (artifacts): %d / %d samples (%.2f%%)",
@@ -108,32 +106,19 @@ def run_auto_qc(
     )
 
 
-def _select_kept_channels(
-    data: FloatArray,
-    grid_channel_counts: list[int],
-    bad_channel_masks: list[BoolArray],
-    grid_coordinates: list[FloatArray] | None,
-) -> tuple[FloatArray, list[int], list[FloatArray] | None]:
-    """Build a data array containing only kept channels per grid."""
-    kept_slices: list[FloatArray] = []
-    kept_counts: list[int] = []
-    kept_coords: list[FloatArray] | None = [] if grid_coordinates is not None else None
-
+def _kept_rows(
+    grid_channel_counts: list[int], bad_channel_masks: list[BoolArray]
+) -> list[IntArray]:
+    """Rows of each grid's kept channels in the full signal (its first channel if none is kept)."""
+    rows: list[IntArray] = []
     ch_idx = 0
-    for grid_idx, (n_ch, bad) in enumerate(
-        zip(grid_channel_counts, bad_channel_masks, strict=True)
-    ):
+    for n_ch, bad in zip(grid_channel_counts, bad_channel_masks, strict=True):
         kept = np.where(~bad)[0]
         if kept.size == 0:
             kept = np.array([0])
-        kept_slices.append(data[ch_idx + kept, :])
-        kept_counts.append(kept.size)
-        if grid_coordinates is not None and kept_coords is not None:
-            kept_coords.append(grid_coordinates[grid_idx][kept])
+        rows.append(ch_idx + kept)
         ch_idx += n_ch
-
-    kept_data = np.vstack(kept_slices) if kept_slices else np.zeros((0, data.shape[1]))
-    return kept_data, kept_counts, kept_coords
+    return rows
 
 
 def _exclude_samples(

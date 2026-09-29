@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from muedit.signal.qc_pipeline import QCPipelineResult, _select_kept_channels, run_auto_qc
+from muedit.signal.qc_pipeline import QCPipelineResult, _kept_rows, run_auto_qc
 from tests._synthetic_emg import (
     FSAMP,
     N_CHANNELS,
@@ -68,14 +68,9 @@ def test_multi_grid_reports_on_the_right_grid() -> None:
 
 
 def test_kept_channels_are_selected_per_grid() -> None:
-    data = np.repeat(np.arange(10, dtype=float)[:, None], 4, axis=1)
-    coords = [np.arange(8.0).reshape(4, 2), 100 + np.arange(12.0).reshape(6, 2)]
     bad = [np.ones(4, bool), np.array([1, 0, 0, 1, 0, 0], bool)]
 
-    kept, counts, kept_coords = _select_kept_channels(data, [4, 6], bad, coords)
+    rows = _kept_rows([4, 6], bad)
 
-    assert counts == [1, 4]
-    assert kept_coords is not None
-    np.testing.assert_array_equal(kept[:, 0], [0, 5, 6, 8, 9])
-    np.testing.assert_array_equal(kept_coords[0], coords[0][[0]])
-    np.testing.assert_array_equal(kept_coords[1], coords[1][[1, 2, 4, 5]])
+    # A grid with every channel bad keeps its first one.
+    assert [r.tolist() for r in rows] == [[0], [5, 6, 8, 9]]

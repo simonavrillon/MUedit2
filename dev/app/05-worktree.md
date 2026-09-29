@@ -407,7 +407,7 @@ All elements are registered in `dom.js` as `els.*` properties.
 |---|---|---|
 | `createApiClient` | [A] | initializeApp |
 | `postJson` (internal) | [A] | editAction, editMode, etc. |
-| `fetchQcWindow` | [A] | qc-stage.requestQcGridWindow |
+| `fetchSeries` | [A] | qc-stage.requestQcGridWindow (`emg`), qc-stage.requestPreview (`overview`, `aux`) |
 | `fetchPreviewByPath` | [A] | qc-stage.requestPreview, decomp/run.js (token re-mint on expiry) |
 | `runAutoQc` | [A] | signal/qc.requestAutoQc |
 | `decomposeStream` | [A] | run-stage.runDecomposition |
@@ -446,13 +446,11 @@ All elements are registered in `dom.js` as `els.*` properties.
 
 | Function | [A/?] | Called By |
 |---|---|---|
-| `hasMagic` | [A] | isQcRawF32Payload, isFrame, decodeFrame |
+| `hasMagic` | [A] | isFrame, decodeFrame |
 | `to2d` | [A] | frameRows |
-| `isQcRawF32Payload` | [A] | fetchQcWindow |
-| `decodeQcJsonPayload` | [A] | fetchQcWindow (JSON fallback) |
-| `decodeQcRawF32` | [A] | fetchQcWindow (binary) |
+| `decodeSeriesFrame` | [A] | fetchSeries |
 | `isFrame` | [A] | decodeEditLoadPayload, decodeDecomposePreviewPayload |
-| `decodeFrame` | [A] | decodeEditLoadPayload, decodeDecomposePreviewPayload |
+| `decodeFrame` | [A] | decodeEditLoadPayload, decodeDecomposePreviewPayload, decodeSeriesFrame |
 | `encodeFrame` | [A] | editSave |
 | `frameRows` | [A] | decodeEditLoadPayload, decodeDecomposePreviewPayload |
 | `decodeEditLoadPayload` | [A] | editLoadByPath |
@@ -563,7 +561,7 @@ All functions are state mutators (`set*` functions). Each is called by at least 
 - `setFile`, `setUploadToken`, `setSeriesLength`, `setRois`, `setRoiForIndex`, `setRoiDraft`
 - `setGridSeries`, `setGridNames`, `setChannelMeans`, `setCoordinates`, `setChannelTraces`, `setChannelTraceForGrid`
 - `setQcWindowLoading`, `setQcWindowLoadingForGrid`
-- `setMetadata`, `setMuscle`, `setFsamp`, `setPreviewSeries`, `setAuxData`
+- `setMetadata`, `setMuscle`, `setFsamp`, `setAuxData`
 - `setDiscardMaskChannel`, `setDiscardMasks`, `ensureDiscardMasks`
 - `setArtifactMode`, `setArtifactDraft`, `setArtifactRegions`, `addArtifactRegion`, `removeLastArtifactRegion`
 - `setParameters`, `setIsRunning`
@@ -649,6 +647,7 @@ All functions are state mutators (`set*` functions). Each is called by at least 
 | `drawSeries` | [A] | edit-canvas, explorer, qc-renderer |
 | `drawGridOverlay` | [A] | qc-renderer.refreshVisuals |
 | `drawMiniSeries` | [A] | qc-renderer.renderChannelQC |
+| `seriesPoints`, `seriesRange`, `strokeSeries` | [A] | drawGridOverlay, drawMiniSeries, renderAuxiliaryChannels (envelopes and samples) |
 
 ---
 

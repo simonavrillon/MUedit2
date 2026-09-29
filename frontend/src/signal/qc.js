@@ -16,7 +16,6 @@ import {
   setQcWindowLoading,
   setQcWindowLoadingForGrid,
   setRois,
-  setPreviewSeries,
   setSeriesLength,
   setUploadToken,
 } from "../state/actions.js";
@@ -24,21 +23,10 @@ import { getCurrentGrid, roiStart, roiEnd } from "../state/selectors.js";
 import { nextFrame } from "../view/plots.js";
 import { errorMessage } from "../app/services/error-service.js";
 import { toSpans } from "../api/payloads.js";
+import { OVERVIEW_BINS, QC_TRACE_BINS } from "../config.js";
 
 /** @typedef {import("../app/context.js").App} App */
 /** @typedef {import("../app/state.js").State} State */
-/** @typedef {import("../app/state.js").ChannelTrace} ChannelTrace */
-/** @typedef {{ channel_index?: number, series: ChannelTrace }} QcChannel */
-
-/**
- * @param {QcChannel[] | null | undefined} channels
- * @returns {ChannelTrace[]}
- */
-function channelsToEnv(channels) {
-  return (Array.isArray(channels) ? channels : [])
-    .sort((a, b) => (a.channel_index ?? 0) - (b.channel_index ?? 0))
-    .map((c) => c.series);
-}
 
 /**
  * @param {State} state
@@ -129,18 +117,14 @@ export async function requestQcGridWindow(app, gridIdx, start, end) {
   setQcWindowLoadingForGrid(state, gridIdx, true);
 
   try {
-    const requestPayload = {
+    const { rows } = await api.fetchSeries("emg", {
       upload_token: state.uploadToken,
-      grid_index: gridIdx,
+      grid: gridIdx,
       start: s,
-      end: e,
-      target_fs: 1000,
-    };
-
-    const preferBinary = typeof api?.fetchQcWindow === "function";
-    const data = await api.fetchQcWindow(requestPayload, { preferBinary });
-    const env = channelsToEnv(data.channels);
-    setChannelTraceForGrid(state, gridIdx, env);
+      end: e ?? 0,
+      bins: QC_TRACE_BINS,
+    });
+    setChannelTraceForGrid(state, gridIdx, rows);
     if (gridIdx === state.currentGrid) {
       renderChannelQC();
     }
@@ -187,7 +171,13 @@ export async function requestPreview(app, options = {}) {
   try {
     const data = await api.fetchPreviewByPath(filepath);
     setUploadToken(state, data.upload_token || null);
-    setGridSeries(state, data.grid_mean_abs || []);
+    // The whole-recording traces come as envelopes, sized for the canvases.
+    const whole = { upload_token: data.upload_token, bins: OVERVIEW_BINS };
+    const [overview, aux] = await Promise.all([
+      api.fetchSeries("overview", whole),
+      api.fetchSeries("aux", whole),
+    ]);
+    setGridSeries(state, overview.rows);
     setGridNames(state, data.grid_names || []);
     setSeriesLength(state, data.total_samples);
     setChannelMeans(state, data.channel_means || []);
@@ -196,10 +186,9 @@ export async function requestPreview(app, options = {}) {
     setQcWindowLoading(state, {});
     setMetadata(state, data.metadata || {});
     setMuscle(state, data.muscle || []);
-    setAuxData(state, data.auxiliary || [], data.auxiliary_names || []);
+    setAuxData(state, aux.rows, data.auxiliary_names || []);
     setFsamp(state, data.fsamp);
     applyPreviewMetadata(data);
-    setPreviewSeries(state, data.mean_abs || []);
     populateAuxSelector();
     ensureDiscardMasks(state);
     populateGridTabs();

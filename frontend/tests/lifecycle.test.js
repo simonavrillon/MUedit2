@@ -59,7 +59,7 @@ beforeEach(() => {
   app = createApp({ state: structuredClone(pristine), els, api: {} });
   app.setStatus = recorder();
   app.state.file = { name: "a.otb+", path: "/a.otb+" };
-  app.state.previewSeries = [1, 2, 3];
+  app.state.gridSeries = [new Float32Array([1, 2, 3])];
 });
 
 const activePanels = () =>
@@ -84,7 +84,7 @@ describe("switchStage", () => {
   });
 
   test("Run without a preview is refused with a reason", () => {
-    app.state.previewSeries = [];
+    app.state.gridSeries = [];
     app.switchStage("run");
     assert.equal(app.state.currentStage, "qc");
     assert.deepEqual(app.setStatus.calls, [

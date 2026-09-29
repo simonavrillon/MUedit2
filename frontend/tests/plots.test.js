@@ -379,6 +379,21 @@ describe("drawGridOverlay", () => {
     assert.deepEqual(ops(canvas.ctx, "fillRect")[0].args, [0, 0, 50, 50]);
   });
 
+  test("draws envelopes as the band between each bin's min and max", () => {
+    const canvas = fakeCanvas({ width: 100, height: 50 });
+    plots.drawGridOverlay(
+      canvas,
+      [{ min: new Float32Array([0, 5]), max: new Float32Array([10, 10]) }],
+      ["#a"],
+    );
+    assert.deepEqual(pathPoints(canvas.ctx), [
+      ["moveTo", 0, 0],
+      ["lineTo", 0, 50],
+      ["lineTo", 100, 0],
+      ["lineTo", 100, 25],
+    ]);
+  });
+
   test("reports missing or non-numeric data", () => {
     const empty = fakeCanvas();
     plots.drawGridOverlay(empty, [[], null, "x"]);
@@ -420,13 +435,25 @@ describe("drawMiniSeries", () => {
     assert.equal(ops(off.ctx, "stroke")[0].strokeStyle, COLORS.warning);
   });
 
-  test("an envelope draws one min-to-max bar per sample", () => {
+  test("an envelope zig-zags through each bin's max and min", () => {
     const canvas = fakeCanvas({ width: 60, height: 30 });
-    plots.drawMiniSeries(canvas, { min: [0, 1], max: [2, 3] });
+    plots.drawMiniSeries(canvas, {
+      min: new Float32Array([0, 1]),
+      max: new Float32Array([2, 3]),
+    });
     assert.deepEqual(pathPoints(canvas.ctx), [
-      ["moveTo", 0, 30],
-      ["lineTo", 0, 10],
-      ["moveTo", 60, 20],
+      ["moveTo", 0, 10],
+      ["lineTo", 0, 30],
+      ["lineTo", 60, 0],
+      ["lineTo", 60, 20],
+    ]);
+  });
+
+  test("the samples of a zoomed-in window are one line", () => {
+    const canvas = fakeCanvas({ width: 60, height: 20 });
+    plots.drawMiniSeries(canvas, new Float32Array([0, 2]));
+    assert.deepEqual(pathPoints(canvas.ctx), [
+      ["moveTo", 0, 20],
       ["lineTo", 60, 0],
     ]);
   });

@@ -132,6 +132,7 @@ class TestPreprocessArtifactMask:
             fsamp: float,
             counts: list[int],
             grid_coordinates: list[np.ndarray] | None = None,
+            store: object = None,
         ) -> QCPipelineResult:
             assert counts == [N_CHANNELS, N_CHANNELS]
             assert grid_coordinates is not None
@@ -185,18 +186,10 @@ def api_client() -> Iterator[TestClient]:
 
 
 def _qc_token(data: np.ndarray, grids: list[str]) -> str:
-    """Cache ``data`` as the upload + QC preview signal, as /preview-by-path does."""
-    from muedit.api.cache import _store_qc_signal, _store_upload_signal
+    """Cache ``data`` as an upload; /qc/auto bandpasses it, as for a file."""
+    from muedit.api.cache import _store_upload_signal
 
-    token = _store_upload_signal(_loaded(data, grids).signal)
-    _store_qc_signal(
-        token,
-        data,
-        FSAMP,
-        grids,
-        [np.zeros(N_CHANNELS, int) for _ in grids],
-    )
-    return token
+    return _store_upload_signal(_loaded(data, grids).signal)
 
 
 class TestQcAutoRoute:

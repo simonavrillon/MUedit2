@@ -72,10 +72,11 @@ beginRawPreviewTransition(state, file):
 
 [after preview API succeeds]:
   - setUploadToken(state, data.upload_token)
+  - fetchSeries("overview"), fetchSeries("aux")   # whole-recording envelopes
   - setGridSeries, setGridNames, setSeriesLength
   - setChannelMeans, setCoordinates, setChannelTraces([])
   - setMetadata, setMuscle, setAuxData, setFsamp
-  - setPreviewSeries, setRois
+  - setRois
   - switchStage("qc")   # runs the Edit exit hook if the user was editing
 ```
 
@@ -220,7 +221,8 @@ User clicks "Decompose Signal" (#startBtn)
 | Endpoint | When | Purpose |
 |---|---|---|
 | `POST /preview-by-path` | On file load (native dialog) | Fetch preview metadata |
-| `POST /qc/window` | On initial render, grid tab switch, ROI change | Fetch QC channel traces |
+| `GET /series/emg` | On initial render, grid tab switch, ROI change | Fetch QC channel envelopes |
+| `GET /series/overview`, `/series/aux` | After `/preview-by-path` | Fetch the whole-recording overview and aux envelopes |
 | `POST /qc/auto` | On "Automatic QC" button click | Run auto QC: detect bad channels + artifact regions |
 
 ---

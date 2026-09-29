@@ -15,17 +15,6 @@ class PathPayload(BaseModel):
     path: str
 
 
-class QcWindowPayload(BaseModel):
-    """Typed request body for QC channel-window retrieval."""
-
-    upload_token: str
-    grid_index: int = 0
-    start: int = 0
-    end: int = 0
-    target_fs: float = 1000.0
-    channel_index: int | None = None
-
-
 class QcAutoPayload(BaseModel):
     """Typed request body for the on-demand automatic QC pass."""
 

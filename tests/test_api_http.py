@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import re
-import struct
 import subprocess
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -33,7 +32,9 @@ LIVE_ENDPOINTS: list[tuple[str, str]] = [
     ("GET", "/health"),
     ("GET", "/dialog/open-file"),
     ("POST", "/preview-by-path"),
-    ("POST", "/qc/window"),
+    ("GET", "/series/emg"),
+    ("GET", "/series/overview"),
+    ("GET", "/series/aux"),
     ("POST", "/qc/auto"),
     ("POST", "/decompose_stream"),
     ("POST", "/decompose/cancel"),
@@ -244,31 +245,6 @@ def _unpack_frame_response(resp: Response) -> tuple[dict[str, Any], dict[str, np
     return unpack_frame(resp.content)
 
 
-def _unpack_mqcr(blob: bytes) -> dict[str, Any]:
-    """Decode the MQCR v1 QC-window payload."""
-    assert blob[:4] == b"MQCR"
-    (version,) = struct.unpack("<I", blob[4:8])
-    grid, ch, start, end, total = struct.unpack("<5i", blob[8:28])
-    (fsamp,) = struct.unpack("<f", blob[28:32])
-    (n,) = struct.unpack("<I", blob[32:36])
-    off, channels = 36, []
-    for _ in range(n):
-        idx, size = struct.unpack("<iI", blob[off : off + 8])
-        off += 8 + 4 * size
-        channels.append((idx, size))
-    assert off == len(blob)
-    return {
-        "version": version,
-        "grid": grid,
-        "channel": ch,
-        "start": start,
-        "end": end,
-        "total": total,
-        "fsamp": fsamp,
-        "channels": channels,
-    }
-
-
 # ── Route table ──────────────────────────────────────────────────────────────
 
 
@@ -416,8 +392,6 @@ class TestDialog:
 
 PREVIEW_KEYS = {
     "upload_token",
-    "mean_abs",
-    "grid_mean_abs",
     "grid_names",
     "total_samples",
     "fsamp",
@@ -425,7 +399,6 @@ PREVIEW_KEYS = {
     "coordinates",
     "metadata",
     "muscle",
-    "auxiliary",
     "auxiliary_names",
 }
 
@@ -436,10 +409,10 @@ def _check_preview(data: dict[str, Any]) -> None:
     assert data["grid_names"] == [GRID]
     assert data["total_samples"] == N_SAMPLES
     assert data["fsamp"] == FSAMP
-    assert len(data["grid_mean_abs"]) == 1
     assert len(data["channel_means"]) == 1 and len(data["channel_means"][0]) == N_CHANNELS
     assert len(data["coordinates"]) == 1 and len(data["coordinates"][0]) == N_CHANNELS
-    assert isinstance(data["mean_abs"], list) and data["mean_abs"]
+    # Series travel as viewport envelopes (/series/*), never as JSON lists.
+    assert not {"mean_abs", "grid_mean_abs", "auxiliary"} & set(data)
 
 
 class TestPreview:
@@ -468,55 +441,70 @@ class TestPreview:
         assert "Unsupported file format" in err["detail"]["reason"]
 
 
-# ── /qc/window ───────────────────────────────────────────────────────────────
+# ── /series/emg, /series/overview, /series/aux ───────────────────────────────
 
 
-class TestQcWindow:
-    def test_all_channels_binary(self, client: TestClient, upload_token: str) -> None:
-        resp = client.post(
-            f"{API}/qc/window",
-            json={
-                "upload_token": upload_token,
-                "start": 0,
-                "end": 2000,
-                "target_fs": 500.0,
-            },
+def _series(
+    client: TestClient, kind: str, **params: Any
+) -> tuple[dict[str, Any], dict[str, np.ndarray]]:
+    return _unpack_frame_response(client.get(f"{API}/series/{kind}", params=params))
+
+
+class TestSeries:
+    def test_emg_envelope_of_the_whole_recording(
+        self, client: TestClient, upload_token: str
+    ) -> None:
+        meta, arrays = _series(client, "emg", upload_token=upload_token, grid=0, bins=100)
+        assert meta["kind"] == "envelope"
+        assert (meta["start"], meta["end"], meta["bins"]) == (0, N_SAMPLES, 100)
+        assert meta["factor"] == 16  # the coarsest level with at least one bin per output bin
+        assert (meta["total_samples"], meta["fsamp"], meta["grid"]) == (N_SAMPLES, FSAMP, 0)
+        assert len(meta["names"]) == N_CHANNELS
+        assert arrays["min"].dtype == np.float32
+        assert arrays["min"].shape == arrays["max"].shape == (N_CHANNELS, 100)
+        assert (arrays["min"] <= arrays["max"]).all()
+
+    def test_emg_samples_when_zoomed_in(self, client: TestClient, upload_token: str) -> None:
+        meta, arrays = _series(
+            client, "emg", upload_token=upload_token, start=1000, end=1200, bins=512
         )
-        assert resp.status_code == 200
-        assert resp.headers["content-type"] == "application/octet-stream"
-        assert resp.headers["x-muedit-format"] == "qc-raw-f32-v1"
-        dec = _unpack_mqcr(resp.content)
-        assert dec["version"] == 1
-        assert (dec["grid"], dec["channel"], dec["start"], dec["end"]) == (0, -1, 0, 2000)
-        assert dec["total"] == N_SAMPLES
-        assert dec["fsamp"] == FSAMP
-        assert [idx for idx, _ in dec["channels"]] == list(range(N_CHANNELS))
-        assert all(size > 0 for _, size in dec["channels"])
+        assert (meta["kind"], meta["factor"]) == ("samples", 1)
+        assert arrays["samples"].shape == (N_CHANNELS, 200)
 
-    def test_single_channel_binary(self, client: TestClient, upload_token: str) -> None:
-        resp = client.post(
-            f"{API}/qc/window",
-            json={
-                "upload_token": upload_token,
-                "channel_index": 5,
-            },
-        )
-        assert resp.status_code == 200
-        dec = _unpack_mqcr(resp.content)
-        assert dec["channel"] == 5
-        assert dec["end"] == N_SAMPLES
-        assert [idx for idx, _ in dec["channels"]] == [5]
+    def test_overview_has_one_row_per_grid(self, client: TestClient, upload_token: str) -> None:
+        meta, arrays = _series(client, "overview", upload_token=upload_token, bins=256)
+        assert meta["names"] == [GRID]
+        assert arrays["max"].shape == (1, 256)
+        assert (arrays["max"] >= 0).all()  # a mean of |EMG|
+
+    def test_aux_without_channels_is_empty(self, client: TestClient, upload_token: str) -> None:
+        meta, arrays = _series(client, "aux", upload_token=upload_token, bins=64)
+        assert meta["names"] == []
+        assert arrays["max"].shape == (0, 64)
 
     @pytest.mark.parametrize(
-        "body",
-        [{"upload_token": "expired"}, {"grid_index": 1}, {"channel_index": N_CHANNELS}],
-        ids=["bad-token", "bad-grid", "bad-channel"],
+        ("params", "status", "code"),
+        [
+            ({"upload_token": "expired"}, 400, None),
+            ({"grid": 1}, 400, None),
+            ({"bins": 0}, 422, "validation_error"),
+            ({"end": -1}, 422, "validation_error"),
+        ],
+        ids=["bad-token", "bad-grid", "no-bins", "negative-end"],
     )
-    def test_rejected(self, client: TestClient, upload_token: str, body: dict[str, Any]) -> None:
-        _err(client.post(f"{API}/qc/window", json={"upload_token": upload_token, **body}), 400)
+    def test_rejected(
+        self,
+        client: TestClient,
+        upload_token: str,
+        params: dict[str, Any],
+        status: int,
+        code: str | None,
+    ) -> None:
+        query = {"upload_token": upload_token, **params}
+        _err(client.get(f"{API}/series/emg", params=query), status, code)
 
     def test_missing_token_is_422(self, client: TestClient) -> None:
-        _err(client.post(f"{API}/qc/window", json={}), 422, "validation_error")
+        _err(client.get(f"{API}/series/emg"), 422, "validation_error")
 
 
 # ── /qc/auto ─────────────────────────────────────────────────────────────────

@@ -43,12 +43,14 @@ python/src/muedit/
 │   ├── app_factory.py                       FastAPI app construction, CORS and Host restrictions
 │   ├── routes/
 │   │   ├── __init__.py                       include_routers()
-│   │   ├── preview.py                        /preview-by-path, /qc/window, /qc/auto, /health
+│   │   ├── preview.py                        /preview-by-path, /qc/auto, /health
+│   │   ├── series.py                         /series/emg, /series/overview, /series/aux
 │   │   ├── decompose.py                      /decompose_stream, /decompose/cancel, /decompose_preview/{token}
 │   │   ├── editing.py                        /edit/* (load-by-path, save, update-filter, add/delete, dedup, flag)
 │   │   └── dialog.py                         /dialog/open-file
 │   ├── services/
-│   │   ├── preview_service.py                Preview building + QC window encoding
+│   │   ├── preview_service.py                Preview building + on-demand auto-QC
+│   │   ├── series_service.py                 QC pyramids and viewport envelopes
 │   │   ├── decompose_service.py              One run at a time, cancel, NDJSON streaming
 │   │   ├── decompose_worker.py               Run body, executed in a spawned worker process
 │   │   ├── editing_service.py                Edit operation dispatch + BIDS save

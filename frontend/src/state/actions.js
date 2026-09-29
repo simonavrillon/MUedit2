@@ -170,15 +170,7 @@ export function setRois(state, rois) {
 
 /**
  * @param {State} state
- * @param {number[] | null | undefined} series
- */
-export function setPreviewSeries(state, series) {
-  state.previewSeries = Array.isArray(series) ? series : [];
-}
-
-/**
- * @param {State} state
- * @param {number[][] | null | undefined} series
+ * @param {ChannelTrace[] | null | undefined} series
  */
 export function setGridSeries(state, series) {
   state.gridSeries = Array.isArray(series) ? series : [];
@@ -270,7 +262,7 @@ export function setMetadata(state, metadata) {
 
 /**
  * @param {State} state
- * @param {number[][] | null | undefined} auxiliary
+ * @param {ChannelTrace[] | null | undefined} auxiliary
  * @param {string[] | null | undefined} auxiliaryNames
  */
 export function setAuxData(state, auxiliary, auxiliaryNames) {
@@ -302,7 +294,6 @@ export function setParameters(state, parameters) {
  * @param {State} state
  */
 export function clearPreviewState(state) {
-  state.previewSeries = [];
   state.gridSeries = [];
   state.gridNames = [];
   state.channelMeans = [];

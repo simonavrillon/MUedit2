@@ -36,3 +36,8 @@ export const GRID_COLORS = [
 ];
 
 export const UNIFORM_PULSE_COLOR = GRID_COLORS[1];
+
+/** Bins of the whole-recording envelopes (grid overview, aux): about a wide canvas in pixels. */
+export const OVERVIEW_BINS = 2048;
+/** Bins of each channel's mini trace in the QC grid, a few dozen pixels wide. */
+export const QC_TRACE_BINS = 128;

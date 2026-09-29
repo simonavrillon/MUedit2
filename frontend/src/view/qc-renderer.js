@@ -4,6 +4,9 @@ import {
   drawMiniSeries,
   drawRoiRects,
   nextFrame,
+  seriesPoints,
+  seriesRange,
+  strokeSeries,
 } from "./plots.js";
 import { gridDimensionsFor } from "../io/grid.js";
 import { getCurrentGrid, roiStart, roiEnd } from "../state/selectors.js";
@@ -339,18 +342,11 @@ export function renderAuxiliaryChannels(els, state) {
   }
 
   const selectedIdx = parseInt(els.auxSelector?.value ?? "-1", 10);
-  let globalMin = Infinity;
-  let globalMax = -Infinity;
-  state.auxSeries.forEach((s, idx) => {
-    if (!Array.isArray(s)) return;
-    if (selectedIdx !== -1 && selectedIdx !== idx) return;
-    s.forEach((v) => {
-      if (v < globalMin) globalMin = v;
-      if (v > globalMax) globalMax = v;
-    });
-  });
-
-  if (globalMin === Infinity) return;
+  const shown = state.auxSeries.map((row, idx) =>
+    selectedIdx === -1 || selectedIdx === idx ? row : null,
+  );
+  const { min: globalMin, max: globalMax } = seriesRange(shown);
+  if (!Number.isFinite(globalMin) || !Number.isFinite(globalMax)) return;
   const span = globalMax - globalMin || 1;
 
   const selections = buildSelections(state);
@@ -363,20 +359,17 @@ export function renderAuxiliaryChannels(els, state) {
   );
 
   let labelCount = 0;
-  state.auxSeries.forEach((s, idx) => {
-    if (!s || !s.length) return;
-    if (selectedIdx !== -1 && selectedIdx !== idx) return;
-    const stepX = canvas.width / Math.max(1, s.length - 1);
+  shown.forEach((row, idx) => {
+    if (!row || !seriesPoints(row)) return;
     ctx.strokeStyle = state.gridColors[idx % state.gridColors.length];
     ctx.lineWidth = 1;
-    ctx.beginPath();
-    s.forEach((v, i) => {
-      const x = i * stepX;
-      const y = canvas.height - ((v - globalMin) / span) * canvas.height;
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    });
-    ctx.stroke();
+    strokeSeries(
+      ctx,
+      row,
+      0,
+      canvas.width,
+      (v) => canvas.height - ((v - globalMin) / span) * canvas.height,
+    );
 
     ctx.fillStyle = ctx.strokeStyle;
     ctx.font = "10px sans-serif";

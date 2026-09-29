@@ -415,6 +415,7 @@ def preprocess_step(
             loaded.fsamp,
             grid_channel_counts,
             grid_coordinates=coordinates,
+            store=store,
         )
         artifact_mask = qc_result.artifact_mask
         bad_channel_masks = qc_result.bad_channel_masks

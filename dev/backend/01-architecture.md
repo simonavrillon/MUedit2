@@ -39,7 +39,8 @@ cli.serve_api()
         rejects DNS-rebound requests, which arrive same-origin and bypass CORS
       → errors.register_exception_handlers(app)
   → routes.include_routers(app)
-      → app.include_router(preview_router)    # /api/v1: health, preview-by-path, qc/*
+      → app.include_router(preview_router)    # /api/v1: health, preview-by-path, qc/auto
+      → app.include_router(series_router)     # /api/v1/series: emg, overview, aux
       → app.include_router(decompose_router)  # /api/v1: decompose_stream, decompose/cancel, decompose_preview
       → app.include_router(editing_router)    # /api/v1: edit/*
       → app.include_router(dialog_router)   # /api/v1/dialog: open-file
@@ -195,11 +196,13 @@ Methods: `to_dict()`
 |---|---|
 | `app_factory.py` | Construct FastAPI app, configure CORS, register exception handlers |
 | `routes/__init__.py` | Register all routers on the app |
-| `routes/preview.py` | File preview, QC window, on-demand auto-QC, health check |
+| `routes/preview.py` | File preview, on-demand auto-QC, health check |
+| `routes/series.py` | Viewport envelopes of the upload's EMG, grid overview and aux channels |
 | `routes/decompose.py` | Streaming decomposition, cancel, binary preview fetch |
 | `routes/editing.py` | All edit endpoints (load, save, filter update, spike/artifact ops) |
 | `routes/dialog.py` | Native file-open dialog (macOS AppleScript / tkinter) |
-| `services/preview_service.py` | Preview building, QC window binary encoding, on-demand auto-QC |
+| `services/preview_service.py` | Preview building, on-demand auto-QC |
+| `services/series_service.py` | One bandpass pass building the QC pyramids; serves `/series/*` frames |
 | `services/decompose_service.py` | One run at a time (409), cancel, worker supervision, NDJSON streaming, binary preview |
 | `services/decompose_worker.py` | Run body, executed in a `spawn` worker process (or a thread with `MUEDIT_DECOMPOSE_WORKER=thread`) |
 | `services/editing_service.py` | Edit operation dispatch, BIDS save, MAT signal context management |
@@ -244,7 +247,8 @@ Methods: `to_dict()`
 | Component | Responsibility |
 |---|---|
 | `filters.py` | `demean()`, `bandpass_signals()`, `notch_signals()` |
-| `downsample.py` | `raw_series_at_fs()`, `moving_average_ms()` |
+| `downsample.py` | `moving_average_ms()` |
+| `pyramid.py` | `MinMaxPyramid` (min/max levels at bins of 16, 64, 256, … samples) and `view()`, the envelope of any window |
 | `decomp_primitives.py` | `extend_signal()`, `signed_square()`, `find_refractory_peaks()`, `split_by_amplitude()`, `isi_cov()` |
 | `grid.py` | `GridSpec` catalog, `format_hdemg_signal()`, `get_grid_electrode_metadata()` |
 | `channel_qc.py` | Bad-channel detection (7 criteria: flat, saturated, quantized, noisy, low-SNR, intermittent, contact-loss) |

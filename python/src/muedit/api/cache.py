@@ -5,8 +5,6 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-import numpy as np
-
 from muedit.api.memory import (
     DEFAULT_SESSION,
     BudgetedLRU,
@@ -17,10 +15,10 @@ from muedit.io.store import SessionStore
 from muedit.models import (
     EditSignalContext,
     FloatArray,
-    IntArray,
     SignalImport,
     resident_nbytes,
 )
+from muedit.signal.pyramid import MinMaxPyramid
 
 logger = logging.getLogger(__name__)
 
@@ -28,30 +26,41 @@ DECOMP_PREVIEW_BINARY_TTL_SEC = 10 * 60
 
 
 @dataclass
-class QCSignal:
-    """Filtered preview EMG kept with an upload for channel views and auto-QC."""
+class SignalViews:
+    """What the QC stage draws, kept with an upload: min/max pyramids and the grid overview.
 
-    data: FloatArray  # float32, (n_channels, n_samples); memory-mapped from the upload's store
+    Every array is float32 and memory-mapped from the upload's store.
+    """
+
     fsamp: float
     grid_names: list[str]
-    channel_offsets: list[int]  # first row of each grid in ``data``
-    discard_channels: list[IntArray]  # per grid, 1 = discarded channel
+    grid_rows: list[tuple[int, int]]  # [first, stop) EMG rows of each grid
+    emg_types: list[int]  # per grid, the bandpass the EMG is filtered with
+    emg: MinMaxPyramid  # bandpassed EMG of the grid rows
+    overview: FloatArray  # (n_grids, n_samples): smoothed mean |bandpassed EMG| per grid
+    overview_levels: MinMaxPyramid
+    aux: MinMaxPyramid
 
     @property
     def nbytes(self) -> int:
-        return resident_nbytes(self.data) + sum(int(m.nbytes) for m in self.discard_channels)
+        return (
+            self.emg.nbytes
+            + resident_nbytes(self.overview)
+            + self.overview_levels.nbytes
+            + self.aux.nbytes
+        )
 
 
 @dataclass
 class _UploadEntry:
     signal: SignalImport
     source_path: str | None
-    qc: QCSignal | None = None
+    views: SignalViews | None = None
     store: SessionStore | None = None  # T1 folder holding the memory-mapped arrays
 
     @property
     def nbytes(self) -> int:
-        return self.signal.nbytes + (self.qc.nbytes if self.qc is not None else 0)
+        return self.signal.nbytes + (self.views.nbytes if self.views is not None else 0)
 
 
 @dataclass
@@ -132,8 +141,23 @@ def _get_upload_signal(token: str | None) -> SignalImport | None:
     return entry.signal.readonly_view() if entry else None
 
 
-def _hold_upload(token: str | None) -> tuple[SignalImport, str | None, SessionStore | None] | None:
-    """The upload's read-only signal, source path and store, the store held until ``release``.
+@dataclass
+class HeldUpload:
+    """An upload taken for one request or run: its store stays until ``release``."""
+
+    signal: SignalImport  # a read-only view
+    source_path: str | None
+    store: SessionStore | None
+    views: SignalViews | None
+
+    def release(self) -> None:
+        """End the hold; a drop of the upload meanwhile deletes its store now."""
+        if self.store is not None:
+            self.store.release()
+
+
+def _hold_upload(token: str | None) -> HeldUpload | None:
+    """The upload for ``token``, its store held until ``release``.
 
     Dropping the upload meanwhile (a new file, an eviction) closes the store only after.
     """
@@ -143,60 +167,24 @@ def _hold_upload(token: str | None) -> tuple[SignalImport, str | None, SessionSt
             return None
         if entry.store is not None:
             entry.store.hold()
-        return entry.signal.readonly_view(), entry.source_path, entry.store
+        return HeldUpload(entry.signal.readonly_view(), entry.source_path, entry.store, entry.views)
 
 
-def _store_qc_signal(
-    token: str,
-    data: FloatArray,
-    fsamp: float,
-    grid_names: list[str],
-    discard_channels: list[IntArray],
-) -> None:
-    """Attach preprocessed QC arrays to the upload session for ``token``.
-
-    float32 ``data`` (the memory-mapped QC array of the upload's store) is kept as is.
-    """
-    channel_offsets: list[int] = []
-    offset = 0
-    for mask in discard_channels:
-        channel_offsets.append(offset)
-        offset += int(np.asarray(mask).size)
-
-    qc = QCSignal(
-        data=np.asarray(data, dtype=np.float32),
-        fsamp=float(fsamp),
-        grid_names=list(grid_names),
-        channel_offsets=channel_offsets,
-        discard_channels=[np.array(m, dtype=int) for m in discard_channels],
-    )
+def _store_signal_views(token: str, views: SignalViews) -> None:
+    """Attach the QC stage's pyramids and overview to the upload for ``token``."""
     with BUDGET.lock:
         entry = _UPLOADS.get(token)
         if entry is None:
-            logger.debug("Dropping QC data: upload token %s is no longer cached", token)
+            logger.debug("Dropping signal views: upload token %s is no longer cached", token)
             return
-        entry.qc = qc
+        entry.views = views
         _UPLOADS.resize(token)
 
 
-def _get_qc_signal(token: str | None) -> QCSignal | None:
-    """Resolve QC arrays by upload token.
-
-    ``data`` is a read-only view of the cached array; everything else is a copy.
-    """
+def _get_signal_views(token: str | None) -> SignalViews | None:
+    """The pyramids and overview of the upload for ``token`` (sealed, so read-only)."""
     entry = _UPLOADS.get(token)
-    qc = entry.qc if entry is not None else None
-    if qc is None:
-        return None
-    data_view = qc.data.view()
-    data_view.flags.writeable = False
-    return QCSignal(
-        data=data_view,
-        fsamp=qc.fsamp,
-        grid_names=list(qc.grid_names),
-        channel_offsets=list(qc.channel_offsets),
-        discard_channels=[m.copy() for m in qc.discard_channels],
-    )
+    return entry.views if entry is not None else None
 
 
 def _store_decomp_preview_binary(

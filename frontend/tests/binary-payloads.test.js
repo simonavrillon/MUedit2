@@ -1,5 +1,5 @@
-// Binary payload codecs: MUB1 frames (api/binary.py) and the MQCR QC window
-// (`_encode_qc_raw_f32` in api/services/preview_service.py).
+// Binary payload codecs: MUB1 frames (api/binary.py), including the viewport
+// series frames of /series/* (api/services/series_service.py).
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 
@@ -7,10 +7,8 @@ import {
   decodeDecomposePreviewPayload,
   decodeEditLoadPayload,
   decodeFrame,
-  decodeQcJsonPayload,
-  decodeQcRawF32,
+  decodeSeriesFrame,
   encodeFrame,
-  isQcRawF32Payload,
 } from "../src/api/binary-payloads.js";
 
 const encoder = new TextEncoder();
@@ -31,39 +29,6 @@ function u32(v) {
   const b = new Uint8Array(4);
   new DataView(b.buffer).setUint32(0, v, true);
   return b;
-}
-
-function i32(v) {
-  const b = new Uint8Array(4);
-  new DataView(b.buffer).setInt32(0, v, true);
-  return b;
-}
-
-function f32s(values) {
-  const b = new Uint8Array(values.length * 4);
-  const view = new DataView(b.buffer);
-  values.forEach((v, i) => view.setFloat32(i * 4, v, true));
-  return b;
-}
-
-/** Mirror of the MQCR packer: fixed header, then (index, n, samples) per channel. */
-function packQcRaw(header, channels, { magic = "MQCR", version = 1 } = {}) {
-  return concat([
-    encoder.encode(magic),
-    u32(version),
-    i32(header.grid_index),
-    i32(header.channel_index),
-    i32(header.start),
-    i32(header.end),
-    i32(header.total_samples),
-    f32s([header.fsamp]),
-    u32(channels.length),
-    ...channels.flatMap((ch) => [
-      i32(ch.channel_index),
-      u32(ch.series.length),
-      f32s(ch.series),
-    ]),
-  ]);
 }
 
 function jsonBuffer(obj) {
@@ -233,60 +198,51 @@ describe("decodeDecomposePreviewPayload", () => {
   });
 });
 
-describe("decodeQcRawF32", () => {
-  const header = {
-    grid_index: 1,
-    channel_index: -1,
-    start: 100,
-    end: 612,
-    total_samples: 20480,
-    fsamp: 2048,
-  };
+describe("decodeSeriesFrame", () => {
+  const rows = [
+    [1, 2, 3],
+    [4, 5, 6],
+  ];
 
-  test("decodes the header and variable-length channel blocks", () => {
-    const channels = [
-      { channel_index: 0, series: [0.5, 1.5, -2.5] },
-      { channel_index: -3, series: [] },
-      { channel_index: 63, series: [4, 5] },
-    ];
-    assert.deepEqual(decodeQcRawF32(packQcRaw(header, channels)), {
-      ...header,
-      channels,
-    });
+  test("an envelope gives one min/max pair of views per row", () => {
+    const buffer = encodeFrame(
+      { kind: "envelope", start: 0, end: 300, bins: 3, names: ["a", "b"] },
+      {
+        min: { dtype: "f4", shape: [2, 3], rows },
+        max: {
+          dtype: "f4",
+          shape: [2, 3],
+          rows: rows.map((r) => r.map((v) => v * 10)),
+        },
+      },
+    );
+    const { meta, rows: decoded } = decodeSeriesFrame(buffer);
+    assert.deepEqual(meta.names, ["a", "b"]);
+    assert.equal(decoded.length, 2);
+    const [first] = decoded;
+    assert.ok(!(first instanceof Float32Array));
+    assert.deepEqual(Array.from(first.min), [1, 2, 3]);
+    assert.deepEqual(Array.from(first.max), [10, 20, 30]);
+    assert.equal(first.min.buffer, buffer); // views, not copies
   });
 
-  test("a frame with no channels decodes to an empty list", () => {
-    assert.deepEqual(decodeQcRawF32(packQcRaw(header, [])).channels, []);
+  test("samples give one Float32Array view per row", () => {
+    const buffer = encodeFrame(
+      { kind: "samples", start: 10, end: 13 },
+      { samples: { dtype: "f4", shape: [2, 3], rows } },
+    );
+    const { rows: decoded } = decodeSeriesFrame(buffer);
+    assert.ok(decoded[1] instanceof Float32Array);
+    assert.deepEqual(Array.from(decoded[1]), [4, 5, 6]);
+    assert.equal(decoded[1].buffer, buffer);
   });
 
-  test("rejects a missing magic", () => {
-    const buf = packQcRaw(header, [], { magic: "XXXX" });
-    assert.throws(() => decodeQcRawF32(buf), /Invalid QC raw/);
-  });
-
-  test("rejects an unsupported version", () => {
-    const buf = packQcRaw(header, [], { version: 2 });
-    assert.throws(() => decodeQcRawF32(buf), /version: 2/);
-  });
-});
-
-describe("QC payload detection", () => {
-  test("recognises the format header", () => {
-    assert.equal(isQcRawF32Payload(jsonBuffer({}), "qc-raw-f32-v1"), true);
-  });
-
-  test("recognises the magic without a header", () => {
-    assert.equal(isQcRawF32Payload(encoder.encode("MQCR....").buffer), true);
-  });
-
-  test("JSON and short buffers are not binary", () => {
-    assert.equal(isQcRawF32Payload(jsonBuffer({ a: 1 })), false);
-    assert.equal(isQcRawF32Payload(new ArrayBuffer(2)), false);
-    assert.equal(isQcRawF32Payload(null), false);
-  });
-
-  test("decodeQcJsonPayload parses the JSON fallback", () => {
-    const payload = { channels: [{ channel_index: 0, series: [1] }] };
-    assert.deepEqual(decodeQcJsonPayload(jsonBuffer(payload)), payload);
+  test("a series without rows decodes to none", () => {
+    const empty = { dtype: "f4", shape: [0, 64] };
+    const buffer = encodeFrame(
+      { kind: "envelope" },
+      { min: empty, max: empty },
+    );
+    assert.deepEqual(decodeSeriesFrame(buffer).rows, []);
   });
 });

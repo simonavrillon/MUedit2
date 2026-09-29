@@ -5,14 +5,12 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends
-from fastapi.responses import Response
 
 from muedit.api.common import request_session
 from muedit.api.contracts import success_payload
-from muedit.api.schemas import PathPayload, QcAutoPayload, QcWindowPayload
+from muedit.api.schemas import PathPayload, QcAutoPayload
 from muedit.api.services.preview_service import (
     build_preview_from_path,
-    get_qc_window,
     run_auto_qc_on_token,
 )
 
@@ -31,12 +29,6 @@ def preview_by_path(
 ) -> dict[str, Any]:
     """Build preview data from an existing file path on disk."""
     return success_payload(build_preview_from_path(payload.path, session))
-
-
-@router.post("/qc/window", response_model=None)
-def qc_window(payload: QcWindowPayload) -> Response:
-    """Return QC channel-window data as packed float32 binary."""
-    return get_qc_window(payload)
 
 
 @router.post("/qc/auto")

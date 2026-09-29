@@ -1,10 +1,12 @@
 /**
  * Central API endpoint path table. Callers compose the full URL by
- * prepending API_BASE (injected via deps): `${API_BASE}${routes.qcWindow}`.
+ * prepending API_BASE (injected via deps): `${API_BASE}${routes.seriesEmg}`.
  * Dynamic routes are functions that return the path segment.
  */
 export const routes = {
-  qcWindow: "/qc/window",
+  seriesEmg: "/series/emg",
+  seriesOverview: "/series/overview",
+  seriesAux: "/series/aux",
   qcAuto: "/qc/auto",
   previewByPath: "/preview-by-path",
   decomposeStream: "/decompose_stream",

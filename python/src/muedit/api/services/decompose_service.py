@@ -22,6 +22,7 @@ from fastapi.responses import Response
 
 from muedit.api.binary import FRAME_FORMAT, FRAME_MEDIA_TYPE, pack_frame
 from muedit.api.cache import (
+    HeldUpload,
     _hold_upload,
     _pop_decomp_preview_binary,
     _store_decomp_preview_binary,
@@ -90,13 +91,11 @@ def worker_mode() -> str:
 class _Run:
     """One decomposition: its worker and a thread turning the worker's messages into events."""
 
-    def __init__(
-        self, job: RunJob, session: str, binary_preview: bool, upload_store: SessionStore | None
-    ) -> None:
+    def __init__(self, job: RunJob, session: str, binary_preview: bool, upload: HeldUpload) -> None:
         self.job = job
         self.session = session
         self.binary_preview = binary_preview
-        self.upload_store = upload_store
+        self.upload = upload
         self.events: queue.Queue[dict[str, Any] | None] = queue.Queue()
         self.cancelled = threading.Event()
         self.store: SessionStore | None = None
@@ -149,8 +148,7 @@ class _Run:
             messages.close()  # waits for the worker to exit
             if self.store is not None and not kept:
                 self.store.close()
-            if self.upload_store is not None:
-                self.upload_store.release()
+            self.upload.release()
             _finish(self)
             self.events.put(None)
 
@@ -310,16 +308,14 @@ def start_decomposition(
                     "reason": "Token expired or missing; reload the file via /preview-by-path",
                 },
             )
-        signal, source_path, upload_store = held
-        run_path = source_path or str(Path(tempfile.gettempdir()) / "muedit_cached_input")
-        job = RunJob(run_path=run_path, signal=signal, **options)
-        run = _Run(job, session, binary_preview, upload_store)
+        run_path = held.source_path or str(Path(tempfile.gettempdir()) / "muedit_cached_input")
+        job = RunJob(run_path=run_path, signal=held.signal, **options)
+        run = _Run(job, session, binary_preview, held)
         _SLOT.run = run
     try:
         run.start()
     except BaseException:
-        if upload_store is not None:
-            upload_store.release()
+        held.release()
         _finish(run)
         raise
     return run

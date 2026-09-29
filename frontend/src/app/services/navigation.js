@@ -35,7 +35,7 @@ export function updateWorkflowStepper(app, targetStage) {
   const { els, state } = app;
   const steps = [
     { key: "import", el: els.stepImport, complete: !!state.file },
-    { key: "qc", el: els.stepQc, complete: !!state.previewSeries?.length },
+    { key: "qc", el: els.stepQc, complete: !!state.gridSeries?.length },
     { key: "run", el: els.stepRun, complete: !!state.muDistimes?.length },
     { key: "edit", el: els.stepEdit, complete: !!state.edit.distimes?.length },
   ];
@@ -78,7 +78,7 @@ export function showWorkspace(app, options = {}) {
 export function updateStepAvailability(app) {
   const { els, state } = app;
   const hasFile = !!state.file;
-  const hasPreview = !!state.previewSeries?.length;
+  const hasPreview = !!state.gridSeries?.length;
   const hasRunResults = !!state.muDistimes?.length;
   const hasEditData = !!state.edit.distimes?.length;
 

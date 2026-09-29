@@ -19,11 +19,11 @@
  */
 
 /**
- * A signal preview; fields beyond these pass through.
+ * A run's preview; fields beyond these pass through. The overview and aux
+ * traces are not read from it: they come from the upload as envelopes
+ * (`/series/*`).
  *
  * @typedef {JsonObject & {
- *   mean_abs: number[],
- *   grid_mean_abs: number[][],
  *   grid_names: string[],
  *   rois: Span[],
  *   channel_means: number[][],
@@ -34,8 +34,6 @@
  *   pulse_trains_all: number[][],
  *   distime_all: number[][],
  *   mu_grid_index: number[],
- *   auxiliary: number[][],
- *   auxiliary_names: string[],
  *   total_samples: number,
  * }} PreviewPayload
  */
@@ -131,10 +129,6 @@ export function normalizePreviewPayload(payload) {
   const source = payload && typeof payload === "object" ? payload : {};
   return {
     ...source,
-    mean_abs: Array.isArray(source.mean_abs) ? source.mean_abs : [],
-    grid_mean_abs: Array.isArray(source.grid_mean_abs)
-      ? source.grid_mean_abs
-      : [],
     grid_names: Array.isArray(source.grid_names) ? source.grid_names : [],
     rois: toSpans(source.rois),
     channel_means: Array.isArray(source.channel_means)
@@ -155,10 +149,6 @@ export function normalizePreviewPayload(payload) {
     distime_all: Array.isArray(source.distime_all) ? source.distime_all : [],
     mu_grid_index: Array.isArray(source.mu_grid_index)
       ? source.mu_grid_index
-      : [],
-    auxiliary: Array.isArray(source.auxiliary) ? source.auxiliary : [],
-    auxiliary_names: Array.isArray(source.auxiliary_names)
-      ? source.auxiliary_names
       : [],
     total_samples: toFiniteNumber(source.total_samples, 0),
   };

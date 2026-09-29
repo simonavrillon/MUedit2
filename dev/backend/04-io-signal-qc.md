@@ -156,11 +156,6 @@ FFT-based notch suppressing mains harmonics without knowing the line frequency. 
 | `PREVIEW_MOVING_AVG_MS` | `25.0` |
 
 ```python
-def raw_series_at_fs(series, source_fs, target_fs) -> list[float]
-```
-Downsamples 1-D series using `scipy.signal.decimate` (FIR anti-alias, zero-phase).
-
-```python
 def moving_average_ms(series, fsamp, window_ms) -> np.ndarray
 ```
 Moving average with window size in ms (convolution, `"same"` mode).

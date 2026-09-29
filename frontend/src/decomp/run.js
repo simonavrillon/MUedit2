@@ -1,18 +1,15 @@
 import {
   ensureDiscardMasks,
-  setAuxData,
   setChannelMeans,
   setChannelTraces,
   setCoordinates,
   setGridNames,
-  setGridSeries,
   setIsRunning,
   setLastRunDownloadKey,
   setMetadata,
   setMuPreviewData,
   setMuscle,
   setParameters,
-  setPreviewSeries,
   setRois,
   setRunDownloadInFlight,
   setRunResultToken,
@@ -265,10 +262,10 @@ function applyPreviewData(app, preview, options = {}) {
   } = app;
   const { skipMuData = false } = options;
 
+  // The overview and aux traces stay the upload's envelopes (/series/*); the
+  // run preview's copies of them are not used.
   const {
-    mean_abs,
     total_samples,
-    grid_mean_abs,
     grid_names,
     rois,
     channel_means,
@@ -279,8 +276,6 @@ function applyPreviewData(app, preview, options = {}) {
     pulse_trains_all,
     distime_all,
     mu_grid_index,
-    auxiliary,
-    auxiliary_names,
   } = preview;
 
   if (total_samples) {
@@ -290,8 +285,7 @@ function applyPreviewData(app, preview, options = {}) {
     setRois(state, rois);
     if (els.nwindows) els.nwindows.value = String(state.rois.length);
   }
-  if (grid_mean_abs && grid_names) {
-    setGridSeries(state, grid_mean_abs);
+  if (grid_names) {
     setGridNames(state, grid_names);
   }
   if (channel_means) {
@@ -316,12 +310,9 @@ function applyPreviewData(app, preview, options = {}) {
     const newGridIndex = mu_grid_index || state.muGridIndex;
     setMuPreviewData(state, newPulseTrains, newDistimes, newGridIndex);
   }
-  if (auxiliary) {
-    setAuxData(state, auxiliary, auxiliary_names || []);
-    populateAuxSelector();
-    renderAuxiliaryChannels();
-    enableRoiSelection("auxCanvas");
-  }
+  populateAuxSelector();
+  renderAuxiliaryChannels();
+  enableRoiSelection("auxCanvas");
   ensureDiscardMasks(state);
   renderChannelQC();
   const roiStream = state.rois?.[0];
@@ -330,7 +321,6 @@ function applyPreviewData(app, preview, options = {}) {
     roiStart(roiStream),
     roiEnd(roiStream, state.seriesLength),
   );
-  setPreviewSeries(state, mean_abs);
   drawGridOverlay(
     els.emgCanvas,
     state.gridSeries,

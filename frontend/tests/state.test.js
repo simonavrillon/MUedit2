@@ -314,13 +314,13 @@ describe("raw preview transitions", () => {
   test("rollback clears the file, token and preview", () => {
     state.file = { name: "x" };
     state.uploadToken = "t";
-    state.previewSeries = [1];
+    state.gridSeries = [new Float32Array([1])];
     state.gridNames = ["g"];
     state.seriesLength = 10;
     rollbackRawPreviewTransition(state);
     assert.equal(state.file, null);
     assert.equal(state.uploadToken, null);
-    assert.deepEqual(state.previewSeries, []);
+    assert.deepEqual(state.gridSeries, []);
     assert.deepEqual(state.gridNames, []);
     assert.equal(state.seriesLength, null);
   });

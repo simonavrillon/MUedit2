@@ -13,9 +13,29 @@ The non-streaming `POST /decompose`, `GET /config`, and the multipart upload rou
 | Method | Path | Accepts | Returns | Service |
 |---|---|---|---|---|
 | GET | `/health` | — | `{status: "ok"}` | — |
-| POST | `/preview-by-path` | JSON: `PathPayload` | JSON: `{upload_token, mean_abs, grid_mean_abs, grid_names, total_samples, fsamp, channel_means, coordinates, metadata, muscle, auxiliary, auxiliary_names}` + BIDS sidecar metadata | `build_preview_from_path(path)` |
-| POST | `/qc/window` | JSON: `QcWindowPayload` | Binary MQCR (`x-muedit-format: qc-raw-f32-v1`) | `get_qc_window(payload)` |
+| POST | `/preview-by-path` | JSON: `PathPayload` | JSON: `{upload_token, grid_names, total_samples, fsamp, channel_means, coordinates, metadata, muscle, auxiliary_names}` + BIDS sidecar metadata | `build_preview_from_path(path)` |
 | POST | `/qc/auto` | JSON: `QcAutoPayload` | JSON: `{bad_channels_per_grid, artifact_regions, artifact_samples, total_samples, fsamp, grid_names}` | `run_auto_qc_on_token(payload)` |
+
+The preview bandpasses the grid channels once, a few rows at a time, and keeps in the upload's
+session store what the QC stage draws. That is min/max pyramids of the bandpassed EMG, of each
+grid's smoothed mean |EMG| (the overview) and of the aux channels, with levels at bins of 16, 64,
+256, … samples. The bandpassed EMG itself is not stored. `/qc/auto` bandpasses it again into a
+temporary store file.
+
+### Series Router (`routes/series.py`)
+
+| Method | Path | Accepts | Returns | Service |
+|---|---|---|---|---|
+| GET | `/series/emg` | query: `upload_token`, `grid`, `start`, `end` (0 = end), `bins` (1–8192, default 1024) | MUB1 frame of one grid's bandpassed EMG | `series_frame("emg", …)` |
+| GET | `/series/overview` | query: `upload_token`, `start`, `end`, `bins` | MUB1 frame, one row per grid | `series_frame("overview", …)` |
+| GET | `/series/aux` | query: `upload_token`, `start`, `end`, `bins` | MUB1 frame, one row per aux channel | `series_frame("aux", …)` |
+
+A series frame holds `min` and `max` `f4[rows, bins]`, served from the coarsest pyramid level
+with at least one level bin per output bin. When the window has no more samples than bins, it
+holds `samples` `f4[rows, end − start]` instead (for the EMG, bandpassed on demand with 1 s of
+padding). Its meta has `kind` (`envelope` | `samples`), `start`, `end`, `bins`, `factor`
+(samples per source bin), `total_samples`, `fsamp` and `names`. An output bin holds every sample
+of its range plus at most one level bin of its neighbours.
 
 ### Decompose Router (`routes/decompose.py`)
 
@@ -72,16 +92,6 @@ All models are Pydantic `BaseModel`.
 | Field | Type |
 |---|---|
 | `path` | `str` |
-
-### `QcWindowPayload`
-| Field | Type | Default |
-|---|---|---|
-| `upload_token` | `str` | (required) |
-| `grid_index` | `int` | `0` |
-| `start` | `int` | `0` |
-| `end` | `int` | `0` |
-| `target_fs` | `float` | `1000.0` |
-| `channel_index` | `int \| None` | `None` |
 
 ### `QcAutoPayload`
 | Field | Type | Default |
@@ -230,17 +240,7 @@ Media type `application/x-muedit-frame`; response header `x-muedit-format: mub1`
 
 | Name | Magic | Header `x-muedit-format` | Used by | Encoding |
 |---|---|---|---|---|
-| MUB1 | `b"MUB1"` | `mub1` | Decompose preview (`pulse_trains_full`, `pulse_trains_all`), edit load (`pulse_trains_full`), edit save request (`pulse_trains`) | `pack_frame` — JSON meta + f4 arrays |
-| MQCR | `b"MQCR"` | `qc-raw-f32-v1` | QC channel-window raw traces | Custom encoding (see below); replaced when QC moves to viewport envelopes |
-
-### MQCR Custom Encoding
-
-```
-"MQCR" | version<uint32=1> | grid_index<int32> | channel_index<int32> |
-  start<int32> | end<int32> | total_samples<int32> | fsamp<float32> |
-  n_channels<uint32> |
-  [channel_index<int32> | n_samples<uint32> | float32_data] x n_channels
-```
+| MUB1 | `b"MUB1"` | `mub1` | Viewport series (`min`/`max` or `samples`), decompose preview (`pulse_trains_full`, `pulse_trains_all`), edit load (`pulse_trains_full`), edit save request (`pulse_trains`) | `pack_frame` — JSON meta + f4 arrays |
 
 ---
 
@@ -264,8 +264,9 @@ Thread-safe (single `threading.Lock`), TTL-based, with budget-driven eviction (m
 |---|---|
 | `_store_upload_signal(signal, source_path=None) -> token` | Store a copy of the signal, return UUID token; `source_path` records the original file path |
 | `_get_upload_signal(token) -> SignalImport \| None` | Get a read-only view of the signal, refresh TTL on hit |
-| `_store_qc_signal(token, data, fsamp, grid_names, discard_channels)` | Attach QC arrays to upload session |
-| `_get_qc_signal(token) -> QCSignal \| None` | Get QC arrays (`data` is a read-only view) |
+| `_store_signal_views(token, views)` | Attach the QC stage's pyramids and overview to the upload |
+| `_get_signal_views(token) -> SignalViews \| None` | Get them (sealed, so read-only) |
+| `_hold_upload(token) -> HeldUpload \| None` | Signal, source path, store and views of an upload, the store held until `release()`; used by runs, `/qc/auto` and `/series/*` |
 | `_store_decomp_preview_binary(payload) -> token` | Store binary preview blob |
 | `_pop_decomp_preview_binary(token) -> bytes \| memoryview \| None` | Remove and return the preview frame |
 | `_store_run_result(pulse_trains) -> token` | Keep a run's float32 pulse matrix |
@@ -283,15 +284,18 @@ Each cache holds a small entry dataclass (`_UploadEntry`, `_PreviewBinaryEntry`,
 `_EditContextEntry`) with an `expires_at` time and an `nbytes` property, which
 `_evict_to_budget_locked` uses for the item and byte budgets.
 
-`QCSignal` (defined in `cache.py`):
+`SignalViews` (defined in `cache.py`; every array float32, memory-mapped from the upload's store):
 
 | Field | Type | Notes |
 |---|---|---|
-| `data` | `FloatArray` | float32, `(n_channels, n_samples)` |
 | `fsamp` | `float` | |
 | `grid_names` | `list[str]` | |
-| `channel_offsets` | `list[int]` | First row of each grid in `data` |
-| `discard_channels` | `list[IntArray]` | Per grid, 1 = discarded |
+| `grid_rows` | `list[tuple[int, int]]` | `[first, stop)` EMG rows of each grid |
+| `emg_types` | `list[int]` | Bandpass of each grid |
+| `emg` | `MinMaxPyramid` | Bandpassed EMG of the grid rows |
+| `overview` | `FloatArray` | `(n_grids, n_samples)`: smoothed mean \|EMG\| per grid |
+| `overview_levels` | `MinMaxPyramid` | Pyramid of `overview` |
+| `aux` | `MinMaxPyramid` | Aux channels |
 
 ---
 

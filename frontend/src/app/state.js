@@ -8,7 +8,7 @@ import { GRID_COLORS } from "../config.js";
 /** @typedef {Span & { yMin?: number, yMax?: number }} Selection */
 /** @typedef {"add" | "add_artifact" | "delete_spikes" | "delete_dr"} EditMode */
 /** @typedef {{ muIdx: number, position: number }} Bookmark Where the user last edited an MU. */
-/** @typedef {number[] | { min: number[], max: number[] }} ChannelTrace A raw trace, or its min/max envelope. */
+/** @typedef {import("../api/binary-payloads.js").SeriesRow} ChannelTrace One row of a viewport: its samples, or their min/max per bin. */
 
 /**
  * One MU as it was before the last edit, for a single-step undo.
@@ -86,9 +86,8 @@ import { GRID_COLORS } from "../config.js";
  * @property {boolean} isRunning
  * @property {number | null} seriesLength
  * @property {Span[]} rois
- * @property {number[]} previewSeries
  * @property {string[]} gridNames
- * @property {number[][]} gridSeries
+ * @property {ChannelTrace[]} gridSeries Per grid, the smoothed mean |EMG| of the whole recording.
  * @property {string[]} gridColors
  * @property {JsonObject | null} parameters
  * @property {number[][]} channelMeans
@@ -114,7 +113,7 @@ import { GRID_COLORS } from "../config.js";
  * @property {Span | null} artifactDraft
  * @property {boolean} artifactMode
  * @property {number | null} fsamp
- * @property {number[][]} auxSeries
+ * @property {ChannelTrace[]} auxSeries Per auxiliary channel, the whole recording.
  * @property {string[]} auxNames
  * @property {EditSlice} edit
  */
@@ -165,7 +164,6 @@ export const state = {
   isRunning: false,
   seriesLength: null,
   rois: [],
-  previewSeries: [],
   gridNames: [],
   gridSeries: [],
   gridColors: GRID_COLORS,
