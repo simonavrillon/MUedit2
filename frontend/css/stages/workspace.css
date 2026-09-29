@@ -560,6 +560,22 @@
   gap: 6px;
 }
 
+.progress-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.cancel-run-btn {
+  width: auto;
+  padding: 4px 14px;
+}
+
+.cancel-run-btn[hidden] {
+  display: none;
+}
+
 .progress-text {
   color: var(--muted);
   font-size: var(--fs-md);

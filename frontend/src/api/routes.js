@@ -8,6 +8,7 @@ export const routes = {
   qcAuto: "/qc/auto",
   previewByPath: "/preview-by-path",
   decomposeStream: "/decompose_stream",
+  decomposeCancel: "/decompose/cancel",
   decomposePreview: (/** @type {string} */ token) =>
     `/decompose_preview/${encodeURIComponent(token)}`,
   editSave: "/edit/save",

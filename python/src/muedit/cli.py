@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import multiprocessing
 import os
 import sys
 from pathlib import Path
@@ -57,6 +58,8 @@ LOOPBACK_HOSTS = ("127.0.0.1", "localhost")
 
 def serve_api() -> None:
     """Start the FastAPI backend server."""
+    # Decompositions run in spawned worker processes; a frozen (bundled) app must let them start.
+    multiprocessing.freeze_support()
     # /preview-by-path reads any local path, so only this machine's frontend may call it.
     host = os.environ.get("MUEDIT_HOST", "127.0.0.1")
     port = int(os.environ.get("MUEDIT_PORT") or os.environ.get("MUEDIT_BACKEND_PORT", "8000"))

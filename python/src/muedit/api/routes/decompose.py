@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import Response, StreamingResponse
 
 from muedit.api.common import request_session
 from muedit.api.config import resolve_bids_root
+from muedit.api.contracts import success_payload
 from muedit.api.services.decompose_service import (
+    cancel_decomposition,
     decomposition_event_stream,
     fetch_decompose_preview_binary,
     parse_stream_options,
-    resolve_decompose_input,
+    start_decomposition,
 )
 
 router = APIRouter(prefix="/api/v1", dependencies=[Depends(request_session)])
@@ -36,8 +40,7 @@ async def decompose_stream(
     artifact_regions: str | None = Form(None),
     session: str = Depends(request_session),
 ) -> StreamingResponse:
-    """Run decomposition and stream stage/progress events as NDJSON."""
-    run_path, preloaded_signal = resolve_decompose_input(upload_token)
+    """Run decomposition and stream stage/progress events as NDJSON; 409 while another runs."""
     (
         roi,
         roi_list,
@@ -54,26 +57,34 @@ async def decompose_stream(
         bids_metadata=bids_metadata,
         artifact_regions=artifact_regions,
     )
-
-    wants_binary_preview = request.headers.get("x-muedit-binary", "1") != "0"
-    generator = decomposition_event_stream(
-        run_path=run_path,
-        params_raw=params,
-        duration=duration,
-        persist_output=persist_output,
-        roi=roi,
-        rois=roi_list,
-        discard_channels=discard_override,
-        bids_root=str(resolve_bids_root(project)) if bids_export else None,
-        bids_entities=bids_entities_obj,
-        bids_metadata=bids_metadata_obj,
-        include_full_preview=full_preview,
-        preloaded_signal=preloaded_signal,
-        binary_preview=wants_binary_preview,
-        artifact_regions=artifact_region_list,
+    run = start_decomposition(
+        upload_token,
+        {
+            "params_raw": params,
+            "duration": duration,
+            "persist_output": persist_output,
+            "roi": roi,
+            "rois": roi_list,
+            "discard_channels": discard_override,
+            "bids_root": str(resolve_bids_root(project)) if bids_export else None,
+            "bids_entities": bids_entities_obj,
+            "bids_metadata": bids_metadata_obj,
+            "include_full_preview": full_preview,
+            "artifact_regions": artifact_region_list,
+        },
+        binary_preview=request.headers.get("x-muedit-binary", "1") != "0",
         session=session,
     )
-    return StreamingResponse(generator, media_type="application/x-ndjson")
+    return StreamingResponse(
+        decomposition_event_stream(run, request.is_disconnected),
+        media_type="application/x-ndjson",
+    )
+
+
+@router.post("/decompose/cancel")
+def decompose_cancel(session: str = Depends(request_session)) -> dict[str, Any]:
+    """Stop the run this session started; ``cancelled`` is false when it has none."""
+    return success_payload({"cancelled": cancel_decomposition(session)})
 
 
 @router.get("/decompose_preview/{token}")

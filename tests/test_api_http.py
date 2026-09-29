@@ -36,6 +36,7 @@ LIVE_ENDPOINTS: list[tuple[str, str]] = [
     ("POST", "/qc/window"),
     ("POST", "/qc/auto"),
     ("POST", "/decompose_stream"),
+    ("POST", "/decompose/cancel"),
     ("GET", "/decompose_preview/{token}"),
     ("POST", "/edit/load-by-path"),
     ("POST", "/edit/save"),

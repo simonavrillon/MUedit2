@@ -14,6 +14,7 @@ from muedit.api.memory import (
     process_memory_bytes,
     session_id_or_default,
 )
+from muedit.api.services.decompose_service import cancel_decomposition
 from muedit.io.store import store_usage
 
 router = APIRouter(prefix="/api/v1")
@@ -21,8 +22,9 @@ router = APIRouter(prefix="/api/v1")
 
 @router.post("/session/close", status_code=204)
 def close_session_endpoint(session: str = Query(...)) -> Response:
-    """Drop what a closing tab held; the frontend sends it with ``navigator.sendBeacon``."""
+    """Drop what a closing tab held and stop its run; the frontend sends it with ``navigator.sendBeacon``."""
     if session_id_or_default(session) == session:
+        cancel_decomposition(session)
         close_session(session)
     return Response(status_code=204)
 

@@ -71,12 +71,22 @@ Use this to trace what the user can reach.
 
 | Symbol | Category | Reachable via |
 |---|---|---|
-| `decomposition_event_stream(...)` | App-internal | `POST /decompose_stream` route |
+| `start_decomposition(upload_token, options, ...)` | App-internal | `POST /decompose_stream` route; 409 while a run is active, holds the upload's store |
+| `decomposition_event_stream(run, is_disconnected)` | App-internal | `POST /decompose_stream` route; cancels the run when the client goes away |
+| `cancel_decomposition(session)` | App-internal | `POST /decompose/cancel`, `POST /session/close` |
+| `stop_decompositions()` | App-internal | App lifespan shutdown |
 | `fetch_decompose_preview_binary(token)` | App-internal | `GET /decompose_preview/{token}` route |
-| `resolve_decompose_input(upload_token)` | App-internal | Called by decompose_stream route; returns `(run_path, preloaded_signal)` |
 | `parse_stream_options(...)` | App-internal | Called by decompose_stream route |
-| `_as_f32_matrix(value)` | App-internal | Called by `_encode_decompose_preview_f32` |
-| `_encode_decompose_preview_f32(preview)` | App-internal | Called by `decomposition_event_stream` |
+| `_Run` | App-internal | One run: its worker process (or thread) and the supervisor thread relaying events |
+| `_encode_decompose_preview(preview)` | App-internal | Called by `_Run._done_event` |
+
+### `services/decompose_worker.py`
+
+| Symbol | Category | Reachable via |
+|---|---|---|
+| `RunJob` | App-internal | Built by `start_decomposition`; pickled to the worker (memmaps as file locations) |
+| `execute(job, store, send, cancelled)` | App-internal | Worker process body and thread fallback |
+| `child_main(job, store_path, conn)` | App-internal | `spawn` target of the worker process |
 
 ### `services/editing_service.py`
 

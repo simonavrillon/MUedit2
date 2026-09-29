@@ -11,7 +11,8 @@ All HTTP endpoints used by the frontend, their payloads, and binary formats.
 | 3 | POST | `/preview-by-path` | `api.fetchPreviewByPath(path)` | `qcStage.requestPreview` (with filepath) | 120s | Fetch preview metadata for raw file by path |
 | 4 | POST | `/qc/window` | `api.fetchQcWindow(payload, {preferBinary})` | `qcStage.requestQcGridWindow` | 120s | Fetch QC channel traces for a grid window |
 | 5 | POST | `/qc/auto` | `api.runAutoQc(payload)` | `qcStage.runAutoQc` | 300s | Run automatic QC: detect bad channels + artifact windows |
-| 6 | POST | `/decompose_stream` | `api.decomposeStream(formData)` | `runStage.runDecomposition` | 15min | Main decomposition (streaming NDJSON response) |
+| 6 | POST | `/decompose_stream` | `api.decomposeStream(formData)` | `runStage.runDecomposition` | 15min | Main decomposition (streaming NDJSON response); 409 while another run is active |
+| 6b | POST | `/decompose/cancel` | `api.cancelDecomposition()` | `runStage.cancelDecomposition` (Cancel button) | 120s | Stop this tab's run; its stream ends with `cancelled` |
 | 7 | GET | `/decompose_preview/{token}` | `api.fetchDecomposePreview(token)` | `handleStreamMessage` (binary fast-path) | 120s | Fetch heavy MU arrays in binary format |
 | 8 | POST | `/edit/load-by-path` | `api.editLoadByPath(filepath)` | `editStage.loadDecompositionForEdit` | 120s | Load decomposition file by server path |
 | 9 | POST | `/edit/add-spikes` | `api.editAction("add-spikes", payload)` | `requestRoiEdit` | 120s | Add spikes in a selected region |
@@ -34,6 +35,7 @@ export const routes = {
   qcAuto: "/qc/auto",
   previewByPath: "/preview-by-path",
   decomposeStream: "/decompose_stream",
+  decomposeCancel: "/decompose/cancel",
   decomposePreview: (token) => `/decompose_preview/${encodeURIComponent(token)}`,
   editSave: "/edit/save",
   editAction: (action) => `/edit/${action}`,
@@ -129,6 +131,9 @@ Response: NDJSON stream (one JSON object per line):
   { summary: { per_grid: [...], parameters: {...} } }
   { stage: "done" }
   { stage: "error", message: string }
+  { stage: "cancelled", message: string }   (after /decompose/cancel, a disconnect or tab close)
+
+A second run while one is active gets HTTP 409 before any stream starts.
 ```
 
 ### GET /decompose_preview/{token}

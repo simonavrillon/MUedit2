@@ -29,6 +29,7 @@ export const els = {
   settingsOverlay: element("settingsOverlay"),
   settingsPanel: element("settingsPanel"),
   start: button("startBtn"),
+  cancelRun: button("cancelRunBtn"),
   progressText: element("progressText"),
   progressBar: element("progressBar"),
   qcGridTabs: element("qcGridTabs"),

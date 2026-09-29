@@ -118,6 +118,7 @@
  * @property {() => Promise<void>} autoSaveRunDecomposition
  * @property {(msg: JsonObject) => void} handleStreamMessage
  * @property {() => Promise<void>} runDecomposition
+ * @property {() => Promise<void>} cancelDecomposition
  * @property {() => void} updateStartAvailability
  * @property {() => DecomposeParams} buildParams
  */

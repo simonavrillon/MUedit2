@@ -132,6 +132,20 @@ def _get_upload_signal(token: str | None) -> SignalImport | None:
     return entry.signal.readonly_view() if entry else None
 
 
+def _hold_upload(token: str | None) -> tuple[SignalImport, str | None, SessionStore | None] | None:
+    """The upload's read-only signal, source path and store, the store held until ``release``.
+
+    Dropping the upload meanwhile (a new file, an eviction) closes the store only after.
+    """
+    with BUDGET.lock:
+        entry = _UPLOADS.get(token)
+        if entry is None:
+            return None
+        if entry.store is not None:
+            entry.store.hold()
+        return entry.signal.readonly_view(), entry.source_path, entry.store
+
+
 def _store_qc_signal(
     token: str,
     data: FloatArray,

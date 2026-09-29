@@ -5,14 +5,17 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import mmap
 import os
 import shutil
 import sys
+import threading
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import replace
+from multiprocessing.reduction import ForkingPickler
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 import numpy as np
 from numpy.typing import DTypeLike
@@ -101,6 +104,9 @@ class SessionStore:
     def __init__(self, path: Path) -> None:
         self.path = path
         self._warned_full = False
+        self._lock = threading.Lock()
+        self._holds = 0
+        self._close_pending = False
 
     @classmethod
     def create(cls, label: str = "session") -> SessionStore:
@@ -168,8 +174,29 @@ class SessionStore:
         with contextlib.suppress(OSError):
             Path(filename).unlink(missing_ok=True)
 
+    def hold(self) -> None:
+        """Keep the folder while another process reads it: ``close`` waits for ``release``."""
+        with self._lock:
+            self._holds += 1
+
+    def release(self) -> None:
+        """End one ``hold``, and do a ``close`` that was asked for meanwhile."""
+        with self._lock:
+            self._holds -= 1
+            close = self._holds == 0 and self._close_pending
+        if close:
+            self.close()
+
     def close(self) -> None:
-        """Delete the folder; what Windows still maps is removed by the next ``purge_stale_sessions``."""
+        """Delete the folder, or once the last ``hold`` is released.
+
+        What Windows still maps is removed by the next ``purge_stale_sessions``.
+        """
+        with self._lock:
+            if self._holds:
+                self._close_pending = True
+                return
+            self._close_pending = False
         shutil.rmtree(self.path, ignore_errors=True)
 
     @property
@@ -193,6 +220,41 @@ def store_signal(signal: SignalImport, store: ArrayStore) -> SignalImport:
         data=_copy_into(store, "emg", signal.data),
         auxiliary=_copy_into(store, "aux", signal.auxiliary),
     )
+
+
+def _open_mapped(
+    filename: str, dtype: np.dtype[Any], shape: tuple[int, ...], offset: int
+) -> np.ndarray:
+    """Read-only map of the array stored ``offset`` bytes into ``filename``."""
+    return np.memmap(filename, dtype=dtype, mode="r", offset=offset, shape=shape)
+
+
+def _file_offset(arr: np.memmap) -> int | None:
+    """Where ``arr``'s first element sits in its file, or None if it cannot be reopened there."""
+    mapping = getattr(arr, "_mmap", None)
+    if mapping is None or not arr.filename or arr.size == 0 or not arr.flags.c_contiguous:
+        return None
+    if not os.path.exists(arr.filename):
+        return None
+    try:
+        mapped_at = np.frombuffer(mapping, dtype=np.uint8).ctypes.data
+    except (ValueError, TypeError):  # the map is closed
+        return None
+    # np.memmap maps its file from the allocation boundary at or below its offset.
+    mapped_from = arr.offset - arr.offset % mmap.ALLOCATIONGRANULARITY
+    return int(mapped_from + arr.ctypes.data - mapped_at)
+
+
+def _reduce_memmap(arr: np.memmap) -> tuple[Callable[..., np.ndarray], tuple[Any, ...]]:
+    """Pickle a file-backed array as its file location; others (and views) by value."""
+    offset = _file_offset(arr)
+    if offset is None:
+        return cast(tuple[Callable[..., np.ndarray], tuple[Any, ...]], np.asarray(arr).__reduce__())
+    return _open_mapped, (arr.filename, arr.dtype, arr.shape, offset)
+
+
+# The decomposition worker process gets its input and returns its pulse trains as files.
+ForkingPickler.register(np.memmap, _reduce_memmap)
 
 
 def _folder_bytes(path: Path) -> int:

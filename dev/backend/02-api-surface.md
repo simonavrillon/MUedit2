@@ -21,8 +21,18 @@ The non-streaming `POST /decompose`, `GET /config`, and the multipart upload rou
 
 | Method | Path | Accepts | Returns | Service |
 |---|---|---|---|---|
-| POST | `/decompose_stream` | form fields: `upload_token` (required; 400 with `field: upload_token` when missing or expired), `params`, `duration`, `persist_output`, `roi_start: int`, `roi_end: int`, `rois` (JSON str), `discard_channels`, `bids_export: bool`, `project: str`, `bids_entities` (JSON str), `bids_metadata` (JSON str), `full_preview`, `artifact_regions` (JSON str) | `StreamingResponse` NDJSON (`application/x-ndjson`) | `decomposition_event_stream()` |
+| POST | `/decompose_stream` | form fields: `upload_token` (required; 400 with `field: upload_token` when missing or expired), `params`, `duration`, `persist_output`, `roi_start: int`, `roi_end: int`, `rois` (JSON str), `discard_channels`, `bids_export: bool`, `project: str`, `bids_entities` (JSON str), `bids_metadata` (JSON str), `full_preview`, `artifact_regions` (JSON str) | `StreamingResponse` NDJSON (`application/x-ndjson`); 409 while another run is active | `start_decomposition()` + `decomposition_event_stream()` |
+| POST | `/decompose/cancel` | — (the session header names the run) | JSON: `{cancelled: bool}`; false when this session has no run | `cancel_decomposition(session)` |
 | GET | `/decompose_preview/{token}` | path param `token: str` | MUB1 frame (`x-muedit-format: mub1`); served once, then 404 | `fetch_decompose_preview_binary(token)` |
+
+The server runs one decomposition at a time, in a worker process started with `spawn`
+(`decompose_worker.child_main`). The worker opens the upload's memory-mapped files and writes the
+run's arrays into a run store the server created, so only file locations cross between the
+processes. Progress comes back over a pipe, and the NDJSON events are the same as they were with
+the old in-process thread. The stream ends with `done`, `error` (also when the worker process dies),
+or `cancelled`. A run is cancelled by `/decompose/cancel`, by the client disconnecting, by
+`/session/close` for its session, and at server shutdown. `MUEDIT_DECOMPOSE_WORKER=thread` runs the
+decomposition on a thread instead. In that mode a cancel takes effect at the next progress event.
 
 Header `x-muedit-binary` (default `"1"`) controls binary vs JSON preview encoding in stream mode.
 When the run has a full-length pulse matrix (`full_preview`), the `done` event's preview carries

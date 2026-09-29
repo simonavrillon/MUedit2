@@ -40,7 +40,7 @@ cli.serve_api()
       → errors.register_exception_handlers(app)
   → routes.include_routers(app)
       → app.include_router(preview_router)    # /api/v1: health, preview-by-path, qc/*
-      → app.include_router(decompose_router)  # /api/v1: decompose_stream, decompose_preview
+      → app.include_router(decompose_router)  # /api/v1: decompose_stream, decompose/cancel, decompose_preview
       → app.include_router(editing_router)    # /api/v1: edit/*
       → app.include_router(dialog_router)   # /api/v1/dialog: open-file
   → uvicorn.run(app, host, port)
@@ -196,11 +196,12 @@ Methods: `to_dict()`
 | `app_factory.py` | Construct FastAPI app, configure CORS, register exception handlers |
 | `routes/__init__.py` | Register all routers on the app |
 | `routes/preview.py` | File preview, QC window, on-demand auto-QC, health check |
-| `routes/decompose.py` | Streaming decomposition + binary preview fetch |
+| `routes/decompose.py` | Streaming decomposition, cancel, binary preview fetch |
 | `routes/editing.py` | All edit endpoints (load, save, filter update, spike/artifact ops) |
 | `routes/dialog.py` | Native file-open dialog (macOS AppleScript / tkinter) |
 | `services/preview_service.py` | Preview building, QC window binary encoding, on-demand auto-QC |
-| `services/decompose_service.py` | Decomposition orchestration, NDJSON streaming, binary preview |
+| `services/decompose_service.py` | One run at a time (409), cancel, worker supervision, NDJSON streaming, binary preview |
+| `services/decompose_worker.py` | Run body, executed in a `spawn` worker process (or a thread with `MUEDIT_DECOMPOSE_WORKER=thread`) |
 | `services/editing_service.py` | Edit operation dispatch, BIDS save, MAT signal context management |
 | `services/bids_helpers.py` | BIDS sidecar parsing, entity label resolution |
 | `services/edit_helpers.py` | Payload normalization helpers for edits |

@@ -228,6 +228,22 @@ export async function runDecomposition(app) {
   }
 }
 
+/** @param {App} app */
+export async function cancelDecomposition(app) {
+  const { state, els, api, setStatus } = app;
+  if (!state.isRunning) return;
+  if (els.cancelRun) els.cancelRun.disabled = true;
+  try {
+    // The run's stream ends with a `cancelled` event, which resets the page.
+    await api.cancelDecomposition();
+    setStatus("Cancelling decomposition...", "muted");
+  } catch (err) {
+    console.error(err);
+    setStatus(`Cancel failed: ${errorMessage(err)}`, "error");
+    if (els.cancelRun) els.cancelRun.disabled = false;
+  }
+}
+
 /**
  * @param {App} app
  * @param {PreviewPayload} preview
@@ -364,6 +380,12 @@ export function handleStreamMessage(app, msg) {
       : "";
     setStatus(`Error${detail}`, "error");
     updateProgress(0, msg.message || "Run failed", msg.stage);
+    return;
+  }
+
+  if (msg.stage === "cancelled") {
+    setStatus("Decomposition cancelled", "muted");
+    updateProgress(0, msg.message || "Decomposition cancelled", msg.stage);
     return;
   }
 

@@ -1,5 +1,6 @@
 import {
   autoSaveRunDecomposition as autoSaveRunDecompositionFeature,
+  cancelDecomposition as cancelDecompositionFeature,
   runDecomposition as runDecompositionFeature,
   handleStreamMessage as handleStreamMessageFeature,
 } from "../../decomp/run.js";
@@ -38,6 +39,10 @@ export function createRunStageService(app) {
   function updateStartAvailability() {
     if (els.start) {
       els.start.disabled = !state.file || state.isRunning;
+    }
+    if (els.cancelRun) {
+      els.cancelRun.hidden = !state.isRunning;
+      els.cancelRun.disabled = false;
     }
   }
 
@@ -103,6 +108,7 @@ export function createRunStageService(app) {
     autoSaveRunDecomposition: () => autoSaveRunDecompositionFeature(app),
     handleStreamMessage: (msg) => handleStreamMessageFeature(app, msg),
     runDecomposition: () => runDecompositionFeature(app),
+    cancelDecomposition: () => cancelDecompositionFeature(app),
     updateStartAvailability,
     buildParams,
   };
@@ -114,6 +120,7 @@ export function setupRunEvents(app) {
     els,
     state,
     runDecomposition,
+    cancelDecomposition,
     enableRoiSelection,
     syncRois,
     refreshVisuals,
@@ -129,6 +136,7 @@ export function setupRunEvents(app) {
   } = app;
 
   els.start?.addEventListener("click", runDecomposition);
+  els.cancelRun?.addEventListener("click", cancelDecomposition);
   els.qcAutoBtn?.addEventListener("click", runAutoQc);
   els.artifactAddBtn?.addEventListener("click", toggleArtifactMode);
   els.artifactRemoveBtn?.addEventListener("click", removeLastArtifact);

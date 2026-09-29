@@ -92,6 +92,11 @@ export function createApiClient({ apiFetch, apiJson, API_BASE, sessionId }) {
       );
     },
 
+    /** Stops this tab's decomposition; its stream then ends with a `cancelled` event. */
+    cancelDecomposition() {
+      return postJson(`${API_BASE}${routes.decomposeCancel}`, {});
+    },
+
     /**
      * @param {string} token
      */

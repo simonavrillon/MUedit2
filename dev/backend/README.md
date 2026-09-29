@@ -44,12 +44,13 @@ python/src/muedit/
 │   ├── routes/
 │   │   ├── __init__.py                       include_routers()
 │   │   ├── preview.py                        /preview-by-path, /qc/window, /qc/auto, /health
-│   │   ├── decompose.py                      /decompose_stream, /decompose_preview/{token}
+│   │   ├── decompose.py                      /decompose_stream, /decompose/cancel, /decompose_preview/{token}
 │   │   ├── editing.py                        /edit/* (load-by-path, save, update-filter, add/delete, dedup, flag)
 │   │   └── dialog.py                         /dialog/open-file
 │   ├── services/
 │   │   ├── preview_service.py                Preview building + QC window encoding
-│   │   ├── decompose_service.py              Decomposition orchestration + streaming
+│   │   ├── decompose_service.py              One run at a time, cancel, NDJSON streaming
+│   │   ├── decompose_worker.py               Run body, executed in a spawned worker process
 │   │   ├── editing_service.py                Edit operation dispatch + BIDS save
 │   │   ├── bids_helpers.py                   BIDS sidecar parsing + entity resolution
 │   │   └── edit_helpers.py                   Normalization helpers for edit payloads

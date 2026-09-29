@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import json
 import os
+import pickle
+import sys
 import tracemalloc
+from multiprocessing.reduction import ForkingPickler
 from pathlib import Path
+from typing import cast
 
 import h5py
 import numpy as np
@@ -72,13 +76,13 @@ class TestSessionStore:
         first[:] = 7
         sealed = st.seal(first)
         second = st.allocate("pulse", (2, 4), np.float32, zero=True)
-        assert second.filename != sealed.filename
+        assert cast(np.memmap, second).filename != cast(np.memmap, sealed).filename
         np.testing.assert_array_equal(sealed, 7)
 
     def test_discard_deletes_only_its_own_files(self, cache_dir: Path, tmp_path: Path) -> None:
         st = SessionStore.create("t")
         arr = st.seal(st.allocate("x", (2, 2), np.float64, zero=True))
-        path = Path(arr.filename)
+        path = Path(str(cast(np.memmap, arr).filename))
         st.discard(arr)
         assert not path.exists()
         np.testing.assert_array_equal(arr, 0)  # the live map keeps its pages
@@ -117,6 +121,66 @@ class TestSessionStore:
         arr = ram.allocate("x", (2, 3), np.float32, zero=True)
         assert ram.seal(arr) is arr
         assert arr.flags.writeable
+
+    def test_close_waits_for_the_last_hold(self, cache_dir: Path) -> None:
+        st = SessionStore.create("t")
+        st.hold()
+        st.hold()
+        st.close()
+        st.release()
+        assert st.path.exists()
+        st.release()
+        assert not st.path.exists()
+
+    def test_release_without_a_pending_close_keeps_the_folder(self, cache_dir: Path) -> None:
+        st = SessionStore.create("t")
+        st.hold()
+        st.release()
+        assert st.path.exists()
+        st.close()
+        assert not st.path.exists()
+
+
+class TestMemmapPickling:
+    """Stored arrays cross to the worker process as file locations (plan stage 11)."""
+
+    def _stored(self) -> np.ndarray:
+        st = SessionStore.create("t")
+        arr = st.allocate("emg", (7, 50_001), np.float32)
+        arr[:] = np.random.default_rng(0).random(arr.shape, dtype=np.float32)
+        return st.seal(arr)
+
+    @staticmethod
+    def _roundtrip(arr: np.ndarray) -> tuple[np.ndarray, int]:
+        data = ForkingPickler.dumps(arr)
+        return pickle.loads(data), len(data)  # noqa: S301 - bytes this test just made
+
+    def test_arrays_and_row_blocks_go_by_location(self, cache_dir: Path) -> None:
+        sealed = self._stored()
+        for view in (sealed, sealed.view(), sealed[2:5], sealed[6]):
+            got, size = self._roundtrip(view)
+            assert size < 1024
+            assert isinstance(got, np.memmap)
+            assert not got.flags.writeable
+            np.testing.assert_array_equal(got, view)
+
+    def test_strided_views_go_by_value(self, cache_dir: Path) -> None:
+        sealed = self._stored()
+        got, size = self._roundtrip(sealed[:, 10:20])
+        assert size > 7 * 10 * 4
+        np.testing.assert_array_equal(got, sealed[:, 10:20])
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="Windows cannot delete a mapped file")
+    def test_deleted_files_go_by_value(self, cache_dir: Path) -> None:
+        sealed = self._stored()
+        Path(str(cast(np.memmap, sealed).filename)).unlink()
+        got, size = self._roundtrip(sealed)
+        assert size > sealed.nbytes
+        np.testing.assert_array_equal(got, sealed)
+
+    def test_plain_pickle_is_unchanged(self, cache_dir: Path) -> None:
+        sealed = self._stored()
+        assert len(pickle.dumps(sealed)) > sealed.nbytes
 
 
 class TestStaleSessions:

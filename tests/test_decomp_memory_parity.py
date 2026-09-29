@@ -23,7 +23,12 @@ from muedit.decomp.pipeline import run_decomposition
 from muedit.decomp.postprocess import postprocess_step, remove_duplicates_by_grid
 from muedit.decomp.preprocess import load_step, preprocess_step
 from muedit.decomp.preview import abs_means
-from muedit.decomp.types import POSTPROCESS_MODES, DecompositionParameters
+from muedit.decomp.types import (
+    POSTPROCESS_MODES,
+    DecompositionParameters,
+    PostprocessMode,
+    PreprocessStepOutput,
+)
 from muedit.io.store import SessionStore
 from muedit.models import FloatArray, SignalImport, resident_nbytes
 from muedit.signal.decomp_primitives import extend_signal
@@ -592,7 +597,7 @@ def store_prep(synthetic_signal: SignalImport) -> dict[str, object]:
     """Preprocessing on the heap and into a session store, and one decomposition."""
     loaded = load_step("synthetic.mat", None, synthetic_signal, None)
 
-    def prep(store: SessionStore | None) -> object:
+    def prep(store: SessionStore | None) -> PreprocessStepOutput:
         return preprocess_step(
             loaded=loaded,
             duration=None,
@@ -625,8 +630,11 @@ def test_filtered_emg_in_the_store_matches_the_heap(store_prep: dict) -> None:
 
 
 @pytest.mark.parametrize("mode", list(POSTPROCESS_MODES))
-def test_pulse_trains_in_the_store_match_the_heap(store_prep: dict, mode: str) -> None:
-    params = replace(_STORE_PARAMS, **POSTPROCESS_MODES[mode])
+def test_pulse_trains_in_the_store_match_the_heap(store_prep: dict, mode: PostprocessMode) -> None:
+    flags = POSTPROCESS_MODES[mode]
+    params = replace(
+        _STORE_PARAMS, use_adaptive=flags["use_adaptive"], full_trace=flags["full_trace"]
+    )
     store = store_prep["store"]
     heap = postprocess_step(
         prep=store_prep["heap"],
