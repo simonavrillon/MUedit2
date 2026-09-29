@@ -1,11 +1,13 @@
 /**
  * Edit-stage canvas rendering and pointer interaction: pulse-train and
  * discharge-rate plots, the navigation timeline, the bookmark marker, and the
- * drag-to-select ROI handlers. Selection gestures update draft/committed
- * selection state via the action helpers; the container re-renders in response.
+ * drag-to-select ROI handlers. The pulse plot draws the window of the current
+ * MU the server sent (`state.edit.pulseView`) and asks for a new one when the
+ * view or the MU changed. Selection gestures update draft/committed selection
+ * state via the action helpers; the container re-renders in response.
  */
 import { COLORS, UNIFORM_PULSE_COLOR } from "../config.js";
-import { drawSeries, getCanvasPlotMetrics } from "./plots.js";
+import { drawTrace, getCanvasPlotMetrics } from "./plots.js";
 import {
   clearEditDrSelections,
   clearEditPulseSelections,
@@ -16,7 +18,7 @@ import {
   setEditView,
   setShowBookmark,
 } from "../state/actions.js";
-import { computeInstantaneousDr } from "../editing/operations.js";
+import { dischargeRates, fastestRateInView } from "../editing/operations.js";
 import { renderSelectPair } from "./select-renderers.js";
 
 /** @typedef {import("../app/context.js").App} App */
@@ -196,57 +198,86 @@ export function renderEditDropdownsView(els, model) {
   );
 }
 
+/**
+ * The current MU's window as drawn: a flagged MU shows as a flat line at 0,
+ * with its discharges on it.
+ *
+ * @param {import("../app/state.js").PulseView} shown
+ * @param {boolean} flagged
+ */
+function displayedPulse(shown, flagged) {
+  if (!flagged) {
+    return {
+      trace: shown,
+      spikeValues: shown.spikeValues,
+      artifactValues: shown.artifactValues,
+      range: undefined,
+    };
+  }
+  const bins = Math.max(1, shown.bins);
+  const zeros = new Float32Array(bins);
+  return {
+    trace: {
+      row: { min: zeros, max: zeros },
+      start: shown.start,
+      end: shown.end,
+    },
+    spikeValues: new Float32Array(shown.spikes.length),
+    artifactValues: new Float32Array(shown.artifacts.length),
+    range: { min: 0, max: 0 },
+  };
+}
+
 /** @param {App} app */
 export function renderEditExplorer(app) {
-  const {
-    els,
-    state,
-    renderEditDropdowns,
-    getDisplayPulse,
-    renderInstantaneousDr,
-  } = app;
+  const { els, state, renderEditDropdowns, renderInstantaneousDr } = app;
 
   renderEditDropdowns();
   const muIdx = state.edit.currentMu ?? 0;
-  const pulse = getDisplayPulse(muIdx);
-  const spikes = state.edit.distimes?.[muIdx] || [];
-  if (!state.edit.view || (pulse && state.edit.view.end > pulse.length)) {
-    setEditView(state, { start: 0, end: pulse.length || 0 });
+  const total = state.edit.totalSamples || 0;
+  if (!state.edit.view || state.edit.view.end > total) {
+    setEditView(state, { start: 0, end: total });
   }
+  const view = state.edit.view || { start: 0, end: total };
   const overlays = [];
   if (state.edit.selectionPulse) overlays.push(state.edit.selectionPulse);
   if (state.edit.draftSelectionPulse)
     overlays.push(state.edit.draftSelectionPulse);
-  const markerVals = spikes.map((s) => pulse?.[s] ?? 0);
-  const artifacts = state.edit.artifactTimes?.[muIdx] || [];
-  const artifactVals = artifacts.map((s) => pulse?.[s] ?? 0);
+  // A window of another MU is not drawn; one of this MU still loading is.
+  const shown =
+    state.edit.pulseView?.mu === muIdx ? state.edit.pulseView : null;
   const canvasEl = els.editPulseCanvas;
-  drawSeries(
-    canvasEl,
-    pulse,
-    UNIFORM_PULSE_COLOR,
-    spikes,
-    overlays,
-    pulse.length,
-    state.edit.view,
-    markerVals,
-    true,
-    {
+  const hasData = !!(state.edit.distimes?.length && total);
+  if (shown) {
+    const { trace, spikeValues, artifactValues, range } = displayedPulse(
+      shown,
+      !!state.edit.flagged?.[muIdx],
+    );
+    drawTrace(canvasEl, trace, view, {
+      color: UNIFORM_PULSE_COLOR,
+      range,
+      selections: overlays,
       showAxes: true,
       hideYAxis: false,
       fsamp: state.edit.fsamp,
-      markerColor: COLORS.muPurple,
-      extraMarkers: artifacts.length
-        ? [
-            {
-              positions: artifacts,
-              values: artifactVals,
-              color: COLORS.artifactMarker,
-            },
-          ]
-        : [],
-    },
-  );
+      markers: [
+        {
+          positions: shown.spikes,
+          values: spikeValues,
+          color: COLORS.muPurple,
+        },
+        {
+          positions: shown.artifacts,
+          values: artifactValues,
+          color: COLORS.artifactMarker,
+          radius: 4,
+          outlined: true,
+        },
+      ],
+    });
+  } else {
+    drawTrace(canvasEl, null, view, { noDataText: hasData ? "" : "No data" });
+  }
   if (canvasEl) {
     renderBookmark(
       canvasEl,
@@ -257,48 +288,34 @@ export function renderEditExplorer(app) {
     );
   }
   renderInstantaneousDr();
+  app.ensureEditPulseView();
 }
 
 /** @param {App} app */
 export function renderInstantaneousDr(app) {
-  const { state, els, getEditTotalSamples, ensureEditFlagged } = app;
+  const { state, els } = app;
 
   const canvas = els?.editDrCanvas || "editDrCanvas";
-  const pulse = state.edit.pulseTrains?.[state.edit.currentMu] || [];
-  const spikes = state.edit.distimes?.[state.edit.currentMu] || [];
-  ensureEditFlagged();
-  if (state.edit.flagged?.[state.edit.currentMu]) {
-    drawSeries(canvas, [], COLORS.warning);
+  const muIdx = state.edit.currentMu ?? 0;
+  const spikes = state.edit.distimes?.[muIdx] || [];
+  const total = state.edit.totalSamples || 0;
+  if (state.edit.flagged?.[muIdx] || !total || !spikes.length) {
+    drawTrace(canvas, null, { start: 0, end: 0 });
     return;
   }
-  const total = getEditTotalSamples();
-  if (!pulse.length || !spikes.length) {
-    drawSeries(canvas, [], COLORS.warning);
-    return;
-  }
-  const { series, markers, markerVals } = computeInstantaneousDr(
-    spikes,
-    state.edit.fsamp,
-    total,
-  );
+  const view = state.edit.view || { start: 0, end: total };
+  const dr = dischargeRates(spikes, state.edit.fsamp, total);
   const drSelection = state.edit.selectionDr || state.edit.draftSelectionDr;
-  drawSeries(
-    canvas,
-    series,
-    COLORS.warning,
-    markers,
-    drSelection ? [drSelection] : [],
-    total,
-    state.edit.view,
-    markerVals,
-    false,
-    {
-      showAxes: true,
-      hideYAxis: false,
-      fsamp: state.edit.fsamp,
-      markerColor: COLORS.muPurple,
-    },
-  );
+  drawTrace(canvas, { row: null, start: view.start, end: view.end }, view, {
+    range: { min: 0, max: fastestRateInView(dr, view) },
+    selections: drSelection ? [drSelection] : [],
+    showAxes: true,
+    hideYAxis: false,
+    fsamp: state.edit.fsamp,
+    markers: [
+      { positions: dr.positions, values: dr.rates, color: COLORS.muPurple },
+    ],
+  });
 }
 
 /** @param {App} app */
@@ -306,7 +323,6 @@ export function bindEditCanvas(app) {
   const {
     els,
     state,
-    getRawPulse,
     renderEditExplorer,
     setEditStatus,
     addSpikesInSelection,
@@ -318,19 +334,21 @@ export function bindEditCanvas(app) {
   const canvas = els.editPulseCanvas;
   if (!canvas) return;
 
-  const getPulse = () => getRawPulse(state.edit.currentMu ?? 0);
+  const hasMu = () =>
+    !!state.edit.totalSamples &&
+    state.edit.distimes?.[state.edit.currentMu ?? 0] !== undefined;
 
   const pxToSample = (/** @type {number} */ px) =>
     pxToViewSample(
       canvas,
       px,
-      state.edit.view || { start: 0, end: getPulse().length || 0 },
+      state.edit.view || { start: 0, end: state.edit.totalSamples || 0 },
     );
 
   const drag = createDragState(canvas, getCanvasPlotMetrics, pxToSample);
 
   canvas.addEventListener("mousedown", (e) => {
-    if (!getPulse().length) return;
+    if (!hasMu()) return;
     drag.begin(e);
     setEditPulseDraftSelection(state, null);
   });
@@ -391,18 +409,35 @@ export function bindEditCanvas(app) {
   });
 
   canvas.addEventListener("dblclick", () => {
-    const pulse = getPulse();
-    if (!pulse.length) return;
-    setEditView(state, { start: 0, end: pulse.length });
+    if (!hasMu()) return;
+    setEditView(state, { start: 0, end: state.edit.totalSamples });
     clearEditPulseSelections(state);
     setShowBookmark(state, true);
     renderEditExplorer();
   });
 }
 
+/**
+ * Fill a 2 px tick at each sample in `positions`, once per pixel column.
+ *
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {ArrayLike<number>} positions
+ * @param {number} total
+ * @param {number} bw
+ */
+function fillTicks(ctx, positions, total, bw) {
+  const drawn = new Set();
+  for (let i = 0; i < positions.length; i++) {
+    const x = TIMELINE_PAD_L + Math.round((positions[i] / total) * bw);
+    if (drawn.has(x)) continue;
+    drawn.add(x);
+    ctx.fillRect(x, TIMELINE_BAR_TOP, 2, TIMELINE_BAR_H);
+  }
+}
+
 /** @param {App} app */
 export function renderEditTimeline(app) {
-  const { els, state, getDisplayPulse } = app;
+  const { els, state } = app;
   const canvas = els?.editTimelineCanvas;
   if (!canvas) return;
 
@@ -414,8 +449,7 @@ export function renderEditTimeline(app) {
   ctx.clearRect(0, 0, w, 20);
 
   const muIdx = state.edit.currentMu ?? 0;
-  const pulse = getDisplayPulse(muIdx);
-  const total = pulse?.length || 0;
+  const total = state.edit.distimes?.[muIdx] ? state.edit.totalSamples || 0 : 0;
   if (!total) return;
 
   const bw = Math.max(1, w - TIMELINE_PAD_L - TIMELINE_PAD_R);
@@ -439,33 +473,15 @@ export function renderEditTimeline(app) {
         ...(lastEntry.artifacts_removed || []),
       ];
       ctx.fillStyle = "rgba(74,222,128,0.85)";
-      added.forEach((s) => {
-        ctx.fillRect(
-          TIMELINE_PAD_L + Math.round((s / total) * bw),
-          TIMELINE_BAR_TOP,
-          2,
-          TIMELINE_BAR_H,
-        );
-      });
+      fillTicks(ctx, added, total, bw);
       ctx.fillStyle = "rgba(248,113,113,0.85)";
-      removed.forEach((s) => {
-        ctx.fillRect(
-          TIMELINE_PAD_L + Math.round((s / total) * bw),
-          TIMELINE_BAR_TOP,
-          2,
-          TIMELINE_BAR_H,
-        );
-      });
+      fillTicks(ctx, removed, total, bw);
     }
   }
 
   // Current spike positions (faint purple, drawn on top of history)
-  const spikes = state.edit.distimes?.[muIdx] || [];
   ctx.fillStyle = "rgba(231,193,255,0.35)";
-  spikes.forEach((s) => {
-    const x = TIMELINE_PAD_L + Math.round((s / total) * bw);
-    ctx.fillRect(x, TIMELINE_BAR_TOP, 2, TIMELINE_BAR_H);
-  });
+  fillTicks(ctx, state.edit.distimes?.[muIdx] || [], total, bw);
 
   // View window
   const view = state.edit.view || { start: 0, end: total };
@@ -486,7 +502,7 @@ export function renderEditTimeline(app) {
 
 /** @param {App} app */
 export function bindEditTimeline(app) {
-  const { els, state, getDisplayPulse, renderEditExplorer } = app;
+  const { els, state, renderEditExplorer } = app;
   const canvas = els?.editTimelineCanvas;
   if (!canvas) return;
 
@@ -495,8 +511,7 @@ export function bindEditTimeline(app) {
   let dragViewStart = 0;
   let didMove = false;
 
-  const getTotal = () =>
-    (getDisplayPulse(state.edit.currentMu ?? 0) || []).length;
+  const getTotal = () => state.edit.totalSamples || 0;
 
   const fracFromClientX = (/** @type {number} */ clientX) => {
     const rect = canvas.getBoundingClientRect();
@@ -549,13 +564,7 @@ export function bindEditTimeline(app) {
 
 /** @param {App} app */
 export function bindEditDrCanvas(app) {
-  const {
-    els,
-    state,
-    getEditTotalSamples,
-    renderEditExplorer,
-    deleteDrInSelection,
-  } = app;
+  const { els, state, renderEditExplorer, deleteDrInSelection } = app;
 
   const canvas = els.editDrCanvas;
   if (!canvas) return;
@@ -564,7 +573,7 @@ export function bindEditDrCanvas(app) {
     pxToViewSample(
       canvas,
       px,
-      state.edit.view || { start: 0, end: getEditTotalSamples() },
+      state.edit.view || { start: 0, end: state.edit.totalSamples || 0 },
     );
 
   const drag = createDragState(canvas, getCanvasPlotMetrics, pxToSample);

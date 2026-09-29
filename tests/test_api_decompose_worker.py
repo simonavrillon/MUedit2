@@ -214,7 +214,7 @@ class TestWorkerProcess:
     def test_a_failure_in_the_server_part_is_an_error_event(
         self, client: TestClient, recording: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        def broken(preview: dict[str, Any]) -> memoryview:
+        def broken(*_: Any) -> memoryview:
             raise RuntimeError("frame encoding broke")
 
         token = _upload(client, recording, "relay")

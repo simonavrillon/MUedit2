@@ -1,3 +1,5 @@
+import { COLORS } from "../config.js";
+import { drawTrace } from "./plots.js";
 import { renderSelectPair } from "./select-renderers.js";
 
 /** @typedef {import("../app/context.js").Els} Els */
@@ -21,26 +23,28 @@ export function renderMuDropdowns(els, model) {
 }
 
 /**
- * @param {{ els: Els, drawSeries: typeof import("./plots.js").drawSeries }} deps
+ * @param {Els} els
  * @param {RunMuExplorerModel | null | undefined} model
  */
-export function renderMuExplorer(deps, model) {
-  const { els, drawSeries } = deps;
+export function renderMuExplorer(els, model) {
   if (!model) return;
   if (els.muMeta) {
     els.muMeta.textContent = model.metaText || "";
   }
-  const pulseCanvas = els.muPulseCanvas || "muPulseCanvas";
-  drawSeries(
-    pulseCanvas,
-    model.pulse || [],
-    model.color,
-    model.spikes || [],
-    [],
-    (model.pulse || []).length,
-    model.view,
-    model.markerVals || [],
-    true,
-    { showAxes: true, fsamp: model.fsamp, noDataText: "" },
-  );
+  const trace = model.trace;
+  drawTrace(els.muPulseCanvas || "muPulseCanvas", trace, model.view, {
+    color: model.color,
+    markers: trace
+      ? [
+          {
+            positions: trace.spikes,
+            values: trace.spikeValues,
+            color: COLORS.secondary,
+          },
+        ]
+      : [],
+    showAxes: true,
+    fsamp: model.fsamp,
+    noDataText: "",
+  });
 }

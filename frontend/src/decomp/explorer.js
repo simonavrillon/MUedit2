@@ -42,43 +42,37 @@ export function buildRunMuDropdownModel(deps) {
 }
 
 /**
+ * What the run explorer draws: the current MU, its window and, once fetched,
+ * that window of its pulse train (`trace`, null until then).
+ *
  * @param {{ state: State, fsamp?: number | null }} deps
  */
 export function buildRunMuExplorerModel(deps) {
   const { state, fsamp = null } = deps;
-  const allPulses = Array.isArray(state.muPulseTrains)
-    ? state.muPulseTrains
-    : [];
+  const distimes = Array.isArray(state.muDistimes) ? state.muDistimes : [];
+  const total = Number(state.seriesLength) || 0;
   const currentMu = Number(state.currentMu);
   let muIdx =
     Number.isFinite(currentMu) && currentMu >= 0 ? Math.floor(currentMu) : 0;
-  if (!allPulses[muIdx]?.length && allPulses.length) {
-    const firstWithPulse = allPulses.findIndex(
-      (pulseRow) => Array.isArray(pulseRow) && pulseRow.length > 0,
-    );
-    if (firstWithPulse >= 0) muIdx = firstWithPulse;
-  }
-  const pulse = allPulses?.[muIdx] || [];
-  const spikes = state.muDistimes?.[muIdx] || [];
-  const view = state.runView || { start: 0, end: pulse.length || 0 };
+  if (muIdx >= distimes.length) muIdx = 0;
+  const spikes = distimes[muIdx] || new Int32Array(0);
   const nextView =
-    !state.runView || (pulse && state.runView.end > pulse.length)
-      ? { start: 0, end: pulse.length || 0 }
+    !state.runView || state.runView.end > total
+      ? { start: 0, end: total }
       : null;
-  const metaText =
-    pulse && pulse.length ? `${spikes?.length || 0} discharge times` : "";
-  const color = UNIFORM_PULSE_COLOR;
-  const markerVals = spikes.map((s) => pulse?.[s] ?? 0);
-
+  const pulse = state.runPulseView;
+  const hasMu = distimes.length > 0 && total > 0;
   return {
     muIdx,
-    pulse,
     spikes,
-    view: nextView || view,
+    total,
+    view:
+      nextView ||
+      /** @type {import("../app/context.js").Span} */ (state.runView),
     nextView,
-    metaText,
-    color,
-    markerVals,
+    metaText: hasMu ? `${spikes.length} discharge times` : "",
+    color: UNIFORM_PULSE_COLOR,
+    trace: hasMu && pulse && pulse.mu === muIdx ? pulse : null,
     fsamp: fsamp != null && Number.isFinite(fsamp) && fsamp > 0 ? fsamp : null,
   };
 }

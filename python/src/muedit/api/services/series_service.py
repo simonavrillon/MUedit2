@@ -1,4 +1,5 @@
-"""Viewport series of an upload: EMG, grid overview and aux envelopes as MUB1 frames."""
+"""Viewport series as MUB1 frames: an upload's EMG, grid overview and aux envelopes, and the
+pulse trains and discharge times of a run or an edit session."""
 
 from __future__ import annotations
 
@@ -9,12 +10,18 @@ from fastapi import HTTPException
 from fastapi.responses import Response
 
 from muedit.api.binary import FRAME_FORMAT, FRAME_MEDIA_TYPE, pack_frame
-from muedit.api.cache import SignalViews, _hold_upload
+from muedit.api.cache import (
+    SignalViews,
+    _get_edit_session,
+    _get_run_result_entry,
+    _hold_upload,
+)
+from muedit.decomp.decomposition_file import pack_csr
 from muedit.io.store import ArrayStore
-from muedit.models import FloatArray, SignalImport
+from muedit.models import FloatArray, IntArray, SignalImport
 from muedit.signal.downsample import PREVIEW_MOVING_AVG_MS, moving_average_ms
 from muedit.signal.filters import FILTER_BLOCK_ROWS, bandpass_inplace
-from muedit.signal.pyramid import MinMaxPyramid, Reader, SeriesView, view
+from muedit.signal.pyramid import MinMaxPyramid, Reader, SeriesView, envelope, view
 
 SeriesKind = Literal["emg", "overview", "aux"]
 MAX_BINS = 8192
@@ -208,6 +215,136 @@ def _frame(
         arrays = {"min": (series.mins, "f4"), "max": (series.maxs, "f4")}
     return Response(
         content=pack_frame(meta, arrays),
+        media_type=FRAME_MEDIA_TYPE,
+        headers={"x-muedit-format": FRAME_FORMAT},
+    )
+
+
+def _missing_token() -> HTTPException:
+    return HTTPException(
+        status_code=400,
+        detail={"field": "token", "reason": "No open edit session or run result for this token"},
+    )
+
+
+def _window(n_samples: int, start: int, end: int) -> tuple[int, int]:
+    s = max(0, min(int(start), n_samples))
+    return s, n_samples if end <= 0 else max(s, min(int(end), n_samples))
+
+
+def _in_view(times: IntArray, start: int, end: int) -> IntArray:
+    lo, hi = np.searchsorted(times, [start, end])
+    return times[lo:hi]
+
+
+def pulse_frame(token: str, mu: int, start: int, end: int, bins: int) -> Response:
+    """``[start, end)`` of one MU's pulse train in ``bins`` bins (``end`` 0 = the end).
+
+    Like the upload series: ``samples`` ``(1, end - start)``, or ``min`` and ``max``
+    ``(1, bins)``. Also ``spikes`` and ``artifacts`` in view (int32) with the train's value
+    at each (``spike_values``, ``artifact_values``). ``meta.version`` changes with every
+    edit of the MU, so a client can cache frames by it.
+    """
+    meta: dict[str, Any]
+    arrays: dict[str, tuple[Any, str]]
+    edit = _get_edit_session(token)
+    if edit is not None:
+        with edit.lock:
+            if not 0 <= mu < edit.n_mu:
+                raise HTTPException(status_code=400, detail="mu out of range")
+            n_samples = edit.total_samples
+            s, e = _window(n_samples, start, end)
+            series = envelope(lambda a, b: edit.values(mu, a, b), s, e, bins)
+            spikes = _in_view(edit.spikes[mu], s, e)
+            artifacts = _in_view(edit.artifacts[mu], s, e)
+            meta = {
+                "version": edit.versions[mu],
+                "flagged": edit.flagged[mu],
+                "has_pulse": edit.has_pulse(mu),
+                "fsamp": edit.fsamp,
+            }
+            arrays = {
+                "spikes": (spikes, "i4"),
+                "spike_values": (edit.values_at(mu, spikes), "f4"),
+                "artifacts": (artifacts, "i4"),
+                "artifact_values": (edit.values_at(mu, artifacts), "f4"),
+            }
+    else:
+        run = _get_run_result_entry(token)
+        if run is None:
+            raise _missing_token()
+        pulse = run.pulse_trains
+        if not 0 <= mu < pulse.shape[0]:
+            raise HTTPException(status_code=400, detail="mu out of range")
+        n_samples = int(pulse.shape[1])
+        s, e = _window(n_samples, start, end)
+        series = envelope(lambda a, b: pulse[mu, a:b], s, e, bins)
+        spikes = _in_view(run.spikes[mu], s, e) if mu < len(run.spikes) else np.zeros(0, np.int32)
+        meta = {"version": 0, "flagged": False, "has_pulse": True}
+        arrays = {
+            "spikes": (spikes, "i4"),
+            "spike_values": (pulse[mu, spikes], "f4"),
+        }
+    meta.update(
+        {
+            "series": "pulse",
+            "mu": mu,
+            "start": series.start,
+            "end": series.end,
+            "bins": bins,
+            "factor": series.factor,
+            "total_samples": n_samples,
+        }
+    )
+    if series.samples is not None:
+        meta["kind"] = "samples"
+        arrays["samples"] = (series.samples, "f4")
+    else:
+        meta["kind"] = "envelope"
+        arrays["min"] = (series.mins, "f4")
+        arrays["max"] = (series.maxs, "f4")
+    return Response(
+        content=pack_frame(meta, arrays),
+        media_type=FRAME_MEDIA_TYPE,
+        headers={"x-muedit-format": FRAME_FORMAT},
+    )
+
+
+def spikes_frame(token: str, mu: str) -> Response:
+    """Discharge times of every MU (``mu`` ``all``) or one, as CSR ``spikes``/``spike_offsets``.
+
+    An edit session adds its artifacts the same way (``artifacts``/``artifact_offsets``).
+    """
+    edit = _get_edit_session(token)
+    artifacts: list[IntArray] | None = None
+    if edit is not None:
+        with edit.lock:
+            spikes, artifacts = list(edit.spikes), list(edit.artifacts)
+    else:
+        run = _get_run_result_entry(token)
+        if run is None:
+            raise _missing_token()
+        spikes = list(run.spikes)
+    if mu != "all":
+        try:
+            index = int(mu)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="mu must be an index or 'all'") from exc
+        if not 0 <= index < len(spikes):
+            raise HTTPException(status_code=400, detail="mu out of range")
+        spikes = [spikes[index]]
+        artifacts = [artifacts[index]] if artifacts is not None else None
+    values, offsets = pack_csr(spikes, np.int32)
+    arrays: dict[str, tuple[Any, str]] = {
+        "spikes": (values, "i4"),
+        "spike_offsets": (offsets, "i8"),
+    }
+    if artifacts is not None:
+        art_values, art_offsets = pack_csr(artifacts, np.int32)
+        arrays["artifacts"] = (art_values, "i4")
+        arrays["artifact_offsets"] = (art_offsets, "i8")
+    return Response(
+        content=pack_frame({"n_mu": len(spikes)}, arrays),
         media_type=FRAME_MEDIA_TYPE,
         headers={"x-muedit-format": FRAME_FORMAT},
     )

@@ -52,10 +52,16 @@ describe("getCanvasPlotMetrics", () => {
   });
 });
 
-describe("drawSeries", () => {
-  test("maps the series min to the bottom and max to the top", () => {
+describe("drawTrace", () => {
+  const samples = (values, start = 0) => ({
+    row: Float32Array.from(values),
+    start,
+    end: start + values.length,
+  });
+
+  test("maps the window min to the bottom and max to the top", () => {
     const canvas = fakeCanvas();
-    plots.drawSeries(canvas, [0, 10, 5]);
+    plots.drawTrace(canvas, samples([0, 10, 5]), { start: 0, end: 3 });
     assert.deepEqual(pathPoints(canvas.ctx), [
       ["moveTo", 0, 100],
       ["lineTo", 150, 0],
@@ -63,28 +69,39 @@ describe("drawSeries", () => {
     ]);
   });
 
-  test("scales to the visible window only", () => {
+  test("an envelope is one min-max stroke per bin", () => {
     const canvas = fakeCanvas();
-    plots.drawSeries(canvas, ramp(10), "#fff", [], [], null, {
-      start: 2,
-      end: 5,
-    });
+    const trace = {
+      row: { min: Float32Array.from([0, 2]), max: Float32Array.from([4, 8]) },
+      start: 0,
+      end: 6,
+    };
+    plots.drawTrace(canvas, trace, { start: 0, end: 6 });
+    // Bin 0 covers samples 0-2 (drawn at 1), bin 1 samples 3-5 (at 4).
     assert.deepEqual(pathPoints(canvas.ctx), [
-      ["moveTo", 0, 100],
-      ["lineTo", 150, 50],
-      ["lineTo", 300, 0],
+      ["moveTo", 60, 50],
+      ["lineTo", 60, 100],
+      ["lineTo", 240, 0],
+      ["lineTo", 240, 75],
     ]);
   });
 
-  test("an empty series says so, unless asked to stay blank", () => {
+  test("a window still loading is drawn where it falls in the view", () => {
     const canvas = fakeCanvas();
-    plots.drawSeries(canvas, []);
+    plots.drawTrace(canvas, samples(ramp(10), 2), { start: 5, end: 8 });
+    assert.deepEqual(
+      pathPoints(canvas.ctx).map(([, x]) => x),
+      [0, 150, 300],
+    );
+  });
+
+  test("no window says so, unless asked to stay blank", () => {
+    const canvas = fakeCanvas();
+    plots.drawTrace(canvas, null, { start: 0, end: 10 });
     assert.deepEqual(ops(canvas.ctx, "fillText")[0].args, ["No data", 12, 24]);
 
     const blank = fakeCanvas();
-    plots.drawSeries(blank, [], "#fff", [], [], null, null, null, true, {
-      noDataText: "",
-    });
+    plots.drawTrace(blank, null, { start: 0, end: 10 }, { noDataText: "" });
     assert.deepEqual(texts(blank.ctx), []);
   });
 
@@ -92,7 +109,7 @@ describe("drawSeries", () => {
     const canvas = fakeCanvas({ width: 420, height: 180 });
     canvas.width = 1;
     canvas.height = 1;
-    plots.drawSeries(canvas, [1, 2]);
+    plots.drawTrace(canvas, samples([1, 2]), { start: 0, end: 2 });
     assert.equal(canvas.width, 420);
     assert.equal(canvas.height, 180);
   });
@@ -100,97 +117,101 @@ describe("drawSeries", () => {
   test("a canvas can be given by id, and a missing one is ignored", () => {
     const canvas = fakeCanvas();
     registerElement("pulse", canvas);
-    plots.drawSeries("pulse", [0, 1]);
+    plots.drawTrace("pulse", samples([0, 1]), { start: 0, end: 2 });
     assert.ok(pathPoints(canvas.ctx).length);
-    assert.doesNotThrow(() => plots.drawSeries("nowhere", [0, 1]));
+    assert.doesNotThrow(() =>
+      plots.drawTrace("nowhere", samples([0, 1]), { start: 0, end: 2 }),
+    );
   });
 
-  test("markers sit on the trace and outside ones are skipped", () => {
+  test("markers sit at their values and outside ones are skipped", () => {
     const canvas = fakeCanvas();
-    plots.drawSeries(canvas, ramp(10), "#fff", [3, 8], [], null, {
-      start: 2,
-      end: 5,
-    });
+    plots.drawTrace(
+      canvas,
+      samples([2, 3, 4], 2),
+      { start: 2, end: 5 },
+      {
+        markers: [{ positions: [3, 8], values: [3, 8], color: "#abc" }],
+      },
+    );
     const arcs = ops(canvas.ctx, "arc");
     assert.equal(arcs.length, 1);
     assert.deepEqual(arcs[0].args.slice(0, 3), [150, 50, 3]);
-    assert.equal(arcs[0].fillStyle, COLORS.secondary);
+    assert.equal(arcs[0].fillStyle, "#abc");
   });
 
-  test("explicit marker values override the trace height", () => {
+  test("markers on the same pixel are drawn once", () => {
     const canvas = fakeCanvas();
-    plots.drawSeries(
+    const positions = ramp(1000);
+    plots.drawTrace(
       canvas,
-      ramp(10),
-      "#fff",
-      [3],
-      [],
-      null,
+      samples([0, 1]),
+      { start: 0, end: 1000 },
       {
-        start: 2,
-        end: 5,
+        range: { min: 0, max: 1 },
+        markers: [
+          { positions, values: new Array(1000).fill(1), color: "#abc" },
+        ],
       },
-      [4],
     );
-    assert.deepEqual(ops(canvas.ctx, "arc")[0].args.slice(0, 3), [150, 0, 3]);
+    assert.equal(
+      ops(canvas.ctx, "arc").length,
+      301,
+      "one per pixel column, 0 to 300",
+    );
   });
 
-  test("extra markers draw larger, in their own colour", () => {
+  test("outlined markers draw larger with a dark edge", () => {
     const canvas = fakeCanvas();
-    plots.drawSeries(
+    plots.drawTrace(
       canvas,
-      ramp(10),
-      "#fff",
-      [],
-      [],
-      null,
+      samples([2, 3, 4], 2),
+      { start: 2, end: 5 },
       {
-        start: 2,
-        end: 5,
-      },
-      null,
-      true,
-      {
-        extraMarkers: [{ positions: [4, 9], color: "#f86" }],
+        markers: [
+          {
+            positions: [4],
+            values: [4],
+            color: "#f86",
+            radius: 4,
+            outlined: true,
+          },
+        ],
       },
     );
     const arcs = ops(canvas.ctx, "arc");
-    assert.equal(arcs.length, 1);
     assert.deepEqual(arcs[0].args.slice(0, 3), [300, 0, 4]);
     assert.equal(arcs[0].fillStyle, "#f86");
+    assert.equal(
+      ops(canvas.ctx, "stroke").at(-1).strokeStyle,
+      "rgba(0,0,0,0.4)",
+    );
   });
 
-  test("without the line only the markers are drawn", () => {
+  test("without a row only the markers are drawn, on the given range", () => {
     const canvas = fakeCanvas();
-    plots.drawSeries(
+    plots.drawTrace(
       canvas,
-      ramp(10),
-      "#fff",
-      [3],
-      [],
-      null,
-      null,
-      null,
-      false,
+      { row: null, start: 0, end: 10 },
+      { start: 0, end: 10 },
+      {
+        range: { min: 0, max: 10 },
+        markers: [{ positions: [3], values: [5], color: "#abc" }],
+      },
     );
     assert.deepEqual(pathPoints(canvas.ctx), []);
-    assert.equal(ops(canvas.ctx, "arc").length, 1);
+    assert.deepEqual(ops(canvas.ctx, "arc")[0].args.slice(0, 2), [100, 50]);
   });
 
   describe("selections", () => {
     const view = { start: 0, end: 4 };
+    const trace = samples(ramp(4));
 
     test("span the full height when they carry no y range", () => {
       const canvas = fakeCanvas();
-      plots.drawSeries(
-        canvas,
-        ramp(10),
-        "#fff",
-        [],
-        [{ start: 1, end: 3 }],
-        10,
-        view,
-      );
+      plots.drawTrace(canvas, trace, view, {
+        selections: [{ start: 1, end: 3 }],
+      });
       const [rect] = ops(canvas.ctx, "fillRect");
       assert.deepEqual(rect.args, [75, 0, 150, 100]);
       assert.equal(rect.fillStyle, COLORS.selectionFill);
@@ -202,18 +223,12 @@ describe("drawSeries", () => {
 
     test("keep the dragged y range, clamped to the plot", () => {
       const canvas = fakeCanvas();
-      plots.drawSeries(
-        canvas,
-        ramp(10),
-        "#fff",
-        [],
-        [
+      plots.drawTrace(canvas, trace, view, {
+        selections: [
           { start: 1, end: 3, yMin: 20, yMax: 60 },
           { start: 1, end: 3, yMin: -30, yMax: 500 },
         ],
-        10,
-        view,
-      );
+      });
       const rects = ops(canvas.ctx, "fillRect").map((r) => r.args);
       assert.deepEqual(rects, [
         [75, 20, 150, 40],
@@ -223,29 +238,17 @@ describe("drawSeries", () => {
 
     test("are clipped to the visible window", () => {
       const canvas = fakeCanvas();
-      plots.drawSeries(
-        canvas,
-        ramp(10),
-        "#fff",
-        [],
-        [{ start: -5, end: 2 }],
-        10,
-        view,
-      );
+      plots.drawTrace(canvas, trace, view, {
+        selections: [{ start: -5, end: 2 }],
+      });
       assert.deepEqual(ops(canvas.ctx, "fillRect")[0].args, [0, 0, 150, 100]);
     });
 
     test("with non-finite bounds are skipped", () => {
       const canvas = fakeCanvas();
-      plots.drawSeries(
-        canvas,
-        ramp(10),
-        "#fff",
-        [],
-        [{ start: NaN, end: 3 }],
-        10,
-        view,
-      );
+      plots.drawTrace(canvas, trace, view, {
+        selections: [{ start: NaN, end: 3 }],
+      });
       assert.equal(ops(canvas.ctx, "fillRect").length, 0);
     });
   });
@@ -253,16 +256,10 @@ describe("drawSeries", () => {
   describe("axes", () => {
     test("label four y ticks from min to max", () => {
       const canvas = fakeCanvas();
-      plots.drawSeries(
+      plots.drawTrace(
         canvas,
-        [0, 30],
-        "#fff",
-        [],
-        [],
-        null,
-        null,
-        null,
-        true,
+        samples([0, 30]),
+        { start: 0, end: 2 },
         {
           showAxes: true,
         },
@@ -272,16 +269,10 @@ describe("drawSeries", () => {
 
     test("label time in seconds at a round step", () => {
       const canvas = fakeCanvas();
-      plots.drawSeries(
+      plots.drawTrace(
         canvas,
-        new Array(2000).fill(1),
-        "#fff",
-        [],
-        [],
-        null,
-        null,
-        null,
-        true,
+        samples([1, 1]),
+        { start: 0, end: 2000 },
         {
           showAxes: true,
           hideYAxis: true,
@@ -299,20 +290,15 @@ describe("drawSeries", () => {
 
     test("time labels follow the visible window", () => {
       const canvas = fakeCanvas();
-      plots.drawSeries(
+      plots.drawTrace(
         canvas,
-        new Array(20000).fill(1),
-        "#fff",
-        [],
-        [],
-        null,
+        samples([1, 1]),
+        { start: 5000, end: 7000 },
         {
-          start: 5000,
-          end: 7000,
+          showAxes: true,
+          hideYAxis: true,
+          fsamp: 1000,
         },
-        null,
-        true,
-        { showAxes: true, hideYAxis: true, fsamp: 1000 },
       );
       assert.deepEqual(texts(canvas.ctx), [
         "5.0s",

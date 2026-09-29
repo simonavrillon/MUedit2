@@ -13,13 +13,36 @@ import { COLORS } from "../config.js";
 /** @typedef {HTMLCanvasElement | string | null | undefined} CanvasRef */
 
 /**
- * @typedef {object} SeriesOptions
- * @property {string} [noDataText]
+ * A window of a series as it was fetched: `row` holds the samples of
+ * `[start, end)`, or their min/max per bin; null draws markers only.
+ *
+ * @typedef {object} TraceWindow
+ * @property {ChannelTrace | null} row
+ * @property {number} start
+ * @property {number} end
+ */
+
+/**
+ * Points drawn at sample `positions`, `values` high.
+ *
+ * @typedef {object} MarkerSet
+ * @property {ArrayLike<number>} positions
+ * @property {ArrayLike<number>} values
+ * @property {string} color
+ * @property {number} [radius]
+ * @property {boolean} [outlined]
+ */
+
+/**
+ * @typedef {object} TraceOptions
+ * @property {string} [color]
+ * @property {MarkerSet[]} [markers]
+ * @property {Overlay[]} [selections]
+ * @property {{ min: number, max: number }} [range] The y range; else the row's.
  * @property {boolean} [showAxes]
  * @property {boolean} [hideYAxis]
  * @property {number | null} [fsamp]
- * @property {string} [markerColor]
- * @property {{ positions: number[], values?: number[] | null, color?: string }[]} [extraMarkers]
+ * @property {string} [noDataText]
  */
 
 /**
@@ -235,34 +258,37 @@ export function drawRoiRects(ctx, selections, totalSamples, width, height) {
 }
 
 /**
- * @param {CanvasRef} canvas
- * @param {number[]} series
- * @param {string} [color]
- * @param {number[]} [markers]
- * @param {Overlay[]} [selections]
- * @param {number | null} [totalSamples]
- * @param {Span | null} [viewRange]
- * @param {number[] | null} [markerValues]
- * @param {boolean} [drawLine]
- * @param {SeriesOptions} [options]
+ * Smallest and largest value of a trace window, `{0, 0}` when it has none.
+ *
+ * @param {TraceWindow | null | undefined} trace
  */
-export function drawSeries(
-  canvas,
-  series,
-  color = COLORS.primary,
-  markers = [],
-  selections = [],
-  totalSamples = null,
-  viewRange = null,
-  markerValues = null,
-  drawLine = true,
-  options = {},
-) {
+export function traceRange(trace) {
+  const { min, max } = seriesRange(trace?.row ? [trace.row] : []);
+  return Number.isFinite(min) && Number.isFinite(max)
+    ? { min, max }
+    : { min: 0, max: 0 };
+}
+
+/**
+ * Draw a series over `view`, the samples `[view.start, view.end)` of the x
+ * axis. The trace may cover another window (a pan still being fetched): it is
+ * drawn where its samples fall, and what falls outside the view is skipped.
+ * An envelope is drawn as each bin's min-max stroke, so a zoomed-out view costs
+ * two points per pixel column; markers are drawn once per pixel.
+ *
+ * @param {CanvasRef} canvas
+ * @param {TraceWindow | null} trace
+ * @param {Span} view
+ * @param {TraceOptions} [options]
+ */
+export function drawTrace(canvas, trace, view, options = {}) {
   const prepared = prepareCanvas(canvas);
   if (!prepared) return;
   const { canvasEl, ctx } = prepared;
 
-  if (!series || !series.length) {
+  const markers = options.markers || [];
+  const viewSpan = view.end - view.start;
+  if (!trace || viewSpan <= 0) {
     const noDataText = options.noDataText ?? "No data";
     if (noDataText) {
       ctx.fillStyle = COLORS.muted;
@@ -275,172 +301,172 @@ export function drawSeries(
   const showAxes = !!options.showAxes;
   const hideYAxis = !!options.hideYAxis;
   const fsamp = options.fsamp || null;
-  const markerColor = options.markerColor || COLORS.secondary;
   const { padding, plotWidth, plotHeight } = getCanvasPlotMetrics(
     canvasEl,
     showAxes,
     { hideYAxis },
   );
-
-  const startIdx = viewRange?.start ?? 0;
-  const endIdx = viewRange?.end ?? series.length;
-  const clampedStart = Math.max(0, Math.min(series.length - 1, startIdx));
-  const clampedEnd = Math.max(
-    clampedStart + 1,
-    Math.min(series.length, endIdx),
-  );
-  const sliced = series.slice(clampedStart, clampedEnd);
-  const viewSpan = clampedEnd - clampedStart;
-
-  let max = -Infinity;
-  let min = Infinity;
-  for (let i = 0; i < sliced.length; i++) {
-    if (sliced[i] > max) max = sliced[i];
-    if (sliced[i] < min) min = sliced[i];
-  }
+  const { min, max } = options.range || traceRange(trace);
   const span = max - min || 1;
-  const stepX = plotWidth / Math.max(1, sliced.length - 1);
-
-  const toCanvasX = (/** @type {number} */ idx) => padding.left + idx * stepX;
-  const toCanvasY = (/** @type {number} */ v) =>
+  const toX = (/** @type {number} */ sample) =>
+    padding.left +
+    ((sample - view.start) / Math.max(1, viewSpan - 1)) * plotWidth;
+  const toY = (/** @type {number} */ v) =>
     padding.top + plotHeight - ((v - min) / span) * plotHeight;
+  const inView = (/** @type {number} */ sample) =>
+    sample >= view.start && sample < view.end;
 
-  if (selections && selections.length && viewSpan > 0) {
-    selections.forEach((sel) => {
-      const rawStart = sel?.start;
-      const rawEnd = sel?.end;
-      if (!Number.isFinite(rawStart) || !Number.isFinite(rawEnd)) return;
-      const s = Math.max(clampedStart, Math.min(clampedEnd, rawStart));
-      const e = Math.max(s + 1, Math.min(clampedEnd, rawEnd));
-      const startX = padding.left + ((s - clampedStart) / viewSpan) * plotWidth;
-      const endX = padding.left + ((e - clampedStart) / viewSpan) * plotWidth;
-      drawSelectionRect(ctx, startX, endX, sel, padding, plotHeight);
-    });
+  for (const sel of options.selections || []) {
+    if (!Number.isFinite(sel?.start) || !Number.isFinite(sel?.end)) continue;
+    const s = Math.max(view.start, Math.min(view.end, sel.start));
+    const e = Math.max(s + 1, Math.min(view.end, sel.end));
+    const startX = padding.left + ((s - view.start) / viewSpan) * plotWidth;
+    const endX = padding.left + ((e - view.start) / viewSpan) * plotWidth;
+    drawSelectionRect(ctx, startX, endX, sel, padding, plotHeight);
   }
 
   if (showAxes) {
-    ctx.strokeStyle = COLORS.gridAxis;
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    if (!hideYAxis) {
-      ctx.moveTo(padding.left, padding.top);
-      ctx.lineTo(padding.left, padding.top + plotHeight);
-    } else {
-      ctx.moveTo(padding.left, padding.top + plotHeight);
-    }
-    ctx.lineTo(padding.left + plotWidth, padding.top + plotHeight);
-    ctx.stroke();
-
-    if (!hideYAxis) {
-      ctx.fillStyle = COLORS.muted;
-      ctx.font = "10px sans-serif";
-      const yTicks = 3;
-      for (let i = 0; i <= yTicks; i++) {
-        const t = i / yTicks;
-        const y = padding.top + plotHeight - t * plotHeight;
-        const value = min + t * span;
-        ctx.strokeStyle = COLORS.gridLineDim;
-        ctx.beginPath();
-        ctx.moveTo(padding.left, y);
-        ctx.lineTo(padding.left + plotWidth, y);
-        ctx.stroke();
-        ctx.fillStyle = COLORS.muted;
-        ctx.textAlign = "right";
-        ctx.fillText(`${value.toFixed(1)}`, padding.left - 8, y + 3);
-      }
-    }
-
-    if (fsamp) {
-      const duration = (clampedEnd - clampedStart) / fsamp;
-      const targets = [0.1, 0.2, 0.5, 1, 2, 5, 10, 20];
-      const desired = duration / 5;
-      let step = targets[targets.length - 1];
-      for (const cand of targets) {
-        if (cand >= desired) {
-          step = cand;
-          break;
-        }
-      }
-      const tStart = clampedStart / fsamp;
-      const tEnd = clampedEnd / fsamp;
-      const first = Math.ceil(tStart / step) * step;
-      ctx.fillStyle = COLORS.muted;
-      ctx.font = "10px sans-serif";
-      for (let t = first; t <= tEnd; t += step) {
-        const frac = (t - tStart) / duration;
-        const x = padding.left + frac * plotWidth;
-        ctx.strokeStyle = COLORS.gridLineDim;
-        ctx.beginPath();
-        ctx.moveTo(x, padding.top);
-        ctx.lineTo(x, padding.top + plotHeight);
-        ctx.stroke();
-        ctx.fillText(`${t.toFixed(1)}s`, x - 10, padding.top + plotHeight + 12);
-      }
-    }
+    drawAxes(ctx, padding, plotWidth, plotHeight, { hideYAxis, min, span });
+    if (fsamp) drawTimeAxis(ctx, padding, plotWidth, plotHeight, view, fsamp);
   }
 
-  if (drawLine) {
-    ctx.strokeStyle = color;
+  const row = trace.row;
+  if (row && seriesPoints(row)) {
+    ctx.strokeStyle = options.color || COLORS.primary;
     ctx.lineWidth = 1.4;
     ctx.beginPath();
-    sliced.forEach((v, idx) => {
-      const x = toCanvasX(idx);
-      const y = toCanvasY(v);
-      if (idx === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    });
+    let started = false;
+    /** @param {number} x @param {number} y */
+    const to = (x, y) => {
+      if (started) ctx.lineTo(x, y);
+      else ctx.moveTo(x, y);
+      started = true;
+    };
+    const n = seriesPoints(row);
+    const traceSpan = trace.end - trace.start;
+    if (isEnvelope(row)) {
+      for (let i = 0; i < n; i++) {
+        const first = trace.start + Math.floor((i * traceSpan) / n);
+        const next = trace.start + Math.floor(((i + 1) * traceSpan) / n);
+        const at = (first + next - 1) / 2;
+        if (!inView(at)) continue;
+        to(toX(at), toY(row.max[i]));
+        ctx.lineTo(toX(at), toY(row.min[i]));
+      }
+    } else if (isValues(row)) {
+      for (let i = 0; i < n; i++) {
+        const at = trace.start + i;
+        if (inView(at)) to(toX(at), toY(row[i]));
+      }
+    }
     ctx.stroke();
   }
 
-  // Canvas point for marker `idx` at sample `m`; null when outside the view.
-  // Without explicit values the marker sits on the trace.
-  const markerPoint = (
-    /** @type {number} */ m,
-    /** @type {number} */ idx,
-    /** @type {number[] | null | undefined} */ values,
-  ) => {
-    if (m < clampedStart || m >= clampedEnd) return null;
-    const relIdx = m - clampedStart;
-    const x = Math.min(padding.left + plotWidth, toCanvasX(relIdx));
-    const val = values && values.length ? values[idx] : sliced[relIdx];
-    return { x, y: toCanvasY(val) };
-  };
-
-  if (markers && markers.length) {
-    ctx.fillStyle = markerColor;
-    markers.forEach((m, idx) => {
-      const pt = markerPoint(m, idx, markerValues);
-      if (!pt) return;
+  for (const set of markers) {
+    ctx.fillStyle = set.color;
+    const drawn = new Set();
+    for (let i = 0; i < set.positions.length; i++) {
+      const m = set.positions[i];
+      if (!inView(m)) continue;
+      const x = Math.min(padding.left + plotWidth, toX(m));
+      const y = toY(set.values[i]);
+      const pixel = `${Math.round(x)},${Math.round(y)}`;
+      if (drawn.has(pixel)) continue;
+      drawn.add(pixel);
       ctx.beginPath();
-      ctx.arc(pt.x, pt.y, 3, 0, Math.PI * 2);
+      ctx.arc(x, y, set.radius ?? 3, 0, Math.PI * 2);
       ctx.fill();
-    });
-  }
-
-  if (options.extraMarkers && options.extraMarkers.length) {
-    options.extraMarkers.forEach(({ positions, values, color }) => {
-      if (!positions || !positions.length) return;
-      ctx.fillStyle = color || COLORS.secondary;
-      positions.forEach((m, idx) => {
-        const pt = markerPoint(m, idx, values);
-        if (!pt) return;
-        const { x, y } = pt;
-        ctx.beginPath();
-        ctx.arc(x, y, 4, 0, Math.PI * 2);
-        ctx.fill();
+      if (set.outlined) {
         ctx.strokeStyle = "rgba(0,0,0,0.4)";
         ctx.lineWidth = 1;
         ctx.stroke();
-      });
-    });
+      }
+    }
   }
+}
 
-  if (selections && selections.length && totalSamples && !viewRange) {
-    selections.forEach((sel) => {
-      const startX = padding.left + (sel.start / totalSamples) * plotWidth;
-      const endX = padding.left + (sel.end / totalSamples) * plotWidth;
-      drawSelectionRect(ctx, startX, endX, sel, padding, plotHeight);
-    });
+/**
+ * The plot's axis lines, and four y ticks from `min` to `min + span`.
+ *
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {Padding} padding
+ * @param {number} plotWidth
+ * @param {number} plotHeight
+ * @param {{ hideYAxis: boolean, min: number, span: number }} y
+ */
+function drawAxes(
+  ctx,
+  padding,
+  plotWidth,
+  plotHeight,
+  { hideYAxis, min, span },
+) {
+  ctx.strokeStyle = COLORS.gridAxis;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  if (!hideYAxis) {
+    ctx.moveTo(padding.left, padding.top);
+    ctx.lineTo(padding.left, padding.top + plotHeight);
+  } else {
+    ctx.moveTo(padding.left, padding.top + plotHeight);
+  }
+  ctx.lineTo(padding.left + plotWidth, padding.top + plotHeight);
+  ctx.stroke();
+  if (hideYAxis) return;
+
+  ctx.fillStyle = COLORS.muted;
+  ctx.font = "10px sans-serif";
+  const yTicks = 3;
+  for (let i = 0; i <= yTicks; i++) {
+    const t = i / yTicks;
+    const y = padding.top + plotHeight - t * plotHeight;
+    const value = min + t * span;
+    ctx.strokeStyle = COLORS.gridLineDim;
+    ctx.beginPath();
+    ctx.moveTo(padding.left, y);
+    ctx.lineTo(padding.left + plotWidth, y);
+    ctx.stroke();
+    ctx.fillStyle = COLORS.muted;
+    ctx.textAlign = "right";
+    ctx.fillText(`${value.toFixed(1)}`, padding.left - 8, y + 3);
+  }
+}
+
+/**
+ * Time labels in seconds at a round step, over the samples of `view`.
+ *
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {Padding} padding
+ * @param {number} plotWidth
+ * @param {number} plotHeight
+ * @param {Span} view
+ * @param {number} fsamp
+ */
+function drawTimeAxis(ctx, padding, plotWidth, plotHeight, view, fsamp) {
+  const duration = (view.end - view.start) / fsamp;
+  const targets = [0.1, 0.2, 0.5, 1, 2, 5, 10, 20];
+  const desired = duration / 5;
+  let step = targets[targets.length - 1];
+  for (const cand of targets) {
+    if (cand >= desired) {
+      step = cand;
+      break;
+    }
+  }
+  const tStart = view.start / fsamp;
+  const tEnd = view.end / fsamp;
+  const first = Math.ceil(tStart / step) * step;
+  ctx.fillStyle = COLORS.muted;
+  ctx.font = "10px sans-serif";
+  for (let t = first; t <= tEnd; t += step) {
+    const frac = (t - tStart) / duration;
+    const x = padding.left + frac * plotWidth;
+    ctx.strokeStyle = COLORS.gridLineDim;
+    ctx.beginPath();
+    ctx.moveTo(x, padding.top);
+    ctx.lineTo(x, padding.top + plotHeight);
+    ctx.stroke();
+    ctx.fillText(`${t.toFixed(1)}s`, x - 10, padding.top + plotHeight + 12);
   }
 }
 

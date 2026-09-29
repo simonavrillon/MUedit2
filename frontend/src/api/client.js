@@ -7,9 +7,8 @@ import { routes } from "./routes.js";
 import {
   decodeSeriesFrame,
   decodeDecomposePreviewPayload,
-  decodeEditLoadPayload,
-  encodeFrame,
-  FRAME_MEDIA_TYPE,
+  decodeEditSessionFrame,
+  decodePulseFrame,
 } from "./binary-payloads.js";
 import { normalizePreviewPayload } from "./payloads.js";
 
@@ -43,6 +42,33 @@ export function createApiClient({ apiFetch, apiJson, API_BASE, sessionId }) {
     );
   }
 
+  /**
+   * @param {string} url
+   * @param {JsonObject} body
+   * @param {number} [timeoutMs]
+   */
+  async function postForSession(url, body, timeoutMs = 120000) {
+    const res = await apiFetch(
+      url,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      },
+      timeoutMs,
+    );
+    return decodeEditSessionFrame(await res.arrayBuffer());
+  }
+
+  /** @param {Record<string, unknown>} params */
+  function queryOf(params) {
+    const query = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined && value !== null) query.set(key, String(value));
+    }
+    return query;
+  }
+
   return {
     /**
      * A viewport of the upload's EMG (one grid), grid overview or auxiliary
@@ -54,13 +80,8 @@ export function createApiClient({ apiFetch, apiJson, API_BASE, sessionId }) {
      * @returns {Promise<import("./binary-payloads.js").SeriesView>}
      */
     async fetchSeries(kind, params) {
-      const query = new URLSearchParams();
-      for (const [key, value] of Object.entries(params)) {
-        if (value !== undefined && value !== null)
-          query.set(key, String(value));
-      }
       const res = await apiFetch(
-        `${API_BASE}${SERIES_ROUTES[kind]}?${query}`,
+        `${API_BASE}${SERIES_ROUTES[kind]}?${queryOf(params)}`,
         { method: "GET", headers: { Accept: "application/octet-stream" } },
         120000,
       );
@@ -127,89 +148,89 @@ export function createApiClient({ apiFetch, apiJson, API_BASE, sessionId }) {
     },
 
     /**
-     * @param {string} action
-     * @param {JsonObject} payload
+     * One MU's pulse train over a window, as `Float32Array` views: min/max
+     * per bin, or the samples when the window has no more samples than bins.
+     * `token` names an edit session or a finished run.
+     *
+     * @param {{ token: string, mu: number, start?: number, end?: number, bins: number }} params
+     * @returns {Promise<import("./binary-payloads.js").PulseView>}
      */
-    editAction(action, payload) {
-      return postJson(`${API_BASE}${routes.editAction(action)}`, payload);
+    async fetchPulse(params) {
+      const res = await apiFetch(
+        `${API_BASE}${routes.seriesPulse}?${queryOf(params)}`,
+        { method: "GET", headers: { Accept: "application/octet-stream" } },
+        120000,
+      );
+      return decodePulseFrame(await res.arrayBuffer());
     },
 
     /**
-     * @param {string} mode
-     * @param {JsonObject} payload
-     */
-    editMode(mode, payload) {
-      return postJson(`${API_BASE}${routes.editMode(mode)}`, payload, 120000);
-    },
-
-    /**
-     * @param {JsonObject} payload
-     */
-    editRemoveOutliers(payload) {
-      return postJson(`${API_BASE}${routes.editRemoveOutliers}`, payload);
-    },
-
-    /**
-     * @param {JsonObject} payload
-     */
-    editRemoveDuplicates(payload) {
-      return postJson(`${API_BASE}${routes.editRemoveDuplicates}`, payload);
-    },
-
-    /**
-     * @param {JsonObject} payload
-     */
-    editFlagMu(payload) {
-      return postJson(`${API_BASE}${routes.editFlagMu}`, payload);
-    },
-
-    /**
+     * Open a decomposition in a server-side edit session: its fields and every
+     * MU's discharge times. The pulse trains stay on the server.
+     *
      * @param {string} filepath
      */
-    async editLoadByPath(filepath) {
-      const res = await apiFetch(
-        `${API_BASE}${routes.editLoadByPath}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ path: filepath }),
-        },
-        120000,
-      );
-      return decodeEditLoadPayload(
-        await res.arrayBuffer(),
-        res.headers.get("x-muedit-format"),
-      );
+    editOpen(filepath) {
+      return postForSession(`${API_BASE}${routes.editSessionOpen}`, {
+        path: filepath,
+      });
     },
 
     /**
-     * Pulse trains go as a float32 MUB1 array, never as JSON: at 20 min the
-     * JSON text would exceed V8's maximum string length.
+     * The whole state of an edit session this page opened before a reload.
      *
-     * @param {JsonObject} payload
-     * @param {ArrayLike<number>[]} [pulseTrains] one row of `total_samples` values per MU
+     * @param {string} token
      */
-    editSave(payload, pulseTrains) {
-      const url = `${API_BASE}${routes.editSave}`;
-      const cols = Number(payload.total_samples) || 0;
-      if (
-        !pulseTrains?.length ||
-        pulseTrains.some((row) => row?.length !== cols)
-      ) {
-        return postJson(url, payload, 120000);
-      }
-      const body = encodeFrame(payload, {
-        pulse_trains: {
-          dtype: "f4",
-          shape: [pulseTrains.length, cols],
-          rows: pulseTrains,
-        },
-      });
-      return apiJson(
-        url,
-        { method: "POST", headers: { "Content-Type": FRAME_MEDIA_TYPE }, body },
+    async editSessionState(token) {
+      const query = queryOf({ token });
+      const res = await apiFetch(
+        `${API_BASE}${routes.editSession}?${query}`,
+        { method: "GET", headers: { Accept: "application/octet-stream" } },
         120000,
       );
+      return decodeEditSessionFrame(await res.arrayBuffer());
+    },
+
+    /**
+     * Replay (`apply`) or drop the unsaved edits left from an earlier session.
+     *
+     * @param {string} token
+     * @param {boolean} apply
+     */
+    editRecover(token, apply) {
+      return postForSession(`${API_BASE}${routes.editSessionRecover}`, {
+        token,
+        apply,
+      });
+    },
+
+    /**
+     * Apply one edit on the server; the frame says what changed.
+     *
+     * @param {string} op
+     * @param {JsonObject} payload `token` plus the operation's arguments
+     */
+    editOp(op, payload) {
+      return postForSession(`${API_BASE}${routes.editOp(op)}`, payload);
+    },
+
+    /**
+     * Save an edit session; only the session form's fields travel.
+     *
+     * @param {JsonObject} payload
+     */
+    editSessionSave(payload) {
+      return postJson(`${API_BASE}${routes.editSessionSave}`, payload, 120000);
+    },
+
+    /**
+     * Save a finished run. Its pulse trains and discharge times stay on the
+     * server under `run_result_token`.
+     *
+     * @param {JsonObject} payload
+     */
+    editSave(payload) {
+      return postJson(`${API_BASE}${routes.editSave}`, payload, 120000);
     },
 
     healthUrl() {

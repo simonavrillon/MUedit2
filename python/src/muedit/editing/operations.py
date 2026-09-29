@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TypeAlias
+from typing import Any, Protocol, TypeAlias
 
 import numpy as np
 
@@ -24,6 +24,14 @@ from muedit.signal.filters import bandpass_signals
 
 SpikeTimes: TypeAlias = list[int]
 FilterUpdateResult: TypeAlias = tuple[FloatArray | None, SpikeTimes]
+
+
+class PulseValues(Protocol):
+    """A pulse train read one sample at a time: an array, or a lookup into a stored one."""
+
+    def __len__(self) -> int: ...
+
+    def __getitem__(self, index: int, /) -> Any: ...
 
 
 def _recompute_spikes_in_window(
@@ -287,7 +295,7 @@ def delete_artifacts_in_roi(
 
 
 def delete_high_discharge_rate_spikes_in_roi(
-    pulse: FloatArray,
+    pulse: PulseValues,
     spike_times: SpikeTimes,
     fsamp: float,
     x_start: int,
@@ -320,7 +328,7 @@ def delete_high_discharge_rate_spikes_in_roi(
 
 
 def remove_discharge_rate_outliers(
-    pulse: FloatArray,
+    pulse: PulseValues,
     spike_times: SpikeTimes,
     fsamp: float,
     z_factor: float = 3.0,

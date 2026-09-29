@@ -141,84 +141,142 @@ describe("discard masks", () => {
   });
 });
 
+const ints = (...values) => Int32Array.from(values);
+const rows = (list) => list.map((r) => Array.from(r));
+
 describe("edit slice", () => {
-  test("appendEditMu keeps the parallel arrays aligned and copies its inputs", () => {
-    const distimes = [10, 20];
-    const pulseTrain = [0, 1, 0];
-    actions.appendEditMu(state, {
-      distimes,
-      pulseTrain,
-      gridIdx: 1,
-      uid: "mu-a",
-    });
+  /** A session frame as `decodeEditSessionFrame` returns it. */
+  function sessionFrame() {
+    return {
+      meta: {
+        token: "tok",
+        n_mu: 2,
+        flagged: [false, true],
+        mu_uids: ["g0_mu0", "g0_mu1"],
+        mu_grid_index: [0, 1],
+        versions: [3, 4],
+        has_pulse: [true, true],
+        dirty: false,
+        can_undo: false,
+        edit_history: [{ type: "flag_mu", mu_uid: "g0_mu1" }],
+        fsamp: 2048,
+        total_samples: 5000,
+        parameters: { duplicatesthresh: 0.3 },
+      },
+      spikes: [ints(10, 20), ints(30)],
+      artifacts: [ints(), ints(31)],
+    };
+  }
+
+  test("setEditSession takes over the whole session", () => {
+    state.edit.pulseView = { mu: 0 };
+    actions.setEditSession(state, sessionFrame());
     const e = state.edit;
-    for (const key of [
-      "distimes",
-      "pulseTrains",
-      "originalDistimes",
-      "originalPulseTrains",
-      "muGridIndex",
-      "flagged",
-      "muUids",
-      "artifactTimes",
-    ]) {
-      assert.equal(e[key].length, 1, key);
-    }
-    assert.equal(e.flagged[0], false);
-    assert.equal(e.muUids[0], "mu-a");
-    distimes.push(30);
-    e.distimes[0].push(99);
-    assert.deepEqual(e.originalDistimes[0], [10, 20]);
-    assert.notEqual(e.pulseTrains[0], e.originalPulseTrains[0]);
+    assert.equal(e.token, "tok");
+    assert.deepEqual(rows(e.distimes), [[10, 20], [30]]);
+    assert.deepEqual(rows(e.artifactTimes), [[], [31]]);
+    assert.deepEqual(e.flagged, [false, true]);
+    assert.deepEqual(e.versions, [3, 4]);
+    assert.equal(e.totalSamples, 5000);
+    assert.equal(e.fsamp, 2048);
+    assert.equal(e.editHistory.length, 1);
+    assert.equal(e.pulseView, null);
   });
 
-  test("dropEditHistoryForMuSince keeps older entries and other MUs", () => {
-    state.edit.editHistory = [
-      { mu_uid: "a", op: 1 },
-      { mu_uid: "b", op: 2 },
-      { mu_uid: "a", op: 3 },
-      { mu_uid: "b", op: 4 },
-      { mu_uid: "a", op: 5 },
-    ];
-    actions.dropEditHistoryForMuSince(state, "a", 2);
+  test("applyEditChange replaces the changed MU and the new log tail", () => {
+    actions.setEditSession(state, sessionFrame());
+    actions.applyEditChange(state, {
+      meta: {
+        n_mu: 2,
+        changed: [0],
+        flagged: [false, true],
+        mu_uids: ["g0_mu0", "g0_mu1"],
+        mu_grid_index: [0, 1],
+        versions: [9, 4],
+        has_pulse: [true, true],
+        dirty: true,
+        can_undo: true,
+        history_start: 1,
+        history: [{ type: "delete_spikes", mu_uid: "g0_mu0" }],
+      },
+      spikes: [ints(10)],
+      artifacts: [ints()],
+    });
+    const e = state.edit;
+    assert.deepEqual(rows(e.distimes), [[10], [30]]);
+    assert.deepEqual(e.versions, [9, 4]);
+    assert.equal(e.dirty, true);
+    assert.equal(e.canUndo, true);
     assert.deepEqual(
-      state.edit.editHistory.map((e) => e.op),
-      [1, 2, 4],
+      e.editHistory.map((h) => h.type),
+      ["flag_mu", "delete_spikes"],
     );
+  });
+
+  test("applyEditChange appends a duplicate and cuts the log on undo", () => {
+    actions.setEditSession(state, sessionFrame());
+    const perMu = (n) => ({
+      n_mu: n,
+      flagged: new Array(n).fill(false),
+      mu_uids: ["a", "b", "c"].slice(0, n),
+      mu_grid_index: new Array(n).fill(0),
+      versions: new Array(n).fill(1),
+      has_pulse: new Array(n).fill(true),
+    });
+    actions.applyEditChange(state, {
+      meta: {
+        ...perMu(3),
+        changed: [2],
+        history_start: 1,
+        history: [{ type: "duplicate_mu" }],
+      },
+      spikes: [ints(30)],
+      artifacts: [ints()],
+    });
+    assert.deepEqual(rows(state.edit.distimes), [[10, 20], [30], [30]]);
+    actions.applyEditChange(state, {
+      meta: {
+        ...perMu(2),
+        changed: [],
+        kept_indices: [0, 1],
+        history_start: 1,
+        history: [],
+      },
+      spikes: [],
+      artifacts: [],
+    });
+    assert.deepEqual(rows(state.edit.distimes), [[10, 20], [30]]);
+    assert.equal(state.edit.editHistory.length, 1);
   });
 
   test("keepEditMus reorders every per-MU array together", () => {
     Object.assign(state.edit, {
-      distimes: [[0], [1], [2]],
-      originalDistimes: [[10], [11], [12]],
-      pulseTrains: [[100], [101], [102]],
-      originalPulseTrains: [[200], [201], [202]],
+      distimes: [ints(0), ints(1), ints(2)],
       muGridIndex: [0, 1, 0],
       flagged: [false, true, false],
       muUids: ["u0", "u1", "u2"],
-      artifactTimes: [[30], [31], [32]],
+      artifactTimes: [ints(30), ints(31), ints(32)],
+      versions: [5, 6, 7],
+      hasPulse: [true, false, true],
       currentMu: 2,
       bookmarkPosition: { muIdx: 1, position: 50 },
-      backup: { muIdx: 2 },
     });
     actions.keepEditMus(state, [2, 1]);
     const e = state.edit;
-    assert.deepEqual(e.distimes, [[2], [1]]);
-    assert.deepEqual(e.originalDistimes, [[12], [11]]);
-    assert.deepEqual(e.pulseTrains, [[102], [101]]);
-    assert.deepEqual(e.originalPulseTrains, [[202], [201]]);
+    assert.deepEqual(rows(e.distimes), [[2], [1]]);
     assert.deepEqual(e.muGridIndex, [0, 1]);
     assert.deepEqual(e.flagged, [false, true]);
     assert.deepEqual(e.muUids, ["u2", "u1"]);
-    assert.deepEqual(e.artifactTimes, [[32], [31]]);
+    assert.deepEqual(rows(e.artifactTimes), [[32], [31]]);
+    assert.deepEqual(e.versions, [7, 6]);
+    assert.deepEqual(e.hasPulse, [true, false]);
     assert.equal(e.currentMu, 0);
     assert.deepEqual(e.bookmarkPosition, { muIdx: 1, position: 50 });
-    assert.equal(e.backup, null);
   });
 
   test("keepEditMus falls back to MU 0 and drops a bookmark on a removed MU", () => {
     Object.assign(state.edit, {
-      distimes: [[0], [1]],
+      distimes: [ints(0), ints(1)],
       muUids: ["u0", "u1"],
       currentMu: 1,
       bookmarkPosition: { muIdx: 1, position: 5 },
@@ -228,16 +286,28 @@ describe("edit slice", () => {
     assert.equal(state.edit.bookmarkPosition, null);
   });
 
-  test("per-MU spike and artifact times are coerced and filtered", () => {
-    actions.setEditDistimesForMu(state, 0, ["5", 6, "x", NaN]);
-    actions.setEditArtifactTimesForMu(state, 1, [1, "2", undefined]);
-    assert.deepEqual(state.edit.distimes[0], [5, 6]);
-    assert.deepEqual(state.edit.artifactTimes[1], [1, 2]);
+  test("applyEditSave mirrors the MUs the file kept", () => {
+    actions.setEditSession(state, sessionFrame());
+    actions.applyEditSave(state, {
+      kept_indices: [0],
+      n_mu: 1,
+      flagged: [false],
+      mu_uids: ["g0_mu0"],
+      mu_grid_index: [0],
+      versions: [3],
+      has_pulse: [true],
+      dirty: false,
+      can_undo: false,
+      edit_history: [{ type: "remove_flagged", on_save: true }],
+    });
+    assert.deepEqual(rows(state.edit.distimes), [[10, 20]]);
+    assert.deepEqual(state.edit.muUids, ["g0_mu0"]);
+    assert.equal(state.edit.editHistory[0].type, "remove_flagged");
   });
 
   test("resetEditSlice returns a fresh slice", () => {
     state.edit.dirty = true;
-    state.edit.pulseTrains.push([1]);
+    state.edit.distimes.push(ints(1));
     actions.resetEditSlice(state);
     assert.deepEqual(state.edit, pristine.edit);
   });
@@ -256,20 +326,20 @@ describe("setFsamp", () => {
 
 describe("selectors", () => {
   test("MU indices without a grid mapping belong to every grid", () => {
-    state.muPulseTrains = [[1], [2], [3]];
+    state.muDistimes = [ints(1), ints(2), ints(3)];
     state.muGridIndex = [];
     assert.deepEqual(selectors.getRunMuIndicesForGrid(state, 4), [0, 1, 2]);
   });
 
   test("MU indices filter by grid, matching numeric strings", () => {
-    state.edit.pulseTrains = [[1], [2], [3], [4]];
+    state.edit.distimes = [ints(1), ints(2), ints(3), ints(4)];
     state.edit.muGridIndex = [0, "1", 1, 0];
     assert.deepEqual(selectors.getEditMuIndicesForGrid(state, 1), [1, 2]);
     assert.deepEqual(selectors.getEditMuIndicesForGrid(state, "0"), [0, 3]);
   });
 
-  test("no pulse trains means no MU indices", () => {
-    state.muPulseTrains = [];
+  test("no MUs means no MU indices", () => {
+    state.muDistimes = [];
     state.muGridIndex = [0, 1];
     assert.deepEqual(selectors.getRunMuIndicesForGrid(state, 0), []);
   });

@@ -4,9 +4,11 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  csrRows,
   decodeDecomposePreviewPayload,
-  decodeEditLoadPayload,
+  decodeEditSessionFrame,
   decodeFrame,
+  decodePulseFrame,
   decodeSeriesFrame,
   encodeFrame,
 } from "../src/api/binary-payloads.js";
@@ -119,78 +121,118 @@ describe("MUB1 frames", () => {
   });
 });
 
-describe("decodeEditLoadPayload", () => {
-  const pulse = [
-    [0.5, -1.25, 2],
-    [3, 4.5, -0.75],
-  ];
-  const frame = (meta) =>
-    encodeFrame(meta, {
-      pulse_trains_full: { dtype: "f4", shape: [2, 3], rows: pulse },
-    });
+/** A CSR pair as the server sends discharge times: rows of int32, int64 offsets. */
+function csr(rows) {
+  const offsets = [0];
+  for (const row of rows) offsets.push(offsets.at(-1) + row.length);
+  return {
+    values: { dtype: "i4", shape: [offsets.at(-1)], data: rows.flat() },
+    offsets: { dtype: "i8", shape: [offsets.length], data: offsets },
+  };
+}
 
-  test("decodes a frame into metadata plus the pulse matrix", () => {
-    const meta = { fsamp: 2048, distime_all: [[1, 2], [3]] };
-    assert.deepEqual(decodeEditLoadPayload(frame(meta)), {
-      ...meta,
-      pulse_trains_full: pulse,
-    });
+describe("csrRows", () => {
+  test("gives one Int32Array view per row, empty rows included", () => {
+    const { values, offsets } = csr([[1, 2], [], [7]]);
+    const { arrays } = decodeFrame(encodeFrame({}, { values, offsets }));
+    const rows = csrRows(arrays.values, arrays.offsets);
+    assert.deepEqual(
+      rows.map((r) => Array.from(r)),
+      [[1, 2], [], [7]],
+    );
+    assert.ok(rows.every((r) => r instanceof Int32Array));
+    assert.equal(
+      rows[0].buffer,
+      arrays.values.data.buffer,
+      "views, not copies",
+    );
   });
 
-  test("the format header alone selects the frame path", () => {
-    const out = decodeEditLoadPayload(frame({ a: 1 }), "mub1");
-    assert.deepEqual(out.pulse_trains_full, pulse);
+  test("missing arrays give no rows", () => {
+    assert.deepEqual(csrRows(undefined, undefined), []);
   });
+});
 
-  test("an empty matrix decodes to no rows", () => {
+describe("decodeEditSessionFrame", () => {
+  test("splits discharge and artifact times per MU", () => {
+    const spikes = csr([[10, 20], [30]]);
+    const artifacts = csr([[], [31]]);
     const buf = encodeFrame(
-      {},
+      { token: "abc", n_mu: 2 },
       {
-        pulse_trains_full: { dtype: "f4", shape: [0, 0], rows: [] },
+        spikes: spikes.values,
+        spike_offsets: spikes.offsets,
+        artifacts: artifacts.values,
+        artifact_offsets: artifacts.offsets,
       },
     );
-    assert.deepEqual(decodeEditLoadPayload(buf).pulse_trains_full, []);
-  });
-
-  test("falls back to JSON without magic or header", () => {
-    const payload = { pulse_trains_full: [[1, 2]], fsamp: 2048 };
-    assert.deepEqual(decodeEditLoadPayload(jsonBuffer(payload)), payload);
-  });
-
-  test("rejects a frame header on a body without the magic", () => {
-    assert.throws(
-      () => decodeEditLoadPayload(jsonBuffer({}), "mub1"),
-      /Invalid MUB1/,
+    const frame = decodeEditSessionFrame(buf);
+    assert.deepEqual(frame.meta, { token: "abc", n_mu: 2 });
+    assert.deepEqual(
+      frame.spikes.map((r) => Array.from(r)),
+      [[10, 20], [30]],
+    );
+    assert.deepEqual(
+      frame.artifacts.map((r) => Array.from(r)),
+      [[], [31]],
     );
   });
 });
 
-describe("decodeDecomposePreviewPayload", () => {
-  const full = [
-    [1, 2, 3, 4],
-    [5, 6, 7, 8],
-  ];
-  const all = [
-    [-1, -2],
-    [-3, -4],
-    [-5, -6],
-  ];
+describe("decodePulseFrame", () => {
+  const markers = {
+    spikes: { dtype: "i4", shape: [2], data: [3, 5] },
+    spike_values: { dtype: "f4", shape: [2], data: [0.5, 0.25] },
+  };
 
-  test("reads both matrices with their own shapes", () => {
-    const meta = { iteration: 3, sil: [0.91, 0.95] };
-    const buf = encodeFrame(meta, {
-      pulse_trains_full: { dtype: "f4", shape: [2, 4], rows: full },
-      pulse_trains_all: { dtype: "f4", shape: [3, 2], rows: all },
-    });
-    assert.deepEqual(decodeDecomposePreviewPayload(buf), {
-      ...meta,
-      pulse_trains_full: full,
-      pulse_trains_all: all,
-    });
+  test("an envelope with its markers", () => {
+    const buf = encodeFrame(
+      { kind: "envelope", mu: 2, start: 0, end: 8, bins: 2, version: 7 },
+      {
+        min: { dtype: "f4", shape: [1, 2], data: [0, -1] },
+        max: { dtype: "f4", shape: [1, 2], data: [1, 2] },
+        ...markers,
+      },
+    );
+    const view = decodePulseFrame(buf);
+    assert.deepEqual(
+      [view.mu, view.start, view.end, view.bins, view.version, view.flagged],
+      [2, 0, 8, 2, 7, false],
+    );
+    assert.deepEqual(Array.from(view.row.max), [1, 2]);
+    assert.deepEqual(Array.from(view.spikes), [3, 5]);
+    assert.deepEqual(Array.from(view.spikeValues), [0.5, 0.25]);
+    assert.equal(view.artifacts.length, 0, "a run sends no artifacts");
+  });
+
+  test("samples when zoomed in past one sample per bin", () => {
+    const buf = encodeFrame(
+      { kind: "samples", mu: 0, start: 4, end: 7, bins: 100, version: 1 },
+      { samples: { dtype: "f4", shape: [1, 3], data: [1, 2, 3] }, ...markers },
+    );
+    const view = decodePulseFrame(buf);
+    assert.ok(view.row instanceof Float32Array);
+    assert.deepEqual(Array.from(view.row), [1, 2, 3]);
+  });
+});
+
+describe("decodeDecomposePreviewPayload", () => {
+  test("rebuilds each MU's discharge times from CSR", () => {
+    const { values, offsets } = csr([[1, 2], [5]]);
+    const buf = encodeFrame(
+      { sil: [0.91, 0.95] },
+      { spikes: values, spike_offsets: offsets },
+    );
+    const out = decodeDecomposePreviewPayload(buf);
+    assert.deepEqual(out.sil, [0.91, 0.95]);
+    assert.deepEqual(
+      out.distime_all.map((r) => Array.from(r)),
+      [[1, 2], [5]],
+    );
   });
 
   test("falls back to JSON without magic or header", () => {
-    const payload = { pulse_trains_full: [], pulse_trains_all: [] };
+    const payload = { distime_all: [[1]] };
     assert.deepEqual(
       decodeDecomposePreviewPayload(jsonBuffer(payload)),
       payload,

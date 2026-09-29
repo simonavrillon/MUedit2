@@ -114,18 +114,20 @@ export function populateGridTabs(app) {
  */
 function getViewForStage(state, stage) {
   if (stage === "edit") {
-    const pulse = state.edit.pulseTrains?.[state.edit.currentMu] || [];
-    if (!state.edit.view && pulse.length) {
-      setEditView(state, { start: 0, end: pulse.length });
+    const total = state.edit.distimes?.length
+      ? state.edit.totalSamples || 0
+      : 0;
+    if (!state.edit.view && total) {
+      setEditView(state, { start: 0, end: total });
     }
-    return { view: state.edit.view, total: pulse.length };
+    return { view: state.edit.view, total };
   }
   if (stage === "run") {
-    const pulse = state.muPulseTrains?.[state.currentMu] || [];
-    if (!state.runView && pulse.length) {
-      setRunView(state, { start: 0, end: pulse.length });
+    const total = state.muDistimes?.length ? state.seriesLength || 0 : 0;
+    if (!state.runView && total) {
+      setRunView(state, { start: 0, end: total });
     }
-    return { view: state.runView, total: pulse.length };
+    return { view: state.runView, total };
   }
   return { view: null, total: 0 };
 }

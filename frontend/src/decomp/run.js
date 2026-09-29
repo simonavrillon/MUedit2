@@ -48,12 +48,13 @@ export async function autoSaveRunDecomposition(app) {
 
   const muscleNames = getBidsMuscleNames();
   const totalSamples =
-    state.seriesLength ||
-    (state.muPulseTrains?.[0]?.length ?? 0) ||
-    totalSamplesFromDistimes(state.muDistimes);
+    state.seriesLength || totalSamplesFromDistimes(state.muDistimes);
   const fs = state.fsamp;
+  // The server kept this run's pulse trains and discharge times under its token.
   const payload = {
-    distimes: state.muDistimes || [],
+    ...(state.runResultToken
+      ? {}
+      : { distimes: state.muDistimes.map((d) => Array.from(d)) }),
     run_result_token: state.runResultToken || null,
     total_samples: totalSamples,
     fsamp: fs != null && Number.isFinite(fs) && fs > 0 ? fs : null,
@@ -67,12 +68,7 @@ export async function autoSaveRunDecomposition(app) {
   setRunDownloadInFlight(state, true);
   try {
     setStatus("Saving decomposition...", "muted");
-    // The server kept this run's pulse trains; send them only if that token is gone.
-    const saved = await persistNpzBySaveTarget(
-      payload,
-      suggestedName,
-      state.runResultToken ? undefined : state.muPulseTrains,
-    );
+    const saved = await persistNpzBySaveTarget(payload, suggestedName);
     setLastRunDownloadKey(state, key);
     setStatus(
       saved?.path
@@ -119,7 +115,7 @@ export async function runDecomposition(app) {
   updateStartAvailability();
   switchStage("run");
   setParameters(state, buildParams());
-  setMuPreviewData(state, [], [], []);
+  setMuPreviewData(state, [], []);
   setLastRunDownloadKey(state, "");
   setRunResultToken(state, "");
 
@@ -272,8 +268,6 @@ function applyPreviewData(app, preview, options = {}) {
     coordinates,
     metadata,
     muscle,
-    pulse_trains_full,
-    pulse_trains_all,
     distime_all,
     mu_grid_index,
   } = preview;
@@ -302,13 +296,11 @@ function applyPreviewData(app, preview, options = {}) {
     setMuscle(state, muscle);
   }
   if (!skipMuData) {
-    const newPulseTrains =
-      pulse_trains_full && pulse_trains_full.length
-        ? pulse_trains_full
-        : pulse_trains_all || state.muPulseTrains;
-    const newDistimes = distime_all || state.muDistimes;
-    const newGridIndex = mu_grid_index || state.muGridIndex;
-    setMuPreviewData(state, newPulseTrains, newDistimes, newGridIndex);
+    setMuPreviewData(
+      state,
+      distime_all.length ? distime_all : state.muDistimes,
+      mu_grid_index.length ? mu_grid_index : state.muGridIndex,
+    );
   }
   populateAuxSelector();
   renderAuxiliaryChannels();
@@ -450,7 +442,7 @@ export function handleStreamMessage(app, msg) {
   }
 
   if (msg.stage === "done") {
-    if (Array.isArray(state.muPulseTrains) && state.muPulseTrains.length) {
+    if (state.muDistimes?.length) {
       renderMuExplorer();
       void autoSaveRunDecomposition();
     } else {

@@ -15,6 +15,7 @@ import {
 import {
   setRunCurrentMu,
   setRunCurrentMuGrid,
+  setRunPulseView,
   setRunView,
 } from "../../state/actions.js";
 import { getRunMuIndicesForGrid } from "../../state/selectors.js";
@@ -23,7 +24,9 @@ import {
   POSTPROCESS_MODES,
   buildDecomposeParams,
 } from "../../decomp/params.js";
-import { drawSeries } from "../../view/plots.js";
+import { getCanvasPlotMetrics } from "../../view/plots.js";
+import { createViewFetcher } from "../services/view-fetcher.js";
+import { errorMessage } from "../services/error-service.js";
 
 /** @typedef {import("../context.js").App} App */
 /** @typedef {import("../context.js").RunStage} RunStage */
@@ -87,6 +90,15 @@ export function createRunStageService(app) {
     renderMuDropdownsController(els, model);
   }
 
+  const pulseFetcher = createViewFetcher(
+    (params) => app.api.fetchPulse(params),
+    (view) => {
+      setRunPulseView(state, view);
+      if (state.currentStage === "run") renderMuExplorer();
+    },
+    (err) => app.setStatus(`Pulse train failed: ${errorMessage(err)}`, "error"),
+  );
+
   /** @type {RunStage["renderMuExplorer"]} */
   function renderMuExplorer() {
     renderMuDropdowns();
@@ -98,7 +110,26 @@ export function createRunStageService(app) {
       setRunView(state, model.nextView);
       model.view = model.nextView;
     }
-    renderMuExplorerController({ els, drawSeries }, model);
+    renderMuExplorerController(els, model);
+    const token = state.runResultToken;
+    const canvas = els.muPulseCanvas;
+    if (!token || !model.total || !model.view || !canvas) return;
+    const bins = Math.round(getCanvasPlotMetrics(canvas, true).plotWidth);
+    const { start, end } = model.view;
+    const shown = model.trace;
+    if (
+      shown &&
+      shown.start === start &&
+      shown.end === end &&
+      shown.bins === bins
+    ) {
+      return;
+    }
+    const params = { token, mu: model.muIdx, start, end, bins };
+    pulseFetcher.want(
+      `${token}:${model.muIdx}:${start}:${end}:${bins}`,
+      params,
+    );
   }
 
   return {

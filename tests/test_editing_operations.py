@@ -54,6 +54,10 @@ def _muap(seed: int) -> np.ndarray:
 
 @pytest.fixture(scope="module")
 def synthetic_mu() -> dict[str, np.ndarray]:
+    return make_synthetic_mu()
+
+
+def make_synthetic_mu() -> dict[str, np.ndarray]:
     """EMG with one target MU, one interfering MU and white noise."""
     rng = np.random.default_rng(0)
     target = _spike_train(12.0, seed=1)
@@ -373,146 +377,43 @@ def _post(client: TestClient, route: str, body: dict) -> dict:
     return resp.json()["data"]
 
 
+def _kept(distimes: list[list[int]], grids: list[int] | None = None, **params: Any) -> list[int]:
+    """MUs the edit stage's duplicate removal keeps."""
+    from muedit.api.services.editing_service import _dedup
+
+    grids = grids or [0] * len(distimes)
+    return _dedup([np.asarray(d) for d in distimes], grids, params, FSAMP, N_SAMPLES)
+
+
 class TestEditRoutes:
-    def test_add_spikes(self, api_client: TestClient) -> None:
-        pulse = _pulse_with_peaks({1000: 1.0, 3000: 1.0}, n=4000).tolist()
-        data = _post(
-            api_client,
-            "add-spikes",
-            {
-                "distimes": [[10], [500]],
-                "mu_index": 1,
-                "pulse_train": pulse,
-                "fsamp": FSAMP,
-                "x_start": 900,
-                "x_end": 1100,
-                "y_min": 0.5,
-            },
-        )
-        assert data == {"distimes": [500, 1000]}
-
-    def test_add_artifact(self, api_client: TestClient) -> None:
-        pulse = _pulse_with_peaks({1000: 1.0}, n=4000).tolist()
-        data = _post(
-            api_client,
-            "add-artifact",
-            {
-                "distimes": [[]],
-                "pulse_train": pulse,
-                "fsamp": FSAMP,
-                "x_start": 900,
-                "x_end": 1100,
-                "y_min": 0.5,
-                "artifact_times": [50],
-            },
-        )
-        assert data == {"artifact_times": [50, 1000]}
-
-    def test_delete_spikes_also_deletes_artifacts(self, api_client: TestClient) -> None:
-        pulse = _pulse_with_peaks({100: 0.5, 200: 0.5, 300: 0.5}, n=1000).tolist()
-        data = _post(
-            api_client,
-            "delete-spikes",
-            {
-                "distimes": [[100, 200]],
-                "pulse_train": pulse,
-                "x_start": 150,
-                "x_end": 400,
-                "y_min": 0.2,
-                "y_max": 0.8,
-                "artifact_times": [300, 900],
-            },
-        )
-        assert data == {"distimes": [100], "artifact_times": [900]}
-
-    def test_delete_dr(self, api_client: TestClient) -> None:
-        pulse = _pulse_with_peaks({1000: 1.0, 2000: 1.0, 2040: 0.3}, n=4000).tolist()
-        data = _post(
-            api_client,
-            "delete-dr",
-            {
-                "distimes": [[1000, 2000, 2040]],
-                "pulse_train": pulse,
-                "fsamp": FSAMP,
-                "x_start": 1500,
-                "x_end": 2500,
-                "y_min": 20.0,
-            },
-        )
-        assert data == {"distimes": [1000, 2000]}
-
-    def test_remove_outliers_reports_count(self, api_client: TestClient) -> None:
-        spikes = [*range(1000, 9001, 200), 4020]
-        heights = dict.fromkeys(spikes, 1.0)
-        heights[4020] = 0.2
-        data = _post(
-            api_client,
-            "remove-outliers",
-            {
-                "distimes": [spikes],
-                "pulse_train": _pulse_with_peaks(heights).tolist(),
-                "fsamp": FSAMP,
-            },
-        )
-        assert data["removed_count"] == 1
-        assert 4020 not in data["distimes"]
-
-    def test_remove_duplicates(self, api_client: TestClient) -> None:
+    def test_remove_duplicates(self) -> None:
         a = _spike_train(10.0, seed=3).tolist()
         b = _spike_train(8.0, seed=4).tolist()
-        data = _post(
-            api_client,
-            "remove-duplicates",
-            {
-                "distimes": [a, [t + 1 for t in a], b],
-                "fsamp": FSAMP,
-                "total_samples": N_SAMPLES,
-            },
-        )
-        assert data["removed_count"] == 1
-        assert len(data["kept_indices"]) == 2
-        assert 2 in data["kept_indices"]
+        kept = _kept([a, [t + 1 for t in a], b])
+        assert len(kept) == 2
+        assert 2 in kept
 
-    def test_remove_duplicates_keeps_original_order(self, api_client: TestClient) -> None:
+    def test_remove_duplicates_keeps_original_order(self) -> None:
         a = _spike_train(10.0, seed=3).tolist()
         b = _spike_train(8.0, seed=4).tolist()
         # An extra mid-ISI spike raises MU 0's CoV, so its duplicate MU 2 is kept instead.
         noisy_a = sorted([*a, (a[5] + a[6]) // 2])
-        data = _post(
-            api_client,
-            "remove-duplicates",
-            {"distimes": [noisy_a, b, a], "fsamp": FSAMP, "total_samples": N_SAMPLES},
-        )
-        assert data["kept_indices"] == [1, 2]
-        assert data["distimes"] == [b, a]
+        assert _kept([noisy_a, b, a]) == [1, 2]
 
     @pytest.mark.parametrize(
         "bgrids,kept",
         [(None, [0, 1]), (False, [0, 1, 2]), (0, [0, 1, 2]), (True, [0, 1]), ([[1.0]], [0, 1])],
     )
     def test_remove_duplicates_across_grids_unless_disabled(
-        self, api_client: TestClient, bgrids: Any, kept: list[int]
+        self, bgrids: Any, kept: list[int]
     ) -> None:
         a = _spike_train(10.0, seed=3).tolist()
         b = _spike_train(8.0, seed=4).tolist()
         parameters = {} if bgrids is None else {"duplicatesbgrids": bgrids}
-        data = _post(
-            api_client,
-            "remove-duplicates",
-            {
-                "distimes": [a, b, a],
-                "mu_grid_index": [0, 0, 1],
-                "parameters": parameters,
-                "fsamp": FSAMP,
-                "total_samples": N_SAMPLES,
-            },
-        )
-        assert data["kept_indices"] == kept
+        assert _kept([a, b, a], [0, 0, 1], **parameters) == kept
 
     @pytest.mark.parametrize("bgrids", [False, True])
-    def test_remove_duplicates_matches_decomposition(
-        self, api_client: TestClient, bgrids: bool
-    ) -> None:
+    def test_remove_duplicates_matches_decomposition(self, bgrids: bool) -> None:
         from muedit.decomp.decomposition_file import build_pulse_trains_from_distimes
         from muedit.decomp.postprocess import remove_duplicates_by_grid
         from muedit.decomp.types import DecompositionParameters
@@ -531,18 +432,7 @@ class TestEditRoutes:
             DecompositionParameters(duplicatesbgrids=bgrids),
             FSAMP,
         )
-        data = _post(
-            api_client,
-            "remove-duplicates",
-            {
-                "distimes": distimes,
-                "mu_grid_index": grids,
-                "parameters": {"duplicatesbgrids": bgrids},
-                "fsamp": FSAMP,
-                "total_samples": N_SAMPLES,
-            },
-        )
-        assert data["kept_indices"] == sorted(pipeline_kept)
+        assert _kept(distimes, grids, duplicatesbgrids=bgrids) == sorted(pipeline_kept)
 
     def test_save_logs_mus_removed_on_save(self, api_client: TestClient, tmp_path: Path) -> None:
         import json
@@ -596,142 +486,3 @@ class TestEditRoutes:
         )
         assert data["kept_indices"] == [0, 1]
         assert data["edit_history"] == []
-
-    @pytest.mark.parametrize("flag,expected", [(None, True), (True, True), (False, False)])
-    def test_flag_mu(self, api_client: TestClient, flag: bool | None, expected: bool) -> None:
-        body = {"distimes": [[1]], "mu_index": 0}
-        if flag is not None:
-            body["flag"] = flag
-        assert _post(api_client, "flag-mu", body) == {"flagged": expected}
-
-    @pytest.mark.parametrize(
-        "route,body",
-        [
-            ("add-spikes", {"distimes": [[1]], "fsamp": FSAMP}),
-            ("add-spikes", {"distimes": [[1]], "pulse_train": [0.0]}),
-            (
-                "add-spikes",
-                {"distimes": [[1]], "pulse_train": [0.0], "fsamp": FSAMP, "mu_index": 3},
-            ),
-            ("add-artifact", {"distimes": [[1]], "pulse_train": [0.0]}),
-            ("delete-spikes", {"distimes": [[1]], "pulse_train": [0.0], "mu_index": -1}),
-            ("delete-dr", {"distimes": [[1]], "pulse_train": [0.0]}),
-            ("remove-outliers", {"distimes": [[1]], "fsamp": FSAMP}),
-            ("remove-duplicates", {"distimes": [[1], [2]]}),
-            ("flag-mu", {"distimes": [[1]], "mu_index": 1}),
-        ],
-    )
-    def test_invalid_requests_rejected(
-        self,
-        api_client: TestClient,
-        route: str,
-        body: dict[str, Any],
-    ) -> None:
-        resp = api_client.post(f"/api/v1/edit/{route}", json=body)
-        assert resp.status_code == 400
-
-
-class TestUpdateFilterRoute:
-    """``/edit/update-filter`` with the EMG served from the edit-signal cache."""
-
-    @pytest.fixture()
-    def ctx_token(self, synthetic_mu: dict[str, np.ndarray]) -> Callable[..., str]:
-        """Cache a 64-channel GR08MM1305 context with the MU on the first 32 channels."""
-        from muedit.api.cache import _store_edit_signal_context
-        from muedit.models import EditSignalContext
-
-        rng = np.random.default_rng(7)
-        data = np.vstack(
-            [
-                synthetic_mu["emg"],
-                rng.normal(0, 0.01, (64 - N_CHANNELS, N_SAMPLES)),
-            ]
-        )
-
-        def store(artifact_mask: np.ndarray | None = None) -> str:
-            return _store_edit_signal_context(
-                EditSignalContext(
-                    data=data,
-                    fsamp=FSAMP,
-                    grid_names=["GR08MM1305"],
-                    emgmask=[np.zeros(64, dtype=int)],
-                    artifact_mask=artifact_mask,
-                )
-            )
-
-        return store
-
-    def _body(
-        self, token: str, synthetic_mu: dict[str, np.ndarray], **extra: Any
-    ) -> dict[str, Any]:
-        body = {
-            "project": "proj",
-            "edit_signal_token": token,
-            "file_label": "sub-01_task-synthetic_decomp.npz",
-            "distimes": [synthetic_mu["target"].tolist()],
-            "pulse_train": [0.0] * N_SAMPLES,
-            "view_start": VIEW_START,
-            "view_end": VIEW_END,
-        }
-        body.update(extra)
-        return body
-
-    def test_update_from_cached_context(
-        self,
-        api_client: TestClient,
-        ctx_token: Callable[..., str],
-        synthetic_mu: dict[str, np.ndarray],
-    ) -> None:
-        data = _post(api_client, "update-filter", self._body(ctx_token(), synthetic_mu))
-        assert data["fsamp"] == FSAMP
-        truth = _in_view(synthetic_mu["target"])
-        assert _match_count(truth, _in_view(data["distimes"])) >= 0.5 * truth.size
-        pulse = np.asarray(data["pulse_train"])
-        assert pulse.shape == (N_SAMPLES,)
-        assert pulse[VIEW_START + EDGE : VIEW_END - EDGE].any()
-        assert not pulse[: VIEW_START + EDGE].any()
-
-    def test_cached_artifact_mask_is_applied(
-        self,
-        api_client: TestClient,
-        ctx_token: Callable[..., str],
-        synthetic_mu: dict[str, np.ndarray],
-    ) -> None:
-        mask = np.zeros(N_SAMPLES, dtype=bool)
-        mask[4000:5000] = True
-        data = _post(api_client, "update-filter", self._body(ctx_token(mask), synthetic_mu))
-        spikes = np.asarray(data["distimes"])
-        assert not ((spikes >= 4000) & (spikes < 5000)).any()
-        assert not np.asarray(data["pulse_train"])[4000:5000].any()
-
-    def test_missing_context_rejected(
-        self,
-        api_client: TestClient,
-        synthetic_mu: dict[str, np.ndarray],
-    ) -> None:
-        resp = api_client.post("/api/v1/edit/update-filter", json=self._body("nope", synthetic_mu))
-        assert resp.status_code == 400
-
-    @pytest.mark.parametrize(
-        "extra",
-        [
-            {"distimes": []},
-            {"mu_index": 5},
-            {"view_end": VIEW_START},
-            {"grid_index": 3},
-            {"view_end": N_SAMPLES + 1},
-        ],
-        ids=["no-distimes", "bad-mu", "empty-view", "bad-grid", "view-overrun"],
-    )
-    def test_invalid_requests_rejected(
-        self,
-        api_client: TestClient,
-        ctx_token: Callable[..., str],
-        synthetic_mu: dict[str, np.ndarray],
-        extra: dict[str, Any],
-    ) -> None:
-        resp = api_client.post(
-            "/api/v1/edit/update-filter",
-            json=self._body(ctx_token(), synthetic_mu, **extra),
-        )
-        assert resp.status_code == 400

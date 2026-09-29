@@ -134,8 +134,15 @@ The BIDS decomposition NPZ has the same keys as above, without `emg_data`,
 
 ## 3) Edited Decomposition Save (Web Edit Mode)
 
-`POST /api/v1/edit/save` writes the edited decomposition into the `muedit`
-derivatives pipeline and refreshes the dataset-level participant files.
+`POST /api/v1/edit/session/save` writes the edited decomposition into the `muedit`
+derivatives pipeline and refreshes the dataset-level participant files. The edits are
+held by the server-side edit session the file was opened in (`/edit/session/open`), so
+the request carries only the session token and the session form's fields. The run save,
+`POST /api/v1/edit/save`, writes to the same place from a finished run.
+
+Until they are saved, the session's edits are also logged to
+`<cache>/edit-logs/*.jsonl`. When the app or the page closes with unsaved edits, opening
+the same file again offers to restore them; the log is deleted when the file is saved.
 
 Primary outputs:
 

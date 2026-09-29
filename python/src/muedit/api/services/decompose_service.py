@@ -42,11 +42,17 @@ from muedit.api.services.decompose_worker import (
     child_main,
     execute,
 )
+from muedit.decomp.decomposition_file import pack_csr
+from muedit.editing.session import spike_array
 from muedit.io.store import SessionStore
+from muedit.models import IntArray
 
 logger = logging.getLogger(__name__)
 
 PREVIEW_PULSE_KEYS = ("pulse_trains_full", "pulse_trains_all")
+#: Preview fields the binary frame replaces: pulse trains stay on the server
+#: (``/series/pulse``), discharge times travel as CSR arrays.
+PREVIEW_ARRAY_KEYS = (*PREVIEW_PULSE_KEYS, "distime", "distime_all")
 #: ``process`` (default) runs each decomposition in a spawned worker process, ``thread`` in-process.
 WORKER_ENV = "MUEDIT_DECOMPOSE_WORKER"
 #: How often a stream waiting for the next event checks that its client is still connected.
@@ -64,11 +70,15 @@ def _as_matrix(value: Any) -> np.ndarray:
     return matrix
 
 
-def _encode_decompose_preview(preview: dict[str, Any]) -> memoryview:
-    """Encode the run preview as a MUB1 frame with float32 pulse matrices."""
-    meta = {k: v for k, v in preview.items() if k not in PREVIEW_PULSE_KEYS}
-    arrays = {key: (_as_matrix(preview.get(key)), "f4") for key in PREVIEW_PULSE_KEYS}
-    return pack_frame(meta, arrays)
+def _preview_spikes(preview: dict[str, Any]) -> list[IntArray]:
+    """The preview's discharge times, as sorted int32 arrays."""
+    return [spike_array(d) for d in preview.get("distime_all") or []]
+
+
+def _encode_decompose_preview(meta: dict[str, Any], spikes: list[IntArray]) -> memoryview:
+    """Encode the run preview as a MUB1 frame: JSON fields, then CSR discharge times."""
+    values, offsets = pack_csr(spikes, np.int32)
+    return pack_frame(meta, {"spikes": (values, "i4"), "spike_offsets": (offsets, "i8")})
 
 
 def fetch_decompose_preview_binary(token: str) -> Response:
@@ -231,22 +241,23 @@ class _Run:
     def _done_event(self, message: dict[str, Any]) -> tuple[dict[str, Any], bool]:
         """The ``done`` event for a finished run, and whether its pulse trains were kept."""
         preview_raw: dict[str, Any] = message.get("preview") or {}
+        spikes = _preview_spikes(preview_raw)
         if self.binary_preview:
-            frame = _encode_decompose_preview(preview_raw)
-            preview_payload = make_json_safe(
-                {k: v for k, v in preview_raw.items() if k not in PREVIEW_PULSE_KEYS}
+            meta = make_json_safe(
+                {k: v for k, v in preview_raw.items() if k not in PREVIEW_ARRAY_KEYS}
             )
+            preview_payload = dict(meta)
             preview_payload["preview_binary_token"] = _store_decomp_preview_binary(
-                frame, self.session
+                _encode_decompose_preview(meta, spikes), self.session
             )
         else:
             preview_payload = make_json_safe(preview_raw)
-        # The run save reads the pulse trains from the run's store, not from the frame.
+        # The explorer and the run save read the pulse trains from the run's store.
         pulse_full = _as_matrix(preview_raw.get("pulse_trains_full")).astype(np.float32, copy=False)
         kept = bool(pulse_full.size)
         if kept:
             preview_payload["run_result_token"] = _store_run_result(
-                pulse_full, self.session, self.store
+                pulse_full, self.session, self.store, spikes
             )
         done = {
             "stage": "done",

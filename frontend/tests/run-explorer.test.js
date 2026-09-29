@@ -64,20 +64,23 @@ describe("buildRunMuDropdownModel", () => {
 });
 
 describe("buildRunMuExplorerModel", () => {
-  const pulse = [0, 0.2, 0.9, 0.1, 0.8, 0];
+  const ints = (...v) => Int32Array.from(v);
+  const pulseView = (mu) => ({ mu, start: 1, end: 5, bins: 254 });
 
-  test("marks each discharge at its pulse value and counts them", () => {
+  test("counts the discharges and draws the fetched window of this MU", () => {
+    const shown = pulseView(0);
     const model = buildRunMuExplorerModel({
       state: {
-        muPulseTrains: [pulse],
-        muDistimes: [[2, 4]],
+        muDistimes: [ints(2, 4)],
+        seriesLength: 6,
         currentMu: 0,
         runView: { start: 1, end: 5 },
+        runPulseView: shown,
       },
       fsamp: 2048,
     });
     assert.equal(model.muIdx, 0);
-    assert.deepEqual(model.markerVals, [0.9, 0.8]);
+    assert.equal(model.trace, shown);
     assert.equal(model.metaText, "2 discharge times");
     assert.deepEqual(model.view, { start: 1, end: 5 });
     assert.equal(model.nextView, null);
@@ -85,20 +88,34 @@ describe("buildRunMuExplorerModel", () => {
     assert.equal(model.fsamp, 2048);
   });
 
-  test("with no view yet, proposes one spanning the pulse", () => {
+  test("a window of another MU is not drawn", () => {
     const model = buildRunMuExplorerModel({
-      state: { muPulseTrains: [pulse], muDistimes: [[]], currentMu: 0 },
+      state: {
+        muDistimes: [ints(), ints(3)],
+        seriesLength: 6,
+        currentMu: 1,
+        runView: { start: 0, end: 6 },
+        runPulseView: pulseView(0),
+      },
+    });
+    assert.equal(model.trace, null);
+    assert.deepEqual(Array.from(model.spikes), [3]);
+  });
+
+  test("with no view yet, proposes one spanning the recording", () => {
+    const model = buildRunMuExplorerModel({
+      state: { muDistimes: [ints()], seriesLength: 6, currentMu: 0 },
     });
     assert.deepEqual(model.nextView, { start: 0, end: 6 });
     assert.deepEqual(model.view, model.nextView);
     assert.equal(model.fsamp, null);
   });
 
-  test("resets a view that runs past a shorter pulse", () => {
+  test("resets a view that runs past the recording", () => {
     const model = buildRunMuExplorerModel({
       state: {
-        muPulseTrains: [pulse],
-        muDistimes: [[]],
+        muDistimes: [ints()],
+        seriesLength: 6,
         currentMu: 0,
         runView: { start: 0, end: 100 },
       },
@@ -106,37 +123,26 @@ describe("buildRunMuExplorerModel", () => {
     assert.deepEqual(model.nextView, { start: 0, end: 6 });
   });
 
-  test("an MU without a pulse falls through to the first one with a pulse", () => {
-    const model = buildRunMuExplorerModel({
-      state: {
-        muPulseTrains: [[], null, pulse],
-        muDistimes: [[], [], [2]],
-        currentMu: 1,
-        runView: { start: 0, end: 6 },
-      },
-    });
-    assert.equal(model.muIdx, 2);
-    assert.deepEqual(model.spikes, [2]);
-  });
-
   test("a bad current MU or sampling rate is sanitised", () => {
-    const model = buildRunMuExplorerModel({
-      state: {
-        muPulseTrains: [pulse],
-        muDistimes: [[1]],
-        currentMu: -3,
-        runView: { start: 0, end: 6 },
-      },
-      fsamp: 0,
-    });
-    assert.equal(model.muIdx, 0);
-    assert.equal(model.fsamp, null);
+    for (const currentMu of [-3, 7]) {
+      const model = buildRunMuExplorerModel({
+        state: {
+          muDistimes: [ints(1)],
+          seriesLength: 6,
+          currentMu,
+          runView: { start: 0, end: 6 },
+        },
+        fsamp: 0,
+      });
+      assert.equal(model.muIdx, 0);
+      assert.equal(model.fsamp, null);
+    }
   });
 
-  test("no pulse trains gives an empty model", () => {
+  test("no MUs gives an empty model", () => {
     const model = buildRunMuExplorerModel({ state: {} });
-    assert.deepEqual(model.pulse, []);
-    assert.deepEqual(model.spikes, []);
+    assert.equal(model.trace, null);
+    assert.equal(model.spikes.length, 0);
     assert.equal(model.metaText, "");
   });
 });

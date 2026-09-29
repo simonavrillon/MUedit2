@@ -424,6 +424,21 @@ class BudgetedLRU(Generic[V]):
                 self.budget.sessions[slot.session] = self.budget.clock()
             return slot.value
 
+    def move(self, token: str | None, session: str) -> V | None:
+        """The value for ``token``, now held by ``session`` (whose other entries here make room)."""
+        with self.budget.lock:
+            slot = self._live_slot(token)
+            if slot is None or token is None:
+                return None
+            if slot.session != session and self.per_session is not None:
+                own = [t for t, s in self.slots.items() if s.session == session and t != token]
+                for other in own[: max(len(own) - self.per_session + 1, 0)]:
+                    self.drop(other)
+            slot.session = session
+            self.budget.touch(session)
+            slot.last_used = self.budget.next_tick()
+            return slot.value
+
     def pop(self, token: str | None) -> V | None:
         """Remove and return the value for ``token``, or None."""
         with self.budget.lock:

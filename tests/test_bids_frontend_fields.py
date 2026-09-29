@@ -70,25 +70,12 @@ def _frontend_entity_label() -> str:
     )
 
 
-def _frontend_edit_save_payload(
-    *,
-    total_samples: int,
-    fsamp: float,
-    grid_names: list[str],
-    edit_signal_token: str,
-    project: str,
-) -> dict[str, Any]:
-    """Mirror the merged ``editSave`` body (saveEditedFile + persistNpzBySaveTarget)."""
+def _frontend_edit_save_payload(*, token: str, project: str) -> dict[str, Any]:
+    """Mirror the merged ``saveEditSession`` body (saveEditedFile + persistNpzBySaveTarget)."""
     return {
-        "distimes": [[100, 5000, 9000], [300, 7000]],
-        "total_samples": total_samples,
-        "fsamp": fsamp,
-        "grid_names": grid_names,
-        "mu_grid_index": [0, 0],
-        "parameters": {"duplicatesthresh": 0.3},
+        "token": token,
         "muscle": FRONTEND_BIDS_INPUTS["muscles"],
         "file_label": "Quattrocento_edited.npz",
-        "edit_signal_token": edit_signal_token,
         "software_versions": FRONTEND_BIDS_INPUTS["software_versions"],
         "entity_label": _frontend_entity_label(),
         "project": project,
@@ -175,9 +162,11 @@ def api_client(bids_data_root: Path) -> Iterator[TestClient]:
 
 
 @pytest.fixture()
-def edit_signal_token(otb4_signal: SignalImport) -> str:
-    """Cache a raw-signal context exactly as the edit-load route does."""
-    from muedit.api.cache import _store_edit_signal_context
+def edit_token(otb4_signal: SignalImport) -> str:
+    """Open an edit session on the raw signal, as the session-open route does for a file."""
+    from muedit.api.cache import _store_edit_session
+    from muedit.editing.session import EditSession
+    from muedit.io.store import SessionStore
 
     sig = otb4_signal
     coordinates, ied, discard_channels, _ = format_hdemg_signal(sig.gridname)
@@ -198,7 +187,22 @@ def edit_signal_token(otb4_signal: SignalImport) -> str:
             "units": sig.metadata.get("units"),
         },
     )
-    return _store_edit_signal_context(ctx, file_label="Quattrocento.otb4")
+    edit = EditSession(
+        store=SessionStore.create("test-edit"),
+        fsamp=float(sig.fsamp),
+        total_samples=int(sig.data.shape[1]),
+        spikes=[[100, 5000, 9000], [300, 7000]],
+        pulse=None,
+        mu_grid_index=[0, 0],
+        mu_uids=["g0_mu0", "g0_mu1"],
+        signal=ctx,
+    )
+    edit.meta = {
+        "file_label": "Quattrocento.otb4",
+        "grid_names": list(sig.gridname),
+        "parameters": {"duplicatesthresh": 0.3},
+    }
+    return _store_edit_session(edit)
 
 
 def test_decompose_bids_export_before_decomposition_writes_all_frontend_fields(
@@ -258,25 +262,18 @@ def test_decompose_bids_export_before_decomposition_writes_all_frontend_fields(
 def test_edit_save_route_writes_all_frontend_bids_fields(
     api_client: TestClient,
     otb4_signal: SignalImport,
-    edit_signal_token: str,
+    edit_token: str,
     bids_data_root: Path,
 ) -> None:
-    """The full ``POST /edit/save`` HTTP path with the frontend's merged payload must write BIDS sidecars echoing every frontend field."""
-    sig = otb4_signal
+    """The full ``POST /edit/session/save`` HTTP path with the frontend's merged payload must write BIDS sidecars echoing every frontend field."""
     project = "testproj"
-    payload = _frontend_edit_save_payload(
-        total_samples=sig.data.shape[1],
-        fsamp=float(sig.fsamp),
-        grid_names=sig.gridname,
-        edit_signal_token=edit_signal_token,
-        project=project,
-    )
+    payload = _frontend_edit_save_payload(token=edit_token, project=project)
 
-    resp = api_client.post("/api/v1/edit/save", json=payload)
+    resp = api_client.post("/api/v1/edit/session/save", json=payload)
     assert resp.status_code == 200, resp.text
     body = resp.json()["data"]
     assert body["saved"] is True
-    assert "bids_emg_paths" in body, "edit/save did not export BIDS (no cached signal context?)"
+    assert "bids_emg_paths" in body, "the session save did not export BIDS (no signal context?)"
     for key in ("edf", "emg_json", "channels_tsv", "electrodes_tsv"):
         assert Path(body["bids_emg_paths"][key]).exists()
 

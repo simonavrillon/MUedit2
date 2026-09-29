@@ -35,26 +35,53 @@ const PLOT_TOP = 8;
 let app;
 let els;
 
-function editApp({ samples = 1000, view = { start: 0, end: 254 } } = {}) {
+/** The fetched window of MU 0 over `view`: samples `i % 7`, spikes 100 and 200. */
+function pulseWindow(view, version = 1) {
+  const n = view.end - view.start;
+  const spikes = Int32Array.from(
+    [100, 200].filter((t) => t >= view.start && t < view.end),
+  );
+  return {
+    mu: 0,
+    version,
+    start: view.start,
+    end: view.end,
+    bins: 254,
+    flagged: false,
+    row: Float32Array.from({ length: n }, (_, i) => (view.start + i) % 7),
+    spikes,
+    spikeValues: Float32Array.from(spikes, (t) => t % 7),
+    artifacts: new Int32Array(0),
+    artifactValues: new Float32Array(0),
+  };
+}
+
+function editApp({
+  samples = 1000,
+  view = { start: 0, end: 254 },
+  api = {},
+} = {}) {
   const state = structuredClone(pristine);
   Object.assign(state.edit, {
-    pulseTrains: [new Array(samples).fill(0).map((_, i) => i % 7)],
-    distimes: [[100, 200]],
-    originalDistimes: [[100, 200]],
-    artifactTimes: [[]],
+    token: "tok",
+    distimes: [Int32Array.from([100, 200])],
+    artifactTimes: [new Int32Array(0)],
     flagged: [false],
     muUids: ["g0_mu0"],
     muGridIndex: [0],
+    versions: [1],
+    hasPulse: [true],
     fsamp: 1000,
     totalSamples: samples,
     view,
+    pulseView: pulseWindow(view),
   });
   els = {
     editPulseCanvas: fakeCanvas({ left: 10, top: 20 }),
     editDrCanvas: fakeCanvas(),
     editTimelineCanvas: fakeCanvas({ width: 346, height: 20 }),
   };
-  const built = createApp({ state, els, api: {} });
+  const built = createApp({ state, els, api });
   Object.assign(built, {
     setEditStatus: recorder(),
     addSpikesInSelection: recorder(),
@@ -175,8 +202,8 @@ describe("pulse canvas drag", () => {
     ]);
   });
 
-  test("an MU without a pulse ignores the gesture", () => {
-    app.state.edit.pulseTrains = [[]];
+  test("with nothing open the gesture is ignored", () => {
+    app.state.edit.totalSamples = 0;
     app.state.edit.mode = "add";
     dragPulse([50, 10], [150, 60]);
     assert.equal(app.addSpikesInSelection.calls.length, 0);
@@ -265,7 +292,7 @@ describe("timeline", () => {
 
   test("draws the last edit, the spikes and the view window", () => {
     Object.assign(app.state.edit, {
-      distimes: [[0, 1500]],
+      distimes: [Int32Array.from([0, 1500])],
       editHistory: [
         { mu_uid: "g0_mu0", spikes_added: [900] },
         { mu_uid: "g0_mu1", spikes_added: [1200] },
@@ -311,6 +338,62 @@ describe("pulse plot", () => {
     app.state.edit.showBookmark = true;
     renderEditExplorer(app);
     assert.ok(!texts(els.editPulseCanvas.ctx).includes("You stopped here"));
+  });
+
+  test("draws the fetched window with its discharges on it", () => {
+    renderEditExplorer(app);
+    const ctx = els.editPulseCanvas.ctx;
+    const arcs = ops(ctx, "arc");
+    assert.equal(arcs.length, 2);
+    // Sample t at x = 38 + t * 254 / 253, value t % 7 on a 0..6 range (100 → 2, 200 → 4).
+    assert.deepEqual(
+      arcs.map((a) => a.args.slice(0, 2).map((v) => Math.round(v))),
+      [
+        [138, 56],
+        [239, 32],
+      ],
+    );
+  });
+
+  test("a flagged MU is a flat line with its discharges at 0", () => {
+    app.state.edit.flagged = [true];
+    renderEditExplorer(app);
+    const ctx = els.editPulseCanvas.ctx;
+    const bottom = PLOT_TOP + 72;
+    assert.ok(ops(ctx, "arc").every((a) => a.args[1] === bottom));
+  });
+
+  test("asks for the window when the view moved, and draws it when it lands", async () => {
+    const asked = [];
+    app = editApp({
+      api: {
+        fetchPulse: async (params) => {
+          asked.push(params);
+          return pulseWindow({ start: params.start, end: params.end }, 1);
+        },
+      },
+    });
+    app.state.currentStage = "edit";
+    app.renderEditExplorer = () => renderEditExplorer(app);
+    app.state.edit.view = { start: 300, end: 554 };
+    renderEditExplorer(app);
+    assert.deepEqual(asked, [
+      { token: "tok", mu: 0, start: 300, end: 554, bins: 254 },
+    ]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(app.state.edit.pulseView.start, 300);
+    renderEditExplorer(app);
+    assert.equal(asked.length, 1, "the window shown is not asked for again");
+  });
+
+  test("an edit of the MU asks for its window again", () => {
+    const asked = [];
+    app = editApp({
+      api: { fetchPulse: async (p) => (asked.push(p), new Promise(() => {})) },
+    });
+    app.state.edit.versions = [2];
+    renderEditExplorer(app);
+    assert.equal(asked.length, 1);
   });
 
   test("a view past the end of a shorter pulse is reset", () => {

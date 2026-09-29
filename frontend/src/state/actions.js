@@ -5,7 +5,8 @@ import { createEditSlice } from "../app/state.js";
 /** @typedef {import("../app/state.js").ChannelTrace} ChannelTrace */
 /** @typedef {import("../app/state.js").Selection} Selection */
 /** @typedef {import("../app/state.js").EditMode} EditMode */
-/** @typedef {import("../app/state.js").EditBackup} EditBackup */
+/** @typedef {import("../app/state.js").PulseView} PulseView */
+/** @typedef {import("../api/binary-payloads.js").EditSessionFrame} EditSessionFrame */
 /** @typedef {import("../app/state.js").Bookmark} Bookmark */
 /** @typedef {import("../app/state.js").EditHistoryEntry} EditHistoryEntry */
 /** @typedef {import("../app/context.js").Span} Span */
@@ -102,14 +103,6 @@ export function setRunCurrentMu(state, idx, { resetView = true } = {}) {
  */
 export function setEditProject(state, value) {
   state.edit.project = String(value || "").trim();
-}
-
-/**
- * @param {State} state
- * @param {string | null | undefined} value
- */
-export function setEditSignalToken(state, value) {
-  state.edit.editSignalToken = String(value || "").trim();
 }
 
 /**
@@ -272,14 +265,21 @@ export function setAuxData(state, auxiliary, auxiliaryNames) {
 
 /**
  * @param {State} state
- * @param {number[][] | null | undefined} pulseTrains
- * @param {number[][] | null | undefined} distimes
+ * @param {Int32Array[] | null | undefined} distimes
  * @param {number[] | null | undefined} gridIndex
  */
-export function setMuPreviewData(state, pulseTrains, distimes, gridIndex) {
-  state.muPulseTrains = Array.isArray(pulseTrains) ? pulseTrains : [];
+export function setMuPreviewData(state, distimes, gridIndex) {
   state.muDistimes = Array.isArray(distimes) ? distimes : [];
   state.muGridIndex = Array.isArray(gridIndex) ? gridIndex : [];
+  state.runPulseView = null;
+}
+
+/**
+ * @param {State} state
+ * @param {PulseView | null} view
+ */
+export function setRunPulseView(state, view) {
+  state.runPulseView = view || null;
 }
 
 /**
@@ -299,52 +299,6 @@ export function clearPreviewState(state) {
   state.channelMeans = [];
   state.channelTraces = [];
   state.seriesLength = null;
-}
-
-/**
- * @param {State} state
- * @param {number} muIdx
- * @param {number[] | null | undefined} distimes
- */
-export function setEditDistimesForMu(state, muIdx, distimes) {
-  const clean = (distimes || [])
-    .map((v) => Number(v))
-    .filter((v) => Number.isFinite(v));
-  state.edit.distimes[muIdx] = clean;
-}
-
-/**
- * @param {State} state
- * @param {number} muIdx
- * @param {number[] | null | undefined} times
- */
-export function setEditArtifactTimesForMu(state, muIdx, times) {
-  if (!state.edit.artifactTimes) state.edit.artifactTimes = [];
-  const clean = (times || [])
-    .map((v) => Number(v))
-    .filter((v) => Number.isFinite(v));
-  state.edit.artifactTimes[muIdx] = clean;
-}
-
-/**
- * @param {State} state
- * @param {number} muIdx
- * @param {number[] | null | undefined} pulseTrain
- */
-export function setEditPulseTrainForMu(state, muIdx, pulseTrain) {
-  const clean = Array.isArray(pulseTrain)
-    ? pulseTrain.map((v) => Number(v))
-    : [];
-  state.edit.pulseTrains[muIdx] = clean;
-}
-
-/**
- * @param {State} state
- * @param {number} muIdx
- * @param {boolean} flagged
- */
-export function setEditFlagForMu(state, muIdx, flagged) {
-  state.edit.flagged[muIdx] = !!flagged;
 }
 
 /**
@@ -389,139 +343,10 @@ export function setEditFilename(state, filename) {
 
 /**
  * @param {State} state
- * @param {number[][] | null | undefined} pulseTrains
- */
-export function setEditPulseTrains(state, pulseTrains) {
-  state.edit.pulseTrains = Array.isArray(pulseTrains) ? pulseTrains : [];
-}
-
-/**
- * @param {State} state
- * @param {number[][] | null | undefined} pulseTrains
- */
-export function setEditOriginalPulseTrains(state, pulseTrains) {
-  state.edit.originalPulseTrains = Array.isArray(pulseTrains)
-    ? pulseTrains
-    : [];
-}
-
-/**
- * @param {State} state
- * @param {number[][] | null | undefined} distimes
- */
-export function setEditDistimes(state, distimes) {
-  state.edit.distimes = Array.isArray(distimes) ? distimes : [];
-}
-
-/**
- * @param {State} state
- * @param {number[][] | null | undefined} distimes
- */
-export function setEditOriginalDistimes(state, distimes) {
-  state.edit.originalDistimes = Array.isArray(distimes) ? distimes : [];
-}
-
-/**
- * @param {State} state
  * @param {string[] | null | undefined} gridNames
  */
 export function setEditGridNames(state, gridNames) {
   state.edit.gridNames = Array.isArray(gridNames) ? gridNames : [];
-}
-
-/**
- * @param {State} state
- * @param {number[] | null | undefined} muGridIndex
- */
-export function setEditMuGridIndex(state, muGridIndex) {
-  state.edit.muGridIndex = Array.isArray(muGridIndex) ? muGridIndex : [];
-}
-
-/**
- * @param {State} state
- * @param {number | null | undefined} fsamp
- */
-export function setEditFsamp(state, fsamp) {
-  state.edit.fsamp = fsamp ?? null;
-}
-
-/**
- * @param {State} state
- * @param {JsonObject | null | undefined} parameters
- */
-export function setEditParameters(state, parameters) {
-  state.edit.parameters = parameters || {};
-}
-
-/**
- * @param {State} state
- * @param {number | null | undefined} totalSamples
- */
-export function setEditTotalSamples(state, totalSamples) {
-  state.edit.totalSamples = Number(totalSamples) || 0;
-}
-
-/**
- * @param {State} state
- * @param {boolean[] | null | undefined} flagged
- */
-export function setEditFlaggedArray(state, flagged) {
-  state.edit.flagged = Array.isArray(flagged) ? flagged : [];
-}
-
-/**
- * @param {State} state
- * @param {string[] | null | undefined} uids
- */
-export function setEditMuUids(state, uids) {
-  state.edit.muUids = Array.isArray(uids) ? uids : [];
-}
-
-/**
- * @param {State} state
- * @param {EditHistoryEntry[] | null | undefined} history
- */
-export function setEditHistory(state, history) {
-  state.edit.editHistory = Array.isArray(history) ? history : [];
-}
-
-/**
- * @param {State} state
- * @param {number[][] | null | undefined} artifactTimes
- */
-export function setEditArtifactTimes(state, artifactTimes) {
-  state.edit.artifactTimes = Array.isArray(artifactTimes) ? artifactTimes : [];
-}
-
-/**
- * @param {State} state
- * @param {EditHistoryEntry} entry
- */
-export function appendEditHistoryEntry(state, entry) {
-  if (!Array.isArray(state.edit.editHistory)) state.edit.editHistory = [];
-  state.edit.editHistory.push(entry);
-}
-
-/**
- * Drop the MU's entries logged at or after `fromIndex`, i.e. since an undo backup.
- *
- * @param {State} state
- * @param {string} muUid
- * @param {number} fromIndex
- */
-export function dropEditHistoryForMuSince(state, muUid, fromIndex) {
-  if (!Array.isArray(state.edit.editHistory)) return;
-  state.edit.editHistory = state.edit.editHistory.filter(
-    (e, i) => i < fromIndex || e.mu_uid !== muUid,
-  );
-}
-
-/**
- * @param {State} state
- * @param {EditBackup | null} backup
- */
-export function setEditBackup(state, backup) {
-  state.edit.backup = backup || null;
 }
 
 /**
@@ -538,14 +363,6 @@ export function setEditBookmark(state, position) {
  */
 export function setShowBookmark(state, show) {
   state.edit.showBookmark = !!show;
-}
-
-/**
- * @param {State} state
- * @param {boolean} dirty
- */
-export function setEditDirty(state, dirty) {
-  state.edit.dirty = !!dirty;
 }
 
 /**
@@ -723,28 +540,7 @@ export function setDiscardMaskChannel(state, gridIdx, chIdx, value) {
 }
 
 /**
- * @param {State} state
- * @param {{ distimes?: number[], pulseTrain?: number[], gridIdx: number, uid: string }} mu
- */
-export function appendEditMu(state, { distimes, pulseTrain, gridIdx, uid }) {
-  state.edit.distimes.push([...(distimes || [])]);
-  state.edit.pulseTrains.push([...(pulseTrain || [])]);
-  if (!state.edit.originalDistimes) state.edit.originalDistimes = [];
-  state.edit.originalDistimes.push([...(distimes || [])]);
-  if (!state.edit.originalPulseTrains) state.edit.originalPulseTrains = [];
-  state.edit.originalPulseTrains.push([...(pulseTrain || [])]);
-  state.edit.muGridIndex.push(gridIdx);
-  if (!Array.isArray(state.edit.flagged)) state.edit.flagged = [];
-  state.edit.flagged.push(false);
-  if (!Array.isArray(state.edit.muUids)) state.edit.muUids = [];
-  state.edit.muUids.push(uid);
-  if (!state.edit.artifactTimes) state.edit.artifactTimes = [];
-  state.edit.artifactTimes.push([]);
-}
-
-/**
  * Keep only the MUs at `keptIdx`, in that order, across every per-MU array.
- * The undo backup is dropped because its MU index no longer applies.
  *
  * @param {State} state
  * @param {number[]} keptIdx
@@ -757,14 +553,13 @@ export function keepEditMus(state, keptIdx) {
    * @param {(i: number) => T} fallback
    */
   const pick = (arr, fallback) => keptIdx.map((i) => arr?.[i] ?? fallback(i));
-  e.distimes = pick(e.distimes, () => []);
-  e.pulseTrains = pick(e.pulseTrains, () => []);
-  e.originalDistimes = pick(e.originalDistimes, () => []);
-  e.originalPulseTrains = pick(e.originalPulseTrains, () => []);
+  e.distimes = pick(e.distimes, () => new Int32Array(0));
+  e.artifactTimes = pick(e.artifactTimes, () => new Int32Array(0));
   e.muGridIndex = pick(e.muGridIndex, () => 0);
   e.flagged = pick(e.flagged, () => false);
   e.muUids = pick(e.muUids, (i) => `mu${i}`);
-  e.artifactTimes = pick(e.artifactTimes, () => []);
+  e.versions = pick(e.versions, () => 0);
+  e.hasPulse = pick(e.hasPulse, () => false);
   e.currentMu = Math.max(0, keptIdx.indexOf(e.currentMu ?? 0));
   const bookmarkIdx = e.bookmarkPosition
     ? keptIdx.indexOf(e.bookmarkPosition.muIdx)
@@ -773,7 +568,102 @@ export function keepEditMus(state, keptIdx) {
     bookmarkIdx === -1 || !e.bookmarkPosition
       ? null
       : { ...e.bookmarkPosition, muIdx: bookmarkIdx };
-  e.backup = null;
+}
+
+/**
+ * Per-MU fields every edit-session response carries in full.
+ *
+ * @param {State} state
+ * @param {JsonObject} meta
+ */
+function setEditPerMu(state, meta) {
+  const e = state.edit;
+  const n = Number(meta.n_mu) || 0;
+  /** @param {unknown} arr @param {(i: number) => any} fallback */
+  const fill = (arr, fallback) =>
+    Array.from({ length: n }, (_, i) =>
+      Array.isArray(arr) && arr[i] !== undefined ? arr[i] : fallback(i),
+    );
+  e.flagged = fill(meta.flagged, () => false).map(Boolean);
+  e.muUids = fill(meta.mu_uids, (i) => `mu${i}`).map(String);
+  e.muGridIndex = fill(meta.mu_grid_index, () => 0).map(Number);
+  e.versions = fill(meta.versions, () => 0).map(Number);
+  e.hasPulse = fill(meta.has_pulse, () => false).map(Boolean);
+  e.dirty = !!meta.dirty;
+  e.canUndo = !!meta.can_undo;
+}
+
+/**
+ * Take over an edit session's whole state (on open, recovery or a reload).
+ *
+ * @param {State} state
+ * @param {EditSessionFrame} frame
+ */
+export function setEditSession(state, { meta, spikes, artifacts }) {
+  const e = state.edit;
+  e.token = String(meta.token || "");
+  e.distimes = spikes;
+  e.artifactTimes = spikes.map((_, i) => artifacts[i] ?? new Int32Array(0));
+  setEditPerMu(state, meta);
+  e.editHistory = Array.isArray(meta.edit_history) ? meta.edit_history : [];
+  e.fsamp = meta.fsamp ?? null;
+  e.totalSamples = Number(meta.total_samples) || 0;
+  e.parameters =
+    meta.parameters && typeof meta.parameters === "object"
+      ? meta.parameters
+      : {};
+  e.pulseView = null;
+}
+
+/**
+ * Apply what one edit changed: MUs kept (when some were removed), the
+ * changed MUs' times, the per-MU fields and the new log entries.
+ *
+ * @param {State} state
+ * @param {EditSessionFrame} frame
+ */
+export function applyEditChange(state, { meta, spikes, artifacts }) {
+  const e = state.edit;
+  if (Array.isArray(meta.kept_indices)) keepEditMus(state, meta.kept_indices);
+  const n = Number(meta.n_mu) || 0;
+  while (e.distimes.length < n) e.distimes.push(new Int32Array(0));
+  while (e.artifactTimes.length < n) e.artifactTimes.push(new Int32Array(0));
+  e.distimes.length = n;
+  e.artifactTimes.length = n;
+  (Array.isArray(meta.changed) ? meta.changed : []).forEach((mu, i) => {
+    e.distimes[mu] = spikes[i] ?? new Int32Array(0);
+    e.artifactTimes[mu] = artifacts[i] ?? new Int32Array(0);
+  });
+  setEditPerMu(state, meta);
+  const start = Math.max(0, Number(meta.history_start) || 0);
+  e.editHistory = [
+    ...(e.editHistory || []).slice(0, start),
+    ...(Array.isArray(meta.history) ? meta.history : []),
+  ];
+}
+
+/**
+ * Mirror a session save: the file keeps `kept_indices`, logged as it returns.
+ *
+ * @param {State} state
+ * @param {JsonObject} saved
+ */
+export function applyEditSave(state, saved) {
+  if (Array.isArray(saved.kept_indices)) {
+    keepEditMus(state, saved.kept_indices);
+  }
+  setEditPerMu(state, saved);
+  if (Array.isArray(saved.edit_history)) {
+    state.edit.editHistory = saved.edit_history;
+  }
+}
+
+/**
+ * @param {State} state
+ * @param {PulseView | null} view
+ */
+export function setEditPulseView(state, view) {
+  state.edit.pulseView = view || null;
 }
 
 /**

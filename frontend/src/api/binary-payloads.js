@@ -1,5 +1,5 @@
 /**
- * Codecs for the binary transport the API uses for arrays (pulse trains, viewport series).
+ * Codecs for the binary transport the API uses for arrays (viewport series, discharge times).
  *
  * MUB1, mirroring `pack_frame` / `unpack_frame` in `api/binary.py`:
  *
@@ -26,23 +26,6 @@ function hasMagic(buffer, magic) {
   return true;
 }
 
-/**
- * @param {Float32Array} raw
- * @param {number} rows
- * @param {number} cols
- * @returns {number[][]}
- */
-function to2d(raw, rows, cols) {
-  const out = [];
-  for (let r = 0; r < rows; r++) {
-    const row = new Array(cols);
-    const base = r * cols;
-    for (let c = 0; c < cols; c++) row[c] = raw[base + c];
-    out.push(row);
-  }
-  return out;
-}
-
 export const FRAME_MEDIA_TYPE = "application/x-muedit-frame";
 const FRAME_MAGIC = "MUB1";
 const FRAME_FORMAT = "mub1";
@@ -60,7 +43,7 @@ const FRAME_TYPES = {
  * @typedef {keyof typeof FRAME_TYPES} FrameDtype
  * @typedef {Float32Array | Int32Array | BigInt64Array | Uint8Array | Int16Array} FrameData
  * @typedef {{ dtype: FrameDtype, shape: number[], data: FrameData }} FrameArray
- * @typedef {{ dtype: "f4" | "i4" | "u1" | "i2", shape: number[], rows?: ArrayLike<number>[], data?: ArrayLike<number> }} FrameArrayInput
+ * @typedef {{ dtype: FrameDtype, shape: number[], rows?: ArrayLike<number>[], data?: ArrayLike<number> }} FrameArrayInput An `i8` array's values are converted to BigInt.
  */
 
 /** @param {number} n */
@@ -154,7 +137,12 @@ export function encodeFrame(meta, arrays) {
       dataStart + spec.offset,
       frameCount(arr.shape),
     );
-    if (arr.rows) {
+    if (view instanceof BigInt64Array) {
+      const flat = arr.rows
+        ? arr.rows.flatMap((row) => Array.from(row))
+        : arr.data;
+      view.set(Array.from(flat ?? [], (v) => BigInt(v)));
+    } else if (arr.rows) {
       const cols = arr.shape[1] ?? 0;
       arr.rows.forEach((row, r) => view.set(row, r * cols));
     } else if (arr.data) {
@@ -165,32 +153,28 @@ export function encodeFrame(meta, arrays) {
 }
 
 /**
- * @param {FrameArray | undefined} arr
- * @returns {number[][]}
+ * Rows of a CSR pair as views into the frame: row `i` is
+ * `values[offsets[i]:offsets[i + 1]]`. Each MU's discharge times arrive this way.
+ *
+ * @param {FrameArray | undefined} values
+ * @param {FrameArray | undefined} offsets
+ * @returns {Int32Array[]}
  */
-function frameRows(arr) {
-  if (!arr || arr.shape.length !== 2) return [];
-  return to2d(
-    /** @type {Float32Array} */ (arr.data),
-    arr.shape[0],
-    arr.shape[1],
-  );
-}
-
-/**
- * @param {ArrayBuffer} buffer
- * @param {string | null} [formatHeader]
- * @returns {JsonObject}
- */
-export function decodeEditLoadPayload(buffer, formatHeader = "") {
-  if (!isFrame(buffer, formatHeader)) {
-    return JSON.parse(textDecoder.decode(new Uint8Array(buffer)));
+export function csrRows(values, offsets) {
+  if (!values || !offsets) return [];
+  const data = /** @type {Int32Array} */ (values.data);
+  const ends = /** @type {BigInt64Array} */ (offsets.data);
+  const rows = [];
+  for (let i = 0; i + 1 < ends.length; i++) {
+    rows.push(data.subarray(Number(ends[i]), Number(ends[i + 1])));
   }
-  const { meta, arrays } = decodeFrame(buffer);
-  return { ...meta, pulse_trains_full: frameRows(arrays.pulse_trains_full) };
+  return rows;
 }
 
 /**
+ * A run's preview: its JSON fields, with `distime_all` rebuilt from the CSR
+ * discharge times. The pulse trains stay on the server (`/series/pulse`).
+ *
  * @param {ArrayBuffer} buffer
  * @param {string | null} [formatHeader]
  * @returns {JsonObject}
@@ -202,8 +186,27 @@ export function decodeDecomposePreviewPayload(buffer, formatHeader = "") {
   const { meta, arrays } = decodeFrame(buffer);
   return {
     ...meta,
-    pulse_trains_full: frameRows(arrays.pulse_trains_full),
-    pulse_trains_all: frameRows(arrays.pulse_trains_all),
+    distime_all: csrRows(arrays.spikes, arrays.spike_offsets),
+  };
+}
+
+/**
+ * @typedef {object} EditSessionFrame What the edit session sends: its fields, and per-MU times.
+ * @property {JsonObject} meta
+ * @property {Int32Array[]} spikes Discharge times of every MU (open) or of the changed ones (an edit).
+ * @property {Int32Array[]} artifacts Artifact times, likewise.
+ */
+
+/**
+ * @param {ArrayBuffer} buffer
+ * @returns {EditSessionFrame}
+ */
+export function decodeEditSessionFrame(buffer) {
+  const { meta, arrays } = decodeFrame(buffer);
+  return {
+    meta,
+    spikes: csrRows(arrays.spikes, arrays.spike_offsets),
+    artifacts: csrRows(arrays.artifacts, arrays.artifact_offsets),
   };
 }
 
@@ -241,5 +244,57 @@ export function decodeSeriesFrame(buffer) {
   return {
     meta,
     rows: frameRowViews(arrays.min).map((min, r) => ({ min, max: maxs[r] })),
+  };
+}
+
+/**
+ * One MU's pulse train over `[start, end)` as drawn, with the discharges and
+ * artifacts in that window and the train's value at each.
+ *
+ * @typedef {object} PulseView
+ * @property {number} mu
+ * @property {number} start
+ * @property {number} end
+ * @property {number} bins
+ * @property {number} version Changes whenever the MU is edited.
+ * @property {boolean} flagged
+ * @property {SeriesRow} row
+ * @property {Int32Array} spikes
+ * @property {Float32Array} spikeValues
+ * @property {Int32Array} artifacts
+ * @property {Float32Array} artifactValues
+ */
+
+/**
+ * Decode a `/series/pulse` frame; every array is a view into `buffer`.
+ *
+ * @param {ArrayBuffer} buffer
+ * @returns {PulseView}
+ */
+export function decodePulseFrame(buffer) {
+  const { meta, arrays } = decodeFrame(buffer);
+  const row =
+    meta.kind === "samples"
+      ? frameRowViews(arrays.samples)[0]
+      : {
+          min: frameRowViews(arrays.min)[0],
+          max: frameRowViews(arrays.max)[0],
+        };
+  const ints = (/** @type {string} */ name) =>
+    /** @type {Int32Array} */ (arrays[name]?.data ?? new Int32Array(0));
+  const floats = (/** @type {string} */ name) =>
+    /** @type {Float32Array} */ (arrays[name]?.data ?? new Float32Array(0));
+  return {
+    mu: Number(meta.mu),
+    start: Number(meta.start),
+    end: Number(meta.end),
+    bins: Number(meta.bins),
+    version: Number(meta.version),
+    flagged: !!meta.flagged,
+    row,
+    spikes: ints("spikes"),
+    spikeValues: floats("spike_values"),
+    artifacts: ints("artifacts"),
+    artifactValues: floats("artifact_values"),
   };
 }

@@ -1,76 +1,71 @@
 /**
- * Edit-stage application service: ROI edits, filter recomputation, dedup,
- * flagging, and decomposition load/save. Every exported action takes the `app`
- * context, so this module stays free of direct DOM or transport coupling. State mutations go exclusively through the action
- * helpers imported from `state/actions.js`.
+ * Edit-stage application service. The edit session lives on the server: every
+ * edit sends `{op, mu, window}` and applies the change it returns (the edited
+ * MU's discharge times, flags and log entries); the pulse trains never come
+ * to the page except as the window on screen. Every exported action takes the
+ * `app` context, so this module stays free of direct DOM or transport
+ * coupling. State mutations go exclusively through `state/actions.js`.
  */
 import { handleError } from "./error-service.js";
-import {
-  normalizeEditLoadPayload,
-  totalSamplesFromDistimes,
-} from "../../api/payloads.js";
 import { inferGridCount, normalizeGridNames } from "../../io/grid.js";
 import { getSuggestedNpzName } from "../../io/bids.js";
-import { muUidFor } from "../../state/selectors.js";
-import { spikesDiff } from "../../editing/operations.js";
 import {
+  applyEditChange,
+  applyEditSave,
   clearAllEditSelections,
   clearEditDrSelections,
   clearEditPulseSelections,
-  setEditArtifactTimes,
-  setEditArtifactTimesForMu,
-  setEditBackup,
   setEditProject,
   setEditBookmark,
   setShowBookmark,
   setEditCurrentMu,
   setEditCurrentMuGrid,
-  setEditDistimes,
-  setEditDistimesForMu,
   setEditFile,
   setEditFilename,
-  setEditFlagForMu,
-  setEditFlaggedArray,
-  setEditFsamp,
   setEditGridNames,
-  setEditHistory,
-  keepEditMus,
-  setEditMuGridIndex,
-  setEditMuUids,
-  setEditOriginalDistimes,
-  setEditOriginalPulseTrains,
-  setEditParameters,
-  setEditPulseTrainForMu,
-  setEditPulseTrains,
-  setEditSignalToken,
-  setEditTotalSamples,
+  setEditSession,
   setEditView,
   setGridNames,
   setMuscle,
 } from "../../state/actions.js";
 
 /** @typedef {import("../context.js").App} App */
+/** @typedef {import("../context.js").JsonObject} JsonObject */
 /** @typedef {import("../context.js").RoiAction} RoiAction */
 /** @typedef {import("../context.js").RoiEditRequest} RoiEditRequest */
 /** @typedef {import("../state.js").State} State */
 /** @typedef {import("../state.js").FileRef} FileRef */
-/** @typedef {import("../state.js").EditHistoryEntry} EditHistoryEntry */
 /** @typedef {import("../state.js").Bookmark} Bookmark */
+/** @typedef {import("../../api/binary-payloads.js").EditSessionFrame} EditSessionFrame */
 
-// Assign stable per-grid MU identifiers ("g<grid>_mu<n>") used to correlate
-// motor units with editlog entries across reloads. Numbering restarts per grid.
-/**
- * @param {number[] | null | undefined} muGridIndex
- * @returns {string[]}
- */
-function generateMuUids(muGridIndex) {
-  /** @type {Record<number, number>} */
-  const counts = {};
-  return (muGridIndex || []).map((gridIdx) => {
-    const count = counts[gridIdx] || 0;
-    counts[gridIdx] = count + 1;
-    return `g${gridIdx}_mu${count}`;
-  });
+// The open session's token survives a reload of the page (not of the app), so
+// a WebView that crashed can pick the session up again.
+const SESSION_TOKEN_KEY = "muedit.editSession";
+
+/** @param {string} token */
+function rememberSessionToken(token) {
+  try {
+    globalThis.sessionStorage?.setItem(SESSION_TOKEN_KEY, token);
+  } catch {
+    // Storage can be unavailable (private mode); the session just is not restored.
+  }
+}
+
+/** @returns {string} */
+function rememberedSessionToken() {
+  try {
+    return globalThis.sessionStorage?.getItem(SESSION_TOKEN_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+function forgetSessionToken() {
+  try {
+    globalThis.sessionStorage?.removeItem(SESSION_TOKEN_KEY);
+  } catch {
+    // See rememberSessionToken.
+  }
 }
 
 /**
@@ -84,124 +79,48 @@ function setEditBookmarkAndHide(state, muIdx, position) {
 }
 
 /**
+ * Run one edit on the server and mirror what it changed.
+ *
+ * @param {App} app
+ * @param {string} op
+ * @param {JsonObject} [args]
+ * @returns {Promise<JsonObject>} the change's fields
+ */
+export async function requestEditOp(app, op, args = {}) {
+  const { state, api } = app;
+  if (!state.edit.token) throw new Error("No decomposition is open");
+  const frame = await api.editOp(op, { token: state.edit.token, ...args });
+  applyEditChange(state, frame);
+  app.refreshEditModeButtons();
+  return frame.meta;
+}
+
+/**
  * @param {App} app
  * @param {RoiAction} action
  * @param {RoiEditRequest} payload
  */
 export async function requestRoiEdit(app, action, payload) {
-  const {
-    state,
-    api,
-    setEditStatus,
-    ensureEditFlagged,
-    setEditMode,
-    recomputeEditDirty,
-    renderEditExplorer,
-  } = app;
-
-  const distimesBefore = [...(state.edit.distimes?.[payload.muIdx] || [])];
-  const artifactsBefore = [
-    ...(state.edit.artifactTimes?.[payload.muIdx] || []),
-  ];
-  const isArtifact = action === "add-artifact";
+  const { state, setEditStatus, setEditMode, renderEditExplorer } = app;
   try {
     setEditStatus("Applying ROI...", "muted");
-    const data = await api.editAction(action, {
-      distimes: state.edit.distimes,
-      mu_index: payload.muIdx,
-      pulse_train: payload.pulse,
-      fsamp: payload.fs,
+    await requestEditOp(app, action, {
+      mu: payload.muIdx,
       x_start: payload.xStart,
       x_end: payload.xEnd,
       y_min: payload.yMin,
       y_max: payload.yMax,
-      artifact_times:
-        payload.artifact_times !== undefined
-          ? payload.artifact_times
-          : isArtifact
-            ? state.edit.artifactTimes?.[payload.muIdx] || []
-            : undefined,
     });
-    if (data.distimes !== undefined) {
-      setEditDistimesForMu(state, payload.muIdx, data.distimes || []);
-    }
-    if (data.artifact_times !== undefined) {
-      setEditArtifactTimesForMu(
-        state,
-        payload.muIdx,
-        data.artifact_times || [],
-      );
-    }
-    ensureEditFlagged();
-    setEditFlagForMu(state, payload.muIdx, false);
-    const muUid = muUidFor(state, payload.muIdx);
-
-    if (action === "delete-spikes") {
-      // Create separate log entries for spikes and artifacts
-      const distimesAfter = state.edit.distimes?.[payload.muIdx] || [];
-      const { removed: spikesRemoved } = spikesDiff(
-        distimesBefore,
-        distimesAfter,
-      );
-      if (spikesRemoved.length) {
-        app.appendEditHistory({
-          type: "delete_spikes",
-          mu_uid: muUid,
-          spikes_removed: spikesRemoved,
-        });
-      }
-
-      const artifactsAfter = state.edit.artifactTimes?.[payload.muIdx] || [];
-      const { removed: artifactsRemoved } = spikesDiff(
-        artifactsBefore,
-        artifactsAfter,
-      );
-      if (artifactsRemoved.length) {
-        app.appendEditHistory({
-          type: "delete_artifact",
-          mu_uid: muUid,
-          artifacts_removed: artifactsRemoved,
-        });
-      }
-    } else {
-      // Keep existing behavior for other actions
-      /** @type {Record<string, string>} */
-      const typeMap = {
-        "add-spikes": "add_spikes",
-        "delete-dr": "delete_dr",
-        "add-artifact": "add_artifact",
-      };
-      /** @type {EditHistoryEntry} */
-      const entry = { type: typeMap[action] || action, mu_uid: muUid };
-      if (isArtifact) {
-        const artifactsAfter = state.edit.artifactTimes?.[payload.muIdx] || [];
-        const { added: artifactsAdded } = spikesDiff(
-          artifactsBefore,
-          artifactsAfter,
-        );
-        if (artifactsAdded.length) entry.artifacts_added = artifactsAdded;
-      } else {
-        const distimesAfter = state.edit.distimes?.[payload.muIdx] || [];
-        const { added, removed } = spikesDiff(distimesBefore, distimesAfter);
-        if (added.length) entry.spikes_added = added;
-        if (removed.length) entry.spikes_removed = removed;
-      }
-      app.appendEditHistory(entry);
-    }
-
     const bookmarkPos = Math.round(
       (payload.xStart + (payload.xEnd ?? payload.xStart)) / 2,
     );
     setEditBookmarkAndHide(state, payload.muIdx, bookmarkPos);
-
     if (action === "delete-dr") {
       clearEditDrSelections(state);
-      setEditMode(null);
     } else {
       clearEditPulseSelections(state);
-      setEditMode(null);
     }
-    recomputeEditDirty();
+    setEditMode(null);
     renderEditExplorer();
     setEditStatus("ROI applied", "success");
   } catch (err) {
@@ -209,84 +128,30 @@ export async function requestRoiEdit(app, action, payload) {
   }
 }
 
-/**
- * @param {App} app
- * @param {string} mode
- */
-export async function requestFilterUpdate(app, mode) {
-  const {
-    state,
-    els,
-    api,
-    setEditStatus,
-    getRawPulse,
-    backupEditMu,
-    ensureEditFlagged,
-    recomputeEditDirty,
-    refreshEditTotals,
-    renderEditExplorer,
-  } = app;
+/** @param {App} app */
+export async function requestFilterUpdate(app) {
+  const { state, els, setEditStatus, renderEditExplorer } = app;
   if (!state.edit.distimes?.length) return;
   const muIdx = state.edit.currentMu ?? 0;
-  const pulse = getRawPulse(muIdx);
-  if (!pulse.length) {
+  const total = state.edit.totalSamples || 0;
+  if (!total) {
     setEditStatus("No pulse train available", "muted");
     return;
   }
-  const view = state.edit.view || { start: 0, end: pulse.length };
+  const view = state.edit.view || { start: 0, end: total };
   const start = Math.max(0, view.start ?? 0);
-  const end = Math.min(pulse.length, view.end ?? pulse.length);
-  const gridIndex =
-    state.edit.muGridIndex?.[muIdx] ?? state.edit.currentMuGrid ?? 0;
-
-  const distimesBefore = [...(state.edit.distimes?.[muIdx] || [])];
+  const end = Math.min(total, view.end ?? total);
   try {
-    backupEditMu();
     setEditStatus("Updating filter from BIDS EMG...", "muted");
-    const data = await api.editMode(mode, {
-      project: state.edit.project || "",
-      edit_signal_token: state.edit.editSignalToken || "",
-      file_label: state.edit.filename,
-      grid_index: gridIndex,
-      mu_index: muIdx,
-      distimes: state.edit.distimes,
-      mu_grid_index: state.edit.muGridIndex || [],
-      pulse_train: pulse,
+    await requestEditOp(app, "update-filter", {
+      mu: muIdx,
       view_start: start,
       view_end: end,
       use_peeloff: els.editPeelOffToggle?.dataset.state === "on",
       lock_spikes: els.editLockSpikesToggle?.dataset.state === "on",
-      flagged: state.edit.flagged || [],
-      artifact_times: state.edit.artifactTimes?.[muIdx] || [],
+      project: state.edit.project || "",
     });
-    setEditDistimesForMu(state, muIdx, data.distimes || []);
-    if (data.pulse_train && Array.isArray(data.pulse_train)) {
-      setEditPulseTrainForMu(state, muIdx, data.pulse_train);
-    }
-    ensureEditFlagged();
-    setEditFlagForMu(state, muIdx, false);
-    const muUid = muUidFor(state, muIdx);
-    const distimesAfter = state.edit.distimes?.[muIdx] || [];
-    const { added, removed } = spikesDiff(distimesBefore, distimesAfter);
-    const peeloff = els.editPeelOffToggle?.dataset.state === "on";
-    const lockSpikes = els.editLockSpikesToggle?.dataset.state === "on";
-    /** @type {EditHistoryEntry} */
-    const entry = {
-      type: "update_filter",
-      mu_uid: muUid,
-      view_start: start,
-      view_end: end,
-      use_peeloff: peeloff,
-      lock_spikes: lockSpikes,
-    };
-    if (added.length) entry.spikes_added = added;
-    if (removed.length) entry.spikes_removed = removed;
-    app.appendEditHistory(entry);
-
-    const centerPos = Math.round((start + end) / 2);
-    setEditBookmarkAndHide(state, muIdx, centerPos);
-    recomputeEditDirty();
-    refreshEditTotals();
+    setEditBookmarkAndHide(state, muIdx, Math.round((start + end) / 2));
     renderEditExplorer();
     setEditStatus("MU filter updated", "success");
   } catch (err) {
@@ -296,60 +161,22 @@ export async function requestFilterUpdate(app, mode) {
 
 /** @param {App} app */
 export async function removeOutliers(app) {
-  const {
-    state,
-    api,
-    setEditStatus,
-    getRawPulse,
-    backupEditMu,
-    ensureEditFlagged,
-    recomputeEditDirty,
-    renderEditExplorer,
-  } = app;
-
+  const { state, setEditStatus, renderEditExplorer } = app;
   const muIdx = state.edit.currentMu ?? 0;
-  const spikes = state.edit.distimes?.[muIdx] || [];
-  if (spikes.length < 3) {
+  if ((state.edit.distimes?.[muIdx]?.length ?? 0) < 3) {
     setEditStatus("Not enough spikes for outlier removal", "muted");
-    return;
-  }
-  backupEditMu();
-  const pulse = getRawPulse(muIdx);
-  if (!pulse.length) {
-    setEditStatus("No pulse train available", "muted");
     return;
   }
   try {
     setEditStatus("Removing outliers...", "muted");
-    const data = await api.editRemoveOutliers({
-      distimes: state.edit.distimes,
-      mu_index: muIdx,
-      pulse_train: pulse,
-      fsamp: state.edit.fsamp || 0,
-    });
-    setEditDistimesForMu(state, muIdx, data.distimes || []);
-    ensureEditFlagged();
-    setEditFlagForMu(state, muIdx, false);
-    if ((data.removed_count || 0) > 0) {
-      const muUid = muUidFor(state, muIdx);
-      const distimesAfter = state.edit.distimes?.[muIdx] || [];
-      const { removed } = spikesDiff(spikes, distimesAfter);
-      app.appendEditHistory({
-        type: "remove_outliers",
-        mu_uid: muUid,
-        spikes_removed: removed,
-      });
-    }
-    const distimesAfter = state.edit.distimes?.[muIdx] || [];
-    const centerPos = distimesAfter.length
-      ? Math.round(
-          (distimesAfter[0] + distimesAfter[distimesAfter.length - 1]) / 2,
-        )
-      : Math.round(pulse.length / 2);
+    const meta = await requestEditOp(app, "remove-outliers", { mu: muIdx });
+    const after = state.edit.distimes[muIdx];
+    const centerPos = after.length
+      ? Math.round((after[0] + after[after.length - 1]) / 2)
+      : Math.round((state.edit.totalSamples || 0) / 2);
     setEditBookmarkAndHide(state, muIdx, centerPos);
-    recomputeEditDirty();
     renderEditExplorer();
-    if ((data.removed_count || 0) > 0) {
+    if ((meta.removed_count || 0) > 0) {
       setEditStatus("Outliers removed", "success");
     } else {
       setEditStatus("No outliers detected", "muted");
@@ -361,53 +188,20 @@ export async function removeOutliers(app) {
 
 /** @param {App} app */
 export async function removeDuplicateMus(app) {
-  const {
-    state,
-    api,
-    setEditStatus,
-    ensureEditFlagged,
-    recomputeEditDirty,
-    renderEditExplorer,
-  } = app;
-
-  const distimes = state.edit.distimes || [];
-  if (distimes.length < 2) {
+  const { state, setEditStatus, renderEditExplorer } = app;
+  if ((state.edit.distimes?.length ?? 0) < 2) {
     setEditStatus("Need at least 2 MUs to deduplicate", "muted");
     return;
   }
   try {
     setEditStatus("Removing duplicates...", "muted");
-    const data = await api.editRemoveDuplicates({
-      distimes: state.edit.distimes,
-      fsamp: state.edit.fsamp,
-      total_samples: state.edit.totalSamples || 0,
-      mu_grid_index: state.edit.muGridIndex || [],
-      parameters: state.edit.parameters || {},
-    });
-
-    /** @type {number[]} */
-    const keptIdx = data.kept_indices || [];
-    if (keptIdx.length === distimes.length) {
+    const meta = await requestEditOp(app, "remove-duplicates");
+    const removedCount = Number(meta.removed_count) || 0;
+    if (!removedCount) {
       setEditStatus("No duplicates found", "muted");
       return;
     }
-
-    const keptSet = new Set(keptIdx);
-    ensureEditFlagged();
-    const removedUids = (state.edit.muUids || []).filter(
-      (_, i) => !keptSet.has(i),
-    );
-    keepEditMus(state, keptIdx);
     setShowBookmark(state, false);
-
-    const removedCount = distimes.length - keptIdx.length;
-    app.appendEditHistory({
-      type: "remove_duplicates",
-      removed_count: removedCount,
-      removed_mu_uids: removedUids,
-    });
-
-    recomputeEditDirty();
     renderEditExplorer();
     setEditStatus(
       `${removedCount} duplicate${removedCount !== 1 ? "s" : ""} removed`,
@@ -420,46 +214,20 @@ export async function removeDuplicateMus(app) {
 
 /** @param {App} app */
 export async function flagMuForDeletion(app) {
-  const {
-    state,
-    api,
-    setEditStatus,
-    getRawPulse,
-    backupEditMu,
-    ensureEditFlagged,
-    recomputeEditDirty,
-    renderEditExplorer,
-  } = app;
-
+  const { state, setEditStatus, renderEditExplorer } = app;
   const muIdx = state.edit.currentMu ?? 0;
-  const pulse = getRawPulse(muIdx);
-  if (!pulse.length) {
+  if (!state.edit.distimes?.length) {
     setEditStatus("No MU loaded", "muted");
     return;
   }
-  ensureEditFlagged();
-  const targetFlag = !state.edit.flagged[muIdx];
-  backupEditMu();
+  const targetFlag = !state.edit.flagged?.[muIdx];
   try {
     setEditStatus(
       targetFlag ? "Flagging MU for deletion..." : "Unflagging MU...",
       "muted",
     );
-    const data = await api.editFlagMu({
-      distimes: state.edit.distimes,
-      mu_index: muIdx,
-      flag: targetFlag,
-    });
-    setEditFlagForMu(state, muIdx, data.flagged !== false);
-    const muUid = muUidFor(state, muIdx);
-    app.appendEditHistory({
-      type: "flag_mu",
-      mu_uid: muUid,
-      flagged: data.flagged !== false,
-    });
-
+    await requestEditOp(app, "flag", { mu: muIdx, flag: targetFlag });
     setShowBookmark(state, false);
-    recomputeEditDirty();
     renderEditExplorer();
     setEditStatus(
       targetFlag ? "MU flagged for deletion" : "MU unflagged",
@@ -471,78 +239,108 @@ export async function flagMuForDeletion(app) {
 }
 
 /** @param {App} app */
+export async function undoEdit(app) {
+  const { state, setEditStatus, renderEditExplorer } = app;
+  if (!state.edit.canUndo) {
+    setEditStatus("Nothing to undo", "muted");
+    return;
+  }
+  try {
+    await requestEditOp(app, "undo");
+    clearAllEditSelections(state);
+    renderEditExplorer();
+    setEditStatus("Undo applied", "success");
+  } catch (err) {
+    handleError(err, setEditStatus, "Undo failed");
+  }
+}
+
+/** @param {App} app */
+export async function resetCurrentMuEdits(app) {
+  const { state, setEditStatus, renderEditExplorer } = app;
+  if (!state.edit.distimes?.length) return;
+  try {
+    await requestEditOp(app, "reset", { mu: state.edit.currentMu ?? 0 });
+    clearAllEditSelections(state);
+    renderEditExplorer();
+  } catch (err) {
+    handleError(err, setEditStatus, "Reset failed");
+  }
+}
+
+/** @param {App} app */
+export async function duplicateMu(app) {
+  const { state, setEditStatus, renderEditExplorer } = app;
+  if (!state.edit.distimes?.length) {
+    setEditStatus("No MU loaded", "muted");
+    return;
+  }
+  try {
+    const meta = await requestEditOp(app, "duplicate", {
+      mu: state.edit.currentMu ?? 0,
+    });
+    const newIdx = Number(meta.changed?.[0] ?? state.edit.distimes.length - 1);
+    setEditCurrentMuGrid(state, state.edit.muGridIndex[newIdx] ?? 0, {
+      resetView: false,
+    });
+    setEditCurrentMu(state, newIdx, { resetView: false });
+    renderEditExplorer();
+    setEditStatus(`MU duplicated — now editing MU ${newIdx + 1}`, "success");
+  } catch (err) {
+    handleError(err, setEditStatus, "Duplicate failed");
+  }
+}
+
+/** @param {string} filename */
+function entityLabelOf(filename) {
+  const stem = filename.replace(/\.[^.]+$/, "");
+  return stem.includes("_grid-")
+    ? stem.split("_grid-")[0]
+    : stem.replace(/(_decomp|_edited)+$/, "");
+}
+
+/** @param {App} app */
 export async function saveEditedFile(app) {
   const {
     state,
-    persistNpzBySaveTarget,
+    api,
+    withBidsSaveFields,
     getBidsMuscleNames,
     setEditStatus,
-    recomputeEditDirty,
     renderEditExplorer,
   } = app;
 
-  const distimes = state.edit.distimes || [];
-  if (!distimes.length) {
+  if (!state.edit.distimes?.length || !state.edit.token) {
     setEditStatus("Load a decomposition first", "error");
     return;
   }
-  const muscleNames = getBidsMuscleNames();
-  const totalSamples =
-    state.edit.totalSamples ||
-    (state.edit.pulseTrains?.[0]?.length ?? 0) ||
-    totalSamplesFromDistimes(distimes);
-  const originalFilename = state.edit.filename || "decomposition";
-  const originalStem = originalFilename.replace(/\.[^.]+$/, "");
-  const entityLabel = originalStem.includes("_grid-")
-    ? originalStem.split("_grid-")[0]
-    : originalStem.replace(/(_decomp|_edited)+$/, "");
-  const payload = {
-    distimes,
-    flagged: state.edit.flagged || [],
-    total_samples: totalSamples,
-    fsamp: state.edit.fsamp,
-    grid_names: state.edit.gridNames,
-    mu_grid_index: state.edit.muGridIndex,
-    mu_uids: state.edit.muUids || [],
-    parameters: state.edit.parameters,
-    muscle: muscleNames,
-    edit_history: state.edit.editHistory || [],
-    artifact_times: distimes.map((_, i) => {
-      const times = state.edit.artifactTimes?.[i];
-      return Array.isArray(times) ? times : [];
-    }),
-    entity_label: entityLabel,
-    file_label: getSuggestedNpzName(
-      state.edit.filename || "decomposition",
-      "_edited",
-    ),
-    edit_signal_token: state.edit.editSignalToken || "",
-    software_versions: state.edit.softwareVersions || null,
-  };
+  const filename = state.edit.filename || "decomposition";
+  const before = state.edit.distimes.length;
   try {
     setEditStatus("Saving edited file...", "muted");
-    const saved = await persistNpzBySaveTarget(
-      payload,
-      payload.file_label,
-      state.edit.pulseTrains || [],
+    const saved = await api.editSessionSave(
+      withBidsSaveFields({
+        token: state.edit.token,
+        muscle: getBidsMuscleNames(),
+        entity_label: entityLabelOf(filename),
+        file_label: getSuggestedNpzName(filename, "_edited"),
+        software_versions: state.edit.softwareVersions || null,
+      }),
     );
     // Mirror the saved file: the backend drops flagged and duplicate MUs and logs it.
-    if (Array.isArray(saved?.editHistory)) {
-      setEditHistory(state, saved.editHistory);
-    }
-    const kept = saved?.keptIndices;
+    applyEditSave(state, saved);
+    app.refreshEditModeButtons();
+    const kept = saved?.kept_indices;
     if (
       Array.isArray(kept) &&
-      (kept.length !== distimes.length || kept.some((k, i) => k !== i))
+      (kept.length !== before ||
+        kept.some(
+          (/** @type {number} */ k, /** @type {number} */ i) => k !== i,
+        ))
     ) {
-      keepEditMus(state, kept);
       renderEditExplorer();
     }
-    setEditOriginalDistimes(
-      state,
-      (state.edit.distimes || []).map((d) => [...d]),
-    );
-    recomputeEditDirty();
+    app.setStatus("Saved", "success");
     setEditStatus(
       saved?.path
         ? `Edited decomposition saved to ${saved.path}`
@@ -555,26 +353,138 @@ export async function saveEditedFile(app) {
 }
 
 /**
+ * Where to resume: the MU, view and bookmark of the last logged edit that
+ * names an MU still in the file.
+ *
+ * @param {State} state
+ */
+function resumePosition(state) {
+  const total = state.edit.totalSamples || 0;
+  const lastEntry = [...(state.edit.editHistory || [])]
+    .reverse()
+    .find((e) => e.mu_uid);
+  let targetMu = 0;
+  let targetView = { start: 0, end: total };
+  /** @type {Bookmark | null} */
+  let targetBookmark = null;
+  const idx = lastEntry?.mu_uid
+    ? (state.edit.muUids || []).indexOf(lastEntry.mu_uid)
+    : -1;
+  if (lastEntry && idx !== -1) {
+    targetMu = idx;
+    const viewStart = lastEntry.view_start;
+    const viewEnd = lastEntry.view_end;
+    if (
+      typeof viewStart === "number" &&
+      typeof viewEnd === "number" &&
+      Number.isFinite(viewStart) &&
+      Number.isFinite(viewEnd)
+    ) {
+      targetView = { start: viewStart, end: viewEnd };
+      targetBookmark = {
+        muIdx: idx,
+        position: Math.round((viewStart + viewEnd) / 2),
+      };
+    } else {
+      const positions = [
+        ...(lastEntry.spikes_added || []),
+        ...(lastEntry.spikes_removed || []),
+        ...(lastEntry.artifacts_added || []),
+        ...(lastEntry.artifacts_removed || []),
+      ];
+      if (positions.length) {
+        const mean = Math.round(
+          positions.reduce((a, b) => a + b, 0) / positions.length,
+        );
+        const halfSpan = Math.min(
+          Math.round(total * 0.1),
+          (state.edit.fsamp || 2048) * 2,
+        );
+        targetView = {
+          start: Math.max(0, mean - halfSpan),
+          end: Math.min(total, mean + halfSpan),
+        };
+        targetBookmark = {
+          muIdx: idx,
+          position: Math.round((targetView.start + targetView.end) / 2),
+        };
+      }
+    }
+  }
+  return { targetMu, targetView, targetBookmark };
+}
+
+/**
+ * Show an edit session the server sent: its fields, grids and MUs, resuming
+ * where its log says the user stopped.
+ *
+ * @param {App} app
+ * @param {FileRef} file
+ * @param {EditSessionFrame} frame
+ */
+function showEditSession(app, file, frame) {
+  const { state, els, applySessionInfoFromDecomposition } = app;
+  const { meta } = frame;
+  const resolvedGridNames = normalizeGridNames(meta.grid_names, {
+    minimumCount: inferGridCount({
+      gridNames: meta.grid_names,
+      muGridIndex: meta.mu_grid_index,
+      muscles: meta.muscle,
+    }),
+  });
+  setGridNames(state, resolvedGridNames);
+  setEditGridNames(state, resolvedGridNames);
+  applySessionInfoFromDecomposition(file, meta);
+  const loadedProject = String(meta.project || "").trim();
+  if (els.bidsProject) els.bidsProject.value = loadedProject;
+  setEditProject(state, loadedProject);
+  setEditFile(state, file);
+  setEditFilename(state, file.name || meta.file_label || "decomposition");
+  setEditSession(state, frame);
+  rememberSessionToken(state.edit.token);
+
+  const { targetMu, targetView, targetBookmark } = resumePosition(state);
+  const targetGrid = (state.edit.muGridIndex || [])[targetMu] ?? 0;
+  setEditCurrentMuGrid(state, targetGrid, { resetView: false });
+  setEditCurrentMu(state, targetMu, { resetView: false });
+  setEditView(state, targetView);
+  if (targetBookmark) {
+    setEditBookmark(state, targetBookmark);
+    setShowBookmark(state, true);
+  }
+  clearAllEditSelections(state);
+  app.refreshEditModeButtons();
+  if (els.editSaveBtn) els.editSaveBtn.disabled = false;
+  app.showWorkspace({ keepLandingVisible: true });
+  app.switchStage("edit");
+  app.renderBidsMuscleFields?.();
+  app.renderEditExplorer();
+  if (els.landing) els.landing.classList.add("hidden");
+}
+
+/**
+ * Ask whether to replay the unsaved edits an earlier session left for the file.
+ *
+ * @param {number} count
+ */
+function confirmRecovery(count) {
+  const ask = globalThis.window?.confirm;
+  return (
+    typeof ask === "function" &&
+    ask(
+      `${count} unsaved edit${count !== 1 ? "s" : ""} to this file were left from an ` +
+        "earlier session. Restore them?",
+    )
+  );
+}
+
+/**
  * @param {App} app
  * @param {FileRef} file
  * @param {string} filepath
  */
 export async function loadDecompositionForEdit(app, file, filepath) {
-  const {
-    state,
-    api,
-    applySessionInfoFromDecomposition,
-    ensureEditFlagged,
-    recomputeEditDirty,
-    showWorkspace,
-    switchStage,
-    renderEditExplorer,
-    renderBidsMuscleFields,
-    setUploadLoading,
-    setEditStatus,
-    resetEditState,
-    els,
-  } = app;
+  const { state, api, setUploadLoading, setEditStatus, resetEditState } = app;
 
   if (!filepath) return;
   setUploadLoading(true);
@@ -582,156 +492,45 @@ export async function loadDecompositionForEdit(app, file, filepath) {
   setEditGridNames(state, []);
   setMuscle(state, []);
   try {
-    const data = normalizeEditLoadPayload(await api.editLoadByPath(filepath));
-    const resolvedGridNames = normalizeGridNames(data.grid_names, {
-      minimumCount: inferGridCount({
-        gridNames: data.grid_names,
-        muGridIndex: data.mu_grid_index,
-        muscles: data.muscle,
-      }),
-    });
-    setGridNames(state, resolvedGridNames);
-    setEditGridNames(state, resolvedGridNames);
-    applySessionInfoFromDecomposition(file, data);
-    const loadedProject = String(data?.project || "").trim();
-    if (els.bidsProject) els.bidsProject.value = loadedProject;
-    setEditProject(state, loadedProject);
-    setEditSignalToken(state, data.edit_signal_token || "");
-    setEditFile(state, file);
-    setEditFilename(state, file.name || data.file_label || "decomposition");
-    setEditPulseTrains(
-      state,
-      data.pulse_trains_full || data.pulse_trains || [],
-    );
-    setEditOriginalPulseTrains(
-      state,
-      (state.edit.pulseTrains || []).map((row) => (row ? [...row] : row)),
-    );
-    const dist = data.distime_all || data.distime || [];
-    setEditDistimes(
-      state,
-      dist.map((d) =>
-        (d || []).map((v) => Number(v)).filter((v) => Number.isFinite(v)),
-      ),
-    );
-    setEditOriginalDistimes(
-      state,
-      (state.edit.distimes || []).map((d) => [...d]),
-    );
-    setEditMuGridIndex(state, data.mu_grid_index || []);
-    if (!state.edit.muGridIndex.length && state.edit.distimes.length) {
-      setEditMuGridIndex(
-        state,
-        state.edit.distimes.map(() => 0),
-      );
+    let frame = await api.editOpen(filepath);
+    const recoverable = Number(frame.meta.recoverable_edits) || 0;
+    let recovered = 0;
+    if (recoverable > 0) {
+      const token = String(frame.meta.token || "");
+      frame = await api.editRecover(token, confirmRecovery(recoverable));
+      recovered = Number(frame.meta.recovered_edits) || 0;
     }
-    setEditMuUids(
-      state,
-      Array.isArray(data.mu_uids) &&
-        data.mu_uids.length === state.edit.distimes.length
-        ? data.mu_uids
-        : generateMuUids(state.edit.muGridIndex),
-    );
-    setEditHistory(
-      state,
-      Array.isArray(data.edit_history) ? data.edit_history : [],
-    );
-    setEditArtifactTimes(
-      state,
-      Array.isArray(data.artifact_times) ? data.artifact_times : [],
-    );
-    setEditFsamp(state, data.fsamp);
-    setEditParameters(state, data.parameters || {});
-    setEditTotalSamples(
-      state,
-      data.total_samples || (state.edit.pulseTrains?.[0]?.length ?? 0),
-    );
-    ensureEditFlagged();
-    setEditFlaggedArray(
-      state,
-      state.edit.distimes.map(() => false),
-    );
-    setEditBackup(state, null);
-
-    // Restore last session from the most recent history entry that names a MU
-    const total = state.edit.totalSamples || 0;
-    const lastEntry = [...(state.edit.editHistory || [])]
-      .reverse()
-      .find((e) => e.mu_uid);
-    let targetMu = 0;
-    let targetView = { start: 0, end: total };
-    /** @type {Bookmark | null} */
-    let targetBookmark = null;
-    if (lastEntry?.mu_uid) {
-      const idx = (state.edit.muUids || []).indexOf(lastEntry.mu_uid);
-      const viewStart = lastEntry.view_start;
-      const viewEnd = lastEntry.view_end;
-      const hasView =
-        typeof viewStart === "number" &&
-        typeof viewEnd === "number" &&
-        Number.isFinite(viewStart) &&
-        Number.isFinite(viewEnd);
-      if (idx !== -1) {
-        targetMu = idx;
-        if (hasView) {
-          targetView = { start: viewStart, end: viewEnd };
-        } else {
-          const positions = [
-            ...(lastEntry.spikes_added || []),
-            ...(lastEntry.spikes_removed || []),
-            ...(lastEntry.artifacts_added || []),
-            ...(lastEntry.artifacts_removed || []),
-          ];
-          if (positions.length) {
-            const mean = Math.round(
-              positions.reduce((a, b) => a + b, 0) / positions.length,
-            );
-            const halfSpan = Math.min(
-              Math.round(total * 0.1),
-              (state.edit.fsamp || 2048) * 2,
-            );
-            targetView = {
-              start: Math.max(0, mean - halfSpan),
-              end: Math.min(total, mean + halfSpan),
-            };
-            targetBookmark = {
-              muIdx: idx,
-              position: Math.round((targetView.start + targetView.end) / 2),
-            };
-          }
-        }
-        if (hasView && !targetBookmark) {
-          const centerPos = Math.round((viewStart + viewEnd) / 2);
-          targetBookmark = { muIdx: idx, position: centerPos };
-        }
-      }
-    }
-    const targetGrid = (state.edit.muGridIndex || [])[targetMu] ?? 0;
-    setEditCurrentMuGrid(state, targetGrid, { resetView: false });
-    setEditCurrentMu(state, targetMu, { resetView: false });
-    setEditView(state, targetView);
-    if (targetBookmark) {
-      setEditBookmark(state, targetBookmark);
-      setShowBookmark(state, true);
-    }
-    clearAllEditSelections(state);
-    recomputeEditDirty();
-    if (els.editSaveBtn) els.editSaveBtn.disabled = false;
+    showEditSession(app, file, frame);
     setEditStatus(
-      "Loaded. You can start interacting with the pulse train.",
+      recovered
+        ? `Loaded, with ${recovered} unsaved edit${recovered !== 1 ? "s" : ""} restored.`
+        : "Loaded. You can start interacting with the pulse train.",
       "success",
     );
-    showWorkspace({ keepLandingVisible: true });
-    switchStage("edit");
-    if (typeof renderBidsMuscleFields === "function") {
-      renderBidsMuscleFields();
-    }
-    renderEditExplorer();
-    if (els.landing) els.landing.classList.add("hidden");
   } catch (err) {
     handleError(err, setEditStatus, "Failed to load");
     resetEditState();
   } finally {
     setUploadLoading(false);
+  }
+}
+
+/**
+ * Pick up the edit session this page had open before it was reloaded (a
+ * WebView that crashed); nothing happens when there was none or it is gone.
+ *
+ * @param {App} app
+ */
+export async function restoreEditSession(app) {
+  const token = rememberedSessionToken();
+  if (!token) return false;
+  try {
+    const frame = await app.api.editSessionState(token);
+    showEditSession(app, { name: String(frame.meta.file_label || "") }, frame);
+    app.setEditStatus("Edit session restored", "success");
+    return true;
+  } catch {
+    forgetSessionToken();
+    return false;
   }
 }

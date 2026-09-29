@@ -6,8 +6,6 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from muedit.decomp.types import DEFAULT_NBEXTCHAN, DEFAULT_PEEL_OFF_WIN_SEC
-
 
 class PathPayload(BaseModel):
     """Path-based request body used by path-loading endpoints."""
@@ -21,31 +19,14 @@ class QcAutoPayload(BaseModel):
     upload_token: str
 
 
-class EditSavePayload(BaseModel):
-    """Typed request body for persisting edited decomposition outputs."""
+class BidsSaveFields(BaseModel):
+    """Where and how a save writes its BIDS files: the session form's fields."""
 
-    distimes: list[list[int]] | None = None
-    discharge_times: list[list[int]] | None = None
-    flagged: list[bool] | None = None
-    remove_flagged: bool | None = None
-    remove_duplicates: bool | None = None
-    # Pulse trains travel as a MUB1 frame array, or stay on the server under this token.
-    run_result_token: str | None = None
-    total_samples: int
-    fsamp: float | None = None
-    grid_names: list[str] | None = None
-    mu_grid_index: list[int] | None = None
-    mu_uids: list[str] | None = None
-    parameters: dict[str, Any] | None = None
     muscle: list[str] | str | None = None
     muscle_names: list[str] | str | None = None  # deprecated alias for ``muscle``
     project: str | None = None
     file_label: str | None = None
     entity_label: str | None = None
-    edit_history: list[dict[str, Any]] | None = None
-    artifact_times: list[list[int]] | None = None
-    artifact_regions: list[Any] | None = None
-    edit_signal_token: str | None = None
     participant_meta: dict[str, Any] | None = None
     powerline_freq: float | None = None
     manufacturer: str | None = None
@@ -54,67 +35,65 @@ class EditSavePayload(BaseModel):
     placement_scheme_description: str | None = None
     task_description: str | None = None
     software_versions: str | None = None
+    remove_flagged: bool | None = None
+    remove_duplicates: bool | None = None
 
 
-class EditFilterPayload(BaseModel):
-    """Typed request body for update-filter endpoint."""
+class EditSavePayload(BidsSaveFields):
+    """A save of discharge times sent by the client: the run save.
 
-    project: str | None = None
-    edit_signal_token: str | None = None
-    file_label: str | None = None
-    entity_label: str | None = None
-    grid_index: int = 0
-    mu_index: int = 0
-    distimes: list[list[int]]
-    mu_grid_index: list[int] | None = None
-    pulse_train: list[float] | None = None
-    view_start: int = 0
-    view_end: int = 0
-    nbextchan: int = DEFAULT_NBEXTCHAN
-    peel_off_win: float = DEFAULT_PEEL_OFF_WIN_SEC
-    use_peeloff: bool = False
-    lock_spikes: bool = False
+    Pulse trains travel as a MUB1 frame array, or stay on the server under
+    ``run_result_token``, which also supplies the discharge times when none are sent.
+    """
+
+    distimes: list[list[int]] | None = None
+    discharge_times: list[list[int]] | None = None
     flagged: list[bool] | None = None
-    artifact_times: list[int] | None = None
-
-
-class EditRoiPayload(BaseModel):
-    """Typed request body for ROI edit actions (add/delete spikes, delete-dr, add-artifact)."""
-
-    distimes: list[list[int]]
-    mu_index: int = 0
-    pulse_train: list[float] | None = None
+    run_result_token: str | None = None
+    total_samples: int
     fsamp: float | None = None
-    x_start: int = 0
-    x_end: int = 0
+    grid_names: list[str] | None = None
+    mu_grid_index: list[int] | None = None
+    mu_uids: list[str] | None = None
+    parameters: dict[str, Any] | None = None
+    edit_history: list[dict[str, Any]] | None = None
+    artifact_times: list[list[int]] | None = None
+    artifact_regions: list[Any] | None = None
+
+
+class EditSessionPayload(BaseModel):
+    """Names an open edit session."""
+
+    token: str
+
+
+class EditSessionSavePayload(BidsSaveFields):
+    """Save of an edit session: everything but the form fields is on the server."""
+
+    token: str
+
+
+class EditRecoverPayload(BaseModel):
+    """Replay (or drop) the unsaved edits a previous session left for the open file."""
+
+    token: str
+    apply: bool = True
+
+
+class EditOpPayload(BaseModel):
+    """One edit of an open session; each operation reads the fields it needs."""
+
+    token: str
+    mu: int | None = None
+    x_start: int | None = None
+    x_end: int | None = None
     y_min: float | None = None
     y_max: float | None = None
-    artifact_times: list[int] | None = None
-
-
-class EditOutliersPayload(BaseModel):
-    """Typed request body for discharge-rate outlier removal."""
-
-    distimes: list[list[int]]
-    mu_index: int = 0
-    pulse_train: list[float] | None = None
-    fsamp: float | None = None
-
-
-class EditDeduplicatePayload(BaseModel):
-    """Typed request body for duplicate motor-unit removal."""
-
-    distimes: list[list[int]]
-    fsamp: float | None = None
-    total_samples: int = 0
-    parameters: dict[str, Any] | None = None
-    mu_grid_index: list[int] | None = None
-    pulse_trains: list[list[float]] | None = None
-
-
-class EditFlagPayload(BaseModel):
-    """Typed request body for flagging a motor unit for deletion."""
-
-    distimes: list[list[int]]
-    mu_index: int = 0
+    view_start: int | None = None
+    view_end: int | None = None
+    use_peeloff: bool | None = None
+    lock_spikes: bool | None = None
     flag: bool | None = None
+    project: str | None = None
+    nbextchan: int | None = None
+    peel_off_win: float | None = None

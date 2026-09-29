@@ -650,8 +650,14 @@ def _shift_distimes(values: list[list[int]], shift: int, limit: int) -> list[lis
     return shifted
 
 
-def _finish_decomposition(d: DecompositionLoad, one_based: bool) -> LoadedDecomposition:
-    """Flatten per-grid layouts and fill what the file leaves out, for the edit stage."""
+def _finish_decomposition(
+    d: DecompositionLoad, one_based: bool, binary_trains: bool = True
+) -> LoadedDecomposition:
+    """Flatten per-grid layouts and fill what the file leaves out, for the edit stage.
+
+    Without pulse trains in the file, ``binary_trains`` draws them from the discharge times;
+    otherwise ``pulse_trains_full`` is left empty.
+    """
     if d.one_row_per_mu:
         pulse_trains, distimes, mu_grid_index = d.pulse_trains, d.distime_raw, d.mu_grid_index
     else:
@@ -681,7 +687,11 @@ def _finish_decomposition(d: DecompositionLoad, one_based: bool) -> LoadedDecomp
 
     pulse_matrix = _coerce_pulse_matrix(pulse_trains)
     if pulse_matrix is None or (pulse_matrix.size == 0 and distimes):
-        pulse_matrix = build_pulse_trains_from_distimes(distimes, total_samples)
+        pulse_matrix = (
+            build_pulse_trains_from_distimes(distimes, total_samples)
+            if binary_trains
+            else np.zeros((0, 0), dtype=np.float32)
+        )
     if not distimes:
         distimes = _distimes_from_pulse_matrix(pulse_matrix)
 
@@ -978,9 +988,16 @@ def _mat5_signal_context(mat: dict[str, Any], store: ArrayStore) -> EditSignalCo
 
 
 def load_decomposition(
-    filepath: str, store: ArrayStore | None = None, *, with_signal: bool = True
+    filepath: str,
+    store: ArrayStore | None = None,
+    *,
+    with_signal: bool = True,
+    binary_trains: bool = True,
 ) -> tuple[LoadedDecomposition, EditSignalContext | None]:
-    """Read a .npz or .mat decomposition once: the decomposition, and its EMG context into ``store``."""
+    """Read a .npz or .mat decomposition once: the decomposition, and its EMG context into ``store``.
+
+    ``binary_trains=False`` leaves ``pulse_trains_full`` empty for a file without pulse trains.
+    """
     store = store if store is not None else RamStore()
     ext = Path(filepath).suffix.lower()
     ctx: EditSignalContext | None = None
@@ -1002,7 +1019,7 @@ def load_decomposition(
                 ctx = _mat5_signal_context(mat, store)
     else:
         raise ValueError("Unsupported decomposition format. Expected .mat or .npz")
-    return _finish_decomposition(d, one_based=ext == ".mat"), ctx
+    return _finish_decomposition(d, one_based=ext == ".mat", binary_trains=binary_trains), ctx
 
 
 def load_decomposition_file(filepath: str) -> LoadedDecomposition:

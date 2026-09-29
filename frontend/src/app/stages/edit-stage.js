@@ -1,20 +1,10 @@
 import {
-  ensureEditFlagged as ensureEditFlaggedFeature,
-  getRawPulse as getRawPulseFeature,
-  getDisplayPulse as getDisplayPulseFeature,
-  backupEditMu as backupEditMuFeature,
-  restoreEditBackup as restoreEditBackupFeature,
-  recomputeEditDirty as recomputeEditDirtyFeature,
-  getEditTotalSamples as getEditTotalSamplesFeature,
   getPulseViewMeta as getPulseViewMetaFeature,
-  refreshEditTotals as refreshEditTotalsFeature,
   resetEditState as resetEditStateFeature,
   addSpikesInSelection as addSpikesInSelectionFeature,
   addArtifactInSelection as addArtifactInSelectionFeature,
   deleteSpikesInSelection as deleteSpikesInSelectionFeature,
   deleteDrInSelection as deleteDrInSelectionFeature,
-  resetCurrentMuEdits as resetCurrentMuEditsFeature,
-  duplicateMu as duplicateMuFeature,
   buildEditDropdownModel,
 } from "../../editing/operations.js";
 import {
@@ -34,17 +24,23 @@ import {
   removeOutliers as removeOutliersFeature,
   flagMuForDeletion as flagMuForDeletionFeature,
   removeDuplicateMus as removeDuplicateMusFeature,
+  resetCurrentMuEdits as resetCurrentMuEditsFeature,
+  duplicateMu as duplicateMuFeature,
+  undoEdit as undoEditFeature,
+  restoreEditSession as restoreEditSessionFeature,
 } from "../services/editing-service.js";
 import {
-  appendEditHistoryEntry,
   setEditMode as setEditModeAction,
   setEditProject,
   setEditCurrentMu,
   setEditCurrentMuGrid,
+  setEditPulseView,
 } from "../../state/actions.js";
 import { getEditMuIndicesForGrid } from "../../state/selectors.js";
 import { getCanvasPlotMetrics } from "../../view/plots.js";
 import { handleKeyboardNavigation } from "../services/navigation.js";
+import { createViewFetcher } from "../services/view-fetcher.js";
+import { errorMessage } from "../services/error-service.js";
 
 /** @typedef {import("../context.js").App} App */
 /** @typedef {import("../context.js").EditStage} EditStage */
@@ -67,7 +63,7 @@ export function createEditStageService(app) {
       els.editDeleteSpikeBtn,
       state.edit.mode === "delete_spikes",
     );
-    if (els.editUndoBtn) els.editUndoBtn.disabled = !state.edit.backup;
+    if (els.editUndoBtn) els.editUndoBtn.disabled = !state.edit.canUndo;
   }
 
   /** @type {EditStage["setEditMode"]} */
@@ -84,53 +80,14 @@ export function createEditStageService(app) {
     return canvas ? getCanvasPlotMetrics(canvas, true).plotHeight || 1 : 1;
   }
 
-  /** @type {EditStage["ensureEditFlagged"]} */
-  function ensureEditFlagged() {
-    ensureEditFlaggedFeature(state);
-  }
-
-  /** @type {EditStage["getRawPulse"]} */
-  function getRawPulse(muIdx) {
-    return getRawPulseFeature(state, muIdx);
-  }
-
-  /** @type {EditStage["getDisplayPulse"]} */
-  function getDisplayPulse(muIdx) {
-    return getDisplayPulseFeature(state, muIdx);
-  }
-
-  /** @type {EditStage["backupEditMu"]} */
-  function backupEditMu() {
-    backupEditMuFeature(state);
-    refreshEditModeButtons();
-  }
-
-  /** @type {EditStage["recomputeEditDirty"]} */
-  function recomputeEditDirty() {
-    recomputeEditDirtyFeature(state);
-  }
-
-  /** @type {EditStage["appendEditHistory"]} */
-  function appendEditHistory(entry) {
-    appendEditHistoryEntry(state, {
-      ...entry,
-      timestamp: new Date().toISOString(),
-    });
-  }
-
-  /** @type {EditStage["getEditTotalSamples"]} */
-  function getEditTotalSamples() {
-    return getEditTotalSamplesFeature(state);
+  /** @param {HTMLCanvasElement} canvas */
+  function plotWidth(canvas) {
+    return getCanvasPlotMetrics(canvas, true).plotWidth || 1;
   }
 
   /** @type {EditStage["getPulseViewMeta"]} */
   function getPulseViewMeta() {
     return getPulseViewMetaFeature(state);
-  }
-
-  /** @type {EditStage["refreshEditTotals"]} */
-  function refreshEditTotals() {
-    refreshEditTotalsFeature(state);
   }
 
   /** @type {EditStage["resetEditState"]} */
@@ -168,15 +125,57 @@ export function createEditStageService(app) {
     renderEditTimelineFeature(app);
   }
 
-  /** @type {EditStage["restoreEditBackup"]} */
-  const restoreEditBackup = () => restoreEditBackupFeature(app);
+  const pulseFetcher = createViewFetcher(
+    (
+      /** @type {{ token: string, mu: number, start: number, end: number, bins: number }} */ params,
+    ) => app.api.fetchPulse(params),
+    (view) => {
+      setEditPulseView(state, view);
+      if (state.currentStage === "edit") renderEditExplorer();
+    },
+    (err) =>
+      app.setEditStatus(`Pulse train failed: ${errorMessage(err)}`, "error"),
+  );
+
+  /** @type {EditStage["ensureEditPulseView"]} */
+  function ensureEditPulseView() {
+    const e = state.edit;
+    const canvas = els.editPulseCanvas;
+    const total = e.totalSamples || 0;
+    const mu = e.currentMu ?? 0;
+    if (!e.token || !canvas || !total || e.distimes?.[mu] === undefined) return;
+    const { start, end } = e.view || { start: 0, end: total };
+    const bins = Math.max(1, Math.round(plotWidth(canvas)));
+    const version = e.versions?.[mu] ?? 0;
+    const shown = e.pulseView;
+    if (
+      shown &&
+      shown.mu === mu &&
+      shown.version === version &&
+      shown.start === start &&
+      shown.end === end &&
+      shown.bins === bins
+    ) {
+      return;
+    }
+    pulseFetcher.want(`${e.token}:${mu}:${version}:${start}:${end}:${bins}`, {
+      token: e.token,
+      mu,
+      start,
+      end,
+      bins,
+    });
+  }
+
+  /** @type {EditStage["undoEdit"]} */
+  const undoEdit = () => undoEditFeature(app);
+  /** @type {EditStage["restoreEditSession"]} */
+  const restoreEditSession = () => restoreEditSessionFeature(app);
   /** @type {EditStage["requestRoiEdit"]} */
   const requestRoiEdit = (action, payload) =>
     requestRoiEditFeature(app, action, payload);
-  /** @type {EditStage["requestFilterUpdate"]} */
-  const requestFilterUpdate = (mode) => requestFilterUpdateFeature(app, mode);
   /** @type {EditStage["updateMuFilter"]} */
-  const updateMuFilter = () => requestFilterUpdate("update-filter");
+  const updateMuFilter = () => requestFilterUpdateFeature(app);
   /** @type {EditStage["addSpikesInSelection"]} */
   const addSpikesInSelection = (sel) => addSpikesInSelectionFeature(app, sel);
   /** @type {EditStage["addArtifactInSelection"]} */
@@ -217,29 +216,22 @@ export function createEditStageService(app) {
 
   return {
     getEditMuIndices,
-    ensureEditFlagged,
-    getRawPulse,
-    getDisplayPulse,
-    backupEditMu,
-    recomputeEditDirty,
-    refreshEditTotals,
-    getEditTotalSamples,
     getPulseViewMeta,
     getPulsePlotHeight: () => plotHeight(els.editPulseCanvas),
     getDrPlotHeight: () => plotHeight(els.editDrCanvas),
-    appendEditHistory,
     resetEditState,
     refreshEditModeButtons,
     setEditMode,
     renderEditDropdowns,
-    restoreEditBackup,
+    undoEdit,
     renderEditExplorer,
+    ensureEditPulseView,
+    restoreEditSession,
     renderInstantaneousDr,
     bindEditCanvas,
     bindEditDrCanvas,
     bindEditTimeline,
     requestRoiEdit,
-    requestFilterUpdate,
     updateMuFilter,
     addSpikesInSelection,
     addArtifactInSelection,
@@ -273,7 +265,7 @@ export function setupEditEvents(app) {
     flagMuForDeletion,
     duplicateMu,
     removeDuplicateMus,
-    restoreEditBackup,
+    undoEdit,
     setEditMode,
     refreshEditModeButtons,
     applyLabeledToggle,
@@ -349,7 +341,7 @@ export function setupEditEvents(app) {
     void runEditAction(els.editDeduplicateBtn, () => removeDuplicateMus());
   });
   els.editUndoBtn?.addEventListener("click", () => {
-    void runEditAction(els.editUndoBtn, () => restoreEditBackup());
+    void runEditAction(els.editUndoBtn, () => undoEdit());
   });
   els.editAddBtn?.addEventListener("click", () => {
     setEditMode("add", "Drag a box on pulse train to add spikes");

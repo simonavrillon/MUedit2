@@ -2,26 +2,9 @@
 /** @typedef {import("../app/context.js").Span} Span */
 
 /**
- * A decomposition file as loaded for editing; fields beyond these pass through.
- *
- * @typedef {JsonObject & {
- *   pulse_trains: number[][],
- *   pulse_trains_full: number[][],
- *   distime_all: number[][],
- *   grid_names: string[],
- *   mu_grid_index: number[],
- *   parameters: JsonObject,
- *   total_samples: number,
- *   fsamp: number | null,
- *   file_label: string,
- *   edit_signal_token: string,
- * }} EditLoadPayload
- */
-
-/**
  * A run's preview; fields beyond these pass through. The overview and aux
  * traces are not read from it: they come from the upload as envelopes
- * (`/series/*`).
+ * (`/series/*`), and the pulse trains from the run (`/series/pulse`).
  *
  * @typedef {JsonObject & {
  *   grid_names: string[],
@@ -30,9 +13,7 @@
  *   coordinates: number[][][],
  *   metadata: JsonObject,
  *   muscle: string[],
- *   pulse_trains_full: number[][],
- *   pulse_trains_all: number[][],
- *   distime_all: number[][],
+ *   distime_all: Int32Array[],
  *   mu_grid_index: number[],
  *   total_samples: number,
  * }} PreviewPayload
@@ -46,6 +27,21 @@
 function toFiniteNumber(value, fallback = 0) {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
+}
+
+/**
+ * One MU's discharge times as an `Int32Array` (a JSON list is converted; a
+ * typed array is kept as it is).
+ *
+ * @param {unknown} row
+ * @returns {Int32Array}
+ */
+export function toSpikeArray(row) {
+  if (row instanceof Int32Array) return row;
+  if (!Array.isArray(row)) return new Int32Array(0);
+  return Int32Array.from(
+    row.map((v) => Number(v)).filter((v) => Number.isFinite(v) && v >= 0),
+  );
 }
 
 /**
@@ -69,55 +65,19 @@ export function toSpans(regions) {
 /**
  * Samples needed to hold every discharge: the last spike + 1, or 1 with none.
  *
- * @param {(number[] | null | undefined)[]} distimes
+ * @param {(ArrayLike<number> | null | undefined)[]} distimes
  * @returns {number}
  */
 export function totalSamplesFromDistimes(distimes) {
   // Not Math.max(...spikes): millions of arguments throw a RangeError.
   let maxSpike = 0;
   for (const mu of distimes) {
-    for (const v of mu || []) {
-      const n = Number(v);
+    for (let i = 0; i < (mu?.length ?? 0); i++) {
+      const n = Number(mu?.[i]);
       if (n > maxSpike) maxSpike = n;
     }
   }
   return maxSpike + 1;
-}
-
-/**
- * @param {unknown} payload
- * @returns {EditLoadPayload}
- */
-export function normalizeEditLoadPayload(payload) {
-  /** @type {JsonObject} */
-  const source = payload && typeof payload === "object" ? payload : {};
-  const distRaw = source.distime_all || source.distime || [];
-  return {
-    ...source,
-    pulse_trains: Array.isArray(source.pulse_trains) ? source.pulse_trains : [],
-    pulse_trains_full: Array.isArray(source.pulse_trains_full)
-      ? source.pulse_trains_full
-      : [],
-    distime_all: Array.isArray(distRaw)
-      ? distRaw.map((row) =>
-          Array.isArray(row)
-            ? row.map((v) => toFiniteNumber(v, NaN)).filter(Number.isFinite)
-            : [],
-        )
-      : [],
-    grid_names: Array.isArray(source.grid_names) ? source.grid_names : [],
-    mu_grid_index: Array.isArray(source.mu_grid_index)
-      ? source.mu_grid_index
-      : [],
-    parameters:
-      source.parameters && typeof source.parameters === "object"
-        ? source.parameters
-        : {},
-    total_samples: toFiniteNumber(source.total_samples, 0),
-    fsamp: source.fsamp ?? null,
-    file_label: String(source.file_label || ""),
-    edit_signal_token: String(source.edit_signal_token || ""),
-  };
 }
 
 /**
@@ -140,13 +100,9 @@ export function normalizePreviewPayload(payload) {
         ? source.metadata
         : {},
     muscle: Array.isArray(source.muscle) ? source.muscle : [],
-    pulse_trains_full: Array.isArray(source.pulse_trains_full)
-      ? source.pulse_trains_full
+    distime_all: Array.isArray(source.distime_all)
+      ? source.distime_all.map(toSpikeArray)
       : [],
-    pulse_trains_all: Array.isArray(source.pulse_trains_all)
-      ? source.pulse_trains_all
-      : [],
-    distime_all: Array.isArray(source.distime_all) ? source.distime_all : [],
     mu_grid_index: Array.isArray(source.mu_grid_index)
       ? source.mu_grid_index
       : [],

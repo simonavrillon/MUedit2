@@ -18,7 +18,7 @@ from starlette.testclient import TestClient
 
 from muedit.api import cache
 from muedit.api.binary import FRAME_FORMAT, FRAME_MEDIA_TYPE, pack_frame, unpack_frame
-from muedit.decomp.decomposition_file import load_decomposition_file
+from muedit.decomp.decomposition_file import load_decomposition_file, unpack_csr
 from tests._synthetic_emg import motor_unit_emg
 from tests.conftest import REPO_ROOT
 
@@ -40,16 +40,14 @@ LIVE_ENDPOINTS: list[tuple[str, str]] = [
     ("POST", "/decompose_stream"),
     ("POST", "/decompose/cancel"),
     ("GET", "/decompose_preview/{token}"),
-    ("POST", "/edit/load-by-path"),
+    ("GET", "/series/pulse"),
+    ("GET", "/spikes"),
+    ("POST", "/edit/session/open"),
+    ("GET", "/edit/session"),
+    ("POST", "/edit/session/recover"),
+    ("POST", "/edit/session/save"),
+    ("POST", "/edit/ops/{op}"),
     ("POST", "/edit/save"),
-    ("POST", "/edit/update-filter"),
-    ("POST", "/edit/add-spikes"),
-    ("POST", "/edit/add-artifact"),
-    ("POST", "/edit/delete-spikes"),
-    ("POST", "/edit/delete-dr"),
-    ("POST", "/edit/remove-outliers"),
-    ("POST", "/edit/remove-duplicates"),
-    ("POST", "/edit/flag-mu"),
     ("POST", "/session/close"),
     ("GET", "/debug/memory"),
 ]
@@ -202,15 +200,14 @@ def mu_run(client: TestClient, workspace: Path) -> dict[str, Any]:
 
 
 @pytest.fixture(scope="module")
-def edit_signal_token(client: TestClient, decomp_npz: Path) -> str:
-    data = _ok(
-        client.post(
-            f"{API}/edit/load-by-path",
-            json={"path": str(decomp_npz)},
-            headers={"x-muedit-binary": "0", SESSION_HEADER: "fixture-edit"},
-        )
+def edit_token(client: TestClient, decomp_npz: Path) -> str:
+    resp = client.post(
+        f"{API}/edit/session/open",
+        json={"path": str(decomp_npz)},
+        headers={SESSION_HEADER: "fixture-edit"},
     )
-    return data["edit_signal_token"]
+    meta, _ = _unpack_frame_response(resp)
+    return meta["token"]
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -336,7 +333,7 @@ class TestSessions:
             "uploads",
             "decompose_previews",
             "run_results",
-            "edit_signal_contexts",
+            "edit_sessions",
         }
         assert budget["used_bytes"] == sum(c["bytes"] for c in budget["caches"].values())
         fixture = next(s for s in budget["sessions"] if s["id"] == "fixture-upload")
@@ -634,120 +631,115 @@ class TestDecomposePreview:
     ) -> None:
         token = mu_run["preview"]["preview_binary_token"]
         meta, arrays = _unpack_frame_response(client.get(f"{API}/decompose_preview/{token}"))
-        assert meta["distime_all"] == mu_run["preview"]["distime_all"]
-        full = arrays["pulse_trains_full"]
-        assert full.dtype == np.float32
-        assert full.shape == (mu_run["summary"]["mu_count"], meta["total_samples"])
-        np.testing.assert_array_equal(
-            full, cache._get_run_result(mu_run["preview"]["run_result_token"])
-        )
-        assert arrays["pulse_trains_all"].shape == (0, 0)
+        # Pulse trains stay on the server; discharge times come as CSR arrays.
+        assert set(arrays) == {"spikes", "spike_offsets"}
+        assert not {"distime_all", "distime", "pulse_trains_full"} & set(meta)
+        run = cache._get_run_result_entry(mu_run["preview"]["run_result_token"])
+        assert run is not None
+        rows = unpack_csr(arrays["spikes"], arrays["spike_offsets"])
+        assert [r.tolist() for r in rows] == [s.tolist() for s in run.spikes]
+        assert len(rows) == mu_run["summary"]["mu_count"]
         _err(client.get(f"{API}/decompose_preview/{token}"), 404)
 
     def test_unknown_token_is_404(self, client: TestClient) -> None:
         _err(client.get(f"{API}/decompose_preview/not-a-token"), 404)
 
-
-# ── /edit/load-by-path ───────────────────────────────────────────────────────
-
-EDIT_LOAD_KEYS = {
-    "distime_all",
-    "edit_signal_token",
-    "file_label",
-    "fsamp",
-    "grid_names",
-    "mu_grid_index",
-    "muscle",
-    "parameters",
-    "rois",
-    "sil",
-    "total_samples",
-}
-
-
-class TestEditLoad:
-    def test_by_path_binary(self, client: TestClient, decomp_npz: Path) -> None:
+    def test_the_explorer_reads_the_runs_pulse_trains(
+        self, client: TestClient, mu_run: dict[str, Any]
+    ) -> None:
+        token = mu_run["preview"]["run_result_token"]
+        run = cache._get_run_result_entry(token)
+        assert run is not None
         meta, arrays = _unpack_frame_response(
-            client.post(f"{API}/edit/load-by-path", json={"path": str(decomp_npz)})
+            client.get(f"{API}/series/pulse", params={"token": token, "mu": 0, "bins": 500})
         )
-        assert set(meta) >= EDIT_LOAD_KEYS | {"project"}
-        assert "pulse_trains_full" not in meta
-        assert meta["file_label"] == decomp_npz.name
-        assert len(meta["distime_all"]) == 2
-        with np.load(decomp_npz) as z:
-            saved = z["pulse_trains"]
-        assert arrays["pulse_trains_full"].dtype == np.float32
-        np.testing.assert_array_equal(arrays["pulse_trains_full"], saved.astype(np.float32))
+        assert meta["kind"] == "envelope"
+        row = np.asarray(run.pulse_trains[0])
+        assert arrays["max"][0].max() == row.max() and arrays["min"][0].min() == row.min()
+        np.testing.assert_array_equal(arrays["spikes"], run.spikes[0])
+        np.testing.assert_array_equal(arrays["spike_values"], row[run.spikes[0]])
+        _, csr = _unpack_frame_response(client.get(f"{API}/spikes", params={"token": token}))
+        assert csr["spike_offsets"][-1] == sum(s.size for s in run.spikes)
 
-    def test_embedded_emg_lives_in_a_store_the_next_load_deletes(
+
+# ── /edit/session ────────────────────────────────────────────────────────────
+
+
+class TestEditSession:
+    def test_embedded_emg_lives_in_a_store_the_next_open_deletes(
         self, client: TestClient, decomp_npz: Path, emg: np.ndarray
     ) -> None:
-        def load() -> Any:
+        def open_session() -> Any:
             meta, _ = _unpack_frame_response(
                 client.post(
-                    f"{API}/edit/load-by-path",
+                    f"{API}/edit/session/open",
                     json={"path": str(decomp_npz)},
                     headers={SESSION_HEADER: "edit-store"},
                 )
             )
-            return cache._EDIT_SIGNAL_CONTEXTS.slots[meta["edit_signal_token"]].value
+            return cache._get_edit_session(meta["token"])
 
-        first = load()
-        assert first.store is not None and first.store.path.is_dir()
-        assert isinstance(first.context.data, np.memmap)
-        np.testing.assert_array_equal(first.context.data, emg.astype(np.float32))
-        second = load()
+        first = open_session()
+        assert first.store.path.is_dir()
+        assert isinstance(first.signal.data, np.memmap)
+        np.testing.assert_array_equal(first.signal.data, emg.astype(np.float32))
+        second = open_session()
         assert not first.store.path.exists()
         assert second.store.path.is_dir()
         cache.close_session("edit-store")
         assert not second.store.path.exists()
 
-    def test_by_path_json(self, client: TestClient, decomp_npz: Path) -> None:
-        data = _ok(
-            client.post(
-                f"{API}/edit/load-by-path",
-                json={"path": str(decomp_npz)},
-                headers={"x-muedit-binary": "0"},
-            )
-        )
-        assert EDIT_LOAD_KEYS | {"pulse_trains_full", "project"} <= set(data)
-        assert np.asarray(data["pulse_trains_full"]).shape == (2, N_SAMPLES)
-
-    def test_by_path_empty_is_400(self, client: TestClient) -> None:
-        assert _err(client.post(f"{API}/edit/load-by-path", json={"path": ""}), 400)["message"] == (
-            "path is required"
-        )
-
-    @pytest.mark.parametrize("header", ["1", "0"], ids=["binary", "json"])
-    def test_by_path_nonexistent_is_404(
-        self,
-        client: TestClient,
-        workspace: Path,
-        header: str,
-    ) -> None:
+    def test_update_filter(self, client: TestClient, edit_token: str) -> None:
         resp = client.post(
-            f"{API}/edit/load-by-path",
-            json={"path": str(workspace / "no.npz")},
-            headers={"x-muedit-binary": header},
+            f"{API}/edit/ops/update-filter",
+            json={
+                "token": edit_token,
+                "mu": 0,
+                "view_start": 500,
+                "view_end": 4000,
+                "nbextchan": 200,
+                "project": "smoke",
+            },
+            headers={SESSION_HEADER: "fixture-edit"},
         )
-        assert _err(resp, 404)["detail"]["field"] == "path"
+        meta, arrays = _unpack_frame_response(resp)
+        assert meta["changed"] == [0]
+        assert meta["history"][-1]["type"] == "update_filter"
+        spikes = arrays["spikes"]
+        assert spikes.tolist() == sorted(spikes.tolist())
 
-    def test_by_path_unsupported_format_is_400(self, client: TestClient, workspace: Path) -> None:
+    def test_open_unsupported_format_is_400(self, client: TestClient, workspace: Path) -> None:
         path = workspace / "recording.otb4"
         path.write_bytes(b"")
-        err = _err(client.post(f"{API}/edit/load-by-path", json={"path": str(path)}), 400)
+        err = _err(client.post(f"{API}/edit/session/open", json={"path": str(path)}), 400)
         assert "Expected .mat or .npz" in err["detail"]["reason"]
+
+    def test_session_save_exports_the_embedded_emg(
+        self, client: TestClient, edit_token: str, workspace: Path
+    ) -> None:
+        data = _ok(
+            client.post(
+                f"{API}/edit/session/save",
+                json={"token": edit_token, "project": "smoke", "remove_duplicates": False},
+                headers={SESSION_HEADER: "fixture-edit"},
+            )
+        )
+        assert data["saved"] is True
+        assert {"path", "bids_emg_paths"} <= set(data)
+        out = Path(data["path"])
+        assert out.is_relative_to(workspace / "smoke")
+        with np.load(out) as z:
+            assert z["pulse_trains"].shape == (2, N_SAMPLES)
 
 
 # ── /edit/save ───────────────────────────────────────────────────────────────
 
 
 class TestEditSave:
-    def test_save_writes_npz_and_bids(
+    def test_save_writes_npz(
         self,
         client: TestClient,
         decomp_npz: Path,
-        edit_signal_token: str,
         workspace: Path,
     ) -> None:
         data = _ok(
@@ -760,13 +752,12 @@ class TestEditSave:
                     "grid_names": [GRID],
                     "project": "smoke",
                     "file_label": decomp_npz.name,
-                    "edit_signal_token": edit_signal_token,
                     "artifact_regions": [[10, 20], {"start": 30, "end": 40}, "junk"],
                 },
             )
         )
         assert data["saved"] is True
-        assert {"path", "bids_emg_paths"} <= set(data)
+        assert "path" in data
         out = Path(data["path"])
         assert out.is_file() and out.suffix == ".npz"
         assert out.is_relative_to(workspace / "smoke")
@@ -811,7 +802,7 @@ class TestEditSave:
             client.post(
                 f"{API}/edit/save",
                 json={
-                    "distimes": preview["distime_all"],
+                    "distimes": [s.tolist() for s in cache._get_run_result_entry(token).spikes],
                     "remove_duplicates": False,
                     "total_samples": preview["total_samples"],
                     "fsamp": FSAMP,
@@ -825,7 +816,31 @@ class TestEditSave:
         )
         with np.load(data["path"]) as z:
             np.testing.assert_array_equal(z["pulse_trains"], stored)
-        assert cache._get_run_result(token) is None
+        # The run explorer still reads it after the save.
+        assert cache._get_run_result(token) is not None
+
+    def test_run_save_takes_the_discharge_times_from_the_run(
+        self, client: TestClient, mu_run: dict[str, Any]
+    ) -> None:
+        preview = mu_run["preview"]
+        run = cache._get_run_result_entry(preview["run_result_token"])
+        assert run is not None
+        data = _ok(
+            client.post(
+                f"{API}/edit/save",
+                json={
+                    "run_result_token": preview["run_result_token"],
+                    "remove_duplicates": False,
+                    "total_samples": preview["total_samples"],
+                    "fsamp": FSAMP,
+                    "project": "smoke",
+                    "file_label": "motor_units_run.npz",
+                },
+            )
+        )
+        with np.load(data["path"]) as z:
+            rows = unpack_csr(z["spike_times"], z["spike_offsets"])
+        assert [r.tolist() for r in rows] == [s.tolist() for s in run.spikes]
 
     def test_mismatched_pulse_trains_save_spikes_only(
         self, client: TestClient, decomp_npz: Path
@@ -870,31 +885,6 @@ class TestEditSave:
 
     def test_zero_total_samples_is_400(self, client: TestClient) -> None:
         _err(client.post(f"{API}/edit/save", json={"distimes": [[1]], "total_samples": 0}), 400)
-
-
-# ── /edit/update-filter ──────────────────────────────────────────────────────
-
-
-class TestEditUpdateFilter:
-    def _body(self, token: str, **extra: Any) -> dict[str, Any]:
-        return {
-            "project": "smoke",
-            "edit_signal_token": token,
-            "file_label": "sub-01_task-smoke_decomp.npz",
-            "distimes": [[1000, 1400, 1800, 2200, 2600, 3000]],
-            "pulse_train": [0.0] * N_SAMPLES,
-            "view_start": 500,
-            "view_end": 4000,
-            "nbextchan": 200,
-            **extra,
-        }
-
-    def test_shape(self, client: TestClient, edit_signal_token: str) -> None:
-        data = _ok(client.post(f"{API}/edit/update-filter", json=self._body(edit_signal_token)))
-        assert set(data) == {"fsamp", "distimes", "pulse_train"}
-        assert data["fsamp"] == FSAMP
-        assert data["distimes"] == sorted(data["distimes"])
-        assert len(data["pulse_train"]) == N_SAMPLES
 
 
 # ── Origin and host restrictions (serve_api) ─────────────────────────────────

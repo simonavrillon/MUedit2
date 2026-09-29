@@ -12,6 +12,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from muedit.api.cache import BUDGET
 from muedit.api.errors import register_exception_handlers
 from muedit.api.services.decompose_service import stop_decompositions
+from muedit.editing.edit_log import purge_old_logs
 from muedit.io.store import purge_stale_sessions
 
 
@@ -19,6 +20,7 @@ from muedit.io.store import purge_stale_sessions
 async def _sweep_caches(_app: FastAPI) -> AsyncIterator[None]:
     """Sweep expired entries and idle sessions while the app runs; own no run or session store after."""
     purge_stale_sessions()
+    purge_old_logs()
     BUDGET.start_sweeper()
     try:
         yield

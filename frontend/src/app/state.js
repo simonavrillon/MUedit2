@@ -9,18 +9,7 @@ import { GRID_COLORS } from "../config.js";
 /** @typedef {"add" | "add_artifact" | "delete_spikes" | "delete_dr"} EditMode */
 /** @typedef {{ muIdx: number, position: number }} Bookmark Where the user last edited an MU. */
 /** @typedef {import("../api/binary-payloads.js").SeriesRow} ChannelTrace One row of a viewport: its samples, or their min/max per bin. */
-
-/**
- * One MU as it was before the last edit, for a single-step undo.
- *
- * @typedef {object} EditBackup
- * @property {number} muIdx
- * @property {number[]} distimes
- * @property {boolean} flagged
- * @property {number[] | null} pulseTrain
- * @property {number[]} artifactTimes
- * @property {number} historyLength Edit-log length when the backup was taken.
- */
+/** @typedef {import("../api/binary-payloads.js").PulseView} PulseView */
 
 /**
  * An edit-log entry; saved into the NPZ and read back on load.
@@ -45,14 +34,17 @@ import { GRID_COLORS } from "../config.js";
  */
 
 /**
+ * The edit stage's view of the server-side edit session. The pulse trains
+ * stay on the server; `pulseView` holds the window of the current MU on screen.
+ *
  * @typedef {object} EditSlice
  * @property {FileRef | null} file
  * @property {string} filename
- * @property {number[][]} pulseTrains
- * @property {number[][]} originalPulseTrains
- * @property {number[][]} distimes
- * @property {number[][]} originalDistimes
- * @property {number[][]} artifactTimes
+ * @property {string} token The server's edit session.
+ * @property {Int32Array[]} distimes
+ * @property {Int32Array[]} artifactTimes
+ * @property {number[]} versions Per MU; changes whenever the server edits it.
+ * @property {boolean[]} hasPulse Per MU; false when the file has only discharge times.
  * @property {string[]} gridNames
  * @property {number[]} muGridIndex
  * @property {number | null} fsamp
@@ -66,12 +58,12 @@ import { GRID_COLORS } from "../config.js";
  * @property {Selection | null} draftSelectionDr
  * @property {EditMode | null} mode
  * @property {boolean} dirty
+ * @property {boolean} canUndo
  * @property {JsonObject | null} parameters
  * @property {boolean[]} flagged
- * @property {EditBackup | null} backup
  * @property {string} bidsRoot
  * @property {string} project
- * @property {string} editSignalToken
+ * @property {PulseView | null} pulseView
  * @property {string[]} muUids
  * @property {EditHistoryEntry[]} editHistory
  * @property {Bookmark | null} bookmarkPosition
@@ -99,8 +91,8 @@ import { GRID_COLORS } from "../config.js";
  * @property {string[]} muscle
  * @property {StageKey} currentStage
  * @property {number} currentGrid
- * @property {number[][]} muPulseTrains
- * @property {number[][]} muDistimes
+ * @property {Int32Array[]} muDistimes
+ * @property {PulseView | null} runPulseView The run explorer's window, from the run's pulse trains.
  * @property {number[]} muGridIndex
  * @property {number} currentMuGrid
  * @property {number} currentMu
@@ -125,11 +117,11 @@ export function createEditSlice() {
   return {
     file: null,
     filename: "",
-    pulseTrains: [],
-    originalPulseTrains: [],
+    token: "",
     distimes: [],
-    originalDistimes: [],
     artifactTimes: [],
+    versions: [],
+    hasPulse: [],
     gridNames: [],
     muGridIndex: [],
     fsamp: null,
@@ -143,12 +135,12 @@ export function createEditSlice() {
     draftSelectionDr: null,
     mode: null,
     dirty: false,
+    canUndo: false,
     parameters: null,
     flagged: [],
-    backup: null,
     bidsRoot: "",
     project: "",
-    editSignalToken: "",
+    pulseView: null,
     muUids: [],
     editHistory: [],
     bookmarkPosition: null,
@@ -177,8 +169,8 @@ export const state = {
   muscle: [],
   currentStage: "qc",
   currentGrid: 0,
-  muPulseTrains: [],
   muDistimes: [],
+  runPulseView: null,
   muGridIndex: [],
   currentMuGrid: 0,
   currentMu: 0,

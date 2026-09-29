@@ -3,66 +3,26 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  normalizeEditLoadPayload,
   normalizePreviewPayload,
+  toSpikeArray,
   toSpans,
   totalSamplesFromDistimes,
 } from "../src/api/payloads.js";
 
-describe("normalizeEditLoadPayload", () => {
-  test("a missing payload becomes a complete empty shape", () => {
-    for (const payload of [null, undefined, "oops", 42]) {
-      assert.deepEqual(normalizeEditLoadPayload(payload), {
-        pulse_trains: [],
-        pulse_trains_full: [],
-        distime_all: [],
-        grid_names: [],
-        mu_grid_index: [],
-        parameters: {},
-        total_samples: 0,
-        fsamp: null,
-        file_label: "",
-        edit_signal_token: "",
-      });
-    }
+describe("toSpikeArray", () => {
+  test("a typed row is kept as it is", () => {
+    const row = Int32Array.from([1, 2]);
+    assert.equal(toSpikeArray(row), row);
   });
 
-  test("discharge times are coerced to numbers, one row per MU", () => {
-    const out = normalizeEditLoadPayload({
-      distime_all: [["1", 2], "not a row", [5]],
-    });
-    assert.deepEqual(out.distime_all, [[1, 2], [], [5]]);
+  test("a JSON row becomes int32, dropping unreadable and negative times", () => {
+    const out = toSpikeArray([120, "x", undefined, Infinity, NaN, -3, "480"]);
+    assert.ok(out instanceof Int32Array);
+    assert.deepEqual(Array.from(out), [120, 480]);
   });
 
-  test("unreadable discharge times are dropped, not moved to sample 0", () => {
-    const out = normalizeEditLoadPayload({
-      distime_all: [[120, "x", undefined, Infinity, NaN, 480]],
-    });
-    assert.deepEqual(out.distime_all, [[120, 480]]);
-  });
-
-  test("falls back to distime when distime_all is absent", () => {
-    const out = normalizeEditLoadPayload({ distime: [[3, 4]] });
-    assert.deepEqual(out.distime_all, [[3, 4]]);
-  });
-
-  test("wrong-typed fields are replaced, unknown fields pass through", () => {
-    const out = normalizeEditLoadPayload({
-      pulse_trains: "nope",
-      parameters: "nope",
-      total_samples: "4096",
-      file_label: 7,
-      extra: "kept",
-    });
-    assert.deepEqual(out.pulse_trains, []);
-    assert.deepEqual(out.parameters, {});
-    assert.equal(out.total_samples, 4096);
-    assert.equal(out.file_label, "7");
-    assert.equal(out.extra, "kept");
-  });
-
-  test("a zero fsamp is kept rather than nulled", () => {
-    assert.equal(normalizeEditLoadPayload({ fsamp: 0 }).fsamp, 0);
+  test("anything but a row is empty", () => {
+    assert.equal(toSpikeArray("nope").length, 0);
   });
 });
 
@@ -75,8 +35,6 @@ describe("normalizePreviewPayload", () => {
       "channel_means",
       "coordinates",
       "muscle",
-      "pulse_trains_full",
-      "pulse_trains_all",
       "distime_all",
       "mu_grid_index",
     ]) {
@@ -84,6 +42,14 @@ describe("normalizePreviewPayload", () => {
     }
     assert.deepEqual(out.metadata, {});
     assert.equal(out.total_samples, 0);
+  });
+
+  test("JSON discharge times become one Int32Array per MU", () => {
+    const out = normalizePreviewPayload({ distime_all: [[1, 2], "x"] });
+    assert.deepEqual(
+      out.distime_all.map((r) => Array.from(r)),
+      [[1, 2], []],
+    );
   });
 
   test("valid fields are kept by reference", () => {

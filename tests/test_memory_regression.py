@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 import scipy.io
 
-from muedit.api.schemas import EditFilterPayload, QcAutoPayload
+from muedit.api.schemas import EditOpPayload, QcAutoPayload
 from muedit.api.services import editing_service, preview_service
 from muedit.api.services.series_service import series_frame
 from muedit.decomp.core import decompose_step
@@ -57,7 +57,8 @@ EXT_WINDOW_MB = EXT_ROWS * ROI_SAMPLES * 8 / 1e6
 # in session stores; stage 12: qc_auto, and ``series`` replacing ``qc_window``;
 # stage 13: save and edit_load, the .npz written and read uncompressed, the edit
 # EMG copied into a store and the pulse trains memory-mapped from the file, so
-# edit_load holds little more than the float32 pulse frame).
+# edit_load holds little more than the float32 pulse frame; stage 14: edit_load opens a
+# server-side edit session and sends discharge times only, no pulse trains).
 # A factor that grows means the stage started keeping an
 # extra full copy.  ``load`` reads a v5 .mat, which scipy can only read whole;
 # ``load_store`` reads the same recording as v7.3 into a store, slice by slice.
@@ -79,7 +80,7 @@ BUDGETS_MB: dict[str, float] = {
     "save": 0.29 * RAW_MB,
     "post_full": 1.5 * RAW_MB,
     "post_adaptive": 2.05 * RAW_MB,
-    "edit_load": 0.045 * RAW_MB,
+    "edit_load": 0.005 * RAW_MB,
     "update_filter": 6.7 * RAW_MB,
 }
 
@@ -380,32 +381,31 @@ def test_save_stage(prepared: Any, post_windowed: Any) -> None:
 
 
 def test_edit_load_stage(saved_decomposition: dict[str, Any]) -> None:
-    def _load() -> Any:
-        return editing_service.load_decomposition_binary_from_path(str(saved_decomposition["npz"]))
+    def _open() -> Any:
+        return editing_service.open_edit_session(str(saved_decomposition["npz"]))
 
-    _, peak = _peak_mb(_load)
+    _, peak = _peak_mb(_open)
     _check("edit_load", peak)
 
 
 def test_update_filter_stage(saved_decomposition: dict[str, Any]) -> None:
     """One update-filter click: the heaviest per-click edit operation."""
+    from muedit.api.binary import unpack_frame
+
     saved = saved_decomposition
     assert len(saved["distimes"]) > 0, "decomposition produced no motor units"
     view_span = int(10.0 * saved["fsamp"])
     view_start = (ROI[0] + ROI[1]) // 2 - view_span // 2
 
-    # Warm the edit-signal context cache exactly as an edit session would.
-    editing_service.load_decomposition_from_path(str(saved["npz"]))
-
-    payload = EditFilterPayload(
-        file_label=saved["npz"].name,
-        grid_index=0,
-        mu_index=0,
-        distimes=[[int(x) for x in d] for d in saved["distimes"]],
-        mu_grid_index=[int(g) for g in saved["mu_grid_index"]],
+    # Open the edit session exactly as the edit stage does.
+    opened = editing_service.open_edit_session(str(saved["npz"]))
+    meta, _ = unpack_frame(bytes(opened.body))
+    payload = EditOpPayload(
+        token=meta["token"],
+        mu=0,
         view_start=view_start,
         view_end=view_start + view_span,
         use_peeloff=True,
     )
-    _, peak = _peak_mb(lambda: editing_service.update_filter(payload))
+    _, peak = _peak_mb(lambda: editing_service.apply_edit("update-filter", payload))
     _check("update_filter", peak)

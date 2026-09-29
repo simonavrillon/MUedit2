@@ -97,6 +97,34 @@ class SeriesView:
     maxs: FloatArray | None = None
 
 
+#: Samples of a row reduced at once by ``envelope``.
+ENVELOPE_BLOCK = 1 << 22
+
+
+def envelope(read: Callable[[int, int], FloatArray], start: int, end: int, bins: int) -> SeriesView:
+    """``[start, end)`` of one row in ``bins`` bins, reduced from the samples ``read`` returns.
+
+    Exact: each bin covers its own samples only. The row is read a block at a time, so a
+    zoomed-out view of a long recording costs a few megabytes.
+    """
+    span = end - start
+    if span <= bins:
+        return SeriesView(start, end, 1, samples=np.asarray(read(start, end), np.float32)[None])
+    edges = start + (np.arange(bins + 1, dtype=np.int64) * span) // bins
+    mins = np.empty(bins, dtype=np.float32)
+    maxs = np.empty(bins, dtype=np.float32)
+    first = 0
+    while first < bins:
+        stop = int(np.searchsorted(edges, edges[first] + ENVELOPE_BLOCK, side="right")) - 1
+        stop = min(max(stop, first + 1), bins)
+        block = np.asarray(read(int(edges[first]), int(edges[stop])), np.float32)
+        at = edges[first:stop] - edges[first]
+        mins[first:stop] = np.minimum.reduceat(block, at)
+        maxs[first:stop] = np.maximum.reduceat(block, at)
+        first = stop
+    return SeriesView(start, end, span // bins, mins=mins[None], maxs=maxs[None])
+
+
 def view(
     pyramid: MinMaxPyramid, read: Reader, rows: slice, start: int, end: int, bins: int
 ) -> SeriesView:

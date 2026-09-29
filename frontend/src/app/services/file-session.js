@@ -244,8 +244,10 @@ export function createFileSessionService(app) {
     renderBidsMuscleFieldsView(els, buildBidsMuscleRowsModel(state));
   }
 
-  /** @type {FileSessionService["persistNpzBySaveTarget"]} */
-  async function persistNpzBySaveTarget(payload, fallbackName, pulseTrains) {
+  // The BIDS entity label from the session form, else the payload's, and
+  // the participant and hardware fields every save carries.
+  /** @type {FileSessionService["withBidsSaveFields"]} */
+  function withBidsSaveFields(payload) {
     const { subject, task, session, run, acquisition } = getBidsEntityInputs();
     const entityLabel =
       buildEntityLabelFromSession({
@@ -255,23 +257,19 @@ export function createFileSessionService(app) {
         run,
         acq: acquisition,
       }) || payload.entity_label;
+    return { ...payload, entity_label: entityLabel, ...getBidsSaveFields() };
+  }
 
+  /** @type {FileSessionService["persistNpzBySaveTarget"]} */
+  async function persistNpzBySaveTarget(payload, fallbackName) {
     const data = await api.editSave(
-      {
+      withBidsSaveFields({
         ...payload,
         file_label: payload.file_label || fallbackName || "decomposition.npz",
-        entity_label: entityLabel,
-        ...getBidsSaveFields(),
-      },
-      pulseTrains,
+      }),
     );
     app.setStatus("Saved", "success");
-    return {
-      mode: "saved",
-      path: data.path || "",
-      keptIndices: data.kept_indices,
-      editHistory: data.edit_history,
-    };
+    return { mode: "saved", path: data.path || "" };
   }
 
   return {
@@ -286,6 +284,7 @@ export function createFileSessionService(app) {
     renderBidsAutoInfo,
     renderBidsMuscleFields,
     persistNpzBySaveTarget,
+    withBidsSaveFields,
     clearUploadFormatError,
     showUnsupportedUploadFormatError,
     detectLandingFileType,

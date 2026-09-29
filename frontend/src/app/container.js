@@ -38,6 +38,8 @@ export async function initializeApp() {
   if (ready) {
     if (els.browseSignalBtn) els.browseSignalBtn.disabled = false;
     app.setStatus("", "muted");
+    // A page reloaded after its WebView crashed picks up the open edit session.
+    await app.restoreEditSession();
   } else {
     app.setStatus("Backend unreachable — please restart the app", "error");
   }

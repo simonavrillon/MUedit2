@@ -27,17 +27,15 @@
 /** @typedef {"add-spikes" | "add-artifact" | "delete-spikes" | "delete-dr"} RoiAction */
 
 /**
- * A box drawn on an edit canvas, in samples and pulse-train units.
+ * A box drawn on an edit canvas, in samples and pulse-train units (Hz on the
+ * discharge-rate plot).
  *
  * @typedef {object} RoiEditRequest
  * @property {number} muIdx
- * @property {number[]} pulse
  * @property {number} xStart
  * @property {number} xEnd
  * @property {number} yMin
  * @property {number} [yMax]
- * @property {number} [fs]
- * @property {number[]} [artifact_times]
  */
 /** @typedef {"muted" | "success" | "error"} Tone */
 /** @typedef {{ start: number, end: number }} Span */
@@ -86,7 +84,8 @@
  * @property {(file: FileRef | null, data?: JsonObject) => void} applySessionInfoFromDecomposition
  * @property {() => void} renderBidsAutoInfo
  * @property {() => void} renderBidsMuscleFields
- * @property {(payload: JsonObject, fallbackName?: string, pulseTrains?: ArrayLike<number>[]) => Promise<{ mode: string, path: string, keptIndices?: number[], editHistory?: EditHistoryEntry[] }>} persistNpzBySaveTarget
+ * @property {(payload: JsonObject, fallbackName?: string) => Promise<{ mode: string, path: string }>} persistNpzBySaveTarget
+ * @property {(payload: JsonObject) => JsonObject} withBidsSaveFields
  * @property {() => void} clearUploadFormatError
  * @property {() => void} showUnsupportedUploadFormatError
  * @property {(file: FileRef) => "raw" | "decomposition" | "ambiguous_mat" | "unsupported"} detectLandingFileType
@@ -126,38 +125,31 @@
 /**
  * @typedef {object} EditStage
  * @property {(gridIdx: number) => number[]} getEditMuIndices
- * @property {() => void} ensureEditFlagged
- * @property {(muIdx: number) => number[]} getRawPulse
- * @property {(muIdx: number) => number[]} getDisplayPulse
- * @property {() => void} backupEditMu
- * @property {() => void} recomputeEditDirty
- * @property {() => void} refreshEditTotals
- * @property {() => number} getEditTotalSamples
- * @property {() => PulseViewMeta} getPulseViewMeta
+ * @property {() => PulseViewMeta | null} getPulseViewMeta
  * @property {() => number} getPulsePlotHeight
  * @property {() => number} getDrPlotHeight
- * @property {(entry: EditHistoryEntry) => void} appendEditHistory
  * @property {() => void} resetEditState
  * @property {() => void} refreshEditModeButtons
  * @property {(mode: EditMode | null, message?: string) => void} setEditMode
  * @property {() => void} renderEditDropdowns
  * @property {() => void} renderEditExplorer
+ * @property {() => void} ensureEditPulseView Fetch the current MU's window when the one shown is not it.
+ * @property {() => Promise<boolean>} restoreEditSession
  * @property {() => void} renderInstantaneousDr
  * @property {() => void} bindEditCanvas
  * @property {() => void} bindEditDrCanvas
  * @property {() => void} bindEditTimeline
  * @property {(action: RoiAction, payload: RoiEditRequest) => Promise<void>} requestRoiEdit
- * @property {(mode: string) => Promise<void>} requestFilterUpdate
  * @property {() => Promise<void>} updateMuFilter
  * @property {(sel: Selection) => void} addSpikesInSelection
  * @property {(sel: Selection) => void} addArtifactInSelection
  * @property {(sel: Selection) => void} deleteSpikesInSelection
  * @property {(sel: Selection) => void} deleteDrInSelection
- * @property {() => void} restoreEditBackup
+ * @property {() => Promise<void>} undoEdit
  * @property {() => Promise<void>} removeOutliers
  * @property {() => Promise<void>} flagMuForDeletion
- * @property {() => void} resetCurrentMuEdits
- * @property {() => void} duplicateMu
+ * @property {() => Promise<void>} resetCurrentMuEdits
+ * @property {() => Promise<void>} duplicateMu
  * @property {() => Promise<void>} removeDuplicateMus
  * @property {() => Promise<void>} saveEditedFile
  * @property {(file: FileRef, path: string) => Promise<void>} loadDecompositionForEdit

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
 
 from muedit.api.memory import (
     DEFAULT_SESSION,
@@ -11,10 +12,11 @@ from muedit.api.memory import (
     MemoryBudget,
     default_budget_bytes,
 )
+from muedit.editing.session import EditSession
 from muedit.io.store import SessionStore
 from muedit.models import (
-    EditSignalContext,
     FloatArray,
+    IntArray,
     SignalImport,
     resident_nbytes,
 )
@@ -64,29 +66,35 @@ class _UploadEntry:
 
 
 @dataclass
-class _RunResult:
+class RunResult:
+    """A finished run's pulse trains and discharge times, for its explorer and its save."""
+
     pulse_trains: FloatArray  # float32, (n_mu, n_samples)
     store: SessionStore | None = None
+    spikes: list[IntArray] = field(default_factory=list)  # sorted int32 per MU
 
     @property
     def nbytes(self) -> int:
-        return resident_nbytes(self.pulse_trains)
+        return resident_nbytes(self.pulse_trains) + sum(int(s.nbytes) for s in self.spikes)
 
 
 @dataclass
-class _EditEntry:
-    context: EditSignalContext
-    store: SessionStore | None = None  # T1 folder holding the context's EMG
+class _EditSessionEntry:
+    session: EditSession
 
     @property
     def nbytes(self) -> int:
-        return self.context.nbytes
+        return self.session.nbytes
 
 
-def _close_store(entry: _UploadEntry | _RunResult | _EditEntry) -> None:
+def _close_store(entry: _UploadEntry | RunResult) -> None:
     """Delete the T1 folder of an entry leaving its cache."""
     if entry.store is not None:
         entry.store.close()
+
+
+def _close_edit_session(entry: _EditSessionEntry) -> None:
+    entry.session.close()
 
 
 @dataclass
@@ -105,13 +113,12 @@ _UPLOADS: BudgetedLRU[_UploadEntry] = BudgetedLRU(
 _DECOMP_PREVIEW_BLOBS: BudgetedLRU[_PreviewBlob] = BudgetedLRU(
     "decompose_previews", BUDGET, per_session=1, ttl_sec=DECOMP_PREVIEW_BINARY_TTL_SEC
 )
-_RUN_RESULTS: BudgetedLRU[_RunResult] = BudgetedLRU(
+_RUN_RESULTS: BudgetedLRU[RunResult] = BudgetedLRU(
     "run_results", BUDGET, per_session=1, on_drop=_close_store
 )
-_EDIT_SIGNAL_CONTEXTS: BudgetedLRU[_EditEntry] = BudgetedLRU(
-    "edit_signal_contexts", BUDGET, per_session=1, on_drop=_close_store
+_EDIT_SESSIONS: BudgetedLRU[_EditSessionEntry] = BudgetedLRU(
+    "edit_sessions", BUDGET, per_session=1, on_drop=_close_edit_session
 )
-_EDIT_SIGNAL_LABEL_INDEX: dict[str, str] = {}
 
 
 def close_session(session: str) -> None:
@@ -214,67 +221,54 @@ def _store_run_result(
     pulse_trains: FloatArray,
     session: str = DEFAULT_SESSION,
     store: SessionStore | None = None,
+    spikes: list[IntArray] | None = None,
 ) -> str:
-    """Keep a finished run's pulse trains so the run save need not send them back.
+    """Keep a finished run's pulse trains and discharge times; the run save reads them back.
 
     With ``store`` (the run's T1 folder holding them), the entry deletes it when dropped.
     """
-    return _RUN_RESULTS.pin(_RunResult(pulse_trains, store), session)
+    return _RUN_RESULTS.pin(RunResult(pulse_trains, store, list(spikes or [])), session)
 
 
-def _get_run_result(token: str | None) -> FloatArray | None:
-    """Read-only view of a stored run's pulse trains."""
+def _get_run_result_entry(token: str | None) -> RunResult | None:
+    """The stored run for ``token``, its pulse trains read-only."""
     stored = _RUN_RESULTS.get(token)
     if stored is None:
         return None
     pulse = stored.pulse_trains.view()
     pulse.flags.writeable = False
-    return pulse
+    return RunResult(pulse, None, stored.spikes)
 
 
-def _drop_run_result(token: str | None) -> None:
-    """Forget a run's pulse trains once they are saved."""
-    _RUN_RESULTS.discard(token)
+def _get_run_result(token: str | None) -> FloatArray | None:
+    """Read-only view of a stored run's pulse trains."""
+    stored = _get_run_result_entry(token)
+    return stored.pulse_trains if stored is not None else None
 
 
-def _release_edit_signal_context(session: str = DEFAULT_SESSION) -> None:
-    """Drop the edit context ``session`` holds, before it loads the next decomposition."""
-    _EDIT_SIGNAL_CONTEXTS.release_session(session)
+def _release_edit_sessions(session: str = DEFAULT_SESSION) -> None:
+    """Drop the edit session ``session`` holds, before it opens the next decomposition."""
+    _EDIT_SESSIONS.release_session(session)
 
 
-def _store_edit_signal_context(
-    context: EditSignalContext,
-    file_label: str | None = None,
-    session: str = DEFAULT_SESSION,
-    store: SessionStore | None = None,
-) -> str:
-    """Keep a decomposition's EMG context and return a token; the entry deletes ``store`` when dropped."""
-    kept = context if store is not None else context.compact_copy()
-    token = _EDIT_SIGNAL_CONTEXTS.pin(_EditEntry(kept, store), session)
+def _store_edit_session(edit: EditSession, session: str = DEFAULT_SESSION) -> str:
+    """Keep an edit session for ``session`` and return its token; dropping it closes the session."""
+    return _EDIT_SESSIONS.pin(_EditSessionEntry(edit), session)
+
+
+def _get_edit_session(token: str | None, session: str | None = None) -> EditSession | None:
+    """The edit session for ``token``; with ``session``, it moves to that tab (a reloaded page)."""
+    entry = _EDIT_SESSIONS.get(token) if session is None else _EDIT_SESSIONS.move(token, session)
+    return entry.session if entry is not None else None
+
+
+def _resize_edit_session(token: str) -> None:
+    """Recount an edit session's bytes after an edit."""
+    _EDIT_SESSIONS.resize(token)
+
+
+def _live_edit_logs() -> set[Path]:
+    """The edit logs open sessions are writing."""
     with BUDGET.lock:
-        for label, mapped in list(_EDIT_SIGNAL_LABEL_INDEX.items()):
-            if mapped not in _EDIT_SIGNAL_CONTEXTS.slots:
-                del _EDIT_SIGNAL_LABEL_INDEX[label]
-        label = str(file_label or "").strip()
-        if label:
-            _EDIT_SIGNAL_LABEL_INDEX[label] = token
-    return token
-
-
-def _get_edit_signal_context(token: str | None) -> EditSignalContext | None:
-    """Resolve edit signal context token to a read-only view."""
-    stored = _EDIT_SIGNAL_CONTEXTS.get(token)
-    return stored.context.readonly_view() if stored is not None else None
-
-
-def _get_edit_signal_context_by_label(file_label: str | None) -> EditSignalContext | None:
-    """Resolve edit signal context by loaded decomposition file label."""
-    label = str(file_label or "").strip()
-    if not label:
-        return None
-    with BUDGET.lock:
-        token = _EDIT_SIGNAL_LABEL_INDEX.get(label)
-        result = _get_edit_signal_context(token)
-        if result is None and token is not None:
-            _EDIT_SIGNAL_LABEL_INDEX.pop(label, None)
-    return result
+        entries = [slot.value.session for slot in _EDIT_SESSIONS.slots.values()]
+    return {edit.log.path for edit in entries if edit.log is not None}

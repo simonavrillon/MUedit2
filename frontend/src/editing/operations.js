@@ -1,165 +1,39 @@
-import {
-  clearAllEditSelections,
-  resetEditSlice,
-  appendEditMu,
-  setEditBackup,
-  setEditCurrentMu,
-  setEditCurrentMuGrid,
-  setEditDirty,
-  setEditArtifactTimesForMu,
-  setEditDistimesForMu,
-  setEditFlagForMu,
-  setEditFlaggedArray,
-  setEditPulseTrainForMu,
-  setEditTotalSamples,
-  dropEditHistoryForMuSince,
-} from "../state/actions.js";
-import { muUidFor } from "../state/selectors.js";
+import { resetEditSlice } from "../state/actions.js";
+import { traceRange } from "../view/plots.js";
 
 /** @typedef {import("../app/state.js").State} State */
 /** @typedef {import("../app/state.js").Selection} Selection */
-/** @typedef {import("../app/state.js").EditHistoryEntry} EditHistoryEntry */
+/** @typedef {import("../app/context.js").Span} Span */
 /** @typedef {ReturnType<typeof buildEditDropdownModel>} EditDropdownModel */
-/** @typedef {ReturnType<typeof getPulseViewMeta>} PulseViewMeta */
+/** @typedef {NonNullable<ReturnType<typeof getPulseViewMeta>>} PulseViewMeta */
 
 /** @typedef {import("../app/context.js").App} App */
 
 // --- State helpers ---
 
 /**
- * @param {State} state
- */
-export function ensureEditFlagged(state) {
-  const total = state.edit.distimes?.length || 0;
-  if (!state.edit.flagged || state.edit.flagged.length !== total) {
-    setEditFlaggedArray(state, new Array(total).fill(false));
-  }
-}
-
-/**
- * @param {State} state
- * @param {number} muIdx
- * @returns {number[]}
- */
-export function getRawPulse(state, muIdx) {
-  return state.edit.pulseTrains?.[muIdx] || [];
-}
-
-/**
- * @param {State} state
- * @param {number} muIdx
- * @returns {number[]}
- */
-export function getDisplayPulse(state, muIdx) {
-  const pulse = getRawPulse(state, muIdx);
-  ensureEditFlagged(state);
-  if (state.edit.flagged?.[muIdx]) {
-    return new Array(pulse.length || 0).fill(0);
-  }
-  return pulse;
-}
-
-/**
- * @param {State} state
- */
-export function backupEditMu(state) {
-  const muIdx = state.edit.currentMu ?? 0;
-  ensureEditFlagged(state);
-  setEditBackup(state, {
-    muIdx,
-    distimes: [...(state.edit.distimes?.[muIdx] || [])],
-    flagged: !!state.edit.flagged?.[muIdx],
-    pulseTrain: state.edit.pulseTrains?.[muIdx]
-      ? [...state.edit.pulseTrains[muIdx]]
-      : null,
-    artifactTimes: [...(state.edit.artifactTimes?.[muIdx] || [])],
-    historyLength: state.edit.editHistory?.length ?? 0,
-  });
-}
-
-/** @param {App} app */
-export function restoreEditBackup(app) {
-  const {
-    state,
-    setEditStatus,
-    renderEditExplorer,
-    recomputeEditDirty,
-    ensureEditFlagged,
-  } = app;
-
-  const backup = state.edit.backup;
-  if (!backup) {
-    setEditStatus("Nothing to undo", "muted");
-    return;
-  }
-  const { muIdx, distimes, flagged } = backup;
-  if (!state.edit.distimes?.length) return;
-  setEditDistimesForMu(state, muIdx, distimes);
-  setEditArtifactTimesForMu(state, muIdx, backup.artifactTimes || []);
-  ensureEditFlagged();
-  setEditFlagForMu(state, muIdx, flagged);
-  if (backup.pulseTrain) {
-    setEditPulseTrainForMu(state, muIdx, backup.pulseTrain);
-  }
-  const muUid = muUidFor(state, muIdx);
-  dropEditHistoryForMuSince(state, muUid, backup.historyLength);
-  setEditBackup(state, null);
-  clearAllEditSelections(state);
-  recomputeEditDirty();
-  renderEditExplorer();
-  setEditStatus("Undo applied", "success");
-}
-
-/**
- * @param {State} state
- */
-export function recomputeEditDirty(state) {
-  const current = state.edit.distimes || [];
-  const baseline = state.edit.originalDistimes || [];
-  setEditDirty(
-    state,
-    current.some((vals, idx) => {
-      const base = baseline[idx] || [];
-      return JSON.stringify(vals || []) !== JSON.stringify(base || []);
-    }),
-  );
-}
-
-/**
- * @param {State} state
- * @returns {number}
- */
-export function getEditTotalSamples(state) {
-  const pulse = state.edit.pulseTrains?.[0] || [];
-  return state.edit.totalSamples || pulse.length || 0;
-}
-
-/**
+ * The window on screen and the value range of the current MU's pulse train
+ * there, which map a drawn box to samples and pulse values. Null until that
+ * window has been fetched for the MU as it is now.
+ *
  * @param {State} state
  */
 export function getPulseViewMeta(state) {
-  const pulse = state.edit.pulseTrains?.[state.edit.currentMu] || [];
-  const viewStart = state.edit.view?.start ?? 0;
-  const viewEnd = state.edit.view?.end ?? pulse.length;
-  const s = Math.max(0, Math.min(pulse.length, viewStart));
-  const e = Math.max(s + 1, Math.min(pulse.length, viewEnd));
-  const slice = pulse.slice(s, e);
-  // Not Math.min(...slice): spreading a long recording overflows the stack.
-  let minVal = slice.length ? Infinity : 0;
-  let maxVal = slice.length ? -Infinity : 1;
-  for (const v of slice) {
-    if (v < minVal) minVal = v;
-    if (v > maxVal) maxVal = v;
+  const muIdx = state.edit.currentMu ?? 0;
+  const shown = state.edit.pulseView;
+  if (
+    !shown ||
+    shown.mu !== muIdx ||
+    shown.version !== state.edit.versions?.[muIdx]
+  ) {
+    return null;
   }
-  const span = maxVal - minVal || 1;
-  return { s, e, minVal, maxVal, span, slice };
-}
-
-/**
- * @param {State} state
- */
-export function refreshEditTotals(state) {
-  setEditTotalSamples(state, getEditTotalSamples(state));
+  const total = state.edit.totalSamples || 0;
+  const view = state.edit.view || { start: 0, end: total };
+  const s = Math.max(0, Math.min(total, view.start));
+  const e = Math.max(s + 1, Math.min(total, view.end));
+  const { min, max } = traceRange(shown);
+  return { s, e, minVal: min, maxVal: max, span: max - min || 1 };
 }
 
 // Compute the dropdown model: which grid to select, which MU list to show,
@@ -202,42 +76,87 @@ export function resetEditState(app) {
   refreshEditModeButtons();
 }
 
+// --- Discharge rates ---
+
+/**
+ * Rate (Hz, 0 when fsamp is unknown) of each positive inter-spike interval,
+ * at its midpoint rounded to a sample inside `[0, totalSamples)`.
+ *
+ * @param {ArrayLike<number>} spikes
+ * @param {number | null} fsamp
+ * @param {number} totalSamples
+ */
+export function dischargeRates(spikes, fsamp, totalSamples) {
+  /** @type {number[]} */
+  const positions = [];
+  /** @type {number[]} */
+  const rates = [];
+  for (let i = 0; i < spikes.length - 1; i++) {
+    const isi = spikes[i + 1] - spikes[i];
+    if (isi <= 0) continue;
+    const at = Math.round(spikes[i] + isi / 2);
+    positions.push(Math.min(totalSamples - 1, Math.max(0, at)));
+    rates.push(fsamp ? fsamp / isi : 0);
+  }
+  return { positions, rates };
+}
+
+/**
+ * The fastest rate whose midpoint is in `view`: the top of the rate plot.
+ *
+ * @param {{ positions: number[], rates: number[] }} dr
+ * @param {Span} view
+ */
+export function fastestRateInView({ positions, rates }, view) {
+  let fastest = 0;
+  for (let i = 0; i < positions.length; i++) {
+    if (positions[i] >= view.start && positions[i] < view.end) {
+      fastest = Math.max(fastest, rates[i]);
+    }
+  }
+  return fastest;
+}
+
 // --- Selection coordinators (bridge canvas coordinates → API actions) ---
+
+/**
+ * The drawn box in samples, clamped to the view, and its pixel rows clamped
+ * to the plot; null until the window on screen has been fetched.
+ *
+ * @param {App} app
+ * @param {Selection} sel
+ */
+function pulseBox(app, sel) {
+  const meta = app.getPulseViewMeta();
+  if (!meta) return null;
+  const { s, e } = meta;
+  const start = Math.max(s, Math.min(e, sel.start));
+  const end = Math.max(start + 1, Math.min(e, sel.end));
+  const height = app.getPulsePlotHeight();
+  const y1 = Math.max(0, Math.min(height, sel.yMin ?? 0));
+  const y2 = Math.max(0, Math.min(height, sel.yMax ?? height));
+  /** @param {number} y */
+  const toValue = (y) => meta.minVal + (1 - y / height) * meta.span;
+  return {
+    start,
+    end,
+    top: toValue(Math.min(y1, y2)),
+    low: toValue(Math.max(y1, y2)),
+  };
+}
 
 /**
  * @param {App} app
  * @param {Selection} sel
  */
 export function addSpikesInSelection(app, sel) {
-  const {
-    state,
-    getRawPulse,
-    backupEditMu,
-    getPulseViewMeta,
-    getPulsePlotHeight,
-    requestRoiEdit,
-  } = app;
-
-  const muIdx = state.edit.currentMu ?? 0;
-  const pulse = getRawPulse(muIdx);
-  if (!pulse.length) return;
-  backupEditMu();
-  const { s, e, minVal, span } = getPulseViewMeta();
-  const start = Math.max(s, Math.min(e, sel.start));
-  const end = Math.max(start + 1, Math.min(e, sel.end));
-  const height = getPulsePlotHeight();
-  const y1 = Math.max(0, Math.min(height, sel.yMin ?? 0));
-  const y2 = Math.max(0, Math.min(height, sel.yMax ?? height));
-  const yLowPx = Math.max(y1, y2);
-  const minHeight = minVal + (1 - yLowPx / height) * span;
-
-  requestRoiEdit("add-spikes", {
-    muIdx,
-    pulse,
-    xStart: start,
-    xEnd: end,
-    yMin: minHeight,
-    fs: state.edit.fsamp || 0,
+  const box = pulseBox(app, sel);
+  if (!box) return;
+  app.requestRoiEdit("add-spikes", {
+    muIdx: app.state.edit.currentMu ?? 0,
+    xStart: box.start,
+    xEnd: box.end,
+    yMin: box.low,
   });
 }
 
@@ -246,35 +165,13 @@ export function addSpikesInSelection(app, sel) {
  * @param {Selection} sel
  */
 export function addArtifactInSelection(app, sel) {
-  const {
-    state,
-    getRawPulse,
-    backupEditMu,
-    getPulseViewMeta,
-    getPulsePlotHeight,
-    requestRoiEdit,
-  } = app;
-
-  const muIdx = state.edit.currentMu ?? 0;
-  const pulse = getRawPulse(muIdx);
-  if (!pulse.length) return;
-  backupEditMu();
-  const { s, e, minVal, span } = getPulseViewMeta();
-  const start = Math.max(s, Math.min(e, sel.start));
-  const end = Math.max(start + 1, Math.min(e, sel.end));
-  const height = getPulsePlotHeight();
-  const y1 = Math.max(0, Math.min(height, sel.yMin ?? 0));
-  const y2 = Math.max(0, Math.min(height, sel.yMax ?? height));
-  const yLowPx = Math.max(y1, y2);
-  const minHeight = minVal + (1 - yLowPx / height) * span;
-
-  requestRoiEdit("add-artifact", {
-    muIdx,
-    pulse,
-    xStart: start,
-    xEnd: end,
-    yMin: minHeight,
-    fs: state.edit.fsamp || 0,
+  const box = pulseBox(app, sel);
+  if (!box) return;
+  app.requestRoiEdit("add-artifact", {
+    muIdx: app.state.edit.currentMu ?? 0,
+    xStart: box.start,
+    xEnd: box.end,
+    yMin: box.low,
   });
 }
 
@@ -283,38 +180,14 @@ export function addArtifactInSelection(app, sel) {
  * @param {Selection} sel
  */
 export function deleteSpikesInSelection(app, sel) {
-  const {
-    state,
-    getRawPulse,
-    backupEditMu,
-    getPulseViewMeta,
-    getPulsePlotHeight,
-    requestRoiEdit,
-  } = app;
-
-  const muIdx = state.edit.currentMu ?? 0;
-  const pulse = getRawPulse(muIdx);
-  if (!pulse.length) return;
-  backupEditMu();
-  const { s, e, minVal, span } = getPulseViewMeta();
-  const start = Math.max(s, Math.min(e, sel.start));
-  const end = Math.max(start + 1, Math.min(e, sel.end));
-  const height = getPulsePlotHeight();
-  const y1 = Math.max(0, Math.min(height, sel.yMin ?? 0));
-  const y2 = Math.max(0, Math.min(height, sel.yMax ?? height));
-  const yVal1 = minVal + (1 - y1 / height) * span;
-  const yVal2 = minVal + (1 - y2 / height) * span;
-  const low = Math.min(yVal1, yVal2);
-  const high = Math.max(yVal1, yVal2);
-
-  requestRoiEdit("delete-spikes", {
-    muIdx,
-    pulse,
-    xStart: start,
-    xEnd: end,
-    yMin: low,
-    yMax: high,
-    artifact_times: state.edit.artifactTimes?.[muIdx] || [],
+  const box = pulseBox(app, sel);
+  if (!box) return;
+  app.requestRoiEdit("delete-spikes", {
+    muIdx: app.state.edit.currentMu ?? 0,
+    xStart: box.start,
+    xEnd: box.end,
+    yMin: box.low,
+    yMax: box.top,
   });
 }
 
@@ -323,178 +196,23 @@ export function deleteSpikesInSelection(app, sel) {
  * @param {Selection} sel
  */
 export function deleteDrInSelection(app, sel) {
-  const { state, backupEditMu, getDrPlotHeight, getRawPulse, requestRoiEdit } =
-    app;
+  const { state, getDrPlotHeight, requestRoiEdit } = app;
 
   const muIdx = state.edit.currentMu ?? 0;
   const spikes = state.edit.distimes?.[muIdx] || [];
   if (spikes.length < 2) return;
-  backupEditMu();
   const height = getDrPlotHeight();
   const yLowPx = Math.max(sel.yMin ?? 0, sel.yMax ?? height);
-  const fs = state.edit.fsamp || 0;
-  // Same scale the DR plot draws: 0 Hz at the bottom, the fastest rate on top.
-  const maxDr = isiRates(spikes, fs).reduce(
-    (m, { rate }) => Math.max(m, rate),
-    0,
+  const total = state.edit.totalSamples || 0;
+  // Same scale the rate plot draws: 0 Hz at the bottom, the fastest rate in view on top.
+  const fastest = fastestRateInView(
+    dischargeRates(spikes, state.edit.fsamp, total),
+    state.edit.view || { start: 0, end: total },
   );
-  const yMin = (1 - yLowPx / height) * (maxDr || 1);
   requestRoiEdit("delete-dr", {
     muIdx,
-    pulse: getRawPulse(muIdx),
     xStart: Math.min(sel.start, sel.end),
     xEnd: Math.max(sel.start, sel.end),
-    yMin,
-    fs,
+    yMin: (1 - yLowPx / height) * (fastest || 1),
   });
-}
-
-// --- MU mutations ---
-
-// Compare a motor unit's spike times before/after an edit. The added/removed
-// lists feed the edit-history log so individual edits can be reverted per MU.
-/**
- * @param {number[]} before
- * @param {number[]} after
- */
-export function spikesDiff(before, after) {
-  const afterSet = new Set(after);
-  const beforeSet = new Set(before);
-  return {
-    added: after.filter((s) => !beforeSet.has(s)),
-    removed: before.filter((s) => !afterSet.has(s)),
-  };
-}
-
-// Every uid the edit log has ever named, so a new MU never reuses the uid of
-// one that was removed and inherits its history.
-/**
- * @param {State} state
- * @returns {Set<string>}
- */
-function knownMuUids(state) {
-  const uids = new Set(state.edit.muUids || []);
-  for (const e of state.edit.editHistory || []) {
-    if (e.mu_uid) uids.add(e.mu_uid);
-    if (e.source_mu_uid) uids.add(e.source_mu_uid);
-    for (const uid of e.removed_mu_uids || []) uids.add(uid);
-  }
-  return uids;
-}
-
-// Compute instantaneous discharge rate series from spike times. Pure
-// signal-processing — no DOM, no state. Extracted from edit-canvas.js so
-// the view layer only renders, never computes domain data.
-/**
- * @param {number[]} spikes
- * @param {number | null} fsamp
- * @param {number} totalSamples
- */
-export function computeInstantaneousDr(spikes, fsamp, totalSamples) {
-  const series = new Array(totalSamples).fill(0);
-  const markers = [];
-  const markerVals = [];
-  for (const { at, rate } of isiRates(spikes, fsamp)) {
-    const mid = Math.min(totalSamples - 1, Math.max(0, Math.round(at)));
-    series[mid] = rate;
-    markers.push(mid);
-    markerVals.push(rate);
-  }
-  return { series, markers, markerVals };
-}
-
-/**
- * Rate (Hz, 0 when fsamp is unknown) and midpoint of each positive inter-spike interval.
- * @param {number[]} spikes
- * @param {number | null} fsamp
- */
-function isiRates(spikes, fsamp) {
-  const out = [];
-  for (let i = 0; i < spikes.length - 1; i++) {
-    const isi = spikes[i + 1] - spikes[i];
-    if (isi <= 0) continue;
-    out.push({ at: spikes[i] + isi / 2, rate: fsamp ? fsamp / isi : 0 });
-  }
-  return out;
-}
-
-/** @param {App} app */
-export function duplicateMu(app) {
-  const {
-    state,
-    setEditStatus,
-    ensureEditFlagged,
-    recomputeEditDirty,
-    renderEditExplorer,
-  } = app;
-
-  const muIdx = state.edit.currentMu ?? 0;
-  const pulse = state.edit.pulseTrains?.[muIdx];
-  const distimes = state.edit.distimes?.[muIdx];
-  if (!pulse || !pulse.length) {
-    setEditStatus("No MU loaded", "muted");
-    return;
-  }
-
-  const gridIdx = state.edit.muGridIndex?.[muIdx] ?? 0;
-
-  const prefix = `g${gridIdx}_mu`;
-  const existingCounts = [...knownMuUids(state)]
-    .filter((uid) => uid.startsWith(prefix))
-    .map((uid) => parseInt(uid.slice(prefix.length), 10))
-    .filter((n) => Number.isFinite(n));
-  const newCount =
-    existingCounts.length > 0 ? Math.max(...existingCounts) + 1 : 0;
-  const newUid = `${prefix}${newCount}`;
-
-  const newIdx = state.edit.distimes.length;
-  appendEditMu(state, { distimes, pulseTrain: pulse, gridIdx, uid: newUid });
-  ensureEditFlagged();
-
-  const sourceUid = muUidFor(state, muIdx);
-  app.appendEditHistory({
-    type: "duplicate_mu",
-    mu_uid: newUid,
-    source_mu_uid: sourceUid,
-  });
-
-  setEditCurrentMuGrid(state, gridIdx, { resetView: false });
-  setEditCurrentMu(state, newIdx, { resetView: false });
-  recomputeEditDirty();
-  renderEditExplorer();
-  setEditStatus(`MU duplicated — now editing MU ${newIdx + 1}`, "success");
-}
-
-/** @param {App} app */
-export function resetCurrentMuEdits(app) {
-  const { state, ensureEditFlagged, recomputeEditDirty, renderEditExplorer } =
-    app;
-
-  const muIdx = state.edit.currentMu ?? 0;
-  const baseline = state.edit.originalDistimes?.[muIdx];
-  if (!baseline) return;
-  const { added, removed } = spikesDiff(
-    state.edit.distimes?.[muIdx] || [],
-    baseline,
-  );
-  const artifactsRemoved = [...(state.edit.artifactTimes?.[muIdx] || [])];
-  const wasFlagged = !!state.edit.flagged?.[muIdx];
-  setEditDistimesForMu(state, muIdx, baseline);
-  setEditArtifactTimesForMu(state, muIdx, []);
-  if (state.edit.originalPulseTrains?.[muIdx]) {
-    setEditPulseTrainForMu(state, muIdx, state.edit.originalPulseTrains[muIdx]);
-  }
-  ensureEditFlagged();
-  setEditFlagForMu(state, muIdx, false);
-  /** @type {EditHistoryEntry} */
-  const entry = { type: "reset_mu", mu_uid: muUidFor(state, muIdx) };
-  if (added.length) entry.spikes_added = added;
-  if (removed.length) entry.spikes_removed = removed;
-  if (artifactsRemoved.length) entry.artifacts_removed = artifactsRemoved;
-  if (wasFlagged) entry.flagged = false;
-  app.appendEditHistory(entry);
-  setEditBackup(state, null);
-  clearAllEditSelections(state);
-  recomputeEditDirty();
-  renderEditExplorer();
 }
