@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+from numpy.typing import DTypeLike
 from scipy.cluster.vq import ClusterError, kmeans2
 from scipy.signal import find_peaks
 
@@ -13,8 +14,16 @@ DECOMP_MIN_ISI_SEC: float = 0.02
 POSTPROC_MIN_ISI_SEC: float = 0.005
 
 
-def extend_signal(signal: FloatArray, exfactor: int, samples_first: bool = False) -> FloatArray:
-    """Delay-embedding channel extension used by convolutive source separation."""
+def extend_signal(
+    signal: FloatArray,
+    exfactor: int,
+    samples_first: bool = False,
+    dtype: DTypeLike | None = None,
+) -> FloatArray:
+    """Delay-embedding channel extension used by convolutive source separation.
+
+    Channels-first output is ``dtype``, or at least float64 when it is not given.
+    """
     if samples_first:
         if exfactor <= 1:
             return signal.copy()
@@ -24,7 +33,7 @@ def extend_signal(signal: FloatArray, exfactor: int, samples_first: bool = False
             output[i:, n_channels * i : n_channels * (i + 1)] = signal[: n_samples - i]
         return output
 
-    out_dtype = np.result_type(signal.dtype, np.float64)
+    out_dtype = np.result_type(signal.dtype, np.float64) if dtype is None else np.dtype(dtype)
     if exfactor <= 1:
         return signal.astype(out_dtype, copy=True)
 

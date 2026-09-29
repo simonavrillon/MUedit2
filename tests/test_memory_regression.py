@@ -21,6 +21,7 @@ from muedit.decomp.pipeline import run_decomposition
 from muedit.decomp.postprocess import export_step, postprocess_step
 from muedit.decomp.preprocess import load_step, preprocess_step
 from muedit.decomp.types import DEFAULT_NBEXTCHAN, DecompositionParameters
+from muedit.io.bids import export_bids_emg
 from muedit.io.factory import load_signal
 from muedit.io.store import SessionStore
 from tests._report import record
@@ -66,7 +67,10 @@ EXT_WINDOW_MB = EXT_ROWS * ROI_SAMPLES * 8 / 1e6
 # multiples of the full-length extension: full-trace holds one ~64 MB batch,
 # adaptive one calibration chunk; their pulse trains are in the run store.
 # ``series`` reads the min/max pyramids, so it depends on the bins asked for, not on
-# the recording: its budget is in MB.
+# the recording: its budget is in MB. So does ``bids_export`` (stage 15), which reads one
+# ``BLOCK_BYTES`` block of data records at a time. Stage 16 (float32 ``compute_dtype``)
+# lowered preprocess, decompose, post_windowed and update_filter; ``RAW_MB`` and ``EXT_WINDOW_MB`` stay
+# float64 sizes, so the float32 working sets are half of them.
 
 BUDGETS_MB: dict[str, float] = {
     "load": 1.9 * RAW_MB,
@@ -74,14 +78,15 @@ BUDGETS_MB: dict[str, float] = {
     "preview": 0.65 * RAW_MB,
     "series": 2.0,
     "qc_auto": 3.2 * RAW_MB,
-    "preprocess": 0.47 * RAW_MB,
-    "decompose": 1.55 * EXT_WINDOW_MB,
-    "post_windowed": 1.45 * EXT_WINDOW_MB,
+    "preprocess": 0.39 * RAW_MB,
+    "decompose": 0.89 * EXT_WINDOW_MB,
+    "post_windowed": 0.84 * EXT_WINDOW_MB,
     "save": 0.29 * RAW_MB,
+    "bids_export": 43.0,
     "post_full": 1.5 * RAW_MB,
     "post_adaptive": 2.05 * RAW_MB,
     "edit_load": 0.005 * RAW_MB,
-    "update_filter": 6.7 * RAW_MB,
+    "update_filter": 3.9 * RAW_MB,
 }
 
 
@@ -378,6 +383,23 @@ def test_save_stage(prepared: Any, post_windowed: Any) -> None:
         )
     )
     _check("save", peak)
+
+
+def test_bids_export_stage(prepared: Any, tmp_path: Path) -> None:
+    """The raw EMG goes to the BIDS EDF one block of data records at a time."""
+    loaded, prep = prepared
+
+    _, peak = _peak_mb(
+        lambda: export_bids_emg(
+            loaded.data,
+            loaded.fsamp,
+            prep.grid_names,
+            prep.coordinates,
+            prep.discard_channels,
+            tmp_path,
+        )
+    )
+    _check("bids_export", peak)
 
 
 def test_edit_load_stage(saved_decomposition: dict[str, Any]) -> None:

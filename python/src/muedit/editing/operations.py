@@ -10,9 +10,15 @@ from muedit.decomp.algorithm import (
     extend_signal,
     pca_extended_signal,
     subtract_mu_waveforms,
+    vec_mat,
     whiten_extended_signal,
 )
-from muedit.decomp.types import DEFAULT_NBEXTCHAN, DEFAULT_PEEL_OFF_WIN_SEC
+from muedit.decomp.types import (
+    DEFAULT_COMPUTE_DTYPE,
+    DEFAULT_NBEXTCHAN,
+    DEFAULT_PEEL_OFF_WIN_SEC,
+    ComputeDtype,
+)
 from muedit.models import BoolArray, FloatArray, IntArray
 from muedit.signal.decomp_primitives import (
     POSTPROC_MIN_ISI_SEC,
@@ -49,8 +55,12 @@ def _recompute_spikes_in_window(
     lock_spikes: bool = False,
     artifact_mask: BoolArray | None = None,
     bandpass: bool = True,
+    compute_dtype: ComputeDtype = DEFAULT_COMPUTE_DTYPE,
 ) -> FilterUpdateResult:
-    """Recompute motor-unit pulse train and spikes within a visible time window."""
+    """Recompute motor-unit pulse train and spikes within a visible time window.
+
+    The extended and whitened window is ``compute_dtype``; the pulse train and detection are float64.
+    """
     if emg.size == 0 or start >= end:
         return None, spike_times
 
@@ -75,7 +85,7 @@ def _recompute_spikes_in_window(
     spikes2 = spikes1 - start
     ex_factor = int(round(nbextchan / max(window_emg.shape[0], 1)))
     ex_factor = max(1, ex_factor)
-    e_sig = extend_signal(window_emg, ex_factor)
+    e_sig = extend_signal(window_emg, ex_factor, dtype=compute_dtype)
 
     win_artifact_mask: BoolArray | None = None
     if artifact_mask is not None:
@@ -111,12 +121,12 @@ def _recompute_spikes_in_window(
         if local_artifacts.size > 0:
             subtract_mu_waveforms(w_sig, local_artifacts, fsamp, peeloff_win)
 
-    mu_filters = np.sum(w_sig[:, spikes2], axis=1)
+    mu_filters = np.sum(w_sig[:, spikes2], axis=1, dtype=np.float64)
     norm = float(np.linalg.norm(mu_filters))
     if norm > 0.0:
         mu_filters = mu_filters / norm
 
-    pt: FloatArray = mu_filters.T @ w_sig
+    pt: FloatArray = vec_mat(mu_filters, w_sig).astype(np.float64)
     pt = pt[: window_emg.shape[1]]
     pt[:edge] = 0
     pt[-edge:] = 0
@@ -181,6 +191,7 @@ def update_motor_unit_filter_window(
     lock_spikes: bool = False,
     artifact_mask: BoolArray | None = None,
     bandpass: bool = True,
+    compute_dtype: ComputeDtype = DEFAULT_COMPUTE_DTYPE,
 ) -> FilterUpdateResult:
     """Update a motor-unit pulse train and spikes inside a time window; ``bandpass=False`` for filtered EMG."""
     slice_start, slice_end = start - emg_offset, end - emg_offset
@@ -202,6 +213,7 @@ def update_motor_unit_filter_window(
         lock_spikes=lock_spikes,
         artifact_mask=artifact_mask,
         bandpass=bandpass,
+        compute_dtype=compute_dtype,
     )
     return pt, updated
 

@@ -75,8 +75,8 @@ def decompose_step(
             win_data_arr = grid_block[keep_idx, :]
 
             ex_factor = int(round(params.nbextchan / win_data_arr.shape[0]))
-            win_means[win_global] = np.mean(win_data_arr, axis=1)
-            e_sig = extend_signal(demean(win_data_arr), ex_factor)
+            win_means[win_global] = np.mean(win_data_arr, axis=1, dtype=np.float64)
+            e_sig = extend_signal(demean(win_data_arr), ex_factor, dtype=params.work_dtype)
 
             edge_samples = int(round(prep.fsamp * params.edges_sec))
             trim_edges = edge_samples > 0 and win_data_arr.shape[1] > 2 * edge_samples
@@ -155,7 +155,7 @@ def decompose_step(
 
                 if len(spikes) > 10:
                     cov_val = isi_cov(spikes, prep.fsamp)
-                    w_ini = np.sum(x[:, spikes], axis=1)
+                    w_ini = np.sum(x[:, spikes], axis=1, dtype=np.float64)
                     w_final, spikes_final, cov_final = minimize_isi_covariance(
                         w_ini, x, cov_val, prep.fsamp
                     )

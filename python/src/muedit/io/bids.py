@@ -7,7 +7,7 @@ import json
 import logging
 import math
 import unicodedata
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +20,7 @@ from muedit.io._bids_reader import (
     load_bids_emg_grid,
     resolve_bids_emg_path,
 )
+from muedit.io.store import BLOCK_BYTES, sample_blocks
 from muedit.signal.grid import get_grid_electrode_metadata
 
 __all__ = [
@@ -92,6 +93,82 @@ def _first_numeric(val: Any) -> float | None:
     return None
 
 
+def _truncate_physical(val: float) -> float:
+    """``val`` rounded to fit the 8 characters of an EDF physical min/max field."""
+    for decimals in range(6, -1, -1):
+        txt = f"{val:.{decimals}f}"
+        if len(txt) <= 8:
+            return float(txt)
+    return float(f"{val:.6g}")
+
+
+def _physical_range(lo: float, hi: float) -> tuple[float, float]:
+    """EDF physical min/max for a channel spanning ``[lo, hi]``, never equal."""
+    if math.isclose(lo, hi):
+        lo, hi = lo - 1.0, hi + 1.0
+    lo_t, hi_t = _truncate_physical(lo), _truncate_physical(hi)
+    if math.isclose(lo_t, hi_t):
+        lo_t, hi_t = lo_t - 1.0, hi_t + 1.0
+    return lo_t, hi_t
+
+
+def _row_reader(data: np.ndarray, aux: np.ndarray | None) -> Callable[[int, int], np.ndarray]:
+    """Read EMG rows then aux rows over ``[start, stop)`` as float64; aux past its end reads as 0."""
+    n_emg, n_samples = data.shape
+    n_aux = 0 if aux is None else aux.shape[0]
+    aux_len = 0 if aux is None else min(aux.shape[1], n_samples)
+
+    def read(start: int, stop: int) -> np.ndarray:
+        out = np.zeros((n_emg + n_aux, stop - start))
+        out[:n_emg] = data[:, start:stop]
+        if aux is not None and start < aux_len:
+            end = min(stop, aux_len)
+            out[n_emg:, : end - start] = aux[:, start:end]
+        return out
+
+    return read
+
+
+def _channel_extrema(
+    read: Callable[[int, int], np.ndarray], n_rows: int, n_samples: int
+) -> tuple[np.ndarray, np.ndarray]:
+    """Per-row minimum and maximum, read block by block."""
+    mins = np.full(n_rows, np.inf)
+    maxs = np.full(n_rows, -np.inf)
+    for start, stop in sample_blocks(n_samples, n_rows):
+        block = read(start, stop)
+        np.minimum(mins, block.min(axis=1), out=mins)
+        np.maximum(maxs, block.max(axis=1), out=maxs)
+        del block  # before the next block is read, not when the name rebinds
+    return mins, maxs
+
+
+def _write_records(
+    writer: Any, read: Callable[[int, int], np.ndarray], n_rows: int, n_samples: int
+) -> None:
+    """Write the samples one data record at a time, as ``EdfWriter.writeSamples`` lays them out."""
+    spr = writer.get_smp_per_record(0)
+    n_full = n_samples // spr
+    per_block = max(1, BLOCK_BYTES // (n_rows * spr * 8))
+    for first in range(0, n_full, per_block):
+        last = min(first + per_block, n_full)
+        block = read(first * spr, last * spr)
+        for r in range(last - first):
+            # Channel after channel within a record, spr samples each.
+            if writer.blockWritePhysicalSamples(block[:, r * spr : (r + 1) * spr].ravel()) < 0:
+                raise OSError("pyedflib could not write a data record")
+        del block
+    tail = n_samples - n_full * spr
+    if tail:
+        # The last record is zero-padded and written channel by channel.
+        block = read(n_full * spr, n_samples)
+        record = np.zeros(spr)
+        for row in block:
+            record[:tail] = row
+            if writer.writePhysicalSamples(record) < 0:
+                raise OSError("pyedflib could not write the last data record")
+
+
 def export_bids_emg(
     data: np.ndarray,
     fsamp: float,
@@ -113,7 +190,7 @@ def export_bids_emg(
     reference_description: str = "ChannelSpecific",
     units: str = "uV",
     target_muscle: str | list[str] | None = None,
-    file_format: str = "bdf",
+    file_format: str = "edf",
     start_time: Any | None = None,
     hardware_filters: str | list[str] | None = "n/a",
     gain: float | list[float] | None = None,
@@ -150,21 +227,9 @@ def export_bids_emg(
             return
         _write_tsv(path, header, rows)
 
-    def _truncate_physical(val: float) -> float:
-        for decimals in range(6, -1, -1):
-            txt = f"{val:.{decimals}f}"
-            if len(txt) <= 8:
-                return float(txt)
-        return float(f"{val:.6g}")
-
     fmt = file_format.lower()
     if fmt not in ("edf", "bdf"):
         raise ValueError("file_format must be 'edf' or 'bdf'")
-    use_bdf = fmt == "bdf"
-    edf_ext = ".bdf" if use_bdf else ".edf"
-    edf_type = pyedflib.FILETYPE_BDFPLUS if use_bdf else pyedflib.FILETYPE_EDFPLUS
-    digital_min = -8388608 if use_bdf else -32768
-    digital_max = 8388607 if use_bdf else 32767
 
     entities = build_entities(subject, task, run, session, acquisition, recording)
     session_prefix = f"sub-{subject}" + (f"_ses-{session}" if session else "")
@@ -175,28 +240,30 @@ def export_bids_emg(
     emg_dir.mkdir(parents=True, exist_ok=True)
 
     suffix = f"{entities}_emg"
-    edf_path = emg_dir / f"{suffix}{edf_ext}"
+    # One EMG file per recording: an existing one keeps its format.
+    existing = next((e for e in (fmt, "edf", "bdf") if (emg_dir / f"{suffix}.{e}").exists()), fmt)
+    if existing != fmt:
+        logger.info("BIDS export: %s.%s exists, keeping its format", suffix, existing)
+        fmt = existing
+    use_bdf = fmt == "bdf"
+    edf_type = pyedflib.FILETYPE_BDFPLUS if use_bdf else pyedflib.FILETYPE_EDFPLUS
+    digital_min = -8388608 if use_bdf else -32768
+    digital_max = 8388607 if use_bdf else 32767
+    edf_path = emg_dir / f"{suffix}.{fmt}"
     json_path = emg_dir / f"{suffix}.json"
     channels_tsv = emg_dir / f"{entities}_channels.tsv"
 
-    n_channels = data.shape[0]
-    if n_channels == 0 or data.shape[1] == 0:
+    n_channels, n_samples = data.shape
+    if n_channels == 0 or n_samples == 0:
         raise ValueError(f"export_bids_emg requires non-empty data (got shape {data.shape})")
-    final_data = data
-    if aux_data is not None and aux_data.size > 0:
-        if aux_data.ndim == 1:
-            aux_data = aux_data.reshape(1, -1)
-        len_emg = data.shape[1]
-        len_aux = aux_data.shape[1]
-        if len_aux > len_emg:
-            aux_data = aux_data[:, :len_emg]
-        elif len_aux < len_emg:
-            pad = np.zeros((aux_data.shape[0], len_emg - len_aux))
-            aux_data = np.hstack([aux_data, pad])
-
-        final_data = np.vstack([data, aux_data])
-
-    n_total_channels, n_samples = final_data.shape
+    if aux_data is not None and aux_data.ndim == 1:
+        aux_data = aux_data.reshape(1, -1)
+    if aux_data is not None and aux_data.size == 0:
+        aux_data = None
+    # EMG then aux rows, read in blocks: aux is cut to the EMG length, or zero-padded to it.
+    read_rows = _row_reader(data, aux_data)
+    n_aux = 0 if aux_data is None else aux_data.shape[0]
+    n_total_channels = n_channels + n_aux
 
     def _unique_labels(names: list[str] | None, count: int) -> list[str]:
         # EDF labels are 16 ASCII chars; channels.tsv names must match them.
@@ -216,7 +283,6 @@ def export_bids_emg(
             labels.append(label)
         return labels
 
-    n_aux = final_data.shape[0] - data.shape[0]
     aux_labels = _unique_labels(aux_names, n_aux)
     aux_descriptions = [
         (aux_names[i] if aux_names and i < len(aux_names) and aux_names[i] else "")
@@ -237,34 +303,17 @@ def export_bids_emg(
             if start_time:
                 writer.setStartdatetime(start_time)
 
+            mins, maxs = _channel_extrema(read_rows, n_total_channels, n_samples)
             signal_headers = []
-            signal_data = []
             for idx in range(n_total_channels):
-                is_aux = idx >= data.shape[0]
-
-                if is_aux:
-                    aux_idx = idx - data.shape[0]
-                    ch_name = aux_labels[aux_idx]
+                if idx >= n_channels:
+                    ch_name = aux_labels[idx - n_channels]
                     ch_units = resolved_aux_units
                 else:
                     ch_name = f"Ch{idx + 1:02d}"
                     ch_units = units
 
-                signal = final_data[idx, :].astype(np.float64)
-                signal_data.append(signal)
-
-                phys_min = float(np.min(signal))
-                phys_max = float(np.max(signal))
-                if math.isclose(phys_min, phys_max):
-                    phys_min -= 1.0
-                    phys_max += 1.0
-
-                phys_min_t = _truncate_physical(phys_min)
-                phys_max_t = _truncate_physical(phys_max)
-                if math.isclose(phys_min_t, phys_max_t):
-                    phys_min_t -= 1.0
-                    phys_max_t += 1.0
-
+                phys_min_t, phys_max_t = _physical_range(float(mins[idx]), float(maxs[idx]))
                 header = {
                     "label": ch_name,
                     "dimension": ch_units,
@@ -279,7 +328,7 @@ def export_bids_emg(
                 signal_headers.append(header)
 
             writer.setSignalHeaders(signal_headers)
-            writer.writeSamples(signal_data)
+            _write_records(writer, read_rows, n_total_channels, n_samples)
         finally:
             if writer is not None:
                 writer.close()

@@ -11,8 +11,11 @@ NOTCH_WINDOW_HZ: float = 50.0
 
 
 def demean(signal: FloatArray) -> FloatArray:
-    """Remove per-channel DC offset from a 2D signal array."""
-    return signal - np.mean(signal, axis=1, keepdims=True)
+    """Remove per-channel DC offset from a 2D signal array; the mean is taken in float64."""
+    mean = np.mean(signal, axis=1, keepdims=True, dtype=np.float64)
+    if signal.dtype == np.float32:
+        return (signal - mean).astype(np.float32)
+    return signal - mean
 
 
 FILTER_BLOCK_ROWS: int = 8
@@ -56,7 +59,8 @@ def _notch_params(fsamp: float, n_samples: int) -> tuple[int, int]:
 
 
 def _remove_line_interference(x: FloatArray, frad: int, window: int) -> FloatArray:
-    """Remove interference from a single-channel signal."""
+    """Remove interference from a single-channel signal, computed in float64."""
+    x = np.asarray(x, dtype=np.float64)  # a float32 FFT would run in single precision
     fsignal = np.fft.fft(x)
     fcorrec = np.zeros_like(fsignal, dtype=complex)
 

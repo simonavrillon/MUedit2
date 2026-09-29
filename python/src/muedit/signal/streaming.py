@@ -46,13 +46,13 @@ class StreamedExtender:
         source: SampleSource,
         ex_factor: int,
         offset: FloatArray | None = None,
-        dtype: type[np.floating[Any]] = np.float64,
+        dtype: type[np.floating[Any]] | np.dtype[np.floating[Any]] = np.float64,
         samples_first: bool = False,
         artifact_mask: BoolArray | None = None,
     ) -> None:
         self.source = source
         self.ex_factor = max(1, int(ex_factor))
-        self.dtype = dtype
+        self.dtype = np.dtype(dtype)
         self.offset = None if offset is None else np.asarray(offset).astype(dtype)[:, None]
         self.samples_first = samples_first
         self.artifact_mask = artifact_mask
@@ -70,7 +70,7 @@ class StreamedExtender:
             raw -= self.offset
         if self.samples_first:
             return extend_signal(raw.T, self.ex_factor, samples_first=True)[start - lo :]
-        return extend_signal(raw, self.ex_factor)[:, start - lo : stop - lo]
+        return extend_signal(raw, self.ex_factor, dtype=self.dtype)[:, start - lo : stop - lo]
 
     @property
     def first_complete(self) -> int:

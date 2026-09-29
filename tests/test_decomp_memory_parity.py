@@ -624,7 +624,7 @@ def store_prep(synthetic_signal: SignalImport) -> dict[str, object]:
 def test_filtered_emg_in_the_store_matches_the_heap(store_prep: dict) -> None:
     heap, stored = store_prep["heap"], store_prep["stored"]
     np.testing.assert_array_equal(stored.data, heap.data)
-    assert stored.data.dtype == np.float64
+    assert stored.data.dtype == _STORE_PARAMS.work_dtype
     assert resident_nbytes(stored.data) == 0
     assert not stored.data.flags.writeable
 
@@ -687,3 +687,51 @@ def test_run_in_a_store_matches_the_heap_run(
     # Only the kept pulse trains outlive the run: the filtered EMG and the
     # pre-dedup matrix were deleted.
     assert _store_files(store) == ["pulse_trains"]
+
+
+# ── Calibration statistics squared chunk by chunk ─────────────────────────────
+
+
+def _legacy_calibration_stats(
+    grid: np.ndarray,
+    win_mean: np.ndarray,
+    whiten_mat: np.ndarray,
+    mu_filters: np.ndarray,
+    calib_start: int,
+    calib_end: int,
+    fsamp: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """The pre-change version: the whole window projected, then squared as a second array."""
+    from muedit.decomp.adaptive_batch import POSTPROC_MIN_ISI_SEC, split_by_amplitude
+    from muedit.signal.decomp_primitives import find_refractory_peaks, signed_square
+
+    source = StreamedExtender(grid, whiten_mat.shape[0] // grid.shape[0], offset=win_mean)
+    ipts_sq = signed_square((whiten_mat.T @ mu_filters).T @ source.read(calib_start, calib_end))
+    base = np.zeros(mu_filters.shape[1], dtype=np.float32)
+    spikes = np.ones(mu_filters.shape[1], dtype=np.float32)
+    for j, pt in enumerate(ipts_sq):
+        peaks = find_refractory_peaks(pt, fsamp, min_isi_sec=POSTPROC_MIN_ISI_SEC)
+        if len(peaks) > 1:
+            _, centroids, _ = split_by_amplitude(pt, peaks)
+            hi = int(np.argmax(centroids))
+            spikes[j], base[j] = centroids[hi], centroids[1 - hi]
+        elif len(peaks) == 1:
+            spikes[j] = pt[peaks[0]]
+    return base, spikes
+
+
+def test_calibration_stats_squared_by_chunk_are_bit_identical(
+    raw: np.ndarray, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from muedit.decomp import adaptive_batch
+
+    monkeypatch.setattr(adaptive_batch, "_STATS_CHUNK", 250)  # several chunks
+    ext = extend_signal(raw[:, 200:2600] - raw[:, 200:2600].mean(axis=1, keepdims=True), EX)
+    vecs, vals = pca_extended_signal(ext)
+    _, whitening = whiten_extended_signal(ext, vecs, vals)
+    filters = np.linalg.qr(np.random.default_rng(4).standard_normal((ext.shape[0], 4)))[0]
+    args = (raw, raw[:, 200:2600].mean(axis=1), whitening, filters, 200, 2600, 2000.0)
+    got = adaptive_batch._compute_calibration_stats(*args)
+    want = _legacy_calibration_stats(*args)
+    for g, w in zip(got, want, strict=True):
+        np.testing.assert_array_equal(g, w)

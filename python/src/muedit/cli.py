@@ -21,6 +21,7 @@ from muedit.decomp.types import (
     DEFAULT_PEEL_OFF_WIN_SEC,
     DEFAULT_POSTPROCESS_MODE,
     POSTPROCESS_MODES,
+    ComputeDtype,
     ContrastFunc,
     DecompositionParameters,
 )
@@ -164,6 +165,12 @@ def run_decomposition_cli(argv: list[str] | None = None) -> None:
         choices=get_args(ContrastFunc),
         default=_DEFAULT_PARAMS.contrast_func,
         help="FastICA contrast function (app setting: Contrast func).",
+    )
+    parser.add_argument(
+        "--compute-dtype",
+        choices=get_args(ComputeDtype),
+        default=_DEFAULT_PARAMS.compute_dtype,
+        help="Type of the filtered EMG and the extended/whitened windows (float32 halves their memory).",
     )
     parser.add_argument(
         "--initialization",
@@ -375,6 +382,7 @@ def run_decomposition_cli(argv: list[str] | None = None) -> None:
         adapt_spike_prev_weight=args.adapt_spike_prev_weight,
         full_trace=postprocess_flags["full_trace"],
         auto_mask_artifacts=args.auto_mask_artifacts,
+        compute_dtype=args.compute_dtype,
     )
 
     run_decomposition(

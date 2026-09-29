@@ -11,7 +11,7 @@ from fastapi import Header, HTTPException
 
 from muedit.api.cache import BUDGET
 from muedit.api.memory import DEFAULT_SESSION, session_id_or_default
-from muedit.decomp.types import ContrastFunc, DecompositionParameters
+from muedit.decomp.types import ComputeDtype, ContrastFunc, DecompositionParameters
 
 
 def request_session(x_muedit_session: str | None = Header(None)) -> str:
@@ -172,6 +172,15 @@ def build_params(raw: str | None) -> DecompositionParameters:
             detail={
                 "field": "contrast_func",
                 "reason": f"contrast_func must be one of {', '.join(contrast_funcs)}",
+            },
+        )
+    compute_dtypes = get_args(ComputeDtype)
+    if base.compute_dtype not in compute_dtypes:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "field": "compute_dtype",
+                "reason": f"compute_dtype must be one of {', '.join(compute_dtypes)}",
             },
         )
     if base.adapt_batch_ms <= 0:

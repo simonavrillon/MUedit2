@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal, TypeAlias
 
+import numpy as np
+
 from muedit.models import BoolArray, FloatArray, IntArray, SignalImport
 
 DEFAULT_NBEXTCHAN: int = 1000
@@ -12,6 +14,12 @@ DEFAULT_PEEL_OFF_WIN_SEC: float = 0.025
 
 ContrastFunc: TypeAlias = Literal["skew", "kurtosis", "logcosh"]
 """FastICA contrast function applied in the fixed-point iteration."""
+
+ComputeDtype: TypeAlias = Literal["float32", "float64"]
+"""Type of the large arrays (filtered EMG, extended and whitened windows); small matrices stay float64."""
+
+DEFAULT_COMPUTE_DTYPE: ComputeDtype = "float32"
+"""Shared by decomposition runs and the edit stage's filter update."""
 
 PostprocessMode: TypeAlias = Literal["windowed", "full-trace", "adaptive"]
 """Post-processing route; must match POSTPROCESS_MODES in the frontend."""
@@ -54,6 +62,12 @@ class DecompositionParameters:
     adapt_spike_prev_weight: int = 5
     full_trace: bool = False
     auto_mask_artifacts: bool = False
+    compute_dtype: ComputeDtype = DEFAULT_COMPUTE_DTYPE
+
+    @property
+    def work_dtype(self) -> np.dtype[np.floating[Any]]:
+        """``compute_dtype`` as a NumPy dtype."""
+        return np.dtype(self.compute_dtype)
 
 
 @dataclass

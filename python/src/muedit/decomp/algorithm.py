@@ -54,6 +54,16 @@ __all__ = [
 ]
 
 
+def vec_mat(v: FloatArray, m: FloatArray) -> FloatArray:
+    """``v @ m`` in ``m``'s dtype, written into a zeroed output.
+
+    Accelerate's float32 ``cblas_sgemv`` (transposed) does not ignore the output's old
+    contents when beta = 0 at some column counts: a NaN left in a fresh buffer comes out
+    as NaN. Zeroing the output makes that term exact (0 * 0).
+    """
+    return np.matmul(v.astype(m.dtype), m, out=np.zeros(m.shape[1], dtype=m.dtype))
+
+
 def _chunk_cols(n_rows: int) -> int:
     """Columns per chunk so one float64 chunk stays near ``_CHUNK_BYTES``."""
     return max(1, _CHUNK_BYTES // (8 * max(1, n_rows)))
@@ -70,20 +80,20 @@ def _column_chunks(
 
 
 def covariance(signal: FloatArray, columns: IntArray | None = None) -> FloatArray:
-    """Biased row covariance of ``signal`` (or of its ``columns``), built in column chunks."""
+    """Biased row covariance of ``signal`` (or of its ``columns``), built in float64 column chunks."""
     n_rows, n_cols = signal.shape
     chunks = _column_chunks(n_cols, n_rows, columns)
     n = n_cols if columns is None else columns.size
     if columns is None:
-        mean = signal.mean(axis=1)
+        mean = signal.mean(axis=1, dtype=np.float64)
     else:
         mean = np.zeros(n_rows)
         for cols in chunks:
-            mean += signal[:, cols].sum(axis=1)
+            mean += signal[:, cols].sum(axis=1, dtype=np.float64)
         mean /= n
     cov = np.zeros((n_rows, n_rows))
     for cols in chunks:
-        block = signal[:, cols] - mean[:, None]
+        block = signal[:, cols] - mean[:, None]  # float64 even when ``signal`` is float32
         cov += block @ block.T
     cov /= n
     return cov
@@ -136,7 +146,10 @@ def whiten_extended_signal(
 
 
 def whiten_inplace(signal: FloatArray, whitening_matrix: FloatArray) -> FloatArray:
-    """Overwrite ``signal`` with ``whitening_matrix @ signal``, one column chunk at a time."""
+    """Overwrite ``signal`` with ``whitening_matrix @ signal``, one column chunk at a time.
+
+    The product is float64 (a float32 chunk is promoted), then stored in ``signal``'s dtype.
+    """
     # Each output column depends only on the same input column, so chunks can
     # be written back without a second full-size array.
     for cols in _column_chunks(signal.shape[1], signal.shape[0]):
@@ -145,11 +158,11 @@ def whiten_inplace(signal: FloatArray, whitening_matrix: FloatArray) -> FloatArr
 
 
 def column_energy(x: FloatArray) -> FloatArray:
-    """``np.sum(x * x, axis=0)`` without a full-size temporary (bit-identical)."""
+    """``np.sum(x * x, axis=0)`` summed in float64, without a full-size temporary."""
     out = np.empty(x.shape[1])
     for cols in _column_chunks(x.shape[1], x.shape[0]):
         block = x[:, cols]
-        out[cols] = np.sum(block * block, axis=0)
+        out[cols] = np.sum(block * block, axis=0, dtype=np.float64)
     return out
 
 
@@ -160,7 +173,10 @@ def fixed_point_alg(
     maxiter: int,
     contrast_func: ContrastFunc,
 ) -> FloatArray:
-    """Run one-unit FastICA fixed-point iterations with orthogonalization."""
+    """Run one-unit FastICA fixed-point iterations with orthogonalization.
+
+    Projections run in ``x``'s dtype; ``w`` and its updates stay float64.
+    """
     k = 0
     delta = 1.0
     basis_bt = basis @ basis.T
@@ -168,7 +184,8 @@ def fixed_point_alg(
 
     while delta > _FIXED_POINT_TOL and k < maxiter:
         w_last = w.copy()
-        wtx = w_last.T @ x
+        # vec_mat casts w, never x: a float64 w would promote the whole window to float64.
+        wtx = vec_mat(w_last, x)
 
         if contrast_func == "skew":
             gp = 2 * wtx
@@ -182,8 +199,8 @@ def fixed_point_alg(
         else:
             raise ValueError(f"Unknown contrast function: {contrast_func}")
 
-        a = np.mean(gp)
-        w = (x @ g.T) / n_samples - a * w_last
+        a = np.mean(gp, dtype=np.float64)
+        w = (x @ g.T).astype(np.float64) / n_samples - a * w_last
         w = w - basis_bt @ w
         w_norm = np.linalg.norm(w)
         if w_norm == 0:
@@ -202,9 +219,8 @@ def fixed_point_alg(
 
 
 def _pulse_train(w: FloatArray, x: FloatArray) -> FloatArray:
-    """Project source and apply signed-squared nonlinearity."""
-    wtx = w.T @ x
-    return signed_square(wtx).flatten()
+    """Project source and apply signed-squared nonlinearity, in ``x``'s dtype."""
+    return signed_square(vec_mat(w, x)).flatten()
 
 
 def _detect_peaks(icasig: FloatArray, fsamp: float) -> IntArray:
@@ -263,7 +279,7 @@ def minimize_isi_covariance(
             best_spikes = spikes
             best_w = w_detect
 
-        w = np.sum(x[:, spikes], axis=1)
+        w = np.sum(x[:, spikes], axis=1, dtype=np.float64)
 
     if len(best_spikes) < 2:
         _, spikes = get_spikes(best_w, x, fsamp)
@@ -316,7 +332,7 @@ def subtract_mu_waveforms(
 
     offsets = np.arange(-window_l, window_l + 1, dtype=int)
     idx = valid_spikes[:, None] + offsets[None, :]  # (n_spikes, window_size)
-    waveforms = x[:, idx].mean(axis=1)  # (n_rows, window_size)
+    waveforms = x[:, idx].mean(axis=1, dtype=np.float64)  # (n_rows, window_size)
 
     for s in valid_spikes:
         x[:, s - window_l : s + window_l + 1] -= waveforms
@@ -346,12 +362,17 @@ def _stream_full_trace(
     out: FloatArray,
     rows: IntArray,
 ) -> None:
-    """Write the signed-squared projection of every filter over the whole trace into ``out[rows]``."""
-    step = max(source.ex_factor, _FULL_TRACE_BATCH_BYTES // (8 * source.n_extended))
+    """Write the signed-squared projection of every filter over the whole trace into ``out[rows]``.
+
+    The projection runs in the extender's dtype.
+    """
+    itemsize = np.dtype(source.dtype).itemsize
+    step = max(source.ex_factor, _FULL_TRACE_BATCH_BYTES // (itemsize * source.n_extended))
     last_delay = source.ex_factor - 1
+    w_t = w_dewhite.T.astype(source.dtype)
     for start in range(0, source.n_samples, step):
         stop = min(start + step, source.n_samples)
-        pt = w_dewhite.T @ source.read(start, stop)
+        pt = w_t @ source.read(start, stop)
         if corr_cum is not None:
             pt -= corr_cum[np.minimum(np.arange(start, stop), last_delay)].T
         out[rows, start:stop] = signed_square(pt)
@@ -382,10 +403,12 @@ def batch_process_filters(
     artifact_mask: BoolArray | None = None,
     pulse_dtype: type[np.floating[Any]] = np.float32,
     store: ArrayStore | None = None,
+    work_dtype: type[np.floating[Any]] | np.dtype[np.floating[Any]] = np.float64,
 ) -> tuple[FloatArray, list[IntArray]]:
     """Apply MU filters over their windows, or streamed over each grid's ``grid_data`` (full trace).
 
-    The pulse trains are written into ``store`` (heap by default) as they are produced.
+    The pulse trains are written into ``store`` (heap by default) as they are produced. The
+    full-trace projection runs in ``work_dtype``; a window's, in the window's dtype.
     """
     sorted_wins = sorted(mu_filters_by_window.keys())
     first_row: dict[int, int] = {}
@@ -420,7 +443,7 @@ def batch_process_filters(
 
     if grid_data is not None and whiten_mat_by_window is not None:
         for g, wins in by_grid.items():
-            source = StreamedExtender(grid_data[g], ex_by_grid[g])
+            source = StreamedExtender(grid_data[g], ex_by_grid[g], dtype=work_dtype)
             w_parts: list[FloatArray] = []
             corr_parts: list[FloatArray] = []
             rows: list[IntArray] = []
@@ -458,7 +481,7 @@ def batch_process_filters(
             segment_len = w_win.shape[1]
             for j in range(filters.shape[1]):
                 pt = np.zeros(ltime)
-                pt[start : start + segment_len] = (filters[:, j] @ w_win)[: ltime - start]
+                pt[start : start + segment_len] = vec_mat(filters[:, j], w_win)[: ltime - start]
                 pt = signed_square(pt)
                 spikes_by_row[first_row[nwin] + j] = _detect_row(pt, fsamp, mask_by_grid[g])
                 pulse_t[first_row[nwin] + j] = pt

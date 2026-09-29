@@ -143,7 +143,7 @@ def _reconstruct_window_signal(
     edge_samples = int(round(prep.fsamp * params.edges_sec))
     trim_edges = edge_samples > 0 and win_data_arr.shape[1] > 2 * edge_samples
 
-    e_sig = extend_signal(demean(win_data_arr), ex_factor)
+    e_sig = extend_signal(demean(win_data_arr), ex_factor, dtype=params.work_dtype)
     if trim_edges:
         e_sig = e_sig[:, edge_samples:-edge_samples]
     return whiten_inplace(e_sig, whiten_mat)
@@ -215,6 +215,7 @@ def postprocess_step(
             win_means_by_window=decomposed.win_means if params.full_trace else None,
             artifact_mask=prep.artifact_mask,
             store=store,
+            work_dtype=params.work_dtype,
         )
 
     pulse_all = pulse_t

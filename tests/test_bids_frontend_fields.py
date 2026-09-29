@@ -116,8 +116,8 @@ def _read_participants(bids_root: Path) -> list[dict[str, str]]:
 
 
 def _emg_row(bids_root: Path) -> Path:
-    paths = list(bids_root.rglob("*_emg.bdf"))
-    assert paths, f"no *_emg.bdf under {bids_root}"
+    paths = list(bids_root.rglob("*_emg.edf"))
+    assert paths, f"no *_emg.edf under {bids_root}"
     return paths[0]
 
 

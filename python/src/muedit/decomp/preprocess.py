@@ -221,7 +221,7 @@ def _export_raw_emg_bids(
         )
 
     export_bids_emg(
-        np.asarray(data, dtype=np.float64),
+        data,
         fsamp,
         grid_names,
         coordinates,
@@ -241,7 +241,7 @@ def _export_raw_emg_bids(
         reference_description=entities.get("reference", "ChannelSpecific"),
         units=entities.get("units", "uV"),
         target_muscle=target_muscle,
-        file_format=entities.get("file_format", "bdf"),
+        file_format=entities.get("file_format", "edf"),
         hardware_filters=loader_meta.get("hardware_filters", "n/a"),
         gain=loader_meta.get("gains"),
         low_cutoff=loader_meta.get("emg_hpf"),
@@ -338,11 +338,12 @@ def preprocess_step(
 ) -> PreprocessStepOutput:
     """Apply channel formatting, filtering, ROI selection, and optional BIDS raw export.
 
-    The filtered float64 copy is allocated in ``store`` (the run's T1 folder), so every
-    later step reads windows and batches from the memory-mapped file.
+    The filtered copy (``params.compute_dtype``) is allocated in ``store`` (the run's T1
+    folder), so every later step reads windows and batches from the memory-mapped file.
+    The filters themselves compute in float64.
     """
     store = store if store is not None else RamStore()
-    data = store.allocate("filtered", loaded.data.shape, np.float64)
+    data = store.allocate("filtered", loaded.data.shape, params.work_dtype)
     for lo in range(0, data.shape[0], FILTER_BLOCK_ROWS):
         data[lo : lo + FILTER_BLOCK_ROWS] = loaded.data[lo : lo + FILTER_BLOCK_ROWS]
     grid_names = loaded.signal.gridname

@@ -62,6 +62,11 @@ tree and dataset-level files at the dataset root.
 > cases "missing" is judged against the export destination, so exporting a
 > BIDS-imported recording into a brand-new `bids_root` still writes everything.
 
+> **File format.** The signal is written as EDF+ (`_emg.edf`, 16-bit samples
+> scaled to each channel's range). If the destination already holds an
+> `_emg.bdf` or `_emg.edf` for the same recording, that file keeps its format,
+> so a recording never gets two signal files.
+
 > **Where `<bids_root>` is.** In the app you don't type a path — you name a
 > project in the **Project** field of the Settings panel, and MUedit saves under
 > `data/<project>/` inside the repository (so `<bids_root>` = `data/<project>`).
@@ -77,7 +82,7 @@ tree and dataset-level files at the dataset root.
   sub-<subject>/
     [ses-<session>/]
       emg/
-        <entity>_emg.bdf|edf
+        <entity>_emg.edf                           # .bdf if the recording already has one
         <entity>_emg.json
         <entity>_channels.tsv
         <entity>_channels.json

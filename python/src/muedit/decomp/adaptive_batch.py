@@ -38,11 +38,13 @@ def _compute_calibration_stats(
     n_mu = mu_filters.shape[1]
     source = StreamedExtender(grid, whiten_mat.shape[0] // grid.shape[0], offset=win_mean)
     w_dewhite = whiten_mat.T @ mu_filters
-    ipts_calib = np.empty((n_mu, calib_end - calib_start))
+    # Squared chunk by chunk, so the window's pulse trains exist once, not twice.
+    ipts_sq = np.empty((n_mu, calib_end - calib_start))
     for lo in range(calib_start, calib_end, _STATS_CHUNK):
         hi = min(lo + _STATS_CHUNK, calib_end)
-        ipts_calib[:, lo - calib_start : hi - calib_start] = w_dewhite.T @ source.read(lo, hi)
-    ipts_sq = signed_square(ipts_calib)
+        ipts_sq[:, lo - calib_start : hi - calib_start] = signed_square(
+            w_dewhite.T @ source.read(lo, hi)
+        )
 
     base_centr = np.zeros(n_mu, dtype=np.float32)
     spikes_centr = np.ones(n_mu, dtype=np.float32)
