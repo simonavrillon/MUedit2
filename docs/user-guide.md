@@ -191,7 +191,7 @@ derivatives pipeline:
 <bids_root>/derivatives/muedit/sub-<subject>/[ses-<session>/]emg/<entity>_desc-decomposition_events.json
 ```
 
-The `.npz` contains the corrected pulse trains. The `.json` sidecar contains a full edit history (every add, delete, filter update, and flag action, with timestamps) that is preserved across successive save-reload-edit cycles.
+The `.npz` contains the corrected spike times, and the pulse trains when they are known. The `.json` sidecar contains a full edit history (every add, delete, filter update, and flag action, with timestamps) that is preserved across successive save-reload-edit cycles.
 
 Each save also refreshes the **BIDS events file** (`<entity>_desc-decomposition_events.tsv`, with a companion `.json`): a standards-compliant representation of the motor-unit discharges, with one row per spike (onset, sample index, and unit ID). It is regenerated from the current edits every time you save, so it always reflects the latest corrected spike trains. Saving additionally upserts the subject row in `participants.tsv`; see [saved-files.md](saved-files.md) for the full file list.
 
@@ -203,18 +203,23 @@ Flagged MUs are removed on save. Duplicate MUs are also removed on save, with th
 
 ### Decomposition NPZ (`.npz`)
 
-Written after decomposition or after saving edits. Core arrays:
+Written after decomposition or after saving edits, as a plain uncompressed NumPy archive
+that `np.load` opens without `allow_pickle`. Core arrays:
 
 | Key | Description |
 |---|---|
-| `discharge_times` | Spike times as sample indices, one array per MU |
-| `pulse_trains` | Continuous pulse train signal, one row per MU |
+| `spike_times`, `spike_offsets` | Spike times as sample indices, all MUs concatenated: MU `i` is `spike_times[spike_offsets[i]:spike_offsets[i + 1]]` |
+| `pulse_trains` | Continuous pulse train signal, one row per MU (float32) |
 | `fsamp` | Sampling frequency (Hz) |
-| `grid_names` | Grid labels |
+| `grid_names` | Grid labels (a JSON list) |
 | `mu_grid_index` | Grid assignment for each MU |
-| `muscle` | Muscle label(s) |
+| `muscle` | Muscle label(s) (a JSON list) |
 | `total_samples` | Total recording length in samples |
-| `parameters` | Decomposition parameters used |
+| `parameters` | Decomposition parameters used (a JSON object) |
+| `schema_version` | `2` |
+
+Files saved by earlier versions of MUedit still open in the app. See
+[saved-files.md](saved-files.md#npz-file-format) for every key and for the older layout.
 
 ### Edit log sidecar (`.json`)
 

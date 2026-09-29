@@ -18,6 +18,7 @@ from starlette.testclient import TestClient
 
 from muedit.api import cache
 from muedit.api.binary import FRAME_FORMAT, FRAME_MEDIA_TYPE, pack_frame, unpack_frame
+from muedit.decomp.decomposition_file import load_decomposition_file
 from tests._synthetic_emg import motor_unit_emg
 from tests.conftest import REPO_ROOT
 
@@ -116,7 +117,7 @@ def signal_mat(workspace: Path, emg: np.ndarray) -> Path:
 @pytest.fixture(scope="module")
 def decomp_npz(workspace: Path, emg: np.ndarray) -> Path:
     """MUedit NPZ decomposition with embedded EMG (so edit-load caches a context)."""
-    from muedit.decomp.decomposition_file import pack_object_array, save_decomposition_npz
+    from muedit.decomp.decomposition_file import save_decomposition_npz
 
     path = workspace / "sub-01_task-smoke_decomp.npz"
     save_decomposition_npz(
@@ -129,11 +130,9 @@ def decomp_npz(workspace: Path, emg: np.ndarray) -> Path:
         muscles=["ta"],
         parameters={},
         total_samples=N_SAMPLES,
-        extras={
-            "emg_data": emg,
-            "discard_channels": pack_object_array([np.zeros(N_CHANNELS, dtype=int)]),
-            "coordinates": pack_object_array([np.zeros((N_CHANNELS, 2))]),
-        },
+        emg_data=emg,
+        discard_channels=[np.zeros(N_CHANNELS, dtype=int)],
+        coordinates=[np.zeros((N_CHANNELS, 2))],
     )
     return path
 
@@ -675,10 +674,33 @@ class TestEditLoad:
         assert "pulse_trains_full" not in meta
         assert meta["file_label"] == decomp_npz.name
         assert len(meta["distime_all"]) == 2
-        with np.load(decomp_npz, allow_pickle=True) as z:
+        with np.load(decomp_npz) as z:
             saved = z["pulse_trains"]
         assert arrays["pulse_trains_full"].dtype == np.float32
         np.testing.assert_array_equal(arrays["pulse_trains_full"], saved.astype(np.float32))
+
+    def test_embedded_emg_lives_in_a_store_the_next_load_deletes(
+        self, client: TestClient, decomp_npz: Path, emg: np.ndarray
+    ) -> None:
+        def load() -> Any:
+            meta, _ = _unpack_frame_response(
+                client.post(
+                    f"{API}/edit/load-by-path",
+                    json={"path": str(decomp_npz)},
+                    headers={SESSION_HEADER: "edit-store"},
+                )
+            )
+            return cache._EDIT_SIGNAL_CONTEXTS.slots[meta["edit_signal_token"]].value
+
+        first = load()
+        assert first.store is not None and first.store.path.is_dir()
+        assert isinstance(first.context.data, np.memmap)
+        np.testing.assert_array_equal(first.context.data, emg.astype(np.float32))
+        second = load()
+        assert not first.store.path.exists()
+        assert second.store.path.is_dir()
+        cache.close_session("edit-store")
+        assert not second.store.path.exists()
 
     def test_by_path_json(self, client: TestClient, decomp_npz: Path) -> None:
         data = _ok(
@@ -749,9 +771,10 @@ class TestEditSave:
         assert out.is_file() and out.suffix == ".npz"
         assert out.is_relative_to(workspace / "smoke")
         assert out.with_suffix(".json").is_file()
-        with np.load(out, allow_pickle=True) as z:
-            assert {"pulse_trains", "discharge_times", "fsamp", "artifact_mask"} <= set(z.files)
-            assert int(z["artifact_mask"].sum()) == 20
+        with np.load(out) as z:
+            assert {"schema_version", "spike_times", "spike_offsets", "fsamp"} <= set(z.files)
+            assert "pulse_trains" not in z.files  # spikes only: no IPTs were sent
+            assert z["artifact_intervals"].tolist() == [[10, 20], [30, 40]]
 
     def test_frame_body_saves_the_sent_pulse_trains_of_kept_mus(
         self, client: TestClient, decomp_npz: Path
@@ -775,7 +798,7 @@ class TestEditSave:
             )
         )
         assert data["kept_indices"] == [0, 2]
-        with np.load(data["path"], allow_pickle=True) as z:
+        with np.load(data["path"]) as z:
             np.testing.assert_array_equal(z["pulse_trains"], pulse[[0, 2]])
 
     def test_run_save_uses_the_stored_run_result(
@@ -800,11 +823,11 @@ class TestEditSave:
                 },
             )
         )
-        with np.load(data["path"], allow_pickle=True) as z:
+        with np.load(data["path"]) as z:
             np.testing.assert_array_equal(z["pulse_trains"], stored)
         assert cache._get_run_result(token) is None
 
-    def test_mismatched_pulse_trains_fall_back_to_discharge_times(
+    def test_mismatched_pulse_trains_save_spikes_only(
         self, client: TestClient, decomp_npz: Path
     ) -> None:
         meta = {
@@ -821,9 +844,12 @@ class TestEditSave:
                 headers={"content-type": FRAME_MEDIA_TYPE},
             )
         )
-        with np.load(data["path"], allow_pickle=True) as z:
-            assert z["pulse_trains"].shape == (1, N_SAMPLES)
-            assert np.flatnonzero(z["pulse_trains"][0]).tolist() == [1000, 1400]
+        with np.load(data["path"]) as z:
+            assert "pulse_trains" not in z.files
+            assert z["spike_times"].tolist() == [1000, 1400]
+        loaded = load_decomposition_file(data["path"])
+        assert loaded.pulse_trains_full.shape == (1, N_SAMPLES)
+        assert np.flatnonzero(loaded.pulse_trains_full[0]).tolist() == [1000, 1400]
 
     def test_malformed_frame_is_400(self, client: TestClient) -> None:
         resp = client.post(

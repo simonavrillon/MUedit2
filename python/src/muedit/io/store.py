@@ -205,7 +205,7 @@ class SessionStore:
         return _folder_bytes(self.path)
 
 
-def _copy_into(store: ArrayStore, name: str, arr: FloatArray) -> FloatArray:
+def copy_into(store: ArrayStore, name: str, arr: FloatArray) -> FloatArray:
     """``arr`` as float32 in ``store``, copied block by block."""
     out = store.allocate(name, arr.shape, np.float32)
     for start, stop in sample_blocks(arr.shape[1], arr.shape[0], arr.dtype.itemsize):
@@ -217,8 +217,8 @@ def store_signal(signal: SignalImport, store: ArrayStore) -> SignalImport:
     """``signal`` with its EMG and auxiliary arrays copied into ``store`` as float32."""
     return replace(
         signal,
-        data=_copy_into(store, "emg", signal.data),
-        auxiliary=_copy_into(store, "aux", signal.auxiliary),
+        data=copy_into(store, "emg", signal.data),
+        auxiliary=copy_into(store, "aux", signal.auxiliary),
     )
 
 

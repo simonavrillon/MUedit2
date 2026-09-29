@@ -235,13 +235,15 @@ Use this to trace what the user can reach.
 | `adaptive_batch_process()` | App-internal | Called by `postprocess_step` |
 | `build_preview_payload()` | App-internal | Called by `export_step` |
 | `downsample_vector()` | App-internal | Called by `build_preview_payload` |
-| `load_decomposition_file()` | App-internal | Called by editing service |
-| `load_decomposition_signal_context()` | App-internal | Called by editing service |
+| `load_decomposition_file()` | App-internal | `load_decomposition()` without the EMG; tests and scripts |
+| `load_decomposition_signal_context()` | App-internal | The EMG context alone; tests and scripts |
 | `normalize_distimes()` | App-internal | Called by editing service |
 | `build_pulse_trains_from_distimes()` | App-internal | Called by editing service |
 | `save_editlog()` | App-internal | Called by editing service |
 | `save_decomposition_npz()` | App-internal | Called by `export_step`, editing service save — owns the `.npz` schema |
-| `pack_object_array()` | App-internal | Called by `export_step`, `save_decomposition_npz` |
+| `load_decomposition()` | App-internal | Called by editing service; one read of the file for both the decomposition and its EMG |
+| `pack_csr()` / `unpack_csr()` | App-internal | CSR layout of the `.npz` schema (spike times, per-window SIL, channel masks) |
+| `io.npz.NpzWriter` / `io.npz.NpzArchive` | App-internal | Aligned uncompressed `.npz` writing; one-open reading with memory maps and the restricted legacy unpickler |
 | `first_non_none()` | App-internal | Called by `decomp/decomposition_file.py` internals |
 | All `_`-prefixed functions | App-internal | Internal helpers |
 
@@ -267,6 +269,7 @@ Use this to trace what the user can reach.
 | `load_bids_emg_grid()` | App-internal | Called by `bids_helpers._load_bids_grid` |
 | `resolve_bids_emg_path()` | App-internal | Called by `_bids_reader`, `bids_helpers` |
 | `select_grid_channels()` | App-internal | Called by `load_bids_emg_grid` |
+| `NpzWriter`, `NpzArchive` (`io/npz.py`) | App-internal | Called by `decomposition_file` |
 | All `_`-prefixed functions | App-internal | Internal helpers |
 
 ---
@@ -286,6 +289,7 @@ Use this to trace what the user can reach.
 | `_channel_qc_diagnostics()` | App-internal | Called by `_detect_bad_channels` |
 | `_detect_artifact_mask()` | App-internal | Called by `detect_artifact_masks` |
 | `detect_artifact_masks()` | App-internal | Called by QC pipeline |
+| `mask_to_intervals()`, `intervals_to_mask()` | App-internal | `.npz` artifact intervals, preview artifact regions |
 | `extend_signal()` | App-internal | Called by `decompose_step`, `operations.py` |
 | `signed_square()` | App-internal | Called by `decompose_step`, `operations.py` |
 | `find_refractory_peaks()` | App-internal | Called by `decompose_step`, `operations.py` |

@@ -294,7 +294,7 @@ Steps:
 ## Stage 5: Export (`postprocess.py: export_step`)
 
 ```python
-def export_step(loaded, prep, post, params, include_full_preview, save_npz, save_emg_data,
+def export_step(loaded, prep, post, params, include_full_preview, save_npz, raw_emg,
                progress_cb) -> (result_dict, save_path)
 ```
 
@@ -304,7 +304,7 @@ Steps:
 2. Build preview payload via `build_preview_payload()`
 3. Construct `DecompositionExport` model and call `.to_dict()`
 4. Attach `adaptive_losses` to result dict
-5. If `save_npz`: save NPZ with extras (sil, sil_by_window, rois, emg_data, discard_channels, coordinates, artifact_mask)
+5. If `save_npz`: save the schema v2 NPZ with sil, sil_by_window, rois, adaptive_losses and the artifact mask; with `raw_emg` (the pipeline passes it when not exporting BIDS), also the raw EMG, discard_channels and coordinates
 6. Emit `"done"` progress callback with summary + preview
 
 ---
@@ -339,31 +339,50 @@ Builds the preview payload dict sent to the frontend:
 
 ## Decomposition Files (`decomp/decomposition_file.py`)
 
-Owns the app `.npz` schema: `save_decomposition_npz(out_path, pulse_trains, distimes, fsamp, grid_names, mu_grid_index, muscles, parameters, total_samples, extras)` writes it (used by the pipeline and the edit-stage save), and `_load_npz_decomp` reads it. `pack_object_array(items)` builds the 1-D object arrays the schema uses.
+Owns the app `.npz` schema (v2, described in `docs/saved-files.md`):
+`save_decomposition_npz(out_path, pulse_trains, distimes, fsamp, grid_names, mu_grid_index,
+muscles, parameters, total_samples, *, sil, sil_by_window, adaptive_losses, rois,
+artifact_mask, emg_data, discard_channels, coordinates)` writes it through
+`io.npz.NpzWriter` (uncompressed, 64-byte-aligned members, no pickle, written to a temporary
+file and moved over the destination). Discharge times are CSR (`spike_times` int32 +
+`spike_offsets` int64, `pack_csr` / `unpack_csr`); names, parameters and losses are JSON
+strings; the artifact mask is stored as `[start, end)` intervals. `pulse_trains=None`
+writes spike times only.
+
+Reading goes through `io.npz.NpzArchive`, which opens the file once, memory-maps
+uncompressed members in place and rebuilds v1 object arrays with a restricted unpickler
+(arrays, dtypes, numpy scalars and plain Python values only; anything else raises
+`LegacyPickleError`).
 
 ### Main entry points
 
 ```python
-def load_decomposition_file(filepath: str) -> LoadedDecomposition
+def load_decomposition(filepath: str, store: ArrayStore | None = None, *, with_signal: bool = True) -> tuple[LoadedDecomposition, EditSignalContext | None]
 ```
-Loads a `.npz` or `.mat` decomposition file into a normalized `LoadedDecomposition`. Handles 1-based MATLAB discharge-time convention (shifts by -1).
+Reads a `.npz` (v1 or v2) or `.mat` (v5 or v7.3) file once and returns the normalized
+`LoadedDecomposition` plus the embedded EMG context, whose EMG and aux arrays are written
+into `store` as float32 block by block (a `RamStore` when none is given). v2 pulse trains
+stay memory-mapped from the file; a file without them gets binary float32 trains built from
+its spike times. v7.3 EMG is read by slice. Handles the 1-based MATLAB discharge-time
+convention (shifts by -1). A v1 `.npz` embeds filtered EMG, so its context has
+`prefiltered=True`.
 
 ```python
-def load_decomposition_signal_context(filepath: str) -> EditSignalContext | None
+def load_decomposition_file(filepath: str) -> LoadedDecomposition
+def load_decomposition_signal_context(filepath: str, store: ArrayStore | None = None) -> EditSignalContext | None
 ```
-Best-effort extraction of raw EMG context embedded in decomposition files. Returns dict with `data`, `fsamp`, `grid_names`, `emgmask`, `artifact_mask`, `coordinates`, `ied`, `aux_data`, `aux_names`, and BIDS metadata keys.
+`load_decomposition` without the EMG, and its EMG context alone.
 
 ### Key helper functions
 
 | Function | Description |
 |---|---|
 | `normalize_distimes(raw) -> list[list[int]]` | Normalize discharge-time payloads (sorted, deduplicated, non-negative) |
-| `build_pulse_trains_from_distimes(distimes, total_samples) -> np.ndarray` | Binary `(n_mu, total_samples)` pulse matrix from discharge indices |
+| `build_pulse_trains_from_distimes(distimes, total_samples) -> np.ndarray` | Binary float32 `(n_mu, total_samples)` pulse matrix from discharge indices |
 | `save_editlog(path, mu_uids, edit_history, artifact_times)` | Write JSON editlog sidecar |
 | `first_non_none(*values)` | Return first non-None argument |
-| `_load_npz_decomp(filepath) -> DecompositionLoad` | Load MUedit NPZ format |
-| `_load_mat_decomp(filepath) -> DecompositionLoad` | Load MATLAB MAT (dispatches v7.3 HDF5 or legacy scipy) |
-| `_load_mat73_decomp(filepath) -> DecompositionLoad` | Load MATLAB v7.3 (HDF5) |
+| `_npz_v1_decomp(archive)` / `_npz_v2_decomp(archive) -> DecompositionLoad` | Read the MUedit NPZ schemas |
+| `_mat5_decomp(mat)` / `_mat73_decomp(h5f) -> DecompositionLoad` | Read MATLAB MAT (scipy v5 or HDF5 v7.3, without the EMG samples) |
 | `_parse_mu_grid_index(raw) -> list[int]` | Normalize MU-to-grid assignment |
 | `_unpack_gridwise_decomposition(pulse_trains, distime_raw, mu_grid_index) -> (pulse, distime, mu_grid_index)` | Stack per-grid blocks |
 | `_distimes_from_pulse_matrix(matrix) -> list[list[int]]` | Derive discharge times from pulse matrix non-zero entries |

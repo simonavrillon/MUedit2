@@ -55,9 +55,7 @@ from muedit.api.services.edit_helpers import (
     _pad_grid_names,
 )
 from muedit.decomp.decomposition_file import (
-    build_pulse_trains_from_distimes,
-    load_decomposition_file,
-    load_decomposition_signal_context,
+    load_decomposition,
     normalize_distimes,
     save_decomposition_npz,
     save_editlog,
@@ -79,6 +77,7 @@ from muedit.io.bids import (
     export_bids_mu_derivatives,
     write_bids_dataset_description,
 )
+from muedit.io.store import SessionStore
 from muedit.models import LoadedDecomposition
 from muedit.signal.grid import format_hdemg_signal
 
@@ -127,11 +126,19 @@ def _load_edit_result(filepath: str, session: str = DEFAULT_SESSION) -> EditLoad
         )
     _release_edit_signal_context(session)
     file_label = Path(filepath).name
-    decomp = load_decomposition_file(filepath)
+    store = SessionStore.create("edit")
+    try:
+        decomp, signal_ctx = load_decomposition(filepath, store)
+    except BaseException:
+        store.close()
+        raise
     result = EditLoadResult(decomposition=decomp, file_label=file_label)
-    signal_ctx = load_decomposition_signal_context(filepath)
     if signal_ctx:
-        result.edit_signal_token = _store_edit_signal_context(signal_ctx, file_label, session)
+        result.edit_signal_token = _store_edit_signal_context(
+            signal_ctx, file_label, session, store
+        )
+    else:
+        store.close()
 
     bids_root = _infer_bids_root_from_decomp_path(filepath)
     if bids_root is not None:
@@ -252,8 +259,8 @@ def _export_bids_from_mat_context(
     )
     if ctx is None:
         return None  # non-MAT source or context expired
-    if ctx.data.size == 0:
-        return None  # mask-only context has no raw EMG to export
+    if ctx.data.size == 0 or ctx.prefiltered:
+        return None  # no raw EMG: a mask-only context, or a v1 .npz holding filtered EMG
 
     entities = _parse_all_bids_entities(entity_label)
     try:
@@ -384,11 +391,8 @@ def save_edits(payload: EditSavePayload, pulse_trains: np.ndarray | None = None)
         if removed_uids:
             edit_history.append(_save_removal_entry("remove_duplicates", removed_uids))
 
-    pulse_trains = (
-        pulse_trains[kept_mus]
-        if pulse_trains is not None
-        else build_pulse_trains_from_distimes(distimes, total_samples)
-    )
+    if pulse_trains is not None and len(kept_mus) != pulse_trains.shape[0]:
+        pulse_trains = pulse_trains[kept_mus]
 
     bids_root = resolve_bids_root(payload.project)
     file_label = payload.file_label or ""
@@ -434,7 +438,7 @@ def save_edits(payload: EditSavePayload, pulse_trains: np.ndarray | None = None)
         muscles=muscle_names,
         parameters=parameters,
         total_samples=total_samples,
-        extras={"artifact_mask": artifact_mask} if artifact_mask is not None else None,
+        artifact_mask=artifact_mask,
     )
     save_editlog(out_path.with_suffix(".json"), mu_uids, edit_history, artifact_times_all or None)
     _drop_run_result(payload.run_result_token)
@@ -528,6 +532,7 @@ def update_filter(payload: EditFilterPayload) -> dict[str, Any]:
     fsamp: float | None = None
     emg_mask: np.ndarray | None = None
     emg_is_presliced = False  # True only when BIDS loaded a view-length slice
+    emg_prefiltered = False
 
     try:
         emg, fsamp, emg_mask = _load_bids_grid(
@@ -571,6 +576,7 @@ def update_filter(payload: EditFilterPayload) -> dict[str, Any]:
         n_ch = int(coordinates[grid_index].shape[0])
         emg = data[ch_offset : ch_offset + n_ch, :]
         fsamp = fsamp_val
+        emg_prefiltered = ctx.prefiltered
 
         raw_masks = ctx.emgmask
         cell = raw_masks[grid_index] if grid_index < len(raw_masks) else np.array([], dtype=int)
@@ -627,6 +633,7 @@ def update_filter(payload: EditFilterPayload) -> dict[str, Any]:
         artifact_times=artifact_times or None,
         lock_spikes=lock_spikes,
         artifact_mask=artifact_mask,
+        bandpass=not emg_prefiltered,
     )
 
     pulse_train = payload.pulse_train

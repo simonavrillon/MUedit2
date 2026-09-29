@@ -34,6 +34,7 @@ from muedit.api.services.series_service import (
 from muedit.io.factory import get_loader, load_signal
 from muedit.io.store import ArrayStore, RamStore, SessionStore
 from muedit.models import FloatArray, SignalImport
+from muedit.signal.artifact_mask import mask_to_intervals
 from muedit.signal.filters import FILTER_BLOCK_ROWS
 from muedit.signal.grid import format_hdemg_signal
 from muedit.signal.qc_pipeline import run_auto_qc
@@ -109,12 +110,7 @@ def build_preview_from_path(filepath: str, session: str = DEFAULT_SESSION) -> di
 
 def _mask_to_regions(mask: np.ndarray | None) -> list[list[int]]:
     """Convert a boolean sample mask into contiguous ``[start, end)`` ranges."""
-    if mask is None or not mask.any():
-        return []
-    diff = np.diff(mask.astype(np.int8), prepend=0, append=0)
-    starts = np.flatnonzero(diff == 1)
-    ends = np.flatnonzero(diff == -1)
-    return [[int(s), int(e)] for s, e in zip(starts, ends, strict=True)]
+    return mask_to_intervals(mask).tolist()
 
 
 def _bandpassed_grids(

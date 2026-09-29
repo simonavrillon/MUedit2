@@ -40,6 +40,7 @@ def _recompute_spikes_in_window(
     artifact_times: SpikeTimes | None = None,
     lock_spikes: bool = False,
     artifact_mask: BoolArray | None = None,
+    bandpass: bool = True,
 ) -> FilterUpdateResult:
     """Recompute motor-unit pulse train and spikes within a visible time window."""
     if emg.size == 0 or start >= end:
@@ -55,7 +56,8 @@ def _recompute_spikes_in_window(
     if slice_start < 0 or slice_end > emg.shape[1]:
         return None, spike_times
     window_emg = emg[:, slice_start:slice_end]
-    window_emg = bandpass_signals(window_emg, fsamp)
+    if bandpass:
+        window_emg = bandpass_signals(window_emg, fsamp)
 
     spikes_arr = np.asarray(spike_times, dtype=int)
     spikes1 = spikes_arr[(spikes_arr >= start + edge) & (spikes_arr < end - edge)]
@@ -170,8 +172,9 @@ def update_motor_unit_filter_window(
     artifact_times: SpikeTimes | None = None,
     lock_spikes: bool = False,
     artifact_mask: BoolArray | None = None,
+    bandpass: bool = True,
 ) -> FilterUpdateResult:
-    """Update a motor-unit pulse train and spikes inside a time window."""
+    """Update a motor-unit pulse train and spikes inside a time window; ``bandpass=False`` for filtered EMG."""
     slice_start, slice_end = start - emg_offset, end - emg_offset
     if 0 <= slice_start < slice_end <= emg.shape[1]:
         emg, emg_offset = emg[:, slice_start:slice_end], start
@@ -190,6 +193,7 @@ def update_motor_unit_filter_window(
         artifact_times=artifact_times,
         lock_spikes=lock_spikes,
         artifact_mask=artifact_mask,
+        bandpass=bandpass,
     )
     return pt, updated
 

@@ -24,28 +24,20 @@ Example:
 /data/session1/recording01_decomp.npz
 ```
 
-Core NPZ keys (aligned with web-app save format):
-- `pulse_trains`
-- `discharge_times`
-- `fsamp`
-- `grid_names`
-- `mu_grid_index`
-- `muscle`
-- `total_samples`
-- `parameters`
-- `adaptive_losses`
-
-Additional keys always written:
+Keys (the schema is described in [NPZ file format](#npz-file-format) below):
+- the core keys every MUedit `.npz` holds: `schema_version`, `fsamp`, `total_samples`,
+  `spike_times`, `spike_offsets`, `mu_grid_index`, `grid_names`, `muscle`, `parameters`
+- `pulse_trains` — the motor units' pulse trains (IPTs)
 - `sil` — silhouette score per MU
-- `sil_keys` — window keys for the `sil_by_window` mapping
-- `sil_by_window` — per-window SIL scores
-- `rois` — list of `(start, end)` analysis windows
+- `sil_keys`, `sil_by_window`, `sil_by_window_offsets` — per-window SIL scores
+- `adaptive_losses` — adaptive decomposition losses
+- `rois` — the `(start, end)` analysis windows
 
-Conditional key:
-- `emg_data` (included only when BIDS export is not requested)
-- `discard_channels` (included only when BIDS export is not requested)
-- `coordinates` (included only when BIDS export is not requested)
-- `artifact_mask` (included whenever an artifact mask was applied, with or without BIDS export)
+Conditional keys:
+- `emg_data`, `discard_channels` + `discard_channel_offsets`, `coordinates` +
+  `coordinate_offsets` (included only when BIDS export is not requested: the raw EMG then
+  travels with the decomposition, so the editor can update MU filters)
+- `artifact_intervals` (included whenever an artifact mask was applied, with or without BIDS export)
 
 Notes:
 - CLI decomposition uses `save_npz=True` by default.
@@ -137,16 +129,8 @@ validator by `.bidsignore`):
 > `derivatives/muedit/` is **not** written by the decomposition pipeline — it
 > is created only during the edited-save flow (see §3 below).
 
-BIDS decomposition NPZ keys (same core schema):
-- `pulse_trains`
-- `discharge_times`
-- `fsamp`
-- `grid_names`
-- `mu_grid_index`
-- `muscle`
-- `total_samples`
-- `parameters`
-- `adaptive_losses`
+The BIDS decomposition NPZ has the same keys as above, without `emg_data`,
+`discard_channels` and `coordinates`: the raw EMG lives in the BIDS `emg/` folder.
 
 ## 3) Edited Decomposition Save (Web Edit Mode)
 
@@ -175,17 +159,13 @@ The `events.tsv` derivative is the BIDS-facing representation of motor-unit
 spike times; the authoritative artefact remains the `_edited.npz` above.
 
 Edited NPZ keys:
-- `pulse_trains`
-- `discharge_times`
-- `fsamp`
-- `grid_names`
-- `mu_grid_index`
-- `muscle`
-- `parameters`
-- `total_samples`
+- the core keys (see [NPZ file format](#npz-file-format))
+- `pulse_trains` (only when the pulse trains were known: after a run, or when the edited
+  file had them. A file edited from spike times alone stores spike times only, and the
+  editor draws binary trains from them)
 
 Conditional key:
-- `artifact_mask` (included only when artifact regions are provided)
+- `artifact_intervals` (included only when artifact regions are provided)
 
 ### Edit Log Sidecar
 
@@ -252,7 +232,7 @@ The sidecar contains:
 }
 ```
 
-**`mu_uids`** — one stable string ID per surviving MU (after flagged/duplicate removal), in the same order as `discharge_times`. Format: `g<grid_index>_mu<rank_within_grid>`. Assigned once at first load; preserved through successive saves. A uid is never reused: a new MU from `duplicate_mu` is numbered after every uid the history has ever named, including removed ones.
+**`mu_uids`** — one stable string ID per surviving MU (after flagged/duplicate removal), in the same order as the MUs in `spike_offsets`. Format: `g<grid_index>_mu<rank_within_grid>`. Assigned once at first load; preserved through successive saves. A uid is never reused: a new MU from `duplicate_mu` is numbered after every uid the history has ever named, including removed ones.
 
 **`history`** — append-only log of all edit actions across all sessions. Carries over when the file is saved and reloaded for further editing.
 
@@ -280,7 +260,55 @@ Undo removes the entries of the action it undoes, so the history always describe
 the saved data.
 
 All spike, artifact, and view coordinates are 0-based sample indices (same units
-as `discharge_times`).
+as `spike_times`).
+
+## NPZ File Format
+
+MUedit writes `.npz` files in **schema v2**. They are plain, uncompressed NumPy archives
+that `np.load` reads with its default `allow_pickle=False`: nothing in them is pickled.
+Each array's data starts on a 64-byte boundary, so large arrays (`pulse_trains`,
+`emg_data`) can be memory-mapped straight from the file.
+
+| Key | dtype, shape | Content |
+|---|---|---|
+| `schema_version` | int64, `()` | `2` |
+| `fsamp` | float64, `()` | Sampling rate, Hz |
+| `total_samples` | int64, `()` | Recording length in samples |
+| `spike_times` | int32, `(n_spikes,)` | Discharge times of all MUs, concatenated; 0-based sample indices, sorted within each MU |
+| `spike_offsets` | int64, `(n_mu + 1,)` | MU `i`'s discharge times are `spike_times[spike_offsets[i]:spike_offsets[i + 1]]` |
+| `mu_grid_index` | int16, `(n_mu,)` | Grid of each MU |
+| `grid_names`, `muscle` | unicode, `()` | JSON list of strings |
+| `parameters` | unicode, `()` | JSON object: the decomposition parameters |
+| `pulse_trains` | float32, `(n_mu, total_samples)` | Pulse trains (IPTs), one row per MU |
+| `sil` | float64, `(n_mu,)` | Silhouette score per MU |
+| `sil_keys`, `sil_by_window`, `sil_by_window_offsets` | int64, float64, int64 | Per-window SIL scores, laid out like the spike times |
+| `adaptive_losses` | unicode, `()` | JSON |
+| `rois` | int64, `(k, 2)` | `[start, end)` analysis windows |
+| `artifact_intervals` | int64, `(k, 2)` | `[start, end)` sample ranges masked as artifacts |
+| `emg_data` | float32, `(n_channels, total_samples)` | The **raw, unfiltered** EMG |
+| `discard_channels`, `discard_channel_offsets` | uint8, int64 | Per grid, 1 = discarded channel |
+| `coordinates`, `coordinate_offsets` | float32 `(n, 2)`, int64 | Per grid, electrode coordinates |
+
+Reading one in Python:
+
+```python
+import json
+import numpy as np
+
+with np.load("recording_decomp.npz") as f:
+    spikes, offsets = f["spike_times"], f["spike_offsets"]
+    discharge_times = [spikes[a:b] for a, b in zip(offsets[:-1], offsets[1:])]
+    grid_names = json.loads(str(f["grid_names"]))
+```
+
+**Older files (schema v1).** Files saved by earlier MUedit versions have no
+`schema_version` key. They store discharge times, names and parameters as pickled Python
+objects (`discharge_times`, an object array), a boolean `artifact_mask`, and, in
+`emg_data`, the EMG *after* the notch and bandpass filters. MUedit still opens them: it
+rebuilds only arrays, lists, dicts, strings and numbers from the pickles and refuses
+anything else, so a crafted file cannot run code. MUedit never rewrites them; saving an
+edit writes a new v2 file. Outside MUedit, they need `np.load(path, allow_pickle=True)`,
+which should only be used on files you trust.
 
 ## Important Path Rule For `bids_root`
 

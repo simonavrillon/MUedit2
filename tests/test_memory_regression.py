@@ -54,7 +54,10 @@ EXT_WINDOW_MB = EXT_ROWS * ROI_SAMPLES * 8 / 1e6
 # stages 4-5: decompose, update_filter and the three postprocess branches;
 # stages 6-7: preview, preprocess and save; stages 9-10: preview, preprocess,
 # full-trace and adaptive, with the loaded, filtered and pulse arrays memory-mapped
-# in session stores; stage 12: qc_auto, and ``series`` replacing ``qc_window``).
+# in session stores; stage 12: qc_auto, and ``series`` replacing ``qc_window``;
+# stage 13: save and edit_load, the .npz written and read uncompressed, the edit
+# EMG copied into a store and the pulse trains memory-mapped from the file, so
+# edit_load holds little more than the float32 pulse frame).
 # A factor that grows means the stage started keeping an
 # extra full copy.  ``load`` reads a v5 .mat, which scipy can only read whole;
 # ``load_store`` reads the same recording as v7.3 into a store, slice by slice.
@@ -73,10 +76,10 @@ BUDGETS_MB: dict[str, float] = {
     "preprocess": 0.47 * RAW_MB,
     "decompose": 1.55 * EXT_WINDOW_MB,
     "post_windowed": 1.45 * EXT_WINDOW_MB,
-    "save": 1.55 * RAW_MB,
+    "save": 0.29 * RAW_MB,
     "post_full": 1.5 * RAW_MB,
     "post_adaptive": 2.05 * RAW_MB,
-    "edit_load": 2.0 * RAW_MB,
+    "edit_load": 0.045 * RAW_MB,
     "update_filter": 6.7 * RAW_MB,
 }
 
@@ -369,7 +372,7 @@ def test_save_stage(prepared: Any, post_windowed: Any) -> None:
             params=DecompositionParameters(niter=NITER),
             include_full_preview=False,
             save_npz=True,
-            save_emg_data=True,
+            raw_emg=loaded.data,
             progress_cb=None,
         )
     )

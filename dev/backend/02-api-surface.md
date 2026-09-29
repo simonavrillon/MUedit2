@@ -272,7 +272,7 @@ Thread-safe (single `threading.Lock`), TTL-based, with budget-driven eviction (m
 | `_store_run_result(pulse_trains) -> token` | Keep a run's float32 pulse matrix |
 | `_get_run_result(token) -> FloatArray \| None` | Read-only view of the stored pulse matrix |
 | `_drop_run_result(token)` | Forget it after a successful save |
-| `_store_edit_signal_context(context: EditSignalContext, file_label) -> token` | Store a float32 copy of the context, index by label |
+| `_store_edit_signal_context(context: EditSignalContext, file_label, session, store) -> token` | Keep the context and its edit `SessionStore` (deleted when the entry is dropped), or a float32 copy without a store; index by label |
 | `_get_edit_signal_context(token) -> EditSignalContext \| None` | Get a read-only view of the context |
 | `_get_edit_signal_context_by_label(file_label) -> EditSignalContext \| None` | Resolve context by label |
 

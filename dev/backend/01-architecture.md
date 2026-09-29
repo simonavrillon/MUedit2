@@ -120,9 +120,10 @@ it, and it is passed as-is through the pipeline and the upload cache.
 Methods: `from_mapping(payload)` (normalizes loader dicts), `clone()`, `to_dict()`, `nbytes` (property)
 
 ### `EditSignalContext`
-Raw EMG embedded in a decomposition file (`.mat`/`.npz`), built by
-`load_decomposition_signal_context()` and held in the API edit cache for
-filter updates and BIDS export.
+EMG embedded in a decomposition file (`.mat`/`.npz`), built by
+`load_decomposition()` and held in the API edit cache for filter updates and BIDS export.
+The editing service passes `load_decomposition()` an edit `SessionStore`, so the EMG is a
+float32 memory map in that store, which the cache entry deletes when it is dropped.
 
 | Field | Type | Default |
 |---|---|---|
@@ -136,8 +137,9 @@ filter updates and BIDS export.
 | `aux_names` | `list[str]` | `[]` |
 | `artifact_mask` | `BoolArray \| None` | `None` |
 | `loader_meta` | `dict[str, Any]` | `{}` (the `LOADER_BIDS_META_KEYS` the file recorded) |
+| `prefiltered` | `bool` | `False`; `True` for a schema v1 `.npz`, whose EMG is notch- and bandpass-filtered: the filter update skips its bandpass and the BIDS export skips it |
 
-Methods: `compact_copy()` (independent copy, EMG/aux as float32), `readonly_view()` (shares arrays read-only), `nbytes` (property)
+Methods: `compact_copy()` (independent copy, EMG/aux as float32), `readonly_view()` (shares arrays read-only), `nbytes` (property; memory-mapped EMG/aux count 0)
 
 ### `LoadedDecomposition`
 Decomposition state loaded from `.npz`/`.mat` for editing. Returned by

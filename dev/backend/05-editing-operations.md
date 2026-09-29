@@ -41,7 +41,7 @@ FilterUpdateResult: TypeAlias = tuple[np.ndarray | None, SpikeTimes]
 | Remove outliers | `/edit/remove-outliers` | spikes | no | rate > mean + z*sigma | `remove_outliers()` | `remove_discharge_rate_outliers()` |
 | Remove duplicates | `/edit/remove-duplicates` | all MUs | no | lag overlap | `remove_duplicates_service()` | `_dedup()` -> `remove_duplicates_by_grid()` |
 | Flag MU | `/edit/flag-mu` | metadata | no | — | `flag_mu()` | — |
-| Load decomposition | `/edit/load-by-path` | — | no | — | `load_decomposition_from_path()` | `load_decomposition_file()` |
+| Load decomposition | `/edit/load-by-path` | — | no | — | `load_decomposition_from_path()` | `load_decomposition()` |
 | Save edits | `/edit/save` | — | no | — | `save_edits()` | NPZ save + BIDS export |
 
 ---
@@ -109,7 +109,7 @@ def update_motor_unit_filter_window(
 
 Resolves the EMG source:
 - **BIDS path**: loads grid via `_load_bids_grid(bids_root, entity_label, grid_index, view_start, view_end)`
-- **MAT context**: loads cached signal context via `_get_edit_signal_context(edit_signal_token)` or `_get_edit_signal_context_by_label(file_label)`
+- **MAT context**: loads cached signal context via `_get_edit_signal_context(edit_signal_token)` or `_get_edit_signal_context_by_label(file_label)`; a `prefiltered` context (schema v1 `.npz`) is passed with `bandpass=False`, so its already-filtered EMG is not bandpassed twice
 
 The temporal artifact mask is retrieved from the cached signal context (if available) so the filter update excludes artifact-contaminated samples.
 
@@ -287,13 +287,13 @@ Full save pipeline:
 4. Generate MU UIDs via `_generate_mu_uids()`
 5. Remove flagged MUs unless `remove_flagged=False`; append a `remove_flagged` editlog entry (`on_save: true`) naming the dropped uids
 6. Deduplicate unless `remove_duplicates=False` via `_dedup()`; append a `remove_duplicates` entry (`on_save: true`) if any were dropped
-7. Index the pulse matrix once with the final kept indices. It comes from the request frame, else from the run result named by `run_result_token`; when neither matches `(n_mu, total_samples)`, the kept MUs' trains are built from distimes via `build_pulse_trains_from_distimes()`
+7. Index the pulse matrix once with the final kept indices (not at all when every MU is kept). It comes from the request frame, else from the run result named by `run_result_token`; when neither matches `(n_mu, total_samples)`, the file stores spike times only (the loader draws binary trains from them)
 8. Build artifact mask from `payload.artifact_regions` via `build_manual_artifact_mask()`; fall back to cached signal context mask if no manual regions
-9. Save NPZ via `decomposition_file.save_decomposition_npz()` (includes `artifact_mask` extra) to BIDS derivatives layout
+9. Save the schema v2 NPZ via `decomposition_file.save_decomposition_npz()` (with the artifact mask as intervals) to BIDS derivatives layout
 10. Write editlog JSON via `save_editlog()` (mu_uids, edit_history, artifact_times)
 11. Write participants.tsv via `write_bids_dataset_description()`
 12. Export BIDS MU derivatives via `export_bids_mu_derivatives()`
-13. Best-effort BIDS EMG export from MAT context via `_export_bids_from_mat_context()`
+13. Best-effort BIDS EMG export from MAT context via `_export_bids_from_mat_context()` (skipped for a `prefiltered` context, which holds no raw EMG)
 
 Returns: `{saved: bool, path: str, kept_indices: list[int], mu_uids: list[str], edit_history: list[dict], bids_emg_paths?: dict, bids_deriv_paths?: dict}`. `kept_indices` indexes the payload's MUs in saved order; the frontend uses it and `edit_history` to mirror the saved file.
 
@@ -307,9 +307,10 @@ def load_decomposition_from_path(filepath: str) -> dict[str, Any]
 
 Load pipeline:
 1. Use the server-side path directly (there is no upload variant)
-2. `load_decomposition_file(filepath)` -> `LoadedDecomposition`, wrapped in an `EditLoadResult`
-3. `load_decomposition_signal_context(filepath)` -> `EditSignalContext`, stored via
-   `_store_edit_signal_context()` -> `EditLoadResult.edit_signal_token`
+2. `load_decomposition(filepath, store)` reads the file once into a new edit `SessionStore`:
+   `LoadedDecomposition`, wrapped in an `EditLoadResult`, and the `EditSignalContext`, stored
+   with its store via `_store_edit_signal_context()` -> `EditLoadResult.edit_signal_token`
+   (the store is closed at once when the file embeds no EMG)
 4. Enrich from BIDS: grid names, muscles and fsamp from channels.tsv update the
    decomposition; participant + hardware fields go to `sidecar_meta`; the editlog JSON
    sets `mu_uids`, `edit_history`, `artifact_times`

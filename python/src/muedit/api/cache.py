@@ -73,7 +73,17 @@ class _RunResult:
         return resident_nbytes(self.pulse_trains)
 
 
-def _close_store(entry: _UploadEntry | _RunResult) -> None:
+@dataclass
+class _EditEntry:
+    context: EditSignalContext
+    store: SessionStore | None = None  # T1 folder holding the context's EMG
+
+    @property
+    def nbytes(self) -> int:
+        return self.context.nbytes
+
+
+def _close_store(entry: _UploadEntry | _RunResult | _EditEntry) -> None:
     """Delete the T1 folder of an entry leaving its cache."""
     if entry.store is not None:
         entry.store.close()
@@ -98,8 +108,8 @@ _DECOMP_PREVIEW_BLOBS: BudgetedLRU[_PreviewBlob] = BudgetedLRU(
 _RUN_RESULTS: BudgetedLRU[_RunResult] = BudgetedLRU(
     "run_results", BUDGET, per_session=1, on_drop=_close_store
 )
-_EDIT_SIGNAL_CONTEXTS: BudgetedLRU[EditSignalContext] = BudgetedLRU(
-    "edit_signal_contexts", BUDGET, per_session=1
+_EDIT_SIGNAL_CONTEXTS: BudgetedLRU[_EditEntry] = BudgetedLRU(
+    "edit_signal_contexts", BUDGET, per_session=1, on_drop=_close_store
 )
 _EDIT_SIGNAL_LABEL_INDEX: dict[str, str] = {}
 
@@ -236,9 +246,11 @@ def _store_edit_signal_context(
     context: EditSignalContext,
     file_label: str | None = None,
     session: str = DEFAULT_SESSION,
+    store: SessionStore | None = None,
 ) -> str:
-    """Store a compact copy of a decomposition's raw-signal context and return a token."""
-    token = _EDIT_SIGNAL_CONTEXTS.pin(context.compact_copy(), session)
+    """Keep a decomposition's EMG context and return a token; the entry deletes ``store`` when dropped."""
+    kept = context if store is not None else context.compact_copy()
+    token = _EDIT_SIGNAL_CONTEXTS.pin(_EditEntry(kept, store), session)
     with BUDGET.lock:
         for label, mapped in list(_EDIT_SIGNAL_LABEL_INDEX.items()):
             if mapped not in _EDIT_SIGNAL_CONTEXTS.slots:
@@ -252,7 +264,7 @@ def _store_edit_signal_context(
 def _get_edit_signal_context(token: str | None) -> EditSignalContext | None:
     """Resolve edit signal context token to a read-only view."""
     stored = _EDIT_SIGNAL_CONTEXTS.get(token)
-    return stored.readonly_view() if stored is not None else None
+    return stored.context.readonly_view() if stored is not None else None
 
 
 def _get_edit_signal_context_by_label(file_label: str | None) -> EditSignalContext | None:

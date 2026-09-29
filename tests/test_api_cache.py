@@ -270,7 +270,7 @@ class TestEditSignalContext:
         token = cache._store_edit_signal_context(_context())
         ctx = cache._get_edit_signal_context(token)
         assert ctx is not None
-        stored = cache._EDIT_SIGNAL_CONTEXTS.slots[token].value
+        stored = cache._EDIT_SIGNAL_CONTEXTS.slots[token].value.context
         assert np.shares_memory(ctx.data, stored.data)
         arrays = [ctx.data, ctx.aux_data, ctx.artifact_mask, *ctx.emgmask, *ctx.coordinates]
         for arr in arrays:

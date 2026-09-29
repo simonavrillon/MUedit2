@@ -12,7 +12,6 @@ from starlette.testclient import TestClient
 
 from muedit.api.services.preview_service import _mask_to_regions
 from muedit.decomp.decomposition_file import (
-    _load_npz_decomp,
     load_decomposition_signal_context,
     save_decomposition_npz,
 )
@@ -222,7 +221,7 @@ class TestQcAutoRoute:
 # ── NPZ persistence ──────────────────────────────────────────────────────────
 
 
-def _save_npz(path: Path, extras: dict | None) -> None:
+def _save_npz(path: Path, **extras: Any) -> None:
     distimes = [[100, 300], [200]]
     pulse = np.zeros((2, 1000))
     save_decomposition_npz(
@@ -235,41 +234,41 @@ def _save_npz(path: Path, extras: dict | None) -> None:
         muscles=["ta"],
         parameters={},
         total_samples=1000,
-        extras=extras,
+        **extras,
     )
 
 
 class TestNpzArtifactMask:
-    def test_decomp_load_returns_mask(self, tmp_path: Path) -> None:
+    def test_mask_only_file_returns_the_mask(self, tmp_path: Path) -> None:
         mask = np.zeros(1000, dtype=bool)
         mask[400:450] = True
         path = tmp_path / "d.npz"
-        _save_npz(path, {"artifact_mask": mask})
-        loaded = _load_npz_decomp(str(path))
-        assert loaded.artifact_mask is not None
-        np.testing.assert_array_equal(loaded.artifact_mask, mask)
-        assert loaded.artifact_mask.dtype == bool
+        _save_npz(path, artifact_mask=mask)
+        ctx = load_decomposition_signal_context(str(path))
+        assert ctx is not None
+        assert ctx.data.size == 0
+        assert ctx.artifact_mask is not None
+        np.testing.assert_array_equal(ctx.artifact_mask, mask)
+        assert ctx.artifact_mask.dtype == bool
 
     def test_signal_context_with_emg_and_mask(self, tmp_path: Path) -> None:
-        from muedit.decomp.decomposition_file import pack_object_array
-
         emg = np.arange(3 * 1000, dtype=float).reshape(3, 1000)
         mask = np.zeros(1000, dtype=bool)
         mask[5:7] = True
         path = tmp_path / "d.npz"
         _save_npz(
             path,
-            {
-                "emg_data": emg.T,
-                "discard_channels": pack_object_array([np.array([0, 1, 0])]),
-                "artifact_mask": mask,
-            },
+            emg_data=emg.T,
+            discard_channels=[np.array([0, 1, 0])],
+            artifact_mask=mask,
         )
         ctx = load_decomposition_signal_context(str(path))
         assert ctx is not None
         np.testing.assert_array_equal(ctx.data, emg)
+        assert not ctx.prefiltered
         assert ctx.fsamp == FSAMP
         assert ctx.grid_names == [GRID]
         assert ctx.artifact_mask is not None
         np.testing.assert_array_equal(ctx.artifact_mask, mask)
         assert len(ctx.emgmask) == 1
+        np.testing.assert_array_equal(ctx.emgmask[0], [0, 1, 0])

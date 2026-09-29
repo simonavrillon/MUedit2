@@ -19,7 +19,7 @@ from muedit.decomp.algorithm import (
     rem_duplicates,
     whiten_inplace,
 )
-from muedit.decomp.decomposition_file import pack_object_array, save_decomposition_npz
+from muedit.decomp.decomposition_file import save_decomposition_npz
 from muedit.decomp.preview import build_preview_payload
 from muedit.decomp.types import (
     DecomposeStepOutput,
@@ -267,10 +267,10 @@ def export_step(
     params: DecompositionParameters,
     include_full_preview: bool,
     save_npz: bool,
-    save_emg_data: bool,
+    raw_emg: FloatArray | None,
     progress_cb: Callable[[str, dict[str, Any]], None] | None,
 ) -> tuple[dict[str, Any], str]:
-    """Build export payloads and optionally persist the default NPZ artifact."""
+    """Build export payloads and optionally persist the default NPZ artifact, with ``raw_emg``."""
     bids_entity_label = prep.loader_meta.get("bids_entity_label")
     bids_emg_path = prep.loader_meta.get("bids_emg_path")
     if bids_entity_label and bids_emg_path:
@@ -339,27 +339,7 @@ def export_step(
     result["adaptive_losses"] = post.adaptive_losses
 
     if save_npz:
-        _sil_keys = sorted(post.sil_by_window)
-        extras: dict[str, Any] = {
-            "adaptive_losses": np.array([post.adaptive_losses], dtype=object),
-            "sil": np.asarray(post.sil, dtype=float),
-            "sil_keys": np.array(_sil_keys, dtype=int),
-            "sil_by_window": pack_object_array(
-                [np.asarray(post.sil_by_window.get(k, []), dtype=float) for k in _sil_keys]
-            ),
-            "rois": np.array(
-                [(int(s), int(e)) for s, e in prep.roi_list],
-                dtype=int,
-            )
-            if prep.roi_list
-            else np.array([], dtype=int),
-        }
-        if save_emg_data:
-            extras["emg_data"] = prep.data
-            extras["discard_channels"] = pack_object_array(prep.discard_channels)
-            extras["coordinates"] = pack_object_array(prep.coordinates)
-        if prep.artifact_mask is not None:
-            extras["artifact_mask"] = prep.artifact_mask
+        with_emg = raw_emg is not None
         save_decomposition_npz(
             save_path,
             pulse_trains=post.pulse_t,
@@ -370,7 +350,14 @@ def export_step(
             muscles=prep.muscles,
             parameters=asdict(params),
             total_samples=prep.data.shape[1],
-            extras=extras,
+            sil=post.sil,
+            sil_by_window=post.sil_by_window,
+            adaptive_losses=post.adaptive_losses,
+            rois=prep.roi_list,
+            artifact_mask=prep.artifact_mask,
+            emg_data=raw_emg,
+            discard_channels=prep.discard_channels if with_emg else None,
+            coordinates=prep.coordinates if with_emg else None,
         )
         logger.info("Saved to %s", save_path)
 

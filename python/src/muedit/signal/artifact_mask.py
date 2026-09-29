@@ -210,3 +210,21 @@ def detect_artifact_masks(
         )
 
     return per_grid_masks, global_mask
+
+
+def mask_to_intervals(mask: BoolArray | None) -> IntArray:
+    """The ``[start, end)`` runs of ``True`` in a sample mask, as sorted ``int64[k, 2]``."""
+    if mask is None or not mask.any():
+        return np.zeros((0, 2), dtype=np.int64)
+    diff = np.diff(mask.astype(np.int8), prepend=0, append=0)
+    starts = np.flatnonzero(diff == 1)
+    ends = np.flatnonzero(diff == -1)
+    return np.stack([starts, ends], axis=1).astype(np.int64)
+
+
+def intervals_to_mask(intervals: IntArray, n_samples: int) -> BoolArray:
+    """A boolean sample mask that is ``True`` inside each ``[start, end)`` interval."""
+    mask = np.zeros(n_samples, dtype=bool)
+    for start, end in np.asarray(intervals, dtype=np.int64).reshape(-1, 2):
+        mask[max(0, int(start)) : max(0, int(end))] = True
+    return mask

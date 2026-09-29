@@ -193,9 +193,10 @@ def _optional_nbytes(value: np.ndarray | None) -> int:
 
 @dataclass
 class EditSignalContext:
-    """Raw EMG embedded in a decomposition file, kept for editing and BIDS export.
+    """EMG embedded in a decomposition file, kept for editing and BIDS export.
 
-    Built by ``load_decomposition_signal_context`` and held in the API edit cache.
+    Built by ``load_decomposition`` and held in the API edit cache, its EMG usually
+    memory-mapped from the edit session's store.
     """
 
     data: FloatArray  # (n_channels, n_samples); (0, 0) when the file holds only a mask
@@ -209,6 +210,8 @@ class EditSignalContext:
     artifact_mask: BoolArray | None = None  # (n_samples,)
     # Loader BIDS fields (decomposition_file.LOADER_BIDS_META_KEYS) the file recorded.
     loader_meta: dict[str, Any] = field(default_factory=dict)
+    # Schema v1 .npz files embed the EMG already notch- and bandpass-filtered, not raw.
+    prefiltered: bool = False
 
     def compact_copy(self) -> EditSignalContext:
         """Return an independent copy with EMG and auxiliary data as float32.
@@ -232,6 +235,7 @@ class EditSignalContext:
             aux_names=list(self.aux_names),
             artifact_mask=np.array(mask, dtype=bool) if mask is not None and mask.size else None,
             loader_meta=dict(self.loader_meta),
+            prefiltered=self.prefiltered,
         )
 
     def readonly_view(self) -> EditSignalContext:
@@ -247,14 +251,15 @@ class EditSignalContext:
             aux_names=list(self.aux_names),
             artifact_mask=_readonly(self.artifact_mask) if self.artifact_mask is not None else None,
             loader_meta=dict(self.loader_meta),
+            prefiltered=self.prefiltered,
         )
 
     @property
     def nbytes(self) -> int:
-        """Resident size of all arrays in the context."""
+        """Heap bytes of all arrays in the context; memory-mapped ones count 0."""
         return (
-            int(self.data.nbytes)
-            + _optional_nbytes(self.aux_data)
+            resident_nbytes(self.data)
+            + (resident_nbytes(self.aux_data) if self.aux_data is not None else 0)
             + _optional_nbytes(self.artifact_mask)
             + sum(int(m.nbytes) for m in self.emgmask)
             + sum(int(c.nbytes) for c in self.coordinates)

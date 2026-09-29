@@ -12,8 +12,8 @@ from muedit.decomp.core import decompose_step
 from muedit.decomp.postprocess import export_step, postprocess_step
 from muedit.decomp.preprocess import load_step, preprocess_step
 from muedit.decomp.types import DecompositionParameters
-from muedit.io.store import ArrayStore
-from muedit.models import SignalImport
+from muedit.io.store import ArrayStore, RamStore, copy_into
+from muedit.models import FloatArray, SignalImport, resident_nbytes
 
 
 def run_decomposition(
@@ -58,6 +58,8 @@ def run_decomposition(
         artifact_regions=artifact_regions,
         store=store,
     )
+    # A file saved outside a BIDS dataset embeds the raw EMG; BIDS has its own copy.
+    raw_emg = _raw_emg_for_file(loaded.data, store) if save_npz and not bids_root else None
     # Only the filtered copy is needed from here on; let the raw samples go.
     loaded = replace(loaded, signal=preprocessed.signal, data=preprocessed.signal.data)
     decomposed = decompose_step(
@@ -80,9 +82,18 @@ def run_decomposition(
         params=params,
         include_full_preview=include_full_preview,
         save_npz=save_npz,
-        save_emg_data=not bool(bids_root),
+        raw_emg=raw_emg,
         progress_cb=progress_cb,
     )
     if store is not None:
         store.discard(preprocessed.data)
+        if raw_emg is not None:
+            store.discard(raw_emg)
     return exported
+
+
+def _raw_emg_for_file(data: FloatArray, store: ArrayStore | None) -> FloatArray:
+    """``data`` itself when memory-mapped, else a float32 copy (in ``store``) held until the save."""
+    if resident_nbytes(data) == 0:
+        return data
+    return copy_into(store if store is not None else RamStore(), "raw", data)
