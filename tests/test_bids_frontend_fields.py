@@ -5,9 +5,11 @@ from __future__ import annotations
 import csv
 import json
 from collections.abc import Iterator
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+import pyedflib
 import pytest
 from starlette.testclient import TestClient
 
@@ -257,6 +259,37 @@ def test_decompose_bids_export_before_decomposition_writes_all_frontend_fields(
     assert row["age"] == entities["participant_meta"]["age"]
     assert row["sex"] == entities["participant_meta"]["sex"]
     assert row["handedness"] == entities["participant_meta"]["handedness"]
+
+
+def test_decompose_bids_export_labels_the_loader_units(
+    otb4_signal: SignalImport, tmp_path: Path
+) -> None:
+    """Without a ``units`` entity (the frontend sends none), channels carry the loader's units."""
+    sig = replace(otb4_signal, metadata={**otb4_signal.metadata, "units": "mV"})
+    loaded = LoadStepOutput(
+        full_path="Quattrocento.otb4",
+        filename="Quattrocento.otb4",
+        signal=sig,
+        data=sig.data,
+        fsamp=float(sig.fsamp),
+    )
+    preprocess_step(
+        loaded=loaded,
+        duration=None,
+        manual_roi=False,
+        roi=None,
+        rois=None,
+        params=DecompositionParameters(),
+        discard_overrides=None,
+        bids_root=str(tmp_path),
+        bids_entities=_frontend_decompose_bids_entities(),
+        bids_metadata=None,
+    )
+
+    emg_units = {r["units"] for r in _read_channels(tmp_path) if r["type"] == "EMG"}
+    assert emg_units == {"mV"}
+    with pyedflib.EdfReader(str(_emg_row(tmp_path))) as reader:
+        assert reader.getPhysicalDimension(0) == "mV"
 
 
 def test_edit_save_route_writes_all_frontend_bids_fields(

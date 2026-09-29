@@ -9,22 +9,16 @@ from typing import Any
 
 import numpy as np
 
-from muedit.io.bids import load_bids_emg_grid
+from muedit.io.bids import read_bids_emg_grid
+from muedit.io.store import ArrayStore
 
 
-def _load_bids_grid(
-    bids_root: Path,
-    entity_label: str,
-    grid_index: int,
-    view_start: int = 0,
-    view_end: int | None = None,
+def _read_bids_grid(
+    bids_root: Path, entity_label: str, grid_index: int, store: ArrayStore
 ) -> tuple[np.ndarray, float, np.ndarray]:
-    """Load a BIDS EMG grid for a specific sample window."""
-    read_n = (view_end - view_start) if view_end is not None and view_end > view_start else None
-    emg, fsamp, emg_mask = load_bids_emg_grid(
-        bids_root, entity_label, grid_index, read_start=view_start, read_n=read_n
-    )
-    return emg.copy(), float(fsamp), np.asarray(emg_mask, dtype=int).copy()
+    """A BIDS EMG grid over the whole recording, as writable float32 rows of ``store``."""
+    emg, fsamp, emg_mask = read_bids_emg_grid(bids_root, entity_label, grid_index, store)
+    return emg, float(fsamp), np.asarray(emg_mask, dtype=int).copy()
 
 
 def _parse_all_bids_entities(entity_label: str) -> dict[str, str | None]:

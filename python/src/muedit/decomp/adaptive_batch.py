@@ -13,68 +13,24 @@ from muedit.adapt_decomp.config import Config
 from muedit.io.store import ArrayStore, RamStore
 from muedit.models import BoolArray, FloatArray, IntArray
 from muedit.signal.decomp_primitives import (
-    POSTPROC_MIN_ISI_SEC,
     enforce_refractory,
-    find_refractory_peaks,
     signed_square,
-    split_by_amplitude,
 )
 from muedit.signal.streaming import SampleSource, StreamedExtender, extend_mask
 
 _DEFAULT_CONFIG = Config()
-_STATS_CHUNK = 4096
-
-
-def _compute_calibration_stats(
-    grid: SampleSource,
-    win_mean: FloatArray,
-    whiten_mat: FloatArray,
-    mu_filters: FloatArray,
-    calib_start: int,
-    calib_end: int,
-    fsamp: float,
-) -> tuple[FloatArray, FloatArray]:
-    """Project the calibration window through the MU filters and derive spike centroids."""
-    n_mu = mu_filters.shape[1]
-    source = StreamedExtender(grid, whiten_mat.shape[0] // grid.shape[0], offset=win_mean)
-    w_dewhite = whiten_mat.T @ mu_filters
-    # Squared chunk by chunk, so the window's pulse trains exist once, not twice.
-    ipts_sq = np.empty((n_mu, calib_end - calib_start))
-    for lo in range(calib_start, calib_end, _STATS_CHUNK):
-        hi = min(lo + _STATS_CHUNK, calib_end)
-        ipts_sq[:, lo - calib_start : hi - calib_start] = signed_square(
-            w_dewhite.T @ source.read(lo, hi)
-        )
-
-    base_centr = np.zeros(n_mu, dtype=np.float32)
-    spikes_centr = np.ones(n_mu, dtype=np.float32)
-
-    for j in range(n_mu):
-        pt = ipts_sq[j]
-        peaks = find_refractory_peaks(pt, fsamp, min_isi_sec=POSTPROC_MIN_ISI_SEC)
-        if len(peaks) > 1:
-            _, centroids, _ = split_by_amplitude(pt, peaks)
-            hi = int(np.argmax(centroids))
-            spikes_centr[j] = float(centroids[hi])
-            base_centr[j] = float(centroids[1 - hi])
-        elif len(peaks) == 1:
-            spikes_centr[j] = float(pt[peaks[0]])
-
-    return base_centr, spikes_centr
 
 
 def _run_adapt_decomp_bidirectional(
     source: StreamedExtender,
     whiten_mat: FloatArray,
     mu_filters: FloatArray,
-    centroids: tuple[FloatArray, FloatArray],
     calib_start: int,
     calib_end: int,
     config: Config,
     sink: BatchSink,
 ) -> dict[str, Any]:
     """Run adaptive decomposition forward from calib_start and, if needed, backward over the pre-calibration segment."""
-    base_centr, spikes_centr = centroids
     cfg = replace(config, ex_factor=source.ex_factor)
     bs = cfg.batch_size
 
@@ -91,8 +47,8 @@ def _run_adapt_decomp_bidirectional(
             emg=source,
             whitening=whiten_mat,
             sep_vectors=mu_filters.T,
-            base_centr=base_centr,
-            spikes_centr=spikes_centr,
+            base_centr=None,  # fitted in the forward pass's calibration read, shared with the backward
+            spikes_centr=None,
             emg_calib=calibration,
             config=cfg,
         )
@@ -199,14 +155,10 @@ def adaptive_batch_process(
             spike_times.append(start + t)
             spike_units.append(rows.start + unit)
 
-        centroids = _compute_calibration_stats(
-            grid, win_mean, whiten_mats[nwin], filters, calib_start, calib_end, fsamp
-        )
         win_losses = _run_adapt_decomp_bidirectional(
             source=source,
             whiten_mat=whiten_mats[nwin],
             mu_filters=filters,
-            centroids=centroids,
             calib_start=calib_start,
             calib_end=calib_end,
             config=config,

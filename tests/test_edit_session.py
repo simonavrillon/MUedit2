@@ -14,6 +14,8 @@ from starlette.testclient import TestClient
 from muedit.api import cache
 from muedit.api.binary import FRAME_MEDIA_TYPE, unpack_frame
 from muedit.decomp.decomposition_file import save_decomposition_npz, unpack_csr
+from muedit.decomp.preprocess import preprocess_step
+from muedit.decomp.types import DecompositionParameters, LoadStepOutput
 from muedit.editing.edit_log import EditLog, find_recoverable
 from muedit.editing.operations import (
     add_artifact_in_roi,
@@ -25,7 +27,7 @@ from muedit.editing.operations import (
 )
 from muedit.editing.session import EditError, EditSession
 from muedit.io.store import SessionStore
-from muedit.models import EditSignalContext
+from muedit.models import EditSignalContext, SignalImport
 from tests.test_editing_operations import (
     EDGE,
     FSAMP,
@@ -161,7 +163,45 @@ def _emg_signal(
     )
 
 
+def _decomposition_filtered(ctx: EditSignalContext) -> np.ndarray:
+    """``ctx``'s EMG as ``preprocess_step`` filters it before a decomposition (default float32)."""
+    signal = SignalImport(
+        data=ctx.data,
+        fsamp=ctx.fsamp,
+        gridname=list(ctx.grid_names),
+        auxiliary=np.zeros((0, ctx.data.shape[1])),
+    )
+    prep = preprocess_step(
+        loaded=LoadStepOutput("x", "x", signal, signal.data, signal.fsamp),
+        duration=None,
+        manual_roi=False,
+        roi=None,
+        rois=None,
+        params=DecompositionParameters(),
+        discard_overrides=None,
+        bids_root=None,
+        bids_entities=None,
+        bids_metadata=None,
+    )
+    return np.asarray(prep.data)
+
+
 class TestUpdateFilter:
+    def test_refits_on_the_emg_as_the_decomposition_filtered_it(
+        self, synthetic_mu: dict[str, np.ndarray]
+    ) -> None:
+        """Notch and the grid's bandpass over the whole recording, built once in the store."""
+        signal = _emg_signal(synthetic_mu)
+        edit = _session([synthetic_mu["target"].tolist()], signal=signal)
+        try:
+            emg, fsamp, _ = edit._grid_emg(None, 0)
+            np.testing.assert_array_equal(emg, _decomposition_filtered(signal))
+            assert fsamp == FSAMP
+            assert Path(getattr(emg, "filename", "")).parent == edit.store.path.resolve()
+            assert edit._grid_emg(None, 0)[0] is emg  # the next refit reuses it
+        finally:
+            edit.close()
+
     def test_matches_the_window_update_and_writes_the_train(
         self, synthetic_mu: dict[str, np.ndarray]
     ) -> None:
@@ -170,7 +210,13 @@ class TestUpdateFilter:
         edit = _session([target], np.zeros((1, N_SAMPLES), np.float32), signal=signal)
         try:
             pt, expected = update_motor_unit_filter_window(
-                signal.data[:64], np.zeros(64, int), target, FSAMP, VIEW_START, VIEW_END
+                _decomposition_filtered(signal),
+                np.zeros(64, int),
+                target,
+                FSAMP,
+                VIEW_START,
+                VIEW_END,
+                bandpass=False,
             )
             assert pt is not None
             edit.apply("update-filter", {"mu": 0, "view_start": VIEW_START, "view_end": VIEW_END})

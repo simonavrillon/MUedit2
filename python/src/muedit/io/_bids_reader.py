@@ -163,6 +163,30 @@ def load_bids_emg_grid(
     return data, fsamp, selection.bad_mask
 
 
+def read_bids_emg_grid(
+    bids_root: Path, entity_label: str, grid_index: int, store: ArrayStore
+) -> tuple[np.ndarray, float, np.ndarray]:
+    """One BIDS grid over the whole recording as writable float32 rows of ``store``, a channel at a time."""
+    emg_path = resolve_bids_emg_path(bids_root, entity_label)
+    channels_tsv = resolve_bids_channels_tsv(emg_path, entity_label)
+    selection = select_grid_channels(channels_tsv, grid_index)
+
+    pyedflib = _ensure_pyedflib()
+    reader = pyedflib.EdfReader(str(emg_path))
+    try:
+        channels = selection.channel_indices
+        fsamp = float(reader.getSampleFrequency(channels[0]))
+        n = min(int(reader.getNSamples()[ch]) for ch in channels)
+        declared = _declared_sample_count(_read_sidecar(emg_path, entity_label), fsamp)
+        n = n if declared is None else min(n, declared)
+        data = store.allocate("bids-grid", (len(channels), n), np.float32)
+        for row, ch in enumerate(channels):
+            data[row] = reader.readSignal(ch, start=0, n=n)
+    finally:
+        reader.close()
+    return data, fsamp, selection.bad_mask
+
+
 def load_bids_signal(filepath: str, store: ArrayStore | None = None) -> SignalImport:
     """Load a BIDS EMG recording (BDF/EDF + sidecars) as a ``SignalImport``, written into ``store``."""
     emg_path = Path(filepath)

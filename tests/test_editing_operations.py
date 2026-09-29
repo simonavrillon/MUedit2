@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 from starlette.testclient import TestClient
 
+from muedit.editing import operations
 from muedit.editing.operations import (
     FilterUpdateResult,
     add_artifact_in_roi,
@@ -249,6 +250,32 @@ class TestUpdateFilterWindow:
         target = synthetic_mu["target"]
         outside = target[(target < VIEW_START + EDGE) | (target >= VIEW_END - EDGE)]
         assert set(outside.tolist()) <= set(updated)
+
+    @pytest.mark.parametrize("masked", [False, True])
+    def test_pca_sees_only_the_columns_spikes_come_from(
+        self, synthetic_mu: dict[str, np.ndarray], monkeypatch: pytest.MonkeyPatch, masked: bool
+    ) -> None:
+        """Not the zero-padded ends of the extension, nor the bandpass transients at the view edges."""
+        seen: list[np.ndarray | None] = []
+        real = operations.pca_extended_signal
+
+        def spy(signal: np.ndarray, columns: np.ndarray | None = None) -> Any:
+            seen.append(columns)
+            return real(signal, columns)
+
+        monkeypatch.setattr(operations, "pca_extended_signal", spy)
+        mask = np.zeros(N_SAMPLES, dtype=bool)
+        mask[VIEW_START + 3000 : VIEW_START + 3100] = masked
+        pt, _ = _update(synthetic_mu, artifact_mask=mask if masked else None)
+        assert pt is not None
+        (cols,) = seen
+        assert cols is not None
+        win_len = VIEW_END - VIEW_START
+        assert cols.min() == EDGE and cols.max() == win_len - EDGE - 1
+        ex_factor = int(round(1000 / N_CHANNELS))
+        masked_cols = np.arange(3000, 3100 + ex_factor - 1)  # a column sees ex_factor samples
+        assert np.isin(masked_cols, cols).any() != masked
+        assert cols.size == win_len - 2 * EDGE - (masked_cols.size if masked else 0)
 
     def test_pulse_train_edges_zeroed(self, synthetic_mu: dict[str, np.ndarray]) -> None:
         pt, _ = _update(synthetic_mu)

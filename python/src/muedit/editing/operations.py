@@ -93,16 +93,19 @@ def _recompute_spikes_in_window(
         if wm.size == (end - start) and wm.any():
             win_artifact_mask = wm
 
-    pca_cols: IntArray | None = None
+    # PCA sees only the columns spikes are taken from: past the zero-padded ends of the
+    # extension and the bandpass transient at the view edges.
+    pca_keep = np.zeros(e_sig.shape[1], dtype=bool)
+    pca_keep[max(edge, ex_factor - 1) : win_len - edge] = True
     if win_artifact_mask is not None:
         n_win = win_artifact_mask.size
         win_mask_ext = np.zeros(n_win + ex_factor - 1, dtype=bool)
         for m in range(ex_factor):
             win_mask_ext[m : m + n_win] |= win_artifact_mask
-        if win_mask_ext.any() and not win_mask_ext.all():
-            clean_cols = np.where(~win_mask_ext)[0]
-            if len(clean_cols) > e_sig.shape[0]:
-                pca_cols = clean_cols
+        clean = pca_keep & ~win_mask_ext
+        if np.count_nonzero(clean) > e_sig.shape[0]:
+            pca_keep = clean
+    pca_cols = np.flatnonzero(pca_keep) if pca_keep.any() else None
     eigenvectors, eigenvalues_diag = pca_extended_signal(e_sig, pca_cols)
     w_sig, _ = whiten_extended_signal(e_sig, eigenvectors, eigenvalues_diag, inplace=True)
 

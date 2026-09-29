@@ -16,7 +16,7 @@ import scipy.io
 from numpy.typing import ArrayLike, DTypeLike
 
 from muedit.io.mat import mat73_read, parse_text_list
-from muedit.io.npz import NpzArchive, NpzWriter
+from muedit.io.npz import NpzArchive, NpzWriter, RowSource
 from muedit.io.store import ArrayStore, RamStore, copy_into, sample_blocks
 from muedit.models import BoolArray, EditSignalContext, FloatArray, IntArray, LoadedDecomposition
 from muedit.signal.artifact_mask import intervals_to_mask, mask_to_intervals
@@ -108,7 +108,7 @@ def _json_array(value: Any) -> np.ndarray:
 
 def save_decomposition_npz(
     out_path: str | Path,
-    pulse_trains: FloatArray | None,
+    pulse_trains: FloatArray | RowSource | None,
     distimes: Sequence[ArrayLike],
     fsamp: float,
     grid_names: list[str],
@@ -125,6 +125,7 @@ def save_decomposition_npz(
     emg_data: FloatArray | None = None,
     discard_channels: Sequence[IntArray] | None = None,
     coordinates: Sequence[FloatArray] | None = None,
+    loader_meta: Mapping[str, Any] | None = None,
 ) -> None:
     """Save a decomposition in the app's pickle-free, memory-mappable .npz schema v2."""
     spikes, spike_offsets = pack_csr([_clean_spike_times(d) for d in distimes], np.int32)
@@ -165,6 +166,13 @@ def save_decomposition_npz(
             values, offsets = pack_csr(coordinates, np.float32, tail=(2,))
             npz.add("coordinates", values)
             npz.add("coordinate_offsets", offsets)
+        if loader_meta is not None:
+            npz.add("loader_meta", _json_array(_bids_meta(loader_meta)))
+
+
+def _bids_meta(meta: Mapping[str, Any]) -> dict[str, Any]:
+    """The ``LOADER_BIDS_META_KEYS`` fields of ``meta``."""
+    return {key: meta[key] for key in LOADER_BIDS_META_KEYS if key in meta}
 
 
 def normalize_distimes(raw: Any) -> list[list[int]]:
@@ -800,7 +808,7 @@ def _parse_signal_ied(raw: Any) -> list[float] | None:
 
 
 def _npz_emg(data: NpzArchive, store: ArrayStore) -> FloatArray | None:
-    """``emg_data`` as float32 ``(channels, samples)`` in ``store``, copied block by block."""
+    """``emg_data`` as float32 ``(channels, samples)``, mapped in place if so stored, else in ``store``."""
     info = data.info("emg_data")
     if info.dtype.kind not in "biuf" or len(info.shape) not in (1, 2) or 0 in info.shape:
         return None
@@ -808,7 +816,8 @@ def _npz_emg(data: NpzArchive, store: ArrayStore) -> FloatArray | None:
     mapped = data.memmap("emg_data")
     if mapped is not None:
         emg = mapped.reshape(logical)
-        return copy_into(store, "emg", emg.T if logical[0] > logical[1] else emg)
+        emg = emg.T if logical[0] > logical[1] else emg
+        return emg if emg.dtype == np.float32 else copy_into(store, "emg", emg)
     rows, cols = info.stored_shape if len(info.shape) == 2 else logical
     # Channels are the shorter axis of the array as saved; the bytes may hold its transpose.
     transposed = info.fortran_order != (logical[0] > logical[1])
@@ -833,8 +842,12 @@ def _npz_signal_context(
     fsamp = float(np.asarray(fsamp_val).ravel()[0]) if fsamp_val is not None else None
 
     artifact_mask: BoolArray | None = None
+    loader_meta: dict[str, Any] = {}
     if v2:
         grid_names = [str(g) for g in _json_member(data, "grid_names", [])]
+        stored_meta = _json_member(data, "loader_meta", {})
+        if isinstance(stored_meta, dict):
+            loader_meta = _bids_meta(stored_meta)
         emgmask: list[IntArray] = []
         discard = data.get("discard_channels")
         discard_offsets = data.get("discard_channel_offsets")
@@ -867,6 +880,7 @@ def _npz_signal_context(
         emgmask=emgmask,
         coordinates=coordinates,
         artifact_mask=artifact_mask,
+        loader_meta=loader_meta,
         prefiltered=emg is not None and not v2,
     )
 
@@ -954,7 +968,7 @@ def _mat_signal_context(
         ied=ied,
         aux_data=aux_data,
         aux_names=aux_names,
-        loader_meta={key: meta[key] for key in LOADER_BIDS_META_KEYS if key in meta},
+        loader_meta=_bids_meta(meta),
     )
 
 

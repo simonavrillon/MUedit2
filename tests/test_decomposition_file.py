@@ -14,6 +14,7 @@ import pytest
 
 from muedit.decomp import decomposition_file as df
 from muedit.editing import operations
+from muedit.editing.session import EditSession
 from muedit.io import npz, store
 from muedit.io.npz import LegacyPickleError, NpzArchive
 from muedit.io.store import SessionStore
@@ -160,7 +161,7 @@ class TestSchemaV2:
         assert ctx is not None and ctx.artifact_mask is not None
         np.testing.assert_array_equal(ctx.artifact_mask, mask)
 
-    def test_embedded_emg_is_raw_and_goes_into_the_store(
+    def test_embedded_emg_is_raw_and_mapped_in_place(
         self, tmp_path: Path, cache_dir: Path, small_blocks: None
     ) -> None:
         path = tmp_path / "d.npz"
@@ -171,10 +172,57 @@ class TestSchemaV2:
         assert not ctx.prefiltered
         assert isinstance(ctx.data, np.memmap)
         assert ctx.data.filename is not None
-        assert Path(ctx.data.filename).parent == st.path
+        assert Path(ctx.data.filename) == path  # the file's member, not a copy in the store
+        assert not list(st.path.glob("*.npy"))
+        assert not ctx.data.flags.writeable
         np.testing.assert_array_equal(ctx.data, _emg().astype(np.float32))
         assert [m.tolist() for m in ctx.emgmask] == [[0, 1, 0], [1, 0]]
         assert ctx.nbytes < ctx.data.nbytes  # memory-mapped EMG is not heap
+
+    def test_detach_copies_what_is_mapped_from_the_file(
+        self, tmp_path: Path, cache_dir: Path
+    ) -> None:
+        """Windows cannot replace a mapped file: before a save over it, both maps move to the store."""
+        path = tmp_path / "d.npz"
+        _save_v2(path, emg_data=_emg())
+        st = SessionStore.create("edit")
+        decomp, ctx = df.load_decomposition(str(path), st, binary_trains=False)
+        edit = EditSession(
+            store=st,
+            fsamp=FSAMP,
+            total_samples=T,
+            spikes=decomp.distime_all,
+            pulse=decomp.pulse_trains_full,
+            mu_grid_index=decomp.mu_grid_index,
+            mu_uids=["g0_mu0", "g1_mu0", "g1_mu1"],
+            signal=ctx,
+        )
+        assert edit.signal is not None
+        mapped = (edit.arrays["base"], edit.signal.data)
+        assert all(Path(getattr(arr, "filename", "")) == path for arr in mapped)
+
+        edit.detach(str(tmp_path / "other.npz"))  # another file: nothing moves
+        assert edit.arrays["base"] is mapped[0] and edit.signal.data is mapped[1]
+
+        edit.detach(str(path))
+        for arr, before in zip((edit.arrays["base"], edit.signal.data), mapped, strict=True):
+            assert Path(getattr(arr, "filename", "")).parent == st.path
+            np.testing.assert_array_equal(arr, before)
+
+    def test_loader_meta_travels_with_the_emg(self, tmp_path: Path) -> None:
+        path = tmp_path / "d.npz"
+        meta = {"units": "mV", "gains": np.array([192.0, 192.0]), "intan_notes": "not BIDS"}
+        _save_v2(path, emg_data=_emg(), loader_meta=meta)
+        ctx = df.load_decomposition_signal_context(str(path))
+        assert ctx is not None
+        assert ctx.loader_meta == {"units": "mV", "gains": [192.0, 192.0]}
+
+    def test_file_without_loader_meta_has_none(self, tmp_path: Path) -> None:
+        path = tmp_path / "d.npz"
+        _save_v2(path, emg_data=_emg())
+        ctx = df.load_decomposition_signal_context(str(path))
+        assert ctx is not None
+        assert ctx.loader_meta == {}
 
     def test_save_replaces_the_file_whole(self, tmp_path: Path) -> None:
         path = tmp_path / "d.npz"
@@ -183,6 +231,31 @@ class TestSchemaV2:
             _save_v2(path, emg_data=np.array([["x"]], dtype=object))  # fails mid-write
         assert df.load_decomposition_file(str(path)).distime_all == [[10, 20, 30], [], [2999]]
         assert [p.name for p in tmp_path.iterdir()] == ["d.npz"]
+
+    def test_pulse_rows_are_read_a_block_at_a_time(
+        self, tmp_path: Path, small_blocks: None
+    ) -> None:
+        """A save writes kept rows straight from their source, never a stacked matrix."""
+        pulse = _pulse().astype(np.float32)
+        kept = [2, 0]
+        reads: list[tuple[int, int]] = []
+
+        def read(first: int, stop: int) -> np.ndarray:
+            reads.append((first, stop))
+            return pulse[kept[first:stop]]
+
+        path = tmp_path / "d.npz"
+        _save_v2(path, pulse_trains=npz.RowSource((2, T), read), distimes=[[1], [2]])
+        assert reads == [(0, 1), (1, 2)]  # 1000-byte blocks: one row each
+        with np.load(path) as z:
+            np.testing.assert_array_equal(z["pulse_trains"], pulse[kept])
+
+    def test_a_short_row_read_fails_the_save_and_keeps_the_file(self, tmp_path: Path) -> None:
+        path = tmp_path / "d.npz"
+        _save_v2(path)
+        with pytest.raises(ValueError, match="rows 0:3 read as"):
+            _save_v2(path, pulse_trains=npz.RowSource((3, T), lambda a, b: np.zeros((b - a, 5))))
+        assert df.load_decomposition_file(str(path)).distime_all == [[10, 20, 30], [], [2999]]
 
     def test_newer_schema_is_refused(self, tmp_path: Path) -> None:
         path = tmp_path / "d.npz"

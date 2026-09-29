@@ -18,6 +18,7 @@ from muedit.decomp.algorithm import (
     extend_signal,
     rem_duplicates,
     whiten_inplace,
+    window_trim,
 )
 from muedit.decomp.decomposition_file import save_decomposition_npz
 from muedit.decomp.preview import build_preview_payload
@@ -140,12 +141,11 @@ def _reconstruct_window_signal(
     win_data_arr = grid_block[keep_idx, :]
 
     ex_factor = int(round(params.nbextchan / win_data_arr.shape[0]))
-    edge_samples = int(round(prep.fsamp * params.edges_sec))
-    trim_edges = edge_samples > 0 and win_data_arr.shape[1] > 2 * edge_samples
+    trim = window_trim(win_data_arr.shape[1], prep.fsamp, params.edges_sec, ex_factor)
 
     e_sig = extend_signal(demean(win_data_arr), ex_factor, dtype=params.work_dtype)
-    if trim_edges:
-        e_sig = e_sig[:, edge_samples:-edge_samples]
+    if trim:
+        e_sig = e_sig[:, trim:-trim]
     return whiten_inplace(e_sig, whiten_mat)
 
 
@@ -307,7 +307,6 @@ def export_step(
         )
 
     preview = build_preview_payload(
-        signal=prep.signal,
         data=prep.data,
         fsamp=prep.fsamp,
         pulse_t=post.pulse_t,
@@ -359,6 +358,7 @@ def export_step(
             emg_data=raw_emg,
             discard_channels=prep.discard_channels if with_emg else None,
             coordinates=prep.coordinates if with_emg else None,
+            loader_meta=prep.loader_meta if with_emg else None,
         )
         logger.info("Saved to %s", save_path)
 

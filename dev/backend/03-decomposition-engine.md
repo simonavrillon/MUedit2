@@ -312,28 +312,19 @@ Steps:
 ## Preview (`preview.py`)
 
 ```python
-def downsample_vector(vector, source_fs, target_fs=1000.0) -> list[float]
-```
-Decimates 1-D array by integer slicing (`step = round(source_fs / target_fs)`).
-
-```python
-def build_preview_payload(signal, data, fsamp, pulse_t, distime, grid_names, roi_list,
+def build_preview_payload(data, fsamp, pulse_t, distime, grid_names, roi_list,
                            discard_channels, coordinates, mu_grid_index, loader_meta,
                            muscles, include_full_preview) -> dict[str, Any]
 ```
-Builds the preview payload dict sent to the frontend:
+Builds the preview of a finished run. The series drawn for the recording (overview, aux,
+per-channel traces) come from the upload's `/series/*` endpoints, not from here.
 
 | Key | Content |
 |---|---|
-| `mean_abs` | Downsampled mean absolute amplitude across all channels |
-| `pulse_trains` | First 3 MU pulse trains (downsampled, if not full preview) |
-| `pulse_trains_all` | All MU pulse trains (downsampled, if not full preview) |
-| `pulse_trains_full` | Full-resolution float32 pulse trains (if `include_full_preview`) |
-| `distime` / `distime_all` | Per-MU discharge time lists |
-| `grid_mean_abs` | Per-grid downsampled mean-abs (excluding discarded channels) |
-| `channel_means` | Per-channel mean-abs (including discarded) |
-| `rois`, `grid_names`, `mu_grid_index`, `metadata`, `muscle`, `coordinates` | Metadata |
-| `auxiliary` / `auxiliaryname` | Downsampled auxiliary signals |
+| `pulse_trains_full` | The run's pulse trains (the stored array itself) when `include_full_preview`, else `None`. The server keeps them for `/series/pulse` and the run save; no preview encoding sends them |
+| `distime_all` | Per-MU discharge times, int32 arrays (CSR in the MUB1 frame, lists in the JSON fallback) |
+| `channel_means` | Per-channel mean of the filtered \|EMG\| (including discarded channels) |
+| `fsamp`, `total_samples`, `rois`, `grid_names`, `mu_grid_index`, `metadata`, `muscle`, `coordinates` | Metadata |
 
 ---
 
@@ -342,12 +333,15 @@ Builds the preview payload dict sent to the frontend:
 Owns the app `.npz` schema (v2, described in `docs/saved-files.md`):
 `save_decomposition_npz(out_path, pulse_trains, distimes, fsamp, grid_names, mu_grid_index,
 muscles, parameters, total_samples, *, sil, sil_by_window, adaptive_losses, rois,
-artifact_mask, emg_data, discard_channels, coordinates)` writes it through
+artifact_mask, emg_data, discard_channels, coordinates, loader_meta)` writes it through
 `io.npz.NpzWriter` (uncompressed, 64-byte-aligned members, no pickle, written to a temporary
 file and moved over the destination). Discharge times are CSR (`spike_times` int32 +
 `spike_offsets` int64, `pack_csr` / `unpack_csr`); names, parameters and losses are JSON
 strings; the artifact mask is stored as `[start, end)` intervals. `pulse_trains=None`
-writes spike times only.
+writes spike times only. `pulse_trains` can also be an `io.npz.RowSource` (shape + a
+`read(first, stop)` of rows), which the writer reads a block of rows at a time: the saves
+write the kept MUs' trains that way, without stacking them. Reading goes through
+`load_decomposition`, whose embedded EMG (`emg_data`) is mapped in place from a v2 file.
 
 Reading goes through `io.npz.NpzArchive`, which opens the file once, memory-maps
 uncompressed members in place and rebuilds v1 object arrays with a restricted unpickler
@@ -428,30 +422,26 @@ def adaptive_batch_process(
 ) -> (pulse_t, distime, all_losses)
 ```
 
-For each window: demean data, compute calibration stats from the window, run bidirectional adaptive decomposition, extract per-MU pulse trains (`signed_square` of ipts), zero artifact regions, collect discharge times.
+For each window: a samples-first float32 `StreamedExtender` over the grid's kept channels (window mean subtracted per batch), a bidirectional adaptive pass writing each batch's pulse trains (`signed_square` of ipts) into the store, artifact regions zeroed, discharge times collected per batch.
 
 ### Bidirectional pass
 
 ```python
-def _run_one_pass(grid_data_g, whiten_mat, mu_filters, base_centr, spikes_centr,
-                  config, artifact_mask, reverse=False)
-    -> (ipts, spikes, losses)
+def _run_adapt_decomp_bidirectional(source, whiten_mat, mu_filters, calib_start, calib_end,
+                                    config, sink) -> losses
 ```
-Single-direction adaptive decomposition over one grid. When `reverse=True`, the signal is reversed in blocks, processed, then output reversed back. Handles artifact mask slicing.
-
-```python
-def _run_adapt_decomp_bidirectional(grid_data_g, win_data_g, whiten_mat, mu_filters,
-    base_centr, spikes_centr, w_sig, calib_start, config, artifact_mask)
-    -> (ipts, spikes, losses)
-```
-Runs adaptive decomposition forward from `calib_start` and, if needed, backward over the pre-calibration segment. The backward pass reverses the signal in blocks, runs adaptive decomp, then reverses the output back. Handles artifact mask slicing/reversal.
+Forward from `calib_start` (warming up on the batch before it), then, if the window does not start
+the recording, backward over `[0, calib_start)`: batches in reverse order, each read with its own
+look-back, so nothing is reversed or concatenated.
 
 ### Calibration
 
-```python
-def _compute_calibration_stats(w_sig, mu_filters, fsamp) -> (base_centr, spikes_centr)
-```
-Projects the whitened calibration signal through MU filters, detects spikes, derives base/spike centroids via k-means amplitude split.
+The forward pass's `AdaptiveDecomp` calibrates on the window in two reads. The first, in chunks,
+sums the whitening covariance and projects the chunk through the filters; the base/spike centroids
+come from those squared projections (`adaptation.calibration_centroids`: refractory peaks, k-means
+amplitude split). The second, in batches, runs the covariance moving average and the loss
+baselines. The backward pass reuses the forward pass's `Calibration`, fitted centroids included,
+so it starts from the same state and does not read the window again.
 
 ---
 

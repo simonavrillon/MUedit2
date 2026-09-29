@@ -556,8 +556,10 @@ class TestDecomposeStream:
         preview = done["preview"]
         assert isinstance(preview["preview_binary_token"], str)
         assert "pulse_trains_full" not in preview
-        assert "pulse_trains_all" not in preview
         assert "run_result_token" not in preview  # no motor units, nothing to save
+        # Whole-recording series come from the upload's /series/* endpoints, never from here.
+        dropped = {"mean_abs", "grid_mean_abs", "auxiliary", "pulse_trains", "pulse_trains_all"}
+        assert not dropped & set(preview)
 
     def test_full_run_keeps_its_pulse_trains_for_the_save(self, mu_run: dict[str, Any]) -> None:
         token = mu_run["preview"]["run_result_token"]
@@ -572,12 +574,15 @@ class TestDecomposeStream:
             data={
                 "upload_token": upload_token,
                 "params": json.dumps({"niter": 2, "nbextchan": 200}),
+                "full_preview": "true",
             },
             headers={"x-muedit-binary": "0"},
         )
         done = json.loads(resp.text.splitlines()[-1])
         assert done["stage"] == "done"
         assert "preview_binary_token" not in done["preview"]
+        assert "pulse_trains_full" not in done["preview"]  # stays on the server here too
+        assert isinstance(done["preview"]["distime_all"], list)
 
     def test_artifact_regions_accepted(self, client: TestClient, upload_token: str) -> None:
         resp = client.post(
@@ -841,6 +846,29 @@ class TestEditSave:
         with np.load(data["path"]) as z:
             rows = unpack_csr(z["spike_times"], z["spike_offsets"])
         assert [r.tolist() for r in rows] == [s.tolist() for s in run.spikes]
+
+    def test_run_save_with_an_expired_run_is_400_and_writes_nothing(
+        self, client: TestClient, workspace: Path
+    ) -> None:
+        # Before, the missing run meant no discharge times, and a file without motor units.
+        derivatives = workspace / "smoke" / "derivatives"
+        before = set(derivatives.rglob("*.npz")) if derivatives.exists() else set()
+        err = _err(
+            client.post(
+                f"{API}/edit/save",
+                json={
+                    "run_result_token": "expired",
+                    "total_samples": N_SAMPLES,
+                    "fsamp": FSAMP,
+                    "project": "smoke",
+                    "file_label": "motor_units_expired.npz",
+                },
+            ),
+            400,
+        )
+        assert err["detail"]["field"] == "run_result_token"
+        after = set(derivatives.rglob("*.npz")) if derivatives.exists() else set()
+        assert after == before
 
     def test_mismatched_pulse_trains_save_spikes_only(
         self, client: TestClient, decomp_npz: Path

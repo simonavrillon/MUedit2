@@ -13,7 +13,7 @@ import itertools
 import logging
 import threading
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -31,8 +31,10 @@ from muedit.editing.operations import (
     remove_discharge_rate_outliers,
     update_motor_unit_filter_window,
 )
-from muedit.io.store import SessionStore
+from muedit.io.npz import RowSource
+from muedit.io.store import SessionStore, copy_into
 from muedit.models import EditSignalContext, FloatArray, IntArray, resident_nbytes
+from muedit.signal.filters import FILTER_BLOCK_ROWS, emg_filter_inplace
 from muedit.signal.grid import format_hdemg_signal
 
 logger = logging.getLogger(__name__)
@@ -45,9 +47,12 @@ HEAP_PATCH_BYTES = 1024 * 1024
 #: ``(key, row)`` of an MU's pulse train in ``EditSession.arrays``; None when the file has
 #: no pulse trains for it, and a binary train is drawn from its discharge times instead.
 PulseRef = tuple[str, int] | None
-#: ``(project, grid, start, end)`` → the grid's EMG over ``[start, end)`` from the BIDS
-#: dataset, as ``(emg, fsamp, discard mask)``; None when the dataset does not have it.
-BidsGridReader = Callable[[str | None, int, int, int], tuple[FloatArray, float, IntArray] | None]
+#: ``(project, grid, store)`` → the grid's raw EMG over the whole recording from the BIDS
+#: dataset, written into ``store`` as writable float32 rows, with its fsamp and discard mask;
+#: None when the dataset does not have it.
+BidsGridReader = Callable[
+    [str | None, int, SessionStore], tuple[FloatArray, float, IntArray] | None
+]
 #: ``(discharge times, grid of each MU)`` → indices of the MUs duplicate removal keeps.
 DuplicateFinder = Callable[[list[IntArray], list[int]], list[int]]
 
@@ -133,6 +138,7 @@ class EditSession:
         self.log: EditLog | None = None
         self.recovery: RecoverableLog | None = None  # unsaved edits an earlier session left
         self.meta: dict[str, Any] = {}  # file fields the client shows and the save writes back
+        self._filtered: dict[tuple[str | None, int], tuple[FloatArray, float, IntArray]] = {}
 
         self.arrays: dict[str, np.ndarray] = {}
         has_pulse = pulse is not None and pulse.ndim == 2 and pulse.shape[0] == n_mu
@@ -486,10 +492,8 @@ class EditSession:
         if view_end <= view_start:
             raise EditError("view_start/view_end are required")
         grid = self.mu_grid_index[mu]
-        emg, fsamp, emg_mask, offset, prefiltered = self._grid_emg(
-            project, grid, view_start, view_end
-        )
-        if view_start - offset < 0 or view_end - offset > emg.shape[1]:
+        emg, fsamp, emg_mask = self._grid_emg(project, grid)
+        if view_start < 0 or view_end > emg.shape[1]:
             raise EditError("view window exceeds available EMG samples")
         start = len(self.history)
         step = self._begin("update_filter", mu)
@@ -508,12 +512,11 @@ class EditSession:
             nbextchan=int(nbextchan),
             peeloff_spike_times=others,
             peeloff_win=peel_off_win if peel_off_win > 0 else DEFAULT_PEEL_OFF_WIN_SEC,
-            emg_offset=offset,
             use_peeloff=bool(use_peeloff),
             artifact_times=self.artifacts[mu].tolist() or None,
             lock_spikes=bool(lock_spikes),
             artifact_mask=self.signal.artifact_mask if self.signal is not None else None,
-            bandpass=not prefiltered,
+            bandpass=False,  # filtered as the decomposition was, by _grid_emg
         )
         if pt is not None:
             edge = int(round(0.1 * fsamp))
@@ -541,15 +544,25 @@ class EditSession:
         self._touch(mu)
         return Change([mu], start, info={"fsamp": fsamp})
 
-    def _grid_emg(
-        self, project: str | None, grid: int, start: int, end: int
-    ) -> tuple[FloatArray, float, IntArray, int, bool]:
-        """``(emg, fsamp, discard mask, first sample, prefiltered)`` of one grid to refit on."""
+    def _grid_emg(self, project: str | None, grid: int) -> tuple[FloatArray, float, IntArray]:
+        """``(emg, fsamp, discard mask)`` of one grid, filtered as the decomposition was (cached)."""
+        key = (project, grid)
+        if key not in self._filtered:
+            self._filtered[key] = self._filter_grid(project, grid)
+        return self._filtered[key]
+
+    def _filter_grid(self, project: str | None, grid: int) -> tuple[FloatArray, float, IntArray]:
+        """One grid's EMG, BIDS or embedded, notched and bandpassed whole into the session store."""
+        # The notch is an FFT over the whole recording, so it cannot be applied to a view: the
+        # grid is filtered once, whole, the way preprocess_step filters it before decomposing.
         if self.bids_grid is not None:
-            found = self.bids_grid(project, grid, start, end)
+            found = self.bids_grid(project, grid, self.store)
             if found is not None:
                 emg, fsamp, mask = found
-                return emg, fsamp, mask, start, False
+                self._filter_rows(
+                    emg, emg, fsamp, self._emg_type(self.meta.get("grid_names"), grid)
+                )
+                return self.store.seal(emg), fsamp, mask
         ctx = self.signal
         missing = "No BIDS EMG available. Reload decomposition MAT and retry filter update."
         if ctx is None or ctx.data.size == 0:
@@ -561,19 +574,33 @@ class EditSession:
             data = data.T
         if ctx.fsamp <= 0:
             raise EditError("Missing fsamp in MAT signal context")
-        coordinates, _, _, _ = format_hdemg_signal(ctx.grid_names or ["Grid 1"])
+        coordinates, _, _, emg_types = format_hdemg_signal(ctx.grid_names or ["Grid 1"])
         if not 0 <= grid < len(coordinates):
             raise EditError("grid_index out of range")
         first = sum(int(coordinates[g].shape[0]) for g in range(grid))
         n_ch = int(coordinates[grid].shape[0])
         cell = ctx.emgmask[grid] if grid < len(ctx.emgmask) else np.array([], dtype=int)
-        return (
-            data[first : first + n_ch, :],
-            ctx.fsamp,
-            _discard_mask(cell, n_ch),
-            0,
-            ctx.prefiltered,
-        )
+        rows = data[first : first + n_ch, :]
+        mask = _discard_mask(cell, n_ch)
+        if ctx.prefiltered:  # a v1 file's EMG went through these filters before it was saved
+            return rows, ctx.fsamp, mask
+        out = self.store.allocate(f"filtered-grid{grid}", rows.shape, np.float32)
+        self._filter_rows(rows, out, ctx.fsamp, emg_types[grid] if grid < len(emg_types) else 1)
+        return self.store.seal(out), ctx.fsamp, mask
+
+    @staticmethod
+    def _emg_type(grid_names: Any, grid: int) -> int:
+        """The bandpass of grid ``grid`` from the grid catalogue (surface when unknown)."""
+        _, _, _, emg_types = format_hdemg_signal(list(grid_names or []) or ["Grid 1"])
+        return emg_types[grid] if grid < len(emg_types) else 1
+
+    @staticmethod
+    def _filter_rows(rows: FloatArray, out: FloatArray, fsamp: float, emg_type: int) -> None:
+        """``rows`` notched and bandpassed into float32 ``out``, a few channels at a time."""
+        for lo in range(0, rows.shape[0], FILTER_BLOCK_ROWS):
+            block = out[lo : lo + FILTER_BLOCK_ROWS]
+            block[...] = rows[lo : lo + FILTER_BLOCK_ROWS]
+            emg_filter_inplace(block, fsamp, emg_type)
 
     def flag(self, mu: int, flag: bool | None = None) -> Change:
         """Flag the MU for removal on save, or clear the flag."""
@@ -737,28 +764,27 @@ class EditSession:
 
     # ── saving ──────────────────────────────────────────────────────────────
 
-    def pulse_matrix(self, mus: list[int]) -> FloatArray | None:
-        """The pulse trains of ``mus`` stacked in the session store; None when none has one."""
+    def pulse_rows(self, mus: list[int]) -> RowSource | None:
+        """The pulse trains of ``mus``, read a few rows at a time as a save writes them; None when none has one."""
         if not any(self.has_pulse(mu) for mu in mus):
             return None
-        out = self.store.allocate("save-pulse", (len(mus), self.total_samples), np.float32)
-        for i, mu in enumerate(mus):
-            step = 1 << 22
-            for first in range(0, self.total_samples, step):
-                out[i, first : first + step] = self.values(mu, first, first + step)
-        return out
+
+        def read(first: int, stop: int) -> FloatArray:
+            return np.stack([self.values(mu, 0, self.total_samples) for mu in mus[first:stop]])
+
+        return RowSource((len(mus), self.total_samples), read)
 
     def detach(self, path: str) -> None:
-        """Copy the pulse trains mapped from ``path`` into the store, so the file can be replaced."""
+        """Copy the pulse trains and EMG mapped from ``path`` into the store, so the file can be replaced."""
         base = self.arrays.get("base")
-        filename = getattr(base, "filename", None)
-        if base is None or filename is None or Path(filename).resolve() != Path(path).resolve():
-            return
-        copy = self.store.allocate("base", base.shape, np.float32)
-        step = max(1, (1 << 24) // max(1, base.shape[0]))
-        for first in range(0, base.shape[1], step):
-            copy[:, first : first + step] = base[:, first : first + step]
-        self.arrays["base"] = copy
+        if base is not None and _mapped_from(base, path):
+            copy = self.store.allocate("base", base.shape, np.float32)
+            step = max(1, (1 << 24) // max(1, base.shape[0]))
+            for first in range(0, base.shape[1], step):
+                copy[:, first : first + step] = base[:, first : first + step]
+            self.arrays["base"] = copy
+        if self.signal is not None and _mapped_from(self.signal.data, path):
+            self.signal = replace(self.signal, data=copy_into(self.store, "emg", self.signal.data))
 
     def saved(self, kept: list[int], entries: list[dict[str, Any]]) -> None:
         """The file now holds MUs ``kept``: they become the baseline, and the log starts over."""
@@ -776,7 +802,14 @@ class EditSession:
                 self.log.close(keep=self.log.net > 0)
                 self.log = None
             self.arrays.clear()
+            self._filtered.clear()
             self.store.close()
+
+
+def _mapped_from(arr: np.ndarray, path: str) -> bool:
+    """Whether ``arr`` is a memory map of the file at ``path``."""
+    filename = getattr(arr, "filename", None)
+    return filename is not None and Path(filename).resolve() == Path(path).resolve()
 
 
 class _PulseLookup:

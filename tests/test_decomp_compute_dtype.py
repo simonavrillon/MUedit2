@@ -11,12 +11,19 @@ from typing import Any
 import numpy as np
 import pytest
 
-from muedit.decomp.algorithm import covariance, fixed_point_alg, get_spikes, vec_mat
+from muedit.adapt_decomp.adaptation import AdaptiveDecomp
+from muedit.decomp.algorithm import (
+    _stream_full_trace,
+    covariance,
+    fixed_point_alg,
+    get_spikes,
+    vec_mat,
+)
 from muedit.decomp.core import decompose_step
 from muedit.decomp.postprocess import postprocess_step
 from muedit.decomp.types import POSTPROCESS_MODES, DecompositionParameters
 from muedit.models import SignalImport
-from muedit.signal.decomp_primitives import extend_signal
+from muedit.signal.decomp_primitives import extend_signal, zeroed_matmul
 from muedit.signal.filters import demean, notch_inplace
 from muedit.signal.streaming import StreamedExtender
 from tests._metrics_helpers import build_signal, greedy_one_to_one, score_pairs
@@ -246,6 +253,50 @@ def test_vec_mat_ignores_stale_output_memory() -> None:
         out = vec_mat(v, m)
         assert np.isfinite(out).all()
         np.testing.assert_allclose(out, expected, rtol=1e-4, atol=1e-3)
+
+
+def test_one_row_products_ignore_stale_output_memory() -> None:
+    """A grid or window with one MU projects through ``(1, k) @ (k, n)``, the same sgemv path."""
+    rng = np.random.default_rng(0)
+    m = rng.standard_normal((1024, 12345)).astype(np.float32)
+    w = rng.standard_normal((1, 1024)).astype(np.float32)
+    expected = w.astype(np.float64) @ m.astype(np.float64)
+    for _ in range(20):
+        stale = np.full((1, m.shape[1]), np.nan, dtype=np.float32)
+        del stale
+        out = zeroed_matmul(w, m)
+        assert out.dtype == np.float32 and np.isfinite(out).all()
+        np.testing.assert_allclose(out, expected, rtol=1e-4, atol=1e-3)
+
+
+def test_single_mu_full_trace_ignores_stale_output_memory() -> None:
+    """The streamed full-trace pass of a grid with one MU over one batch of 12345 samples."""
+    rng = np.random.default_rng(1)
+    n_ch, ex, n = 64, 16, 12345
+    source = StreamedExtender(
+        rng.standard_normal((n_ch, n)).astype(np.float32), ex, dtype=np.float32
+    )
+    w = rng.standard_normal((n_ch * ex, 1))
+    for _ in range(10):
+        out = np.zeros((1, n), dtype=np.float32)  # before the stale buffer, or it takes its memory
+        stale = np.full((1, n), np.nan, dtype=np.float32)
+        del stale
+        _stream_full_trace(source, w, None, out, np.array([0]))
+        assert np.isfinite(out).all()
+
+
+def test_single_mu_adaptive_separation_ignores_stale_output_memory() -> None:
+    """``AdaptiveDecomp._separate`` with one MU over a batch of 520 samples (5.2 kHz, 100 ms)."""
+    rng = np.random.default_rng(2)
+    n_ext, n = 1024, 520
+    model = AdaptiveDecomp.__new__(AdaptiveDecomp)
+    model.sep_vectors = rng.standard_normal((1, n_ext)).astype(np.float32)
+    whitened = rng.standard_normal((n_ext, n)).astype(np.float32)
+    for _ in range(20):
+        stale = np.full((1, n), np.nan, dtype=np.float32)
+        del stale
+        ipts = model._separate(whitened)
+        assert ipts.shape == (n, 1) and np.isfinite(ipts).all()
 
 
 # ── update_filter gate ───────────────────────────────────────────────────────

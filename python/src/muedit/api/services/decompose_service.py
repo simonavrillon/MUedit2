@@ -49,10 +49,10 @@ from muedit.models import IntArray
 
 logger = logging.getLogger(__name__)
 
-PREVIEW_PULSE_KEYS = ("pulse_trains_full", "pulse_trains_all")
-#: Preview fields the binary frame replaces: pulse trains stay on the server
-#: (``/series/pulse``), discharge times travel as CSR arrays.
-PREVIEW_ARRAY_KEYS = (*PREVIEW_PULSE_KEYS, "distime", "distime_all")
+#: Pulse trains stay on the server (``/series/pulse``); no preview encoding sends them.
+PREVIEW_PULSE_KEYS = ("pulse_trains_full",)
+#: Preview fields the binary frame replaces: discharge times travel as CSR arrays.
+PREVIEW_ARRAY_KEYS = (*PREVIEW_PULSE_KEYS, "distime_all")
 #: ``process`` (default) runs each decomposition in a spawned worker process, ``thread`` in-process.
 WORKER_ENV = "MUEDIT_DECOMPOSE_WORKER"
 #: How often a stream waiting for the next event checks that its client is still connected.
@@ -251,7 +251,9 @@ class _Run:
                 _encode_decompose_preview(meta, spikes), self.session
             )
         else:
-            preview_payload = make_json_safe(preview_raw)
+            preview_payload = make_json_safe(
+                {k: v for k, v in preview_raw.items() if k not in PREVIEW_PULSE_KEYS}
+            )
         # The explorer and the run save read the pulse trains from the run's store.
         pulse_full = _as_matrix(preview_raw.get("pulse_trains_full")).astype(np.float32, copy=False)
         kept = bool(pulse_full.size)

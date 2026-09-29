@@ -133,12 +133,11 @@ A second run while one is active gets HTTP 409 before any stream starts.
 
 ```
 Headers: Accept: application/octet-stream
-Response (MUB1 frame or JSON fallback; the server serves it once):
-  {
-    ...meta,
-    pulse_trains_full: number[][],
-    pulse_trains_all: number[][]
-  }
+Response (MUB1 frame; the server serves it once):
+  meta:   the preview's JSON fields (fsamp, total_samples, grid_names, rois,
+          mu_grid_index, channel_means, coordinates, metadata, muscle)
+  arrays: spikes i4 + spike_offsets i8 (CSR discharge times → distime_all)
+Pulse trains stay on the server: /series/pulse with the run_result_token.
 ```
 
 ### POST /edit/load-by-path

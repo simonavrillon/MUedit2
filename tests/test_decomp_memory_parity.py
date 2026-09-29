@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -189,6 +190,53 @@ class TestStreamedExtender:
         np.testing.assert_array_equal(extend_mask(mask, EX), expected[: mask.size])
 
 
+@pytest.mark.parametrize(
+    ("n_samples", "edges_sec", "ex_factor", "expected"),
+    [
+        (2000, 0.2, 16, 400),  # edges_sec, wider than the 15 zero-padded columns
+        (2000, 0.0, 16, 15),  # no edges: the padded columns still go
+        (2000, 0.002, 16, 15),  # edges narrower than the padding
+        (500, 0.2, 16, 15),  # too short for edges_sec, long enough for the padding
+        (20, 0.2, 16, 0),  # too short for either
+        (2000, 0.0, 1, 0),  # nothing extended, nothing padded
+    ],
+)
+def test_window_trim(n_samples: int, edges_sec: float, ex_factor: int, expected: int) -> None:
+    assert algorithm.window_trim(n_samples, 2000.0, edges_sec, ex_factor) == expected
+
+
+def test_window_without_edges_drops_the_zero_padded_columns() -> None:
+    """With ``edges_sec`` 0, decompose and postprocess both cut the ``ex_factor - 1`` padded columns."""
+    from muedit.decomp.postprocess import _reconstruct_window_signal
+    from muedit.signal.filters import demean
+
+    ex, (start, end) = 4, (500, 2500)
+    data = np.random.default_rng(4).standard_normal((64, 3000))
+    params = DecompositionParameters(
+        nbextchan=64 * ex, edges_sec=0.0, niter=1, compute_dtype="float64"
+    )
+    prep = PreprocessStepOutput(
+        signal=SignalImport(data=np.zeros((0, 0)), fsamp=2000.0, gridname=["GR08MM1305"]),
+        data=data,
+        fsamp=2000.0,
+        grid_names=["GR08MM1305"],
+        coordinates=[np.zeros((64, 2))],
+        ied=[8.0],
+        discard_channels=[np.zeros(64, dtype=int)],
+        muscles=[],
+        loader_meta={},
+        roi_list=[(start, end)],
+        ngrid=1,
+        coordinates_plateau=[start, end],
+    )
+    decomposed = decompose_step(prep, params, np.random.default_rng(0), None)
+    assert decomposed.coordinates_plateau == [start + ex - 1, end - (ex - 1)]
+
+    window = _reconstruct_window_signal(prep, params, 0, np.eye(64 * ex))
+    complete = extend_signal(demean(data[:, start:end]), ex)[:, ex - 1 : end - start]
+    np.testing.assert_array_equal(window, complete)
+
+
 def _legacy_full_trace(
     filters_by_window: dict[int, np.ndarray],
     whiten_by_window: dict[int, np.ndarray],
@@ -272,15 +320,13 @@ def _adaptive_setup(
     raw: np.ndarray, **config_kw: object
 ) -> tuple[np.ndarray, dict[str, np.ndarray], Config]:
     """Samples-first float32 EMG, calibrated whitening/filters/centroids, and a small-batch config."""
-    from muedit.decomp.adaptive_batch import _compute_calibration_stats
-
     emg = (raw - raw.mean(axis=1, keepdims=True)).T.astype(np.float32)
     calib = emg[:1200]
     ext = extend_signal(calib.T.astype(np.float64), EX)
     vecs, vals = pca_extended_signal(ext)
     _, whitening = whiten_extended_signal(ext, vecs, vals)
     filters = np.linalg.qr(np.random.default_rng(2).standard_normal((ext.shape[0], 3)))[0]
-    base, spikes = _compute_calibration_stats(
+    base, spikes = _legacy_calibration_stats(
         raw, raw.mean(axis=1), whitening, filters, 0, len(calib), 2000.0
     )
     config = Config(fsamp=2000, ex_factor=EX, batch_ms=50, **config_kw)  # type: ignore[arg-type]
@@ -689,7 +735,7 @@ def test_run_in_a_store_matches_the_heap_run(
     assert _store_files(store) == ["pulse_trains"]
 
 
-# ── Calibration statistics squared chunk by chunk ─────────────────────────────
+# ── Calibration: the centroids come from the covariance's read ───────────────
 
 
 def _legacy_calibration_stats(
@@ -701,9 +747,13 @@ def _legacy_calibration_stats(
     calib_end: int,
     fsamp: float,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """The pre-change version: the whole window projected, then squared as a second array."""
-    from muedit.decomp.adaptive_batch import POSTPROC_MIN_ISI_SEC, split_by_amplitude
-    from muedit.signal.decomp_primitives import find_refractory_peaks, signed_square
+    """The separate float64 pass the centroids had before ``_calibrate`` fitted them."""
+    from muedit.signal.decomp_primitives import (
+        POSTPROC_MIN_ISI_SEC,
+        find_refractory_peaks,
+        signed_square,
+        split_by_amplitude,
+    )
 
     source = StreamedExtender(grid, whiten_mat.shape[0] // grid.shape[0], offset=win_mean)
     ipts_sq = signed_square((whiten_mat.T @ mu_filters).T @ source.read(calib_start, calib_end))
@@ -720,18 +770,73 @@ def _legacy_calibration_stats(
     return base, spikes
 
 
-def test_calibration_stats_squared_by_chunk_are_bit_identical(
-    raw: np.ndarray, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from muedit.decomp import adaptive_batch
-
-    monkeypatch.setattr(adaptive_batch, "_STATS_CHUNK", 250)  # several chunks
-    ext = extend_signal(raw[:, 200:2600] - raw[:, 200:2600].mean(axis=1, keepdims=True), EX)
+def _calibration_case(raw: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Whitening, filters and window mean of a calibration window over samples 200-2600."""
+    window = raw[:, 200:2600]
+    ext = extend_signal(window - window.mean(axis=1, keepdims=True), EX)
     vecs, vals = pca_extended_signal(ext)
     _, whitening = whiten_extended_signal(ext, vecs, vals)
     filters = np.linalg.qr(np.random.default_rng(4).standard_normal((ext.shape[0], 4)))[0]
-    args = (raw, raw[:, 200:2600].mean(axis=1), whitening, filters, 200, 2600, 2000.0)
-    got = adaptive_batch._compute_calibration_stats(*args)
-    want = _legacy_calibration_stats(*args)
-    for g, w in zip(got, want, strict=True):
-        np.testing.assert_array_equal(g, w)
+    return whitening, filters, window.mean(axis=1)
+
+
+def test_centroids_are_fitted_in_the_calibration_read(
+    raw: np.ndarray, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two reads of the window (chunks, then batches), and the centroids of the pass they replace."""
+    from muedit.adapt_decomp import adaptation
+
+    monkeypatch.setattr(adaptation, "_CALIB_CHUNK", 250)
+    whitening, filters, win_mean = _calibration_case(raw)
+    source = StreamedExtender(raw, EX, offset=win_mean, dtype=np.float32, samples_first=True)
+    reads: list[tuple[int, int]] = []
+    read = source.read
+
+    def counted(start: int, stop: int) -> np.ndarray:
+        reads.append((start, stop))
+        return read(start, stop)
+
+    monkeypatch.setattr(source, "read", counted)
+    config = Config(fsamp=2000, ex_factor=EX, batch_ms=50)
+    model = AdaptiveDecomp(
+        emg=source,
+        whitening=whitening,
+        sep_vectors=filters.T,
+        base_centr=None,
+        spikes_centr=None,
+        emg_calib=(200, 2600),
+        config=config,
+    )
+    chunks = len(range(200, 2600, 250))
+    batches = len(range(200, 2600 - config.batch_size + 1, config.batch_size))
+    assert len(reads) == chunks + batches
+
+    base, spikes = _legacy_calibration_stats(raw, win_mean, whitening, filters, 200, 2600, 2000.0)
+    # float32 whitening before the projection, instead of a float64 extension: ~1e-7 apart.
+    np.testing.assert_allclose(model.base_centr, base, rtol=1e-4)
+    np.testing.assert_allclose(model.spikes_centr, spikes, rtol=1e-4)
+
+
+def test_backward_pass_starts_from_the_calibration_centroids(raw: np.ndarray) -> None:
+    """The forward pass adapts its centroids; the backward pass starts from the fitted ones."""
+    whitening, filters, win_mean = _calibration_case(raw)
+
+    def source() -> StreamedExtender:
+        return StreamedExtender(raw, EX, offset=win_mean, dtype=np.float32, samples_first=True)
+
+    config = Config(fsamp=2000, ex_factor=EX, batch_ms=50)
+    common: dict[str, Any] = {
+        "whitening": whitening,
+        "sep_vectors": filters.T,
+        "base_centr": None,
+        "spikes_centr": None,
+    }
+    fwd = AdaptiveDecomp(emg=source(), emg_calib=(200, 2600), config=config, **common)
+    fitted = (fwd.base_centr.copy(), fwd.spikes_centr.copy())
+    fwd.run(200, raw.shape[1])
+    assert not (
+        np.array_equal(fwd.base_centr, fitted[0]) and np.array_equal(fwd.spikes_centr, fitted[1])
+    )
+    bwd = AdaptiveDecomp(emg=source(), emg_calib=fwd.calibration, config=config, **common)
+    np.testing.assert_array_equal(bwd.base_centr, fitted[0])
+    np.testing.assert_array_equal(bwd.spikes_centr, fitted[1])

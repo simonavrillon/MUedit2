@@ -239,7 +239,7 @@ def _export_raw_emg_bids(
         placement_scheme=entities.get("placement_scheme") or "ChannelSpecific",
         placement_scheme_description=entities.get("placement_scheme_description"),
         reference_description=entities.get("reference", "ChannelSpecific"),
-        units=entities.get("units", "uV"),
+        units=entities.get("units") or loader_meta.get("units") or "uV",
         target_muscle=target_muscle,
         file_format=entities.get("file_format", "edf"),
         hardware_filters=loader_meta.get("hardware_filters", "n/a"),

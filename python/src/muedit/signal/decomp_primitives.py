@@ -46,6 +46,18 @@ def extend_signal(
     return esample
 
 
+def zeroed_matmul(a: FloatArray, b: FloatArray) -> FloatArray:
+    """``a @ b`` (``b`` 2-D) written into a zeroed output.
+
+    Accelerate's float32 ``cblas_sgemv``, which NumPy calls for ``v @ m`` and for a
+    one-row ``(1, k) @ (k, n)``, does not ignore the output's old contents when beta = 0
+    at some column counts: a NaN left in a fresh buffer comes out as NaN. Zeroing the
+    output makes that term exact (0 * 0).
+    """
+    out = np.zeros((*a.shape[:-1], b.shape[1]), dtype=np.result_type(a, b))
+    return np.matmul(a, b, out=out)
+
+
 def signed_square(x: FloatArray) -> FloatArray:
     """Signed-squared nonlinearity ``x * |x|`` used to build pulse trains."""
     return x * np.abs(x)

@@ -130,7 +130,7 @@ Use this to trace what the user can reach.
 | Symbol | Category | Reachable via |
 |---|---|---|
 | `read_bids_sidecar_meta(root, entity_label)` | App-internal | Called by preview/editing services |
-| `_load_bids_grid(...)` | App-internal | Called by `update_filter` |
+| `_read_bids_grid(...)` | App-internal | Called by the edit session's first refit of a grid |
 | `_parse_all_bids_entities(entity_label)` | App-internal | Called by editing services |
 | `_parse_subject_session_from_entity_label(label)` | App-internal | Called by `read_bids_sidecar_meta` |
 | `_infer_bids_root_from_decomp_path(filepath)` | App-internal | Called by editing services |
@@ -266,7 +266,8 @@ Use this to trace what the user can reach.
 | `write_bids_dataset_description()` | App-internal | Called by `preprocess`, editing service |
 | `export_bids_mu_derivatives()` | App-internal | Called by editing service |
 | `build_entities()` | App-internal | Called by `export_bids_emg` |
-| `load_bids_emg_grid()` | App-internal | Called by `bids_helpers._load_bids_grid` |
+| `load_bids_emg_grid()` | App-internal | Windowed grid read (sample window) |
+| `read_bids_emg_grid()` | App-internal | Called by `bids_helpers._read_bids_grid` |
 | `resolve_bids_emg_path()` | App-internal | Called by `_bids_reader`, `bids_helpers` |
 | `select_grid_channels()` | App-internal | Called by `load_bids_emg_grid` |
 | `NpzWriter`, `NpzArchive` (`io/npz.py`) | App-internal | Called by `decomposition_file` |

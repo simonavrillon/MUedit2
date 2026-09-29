@@ -35,7 +35,7 @@ Keys (the schema is described in [NPZ file format](#npz-file-format) below):
 
 Conditional keys:
 - `emg_data`, `discard_channels` + `discard_channel_offsets`, `coordinates` +
-  `coordinate_offsets` (included only when BIDS export is not requested: the raw EMG then
+  `coordinate_offsets`, `loader_meta` (included only when BIDS export is not requested: the raw EMG then
   travels with the decomposition, so the editor can update MU filters)
 - `artifact_intervals` (included whenever an artifact mask was applied, with or without BIDS export)
 
@@ -300,6 +300,7 @@ Each array's data starts on a 64-byte boundary, so large arrays (`pulse_trains`,
 | `emg_data` | float32, `(n_channels, total_samples)` | The **raw, unfiltered** EMG |
 | `discard_channels`, `discard_channel_offsets` | uint8, int64 | Per grid, 1 = discarded channel |
 | `coordinates`, `coordinate_offsets` | float32 `(n, 2)`, int64 | Per grid, electrode coordinates |
+| `loader_meta` | unicode, `()` | JSON object: what the loader recorded about `emg_data` for its BIDS export (`units`, gains, hardware filters, device) |
 
 Reading one in Python:
 

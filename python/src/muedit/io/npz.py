@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import io
+import math
 import os
 import pickle
 import struct
 import time
 import uuid
 import zipfile
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from types import TracebackType
@@ -184,6 +185,14 @@ class NpzArchive:
         )
 
 
+@dataclass(frozen=True)
+class RowSource:
+    """A 2-D array ``NpzWriter`` reads a block of rows at a time, so it is never stacked whole."""
+
+    shape: tuple[int, int]
+    read: Callable[[int, int], np.ndarray]  # rows ``[first, stop)``
+
+
 def _npy_header(shape: tuple[int, ...], dtype: np.dtype[Any]) -> bytes:
     buf = io.BytesIO()
     header = {"descr": npy_format.dtype_to_descr(dtype), "fortran_order": False, "shape": shape}
@@ -218,6 +227,20 @@ def _blocks(arr: np.ndarray, dtype: np.dtype[Any]) -> Iterator[np.ndarray]:
         yield np.ascontiguousarray(arr[start : start + step], dtype=dtype)
 
 
+def _source_blocks(source: RowSource, dtype: np.dtype[Any]) -> Iterator[np.ndarray]:
+    """The rows of ``source`` as C-order ``dtype`` blocks of at most ``WRITE_BLOCK_BYTES``."""
+    n_rows, n_cols = source.shape
+    step = max(1, WRITE_BLOCK_BYTES // max(1, n_cols * dtype.itemsize))
+    for start in range(0, n_rows, step):
+        stop = min(start + step, n_rows)
+        block = np.ascontiguousarray(source.read(start, stop), dtype=dtype)
+        if block.shape != (stop - start, n_cols):
+            raise ValueError(
+                f"rows {start}:{stop} read as {block.shape}, not {(stop - start, n_cols)}"
+            )
+        yield block
+
+
 class NpzWriter:
     """Writes an uncompressed ``.npz`` (``np.load`` reads it) with each array ``DATA_ALIGN``-aligned."""
 
@@ -247,22 +270,30 @@ class NpzWriter:
             self._tmp.unlink(missing_ok=True)
 
     def add(self, name: str, arr: Any, dtype: DTypeLike | None = None) -> None:
-        """Write ``arr`` (converted to ``dtype`` block by block) as ``<name>.npy``."""
+        """Write ``arr`` (converted to ``dtype`` block by block) as ``<name>.npy``; a ``RowSource`` is float64 by default."""
         if name in self._names:
             raise ValueError(f"duplicate member {name!r}")
-        arr = arr if isinstance(arr, np.ndarray) else np.asarray(arr)
-        dt = np.dtype(dtype) if dtype is not None else arr.dtype
+        blocks: Iterator[np.ndarray]
+        if isinstance(arr, RowSource):
+            dt = np.dtype(dtype) if dtype is not None else np.dtype(np.float64)
+            shape: tuple[int, ...] = tuple(arr.shape)
+            blocks = _source_blocks(arr, dt)
+        else:
+            arr = arr if isinstance(arr, np.ndarray) else np.asarray(arr)
+            dt = np.dtype(dtype) if dtype is not None else arr.dtype
+            shape = tuple(arr.shape)
+            blocks = _blocks(arr, dt)
         if dt.hasobject:
             raise TypeError(f"{name}: object arrays are not written (they need pickle)")
-        header = _npy_header(tuple(arr.shape), dt)
+        header = _npy_header(shape, dt)
         zinfo = zipfile.ZipInfo(f"{name}.npy", date_time=time.localtime()[:6])
         zinfo.compress_type = zipfile.ZIP_STORED
-        zinfo.file_size = len(header) + int(arr.size) * dt.itemsize
+        zinfo.file_size = len(header) + math.prod(shape) * dt.itemsize
         fixed = _LOCAL_HEADER.size + len(zinfo.filename.encode()) + _ZIP64_EXTRA_BYTES
         zinfo.extra = _pad_extra(self._zip.start_dir + fixed)
         with self._zip.open(zinfo, "w", force_zip64=True) as out:
             out.write(header)
-            for block in _blocks(arr, dt):
+            for block in blocks:
                 if block.size:
                     out.write(memoryview(block.reshape(-1)).cast("B"))
                 del block  # else it stays alive while the next block is converted

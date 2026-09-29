@@ -19,6 +19,7 @@ from muedit.decomp.algorithm import (
     pca_extended_signal,
     subtract_mu_waveforms,
     whiten_extended_signal,
+    window_trim,
 )
 from muedit.decomp.types import DecomposeStepOutput, DecompositionParameters, PreprocessStepOutput
 from muedit.models import FloatArray, IntArray
@@ -78,12 +79,11 @@ def decompose_step(
             win_means[win_global] = np.mean(win_data_arr, axis=1, dtype=np.float64)
             e_sig = extend_signal(demean(win_data_arr), ex_factor, dtype=params.work_dtype)
 
-            edge_samples = int(round(prep.fsamp * params.edges_sec))
-            trim_edges = edge_samples > 0 and win_data_arr.shape[1] > 2 * edge_samples
-            if trim_edges:
-                e_sig = e_sig[:, edge_samples:-edge_samples]
-                coordinates_plateau[win_global * 2] += edge_samples
-                coordinates_plateau[win_global * 2 + 1] -= edge_samples
+            trim = window_trim(win_data_arr.shape[1], prep.fsamp, params.edges_sec, ex_factor)
+            if trim:
+                e_sig = e_sig[:, trim:-trim]
+                coordinates_plateau[win_global * 2] += trim
+                coordinates_plateau[win_global * 2 + 1] -= trim
 
             clean_cols: IntArray | None = None
             win_clean = None
@@ -93,8 +93,8 @@ def decompose_step(
                 win_mask_ext = np.zeros(n_win + ex_factor - 1, dtype=bool)
                 for m in range(ex_factor):
                     win_mask_ext[m : m + n_win] |= win_mask_raw
-                if trim_edges:
-                    win_mask_ext = win_mask_ext[edge_samples:-edge_samples]
+                if trim:
+                    win_mask_ext = win_mask_ext[trim:-trim]
                 if win_mask_ext.any() and not win_mask_ext.all():
                     clean_cols = np.where(~win_mask_ext)[0]
                     win_clean = ~win_mask_ext

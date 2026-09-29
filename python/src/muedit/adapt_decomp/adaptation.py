@@ -10,7 +10,13 @@ from typing import Any
 import numpy as np
 
 from muedit.adapt_decomp.config import Config
-from muedit.signal.decomp_primitives import find_refractory_peaks, signed_square
+from muedit.signal.decomp_primitives import (
+    POSTPROC_MIN_ISI_SEC,
+    find_refractory_peaks,
+    signed_square,
+    split_by_amplitude,
+    zeroed_matmul,
+)
 from muedit.signal.streaming import StreamedExtender
 
 logger = logging.getLogger(__name__)
@@ -24,13 +30,33 @@ BatchSink = Callable[[int, np.ndarray, np.ndarray], None]
 
 @dataclass
 class Calibration:
-    """Whitening covariance and loss baselines fitted once on the calibration window."""
+    """Whitening covariance, loss baselines and starting centroids fitted once on the calibration window."""
 
     whitening_covariance: np.ndarray
     kl_div_calib_mean: float
     kl_div_calib_std: float
     contrast_calib_mean: np.ndarray | None = None
     contrast_calib_std: np.ndarray | None = None
+    base_centr: np.ndarray | None = None
+    spikes_centr: np.ndarray | None = None
+
+
+def calibration_centroids(ipts_sq: np.ndarray, fsamp: float) -> tuple[np.ndarray, np.ndarray]:
+    """Baseline and spike centroids of each MU's squared calibration pulse train ``(n_mu, n)``."""
+    n_mu = ipts_sq.shape[0]
+    base_centr = np.zeros(n_mu, dtype=np.float32)
+    spikes_centr = np.ones(n_mu, dtype=np.float32)
+    for j in range(n_mu):
+        pt = ipts_sq[j]
+        peaks = find_refractory_peaks(pt, fsamp, min_isi_sec=POSTPROC_MIN_ISI_SEC)
+        if len(peaks) > 1:
+            _, centroids, _ = split_by_amplitude(pt, peaks)
+            hi = int(np.argmax(centroids))
+            spikes_centr[j] = float(centroids[hi])
+            base_centr[j] = float(centroids[1 - hi])
+        elif len(peaks) == 1:
+            spikes_centr[j] = float(pt[peaks[0]])
+    return base_centr, spikes_centr
 
 
 class AdaptiveDecomp:
@@ -41,19 +67,20 @@ class AdaptiveDecomp:
         emg: np.ndarray | StreamedExtender,
         whitening: np.ndarray,
         sep_vectors: np.ndarray,
-        base_centr: np.ndarray,
-        spikes_centr: np.ndarray,
+        base_centr: np.ndarray | None,
+        spikes_centr: np.ndarray | None,
         emg_calib: np.ndarray | tuple[int, int] | Calibration,
         config: Config,
         artifact_mask: np.ndarray | None = None,
     ) -> None:
         """Set up one pass; ``emg_calib`` is raw samples, a sample range of ``emg``, or a ``Calibration``."""
+        # Centroids left None come from the calibration: fitted on its window, or the ones it carries.
         self.config = config
         self.whitening = whitening.astype(np.float32, copy=True)
         self.sep_vectors = sep_vectors.astype(np.float32, copy=True)
-        self.base_centr = base_centr.astype(np.float32, copy=True)
-        self.spikes_centr = spikes_centr.astype(np.float32, copy=True)
-        self.height = self.spikes_centr - (self.spikes_centr - self.base_centr) / 2
+        if base_centr is not None and spikes_centr is not None:
+            self._set_centroids(base_centr, spikes_centr)
+        fit_centroids = base_centr is None or spikes_centr is None
         self.n_motor_units = sep_vectors.shape[0]
         self.n_extended = whitening.shape[0]
         self.identity = np.eye(self.n_extended, dtype=np.float32)
@@ -73,6 +100,8 @@ class AdaptiveDecomp:
             )
         self.n_samples = self.source.n_samples
 
+        # The centroids are projected with the filters as given (float64 from the decomposition).
+        centroid_filters = np.asarray(sep_vectors, dtype=np.float64) if fit_centroids else None
         if isinstance(emg_calib, Calibration):
             self.whitening_covariance = emg_calib.whitening_covariance.copy()
             self.kl_div_calib_mean = emg_calib.kl_div_calib_mean
@@ -82,20 +111,26 @@ class AdaptiveDecomp:
                 assert emg_calib.contrast_calib_std is not None
                 self.contrast_calib_mean = emg_calib.contrast_calib_mean.copy()
                 self.contrast_calib_std = emg_calib.contrast_calib_std.copy()
+            if fit_centroids:
+                if emg_calib.base_centr is None or emg_calib.spikes_centr is None:
+                    raise ValueError("a Calibration without centroids needs them passed in")
+                self._set_centroids(emg_calib.base_centr, emg_calib.spikes_centr)
         elif isinstance(emg_calib, tuple):
-            self._calibrate(self.source, *emg_calib)
+            self._calibrate(self.source, *emg_calib, centroid_filters=centroid_filters)
         else:
             calib = np.asarray(emg_calib, dtype=np.float32)
             source = StreamedExtender(
                 calib.T, config.ex_factor, dtype=np.float32, samples_first=True
             )
-            self._calibrate(source, 0, source.n_samples)
+            self._calibrate(source, 0, source.n_samples, centroid_filters=centroid_filters)
         self.calibration = Calibration(
             whitening_covariance=self.whitening_covariance.copy(),
             kl_div_calib_mean=self.kl_div_calib_mean,
             kl_div_calib_std=self.kl_div_calib_std,
             contrast_calib_mean=getattr(self, "contrast_calib_mean", None),
             contrast_calib_std=getattr(self, "contrast_calib_std", None),
+            base_centr=self.base_centr.copy(),
+            spikes_centr=self.spikes_centr.copy(),
         )
 
         logger.info(
@@ -104,8 +139,20 @@ class AdaptiveDecomp:
             self.n_extended,
         )
 
-    def _calibrate(self, source: StreamedExtender, start: int, stop: int) -> None:
-        """Fit the whitening covariance and loss baselines on ``source`` samples ``[start, stop)``."""
+    def _set_centroids(self, base_centr: np.ndarray, spikes_centr: np.ndarray) -> None:
+        """Start from these baseline and spike centroids, and the threshold between them."""
+        self.base_centr = np.array(base_centr, dtype=np.float32)
+        self.spikes_centr = np.array(spikes_centr, dtype=np.float32)
+        self.height = self.spikes_centr - (self.spikes_centr - self.base_centr) / 2
+
+    def _calibrate(
+        self,
+        source: StreamedExtender,
+        start: int,
+        stop: int,
+        centroid_filters: np.ndarray | None = None,
+    ) -> None:
+        """Fit the whitening covariance, loss baselines and, given ``centroid_filters``, the centroids."""
         config = self.config
         start = max(start, source.first_complete)
         n = stop - start
@@ -114,16 +161,21 @@ class AdaptiveDecomp:
         # calibration never holds more than one chunk of the extended window.
         total = np.zeros(self.n_extended)
         outer = np.zeros((self.n_extended, self.n_extended))
+        ipts_sq = None if centroid_filters is None else np.empty((self.n_motor_units, n))
         for lo in range(start, stop, _CALIB_CHUNK):
-            whitened = (source.read(lo, min(lo + _CALIB_CHUNK, stop)) @ self.whitening.T).astype(
-                np.float64
-            )
+            hi = min(lo + _CALIB_CHUNK, stop)
+            whitened = (source.read(lo, hi) @ self.whitening.T).astype(np.float64)
             total += whitened.sum(axis=0)
             outer += whitened.T @ whitened
+            if centroid_filters is not None and ipts_sq is not None:
+                # The centroids come from the same read, not a pass of their own.
+                ipts_sq[:, lo - start : hi - start] = signed_square(centroid_filters @ whitened.T)
         mean = total / n
         self.whitening_covariance = ((outer - n * np.outer(mean, mean)) / max(n - 1, 1)).astype(
             np.float32
         )
+        if ipts_sq is not None:
+            self._set_centroids(*calibration_centroids(ipts_sq, config.fsamp))
 
         kl_divs: list[float] = []
         contrast_values: list[np.ndarray] = []
@@ -281,8 +333,8 @@ class AdaptiveDecomp:
         return whitened_signal
 
     def _separate(self, whitened_signal: np.ndarray) -> np.ndarray:
-        """Project whitened signal through separation vectors."""
-        return (self.sep_vectors @ whitened_signal).T
+        """Project whitened signal through separation vectors (one MU is a one-row product)."""
+        return zeroed_matmul(self.sep_vectors, whitened_signal).T
 
     def _project(self, emg_rows: np.ndarray) -> np.ndarray:
         """Project extended samples with the current whitening, without adapting."""

@@ -128,3 +128,16 @@ def test_existing_recording_keeps_its_format(tmp_path: Path) -> None:
     again = _export(tmp_path, data, None, None)
     assert again == first
     assert sorted(p.name for p in first.parent.glob("*_emg.*df")) == [first.name]
+
+
+def test_whole_grid_read_matches_the_windowed_reader(tmp_path: Path) -> None:
+    """The edit refit's whole-grid read: float32 rows in a store, cut at RecordingDuration."""
+    data = np.random.default_rng(3).standard_normal((N_EMG, int(2.5 * FSAMP))) * 50
+    _export(tmp_path, data, None, None)  # 3 data records, the last one zero-padded
+    label = "sub-01_task-task"
+    want, fsamp, mask = bids.load_bids_emg_grid(tmp_path, label, 0)
+    got, got_fsamp, got_mask = bids.read_bids_emg_grid(tmp_path, label, 0, store.RamStore())
+    assert got.dtype == np.float32 and got.shape == want.shape == data.shape
+    np.testing.assert_array_equal(got, want.astype(np.float32))
+    assert got_fsamp == fsamp and np.array_equal(got_mask, mask)
+    assert got.flags.writeable  # the session filters it in place

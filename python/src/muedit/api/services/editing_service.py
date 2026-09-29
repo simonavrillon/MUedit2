@@ -36,10 +36,10 @@ from muedit.api.schemas import (
 )
 from muedit.api.services.bids_helpers import (
     _infer_bids_root_from_decomp_path,
-    _load_bids_grid,
     _parse_all_bids_entities,
     _parse_subject_session_from_entity_label,
     _read_bids_channels_sidecar,
+    _read_bids_grid,
     read_bids_sidecar_meta,
 )
 from muedit.api.services.edit_helpers import (
@@ -69,6 +69,7 @@ from muedit.io.bids import (
     export_bids_mu_derivatives,
     write_bids_dataset_description,
 )
+from muedit.io.npz import RowSource
 from muedit.io.store import SessionStore, copy_into
 from muedit.models import (
     BoolArray,
@@ -204,10 +205,10 @@ def _new_session(
     entity_label = parse_entity_label(file_label)
 
     def bids_grid(
-        project: str | None, grid: int, start: int, end: int
+        project: str | None, grid: int, into: SessionStore
     ) -> tuple[FloatArray, float, IntArray] | None:
         try:
-            return _load_bids_grid(resolve_bids_root(project), entity_label, grid, start, end)
+            return _read_bids_grid(resolve_bids_root(project), entity_label, grid, into)
         except (ValueError, FileNotFoundError):
             return None
 
@@ -397,8 +398,7 @@ class _SaveRequest:
     grid_names: list[str]
     parameters: dict[str, Any]
     form: BidsSaveFields
-    pulse: Callable[[list[int]], FloatArray | None]  # pulse trains of the kept MUs
-    release: Callable[[FloatArray], None] | None = None  # what ``pulse`` returned is written
+    pulse: Callable[[list[int]], FloatArray | RowSource | None]  # pulse trains of the kept MUs
     artifact_mask: BoolArray | None = None
     signal: EditSignalContext | None = None  # raw EMG for the BIDS export
     before_write: Callable[[Path], None] | None = None
@@ -542,23 +542,18 @@ def _save(req: _SaveRequest) -> tuple[dict[str, Any], list[int], list[dict[str, 
 
     if req.before_write is not None:
         req.before_write(out_path)
-    pulse = req.pulse(kept_mus)
-    try:
-        save_decomposition_npz(
-            out_path,
-            pulse_trains=pulse,
-            distimes=distimes,
-            fsamp=fsamp,
-            grid_names=grid_names,
-            mu_grid_index=mu_grid_index,
-            muscles=muscle_names,
-            parameters=parameters,
-            total_samples=req.total_samples,
-            artifact_mask=req.artifact_mask,
-        )
-    finally:
-        if pulse is not None and req.release is not None:
-            req.release(pulse)
+    save_decomposition_npz(
+        out_path,
+        pulse_trains=req.pulse(kept_mus),
+        distimes=distimes,
+        fsamp=fsamp,
+        grid_names=grid_names,
+        mu_grid_index=mu_grid_index,
+        muscles=muscle_names,
+        parameters=parameters,
+        total_samples=req.total_samples,
+        artifact_mask=req.artifact_mask,
+    )
     save_editlog(out_path.with_suffix(".json"), mu_uids, edit_history, artifact_times or None)
 
     participant_meta = form.participant_meta or {}
@@ -630,8 +625,7 @@ def save_edit_session(
             form=payload.model_copy(
                 update={"file_label": payload.file_label or meta.get("file_label")}
             ),
-            pulse=edit.pulse_matrix,
-            release=edit.store.discard,
+            pulse=edit.pulse_rows,
             artifact_mask=mask if mask is not None and mask.size == edit.total_samples else None,
             signal=edit.signal,
             # Windows cannot replace a file that is memory-mapped.
@@ -656,8 +650,17 @@ def save_edits(payload: EditSavePayload, pulse_trains: np.ndarray | None = None)
     raw = payload.distimes or payload.discharge_times
     if raw:
         distimes = [spike_array(d) for d in normalize_distimes(raw)]
+    elif run is not None:
+        distimes = list(run.spikes)
     else:
-        distimes = list(run.spikes) if run is not None else []
+        # Without it the save would write a file with no motor units and report success.
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "field": "run_result_token",
+                "reason": "The run's results are no longer on the server; run the decomposition again",
+            },
+        )
     total_samples = payload.total_samples
     if total_samples <= 0:
         raise HTTPException(status_code=400, detail="total_samples is required to save edits")
@@ -673,10 +676,11 @@ def save_edits(payload: EditSavePayload, pulse_trains: np.ndarray | None = None)
         pulse_trains = None  # the loader draws them from the discharge times
     matrix = pulse_trains
 
-    def pulse(kept: list[int]) -> FloatArray | None:
+    def pulse(kept: list[int]) -> FloatArray | RowSource | None:
         if matrix is None or len(kept) == matrix.shape[0]:
             return matrix
-        return matrix[kept]
+        # Read as the file is written, not indexed into a heap copy of the kept rows.
+        return RowSource((len(kept), matrix.shape[1]), lambda a, b: matrix[kept[a:b]])
 
     mu_grid_index = _normalize_mu_grid_index(payload.mu_grid_index, len(distimes))
     uids = payload.mu_uids

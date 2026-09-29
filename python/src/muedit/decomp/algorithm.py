@@ -20,6 +20,7 @@ from muedit.signal.decomp_primitives import (
     isi_cov,
     signed_square,
     split_by_amplitude,
+    zeroed_matmul,
 )
 from muedit.signal.streaming import SampleSource, StreamedExtender, extend_mask
 
@@ -51,17 +52,24 @@ __all__ = [
     "subtract_mu_waveforms",
     "whiten_extended_signal",
     "whiten_inplace",
+    "window_trim",
 ]
 
 
 def vec_mat(v: FloatArray, m: FloatArray) -> FloatArray:
-    """``v @ m`` in ``m``'s dtype, written into a zeroed output.
+    """``v @ m`` in ``m``'s dtype, written into a zeroed output (see ``zeroed_matmul``)."""
+    return zeroed_matmul(v.astype(m.dtype), m)
 
-    Accelerate's float32 ``cblas_sgemv`` (transposed) does not ignore the output's old
-    contents when beta = 0 at some column counts: a NaN left in a fresh buffer comes out
-    as NaN. Zeroing the output makes that term exact (0 * 0).
-    """
-    return np.matmul(v.astype(m.dtype), m, out=np.zeros(m.shape[1], dtype=m.dtype))
+
+def window_trim(n_samples: int, fsamp: float, edges_sec: float, ex_factor: int) -> int:
+    """Columns cut from each end of an extended window: ``edges_sec``, and never the zero-padded ones."""
+    # extend_signal zero-pads ex_factor - 1 columns at each end; they must never reach PCA
+    # or FastICA, even when edges_sec is 0 or the window is too short for it.
+    incomplete = max(0, ex_factor - 1)
+    for trim in (max(int(round(fsamp * edges_sec)), incomplete), incomplete):
+        if n_samples > 2 * trim:
+            return trim
+    return 0
 
 
 def _chunk_cols(n_rows: int) -> int:
@@ -364,7 +372,8 @@ def _stream_full_trace(
 ) -> None:
     """Write the signed-squared projection of every filter over the whole trace into ``out[rows]``.
 
-    The projection runs in the extender's dtype.
+    The projection runs in the extender's dtype; a grid with one MU is a one-row product,
+    hence ``zeroed_matmul``.
     """
     itemsize = np.dtype(source.dtype).itemsize
     step = max(source.ex_factor, _FULL_TRACE_BATCH_BYTES // (itemsize * source.n_extended))
@@ -372,7 +381,7 @@ def _stream_full_trace(
     w_t = w_dewhite.T.astype(source.dtype)
     for start in range(0, source.n_samples, step):
         stop = min(start + step, source.n_samples)
-        pt = w_t @ source.read(start, stop)
+        pt = zeroed_matmul(w_t, source.read(start, stop))
         if corr_cum is not None:
             pt -= corr_cum[np.minimum(np.arange(start, stop), last_delay)].T
         out[rows, start:stop] = signed_square(pt)

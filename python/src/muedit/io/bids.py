@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 from muedit.io._bids_reader import (
     _ensure_pyedflib,
     load_bids_emg_grid,
+    read_bids_emg_grid,
     resolve_bids_emg_path,
 )
 from muedit.io.store import BLOCK_BYTES, sample_blocks
@@ -28,6 +29,7 @@ __all__ = [
     "export_bids_emg",
     "export_bids_mu_derivatives",
     "load_bids_emg_grid",
+    "read_bids_emg_grid",
     "resolve_bids_emg_path",
     "write_bids_dataset_description",
 ]

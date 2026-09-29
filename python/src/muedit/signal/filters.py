@@ -109,3 +109,9 @@ def notch_inplace(signal: FloatArray, fsamp: float) -> None:
     frad, window = _notch_params(fsamp, signal.shape[1])
     for ch in range(signal.shape[0]):
         signal[ch, :] = _remove_line_interference(signal[ch, :], frad, window)
+
+
+def emg_filter_inplace(signal: FloatArray, fsamp: float, emg_type: int = 1) -> None:
+    """The decomposition's filtering of one grid's rows (notch, then bandpass), written back."""
+    notch_inplace(signal, fsamp)
+    bandpass_inplace(signal, fsamp, emg_type)

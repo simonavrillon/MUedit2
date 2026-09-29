@@ -73,9 +73,10 @@ def update_motor_unit_filter_window(
 
 ```
 1. Slice EMG to [start, end)
-2. Bandpass filter (bandpass_signals)
+2. Bandpass filter (bandpass_signals), unless bandpass=False (the edit session passes filtered EMG)
 3. Delay-embed (extend_signal) to nbextchan extended channels
-4. PCA on clean columns (artifact-mask-aware) (pca_extended_signal)
+4. PCA on the columns spikes are taken from: [edge, L - edge), past the zero-padded
+   extension ends and the bandpass transients, minus artifact columns (pca_extended_signal)
 5. Whiten (whiten_extended_signal)
 6. Optional peel-off: subtract other MUs' waveforms (subtract_mu_waveforms)
    + subtract artifacts
@@ -107,9 +108,16 @@ def update_motor_unit_filter_window(
 
 ### Service layer (`editing_service.py: update_filter`)
 
-Resolves the EMG source:
-- **BIDS path**: loads grid via `_load_bids_grid(bids_root, entity_label, grid_index, view_start, view_end)`
-- **MAT context**: loads cached signal context via `_get_edit_signal_context(edit_signal_token)` or `_get_edit_signal_context_by_label(file_label)`; a `prefiltered` context (schema v1 `.npz`) is passed with `bandpass=False`, so its already-filtered EMG is not bandpassed twice
+`EditSession.update_filter` refits on the grid's EMG filtered as the decomposition filtered it:
+notch, then the grid's own bandpass (`signal.filters.emg_filter_inplace`), over the whole
+recording, since the FFT notch cannot be applied to a view. The filtered grid is built on the
+grid's first refit, in the session store, and reused (`EditSession._grid_emg`). The refit then
+runs with `bandpass=False`. The raw EMG comes from:
+- **BIDS**: the whole grid read channel by channel into the store (`_read_bids_grid` →
+  `io.bids.read_bids_emg_grid`)
+- **the decomposition file**: its embedded EMG (a v2 `.npz` member mapped in place, or `.mat`);
+  a `prefiltered` context (schema v1 `.npz`) went through these filters before it was saved and
+  is used as is
 
 The temporal artifact mask is retrieved from the cached signal context (if available) so the filter update excludes artifact-contaminated samples.
 
@@ -349,7 +357,7 @@ Binary variant (`load_decomposition_binary_from_path`): a MUB1 frame, the JSON f
 
 | Function | Description |
 |---|---|
-| `_load_bids_grid(bids_root, entity_label, grid_index, view_start, view_end)` | Loads BIDS EMG grid for a specific sample window; returns `(emg, fsamp, emg_mask)` |
+| `_read_bids_grid(bids_root, entity_label, grid_index, store)` | Reads a BIDS EMG grid over the whole recording into `store` (float32, writable); returns `(emg, fsamp, emg_mask)` |
 | `_parse_all_bids_entities(entity_label)` | Extracts BIDS key-value pairs (sub, ses, task, acq, run, recording) |
 | `_parse_subject_session_from_entity_label(entity_label)` | Extracts subject + optional session |
 | `_infer_bids_root_from_decomp_path(filepath)` | Infers BIDS root from decomposition file path (derivatives/muedit/, sub-X/, muedit_out) |

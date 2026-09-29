@@ -54,10 +54,13 @@ or `cancelled`. A run is cancelled by `/decompose/cancel`, by the client disconn
 `/session/close` for its session, and at server shutdown. `MUEDIT_DECOMPOSE_WORKER=thread` runs the
 decomposition on a thread instead. In that mode a cancel takes effect at the next progress event.
 
-Header `x-muedit-binary` (default `"1"`) controls binary vs JSON preview encoding in stream mode.
-When the run has a full-length pulse matrix (`full_preview`), the `done` event's preview carries
-`run_result_token`: the server keeps that float32 matrix (30 min, latest run only) so the run
-save sends the token instead of the pulse trains.
+Header `x-muedit-binary` (default `"1"`) controls binary vs JSON preview encoding in stream mode:
+the MUB1 frame carries the discharge times as CSR, the JSON fallback as lists. Neither carries
+pulse trains. When the run has a full-length pulse matrix (`full_preview`), the `done` event's
+preview carries `run_result_token`: the server keeps the matrix and the discharge times (the
+session's latest run, until the session closes) for `/series/pulse`, `/spikes` and the run save,
+which sends the token instead of the data. A save naming a token the server no longer holds, and
+no discharge times, is refused with 400 (`field: run_result_token`).
 
 ### Editing Router (`routes/editing.py`)
 
