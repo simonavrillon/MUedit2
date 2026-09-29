@@ -17,8 +17,9 @@ from muedit.io.bids import (
     write_bids_dataset_description,
 )
 from muedit.io.factory import load_signal
+from muedit.io.store import ArrayStore, RamStore
 from muedit.models import BoolArray, FloatArray, IntArray, SignalImport
-from muedit.signal.filters import bandpass_inplace, notch_inplace
+from muedit.signal.filters import FILTER_BLOCK_ROWS, bandpass_inplace, notch_inplace
 from muedit.signal.grid import format_hdemg_signal
 from muedit.signal.qc_pipeline import run_auto_qc
 
@@ -333,9 +334,17 @@ def preprocess_step(
     bids_entities: dict[str, Any] | None,
     bids_metadata: dict[str, Any] | None,
     artifact_regions: list[tuple[int, int]] | None = None,
+    store: ArrayStore | None = None,
 ) -> PreprocessStepOutput:
-    """Apply channel formatting, filtering, ROI selection, and optional BIDS raw export."""
-    data = np.array(loaded.data, dtype=np.float64, copy=True)
+    """Apply channel formatting, filtering, ROI selection, and optional BIDS raw export.
+
+    The filtered float64 copy is allocated in ``store`` (the run's T1 folder), so every
+    later step reads windows and batches from the memory-mapped file.
+    """
+    store = store if store is not None else RamStore()
+    data = store.allocate("filtered", loaded.data.shape, np.float64)
+    for lo in range(0, data.shape[0], FILTER_BLOCK_ROWS):
+        data[lo : lo + FILTER_BLOCK_ROWS] = loaded.data[lo : lo + FILTER_BLOCK_ROWS]
     grid_names = loaded.signal.gridname
     if not grid_names:
         raise ValueError(
@@ -436,7 +445,7 @@ def preprocess_step(
 
     return PreprocessStepOutput(
         signal=loaded.signal.without_data(),
-        data=data,
+        data=store.seal(data),
         fsamp=loaded.fsamp,
         grid_names=grid_names,
         coordinates=coordinates,

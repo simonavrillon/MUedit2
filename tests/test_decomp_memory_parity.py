@@ -1,6 +1,9 @@
-"""Old-vs-new parity for the memory rewrites of the decomposition (plan stages 4-7)."""
+"""Old-vs-new parity for the memory rewrites of the decomposition (plan stages 4-10)."""
 
 from __future__ import annotations
+
+from dataclasses import replace
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -15,10 +18,14 @@ from muedit.decomp.algorithm import (
     subtract_mu_waveforms,
     whiten_extended_signal,
 )
-from muedit.decomp.postprocess import remove_duplicates_by_grid
+from muedit.decomp.core import decompose_step
+from muedit.decomp.pipeline import run_decomposition
+from muedit.decomp.postprocess import postprocess_step, remove_duplicates_by_grid
+from muedit.decomp.preprocess import load_step, preprocess_step
 from muedit.decomp.preview import abs_means
-from muedit.decomp.types import DecompositionParameters
-from muedit.models import FloatArray
+from muedit.decomp.types import POSTPROCESS_MODES, DecompositionParameters
+from muedit.io.store import SessionStore
+from muedit.models import FloatArray, SignalImport, resident_nbytes
 from muedit.signal.decomp_primitives import extend_signal
 from muedit.signal.filters import (
     bandpass_inplace,
@@ -27,7 +34,7 @@ from muedit.signal.filters import (
     notch_signals,
 )
 from muedit.signal.streaming import RowSelection, StreamedExtender, extend_mask
-from tests._synthetic_emg import motor_unit_emg
+from tests._synthetic_emg import FSAMP, motor_unit_emg
 
 RTOL = 1e-10
 
@@ -559,3 +566,116 @@ def test_row_by_row_abs_means_are_bit_identical(dtype: type[np.floating]) -> Non
     np.testing.assert_array_equal(per_sample, np.mean(np.abs(x), axis=0))
     np.testing.assert_array_equal(per_row, np.mean(np.abs(x), axis=1))
     np.testing.assert_array_equal(abs_means(x, keep)[0], np.mean(np.abs(x[keep]), axis=0))
+
+
+# ── Stages 9-10: filtered EMG and pulse trains in the session store ──────────
+
+_STORE_ROI = (5_000, 35_000)
+_STORE_PARAMS = DecompositionParameters(niter=8)
+
+
+def _store_files(store: SessionStore) -> list[str]:
+    return sorted(p.name.split("-")[0].removesuffix(".npy") for p in store.path.glob("*.npy"))
+
+
+@pytest.fixture(scope="module")
+def synthetic_signal() -> SignalImport:
+    """One float32 64-channel recording, as loaders now return it."""
+    emg = motor_unit_emg(seed=5, n_samples=40_000, fsamp=FSAMP, activity=_STORE_ROI)
+    return SignalImport(
+        data=emg.astype(np.float32), fsamp=FSAMP, gridname=["GR08MM1305"], muscle=["ta"]
+    )
+
+
+@pytest.fixture(scope="module")
+def store_prep(synthetic_signal: SignalImport) -> dict[str, object]:
+    """Preprocessing on the heap and into a session store, and one decomposition."""
+    loaded = load_step("synthetic.mat", None, synthetic_signal, None)
+
+    def prep(store: SessionStore | None) -> object:
+        return preprocess_step(
+            loaded=loaded,
+            duration=None,
+            manual_roi=False,
+            roi=_STORE_ROI,
+            rois=None,
+            params=_STORE_PARAMS,
+            discard_overrides=None,
+            bids_root=None,
+            bids_entities=None,
+            bids_metadata=None,
+            store=store,
+        )
+
+    store = SessionStore.create("parity")
+    heap = prep(None)
+    decomposed = decompose_step(
+        prep=heap, params=_STORE_PARAMS, rng=np.random.default_rng(0), progress_cb=None
+    )
+    assert sum(f.shape[1] for f in decomposed.mu_filters.values() if f.size), "no filters"
+    return {"heap": heap, "stored": prep(store), "store": store, "decomposed": decomposed}
+
+
+def test_filtered_emg_in_the_store_matches_the_heap(store_prep: dict) -> None:
+    heap, stored = store_prep["heap"], store_prep["stored"]
+    np.testing.assert_array_equal(stored.data, heap.data)
+    assert stored.data.dtype == np.float64
+    assert resident_nbytes(stored.data) == 0
+    assert not stored.data.flags.writeable
+
+
+@pytest.mark.parametrize("mode", list(POSTPROCESS_MODES))
+def test_pulse_trains_in_the_store_match_the_heap(store_prep: dict, mode: str) -> None:
+    params = replace(_STORE_PARAMS, **POSTPROCESS_MODES[mode])
+    store = store_prep["store"]
+    heap = postprocess_step(
+        prep=store_prep["heap"],
+        decomposed=store_prep["decomposed"],
+        params=params,
+        progress_cb=None,
+    )
+    stored = postprocess_step(
+        prep=store_prep["stored"],
+        decomposed=store_prep["decomposed"],
+        params=params,
+        progress_cb=None,
+        store=store,
+    )
+    assert len(heap.distime) > 0
+    np.testing.assert_array_equal(stored.pulse_t, heap.pulse_t)
+    assert stored.pulse_t.dtype == np.float32
+    assert len(stored.distime) == len(heap.distime)
+    for got, want in zip(stored.distime, heap.distime, strict=True):
+        np.testing.assert_array_equal(got, want)
+    assert stored.mu_grid_index == heap.mu_grid_index
+    assert resident_nbytes(stored.pulse_t) == 0
+    assert "pulse_all" not in _store_files(store)
+
+
+def test_run_in_a_store_matches_the_heap_run(
+    synthetic_signal: SignalImport, tmp_path: Path
+) -> None:
+    def run(store: SessionStore | None) -> dict:
+        result, _ = run_decomposition(
+            str(tmp_path / "synthetic.mat"),
+            params=_STORE_PARAMS,
+            save_npz=False,
+            roi=_STORE_ROI,
+            include_full_preview=True,
+            preloaded_signal=synthetic_signal,
+            store=store,
+        )
+        return result
+
+    heap = run(None)
+    store = SessionStore.create("run")
+    stored = run(store)
+    np.testing.assert_array_equal(stored["signal"]["PulseT"], heap["signal"]["PulseT"])
+    for got, want in zip(
+        stored["signal"]["Dischargetimes"], heap["signal"]["Dischargetimes"], strict=True
+    ):
+        np.testing.assert_array_equal(got, want)
+    assert resident_nbytes(stored["preview"]["pulse_trains_full"]) == 0
+    # Only the kept pulse trains outlive the run: the filtered EMG and the
+    # pre-dedup matrix were deleted.
+    assert _store_files(store) == ["pulse_trains"]

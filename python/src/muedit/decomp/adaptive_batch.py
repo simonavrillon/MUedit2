@@ -10,6 +10,7 @@ import numpy as np
 
 from muedit.adapt_decomp.adaptation import AdaptiveDecomp, BatchSink, Calibration
 from muedit.adapt_decomp.config import Config
+from muedit.io.store import ArrayStore, RamStore
 from muedit.models import BoolArray, FloatArray, IntArray
 from muedit.signal.decomp_primitives import (
     POSTPROC_MIN_ISI_SEC,
@@ -140,8 +141,12 @@ def adaptive_batch_process(
     compute_loss: bool = _DEFAULT_CONFIG.compute_loss,
     artifact_mask: BoolArray | None = None,
     pulse_dtype: type[np.floating[Any]] = np.float32,
+    store: ArrayStore | None = None,
 ) -> tuple[FloatArray, list[IntArray], dict[int, dict[str, Any]]]:
-    """Apply adaptive post-processing across all decomposition windows and grids."""
+    """Apply adaptive post-processing across all decomposition windows and grids.
+
+    The pulse trains are written into ``store`` (heap by default) batch by batch.
+    """
     config = Config(
         fsamp=int(fsamp),
         batch_ms=batch_ms,
@@ -159,7 +164,8 @@ def adaptive_batch_process(
     if total_mus == 0:
         return np.array([]), [], {}
 
-    pulse_t = np.zeros((total_mus, ltime), dtype=pulse_dtype)
+    store = store if store is not None else RamStore()
+    pulse_t = store.allocate("pulse_all", (total_mus, ltime), pulse_dtype, zero=True)
     spike_times: list[IntArray] = []
     spike_units: list[IntArray] = []
     mu_nb = 0

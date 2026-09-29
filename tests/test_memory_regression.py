@@ -8,6 +8,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+import h5py
 import numpy as np
 import pytest
 import scipy.io
@@ -20,6 +21,7 @@ from muedit.decomp.postprocess import export_step, postprocess_step
 from muedit.decomp.preprocess import load_step, preprocess_step
 from muedit.decomp.types import DEFAULT_NBEXTCHAN, DecompositionParameters
 from muedit.io.factory import load_signal
+from muedit.io.store import SessionStore
 from tests._report import record
 from tests._synthetic_emg import FSAMP, N_CHANNELS, motor_unit_emg
 
@@ -49,23 +51,27 @@ EXT_WINDOW_MB = EXT_ROWS * ROI_SAMPLES * 8 / 1e6
 # tracemalloc baseline on this input plus 25% headroom, re-measured when a
 # memory-plan stage lowers them (stage 3: preprocess, edit_load, update_filter;
 # stages 4-5: decompose, update_filter and the three postprocess branches;
-# stages 6-7: preview, preprocess and save).  A
-# factor that grows means the stage started keeping an extra full copy.
+# stages 6-7: preview, preprocess and save; stages 9-10: preview, preprocess,
+# full-trace and adaptive, with the loaded, filtered and pulse arrays memory-mapped
+# in session stores).  A factor that grows means the stage started keeping an
+# extra full copy.  ``load`` reads a v5 .mat, which scipy can only read whole;
+# ``load_store`` reads the same recording as v7.3 into a store, slice by slice.
 # Full-trace and adaptive stream the recording, so their budgets are no longer
-# multiples of the full-length extension: full-trace holds the float32 pulse
-# trains plus one ~64 MB batch, adaptive the pulse trains plus one calibration chunk.
+# multiples of the full-length extension: full-trace holds one ~64 MB batch,
+# adaptive one calibration chunk; their pulse trains are in the run store.
 
 BUDGETS_MB: dict[str, float] = {
     "load": 1.9 * RAW_MB,
-    "preview": 3.3 * RAW_MB,
+    "load_store": 0.35 * RAW_MB,
+    "preview": 0.65 * RAW_MB,
     "qc_window": 3.2 * RAW_MB,
     "qc_auto": 5.7 * RAW_MB,
-    "preprocess": 1.75 * RAW_MB,
+    "preprocess": 0.47 * RAW_MB,
     "decompose": 1.55 * EXT_WINDOW_MB,
     "post_windowed": 1.45 * EXT_WINDOW_MB,
     "save": 1.55 * RAW_MB,
-    "post_full": 1.6 * RAW_MB,
-    "post_adaptive": 2.2 * RAW_MB,
+    "post_full": 1.5 * RAW_MB,
+    "post_adaptive": 2.05 * RAW_MB,
     "edit_load": 2.0 * RAW_MB,
     "update_filter": 6.7 * RAW_MB,
 }
@@ -130,6 +136,26 @@ def mat_path(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 
 @pytest.fixture(scope="session")
+def mat73_path(mat_path: Path) -> Path:
+    """The same recording as a v7.3 (HDF5) ``.mat``, which loaders read by slices."""
+    data = scipy.io.loadmat(str(mat_path))["signal"]["data"][0, 0]
+    path = mat_path.with_name("mid_size_v73.mat")
+    with h5py.File(path, "w") as f:
+        group = f.create_group("signal")
+        group.create_dataset("data", data=data.T)
+        group.create_dataset("fsamp", data=np.array([[FSAMP]]))
+        name = np.frombuffer(GRID_NAME.encode(), dtype=np.uint8).astype(np.uint16)
+        group.create_dataset("gridname", data=name.reshape(-1, 1))
+    return path
+
+
+@pytest.fixture(scope="session")
+def run_store() -> SessionStore:
+    """The T1 folder a decompose run writes its filtered EMG and pulse trains into."""
+    return SessionStore.create("memory-regression")
+
+
+@pytest.fixture(scope="session")
 def upload_token(mat_path: Path) -> str:
     """Preview the recording once; keeps the upload/QC caches warm."""
     payload = preview_service._build_preview_core(str(mat_path))
@@ -137,8 +163,8 @@ def upload_token(mat_path: Path) -> str:
 
 
 @pytest.fixture(scope="session")
-def prepared(mat_path: Path, upload_token: str) -> Any:
-    """``(loaded, prep)`` from the upload cache, as the decompose run does."""
+def prepared(mat_path: Path, upload_token: str, run_store: SessionStore) -> Any:
+    """``(loaded, prep)`` from the upload cache into the run's store, as the decompose run does."""
     from muedit.api.cache import _get_upload_signal
 
     loaded = load_step(str(mat_path), None, _get_upload_signal(upload_token), None)
@@ -153,6 +179,7 @@ def prepared(mat_path: Path, upload_token: str) -> Any:
         bids_root=None,
         bids_entities=None,
         bids_metadata=None,
+        store=run_store,
     )
     return loaded, prep
 
@@ -170,7 +197,7 @@ def decomposed(prepared: Any) -> Any:
 
 
 @pytest.fixture(scope="session")
-def post_windowed(prepared: Any, decomposed: Any) -> Any:
+def post_windowed(prepared: Any, decomposed: Any, run_store: SessionStore) -> Any:
     """Windowed postprocess output for the save stage."""
     _, prep = prepared
     return postprocess_step(
@@ -178,6 +205,7 @@ def post_windowed(prepared: Any, decomposed: Any) -> Any:
         decomposed=decomposed,
         params=DecompositionParameters(niter=NITER),
         progress_cb=None,
+        store=run_store,
     )
 
 
@@ -208,6 +236,16 @@ def test_load_stage(mat_path: Path) -> None:
     _check("load", peak)
 
 
+def test_load_store_stage(mat73_path: Path) -> None:
+    """A v7.3 file goes into the session store by slices: no full-size heap copy."""
+    store = SessionStore.create("memory-regression-load")
+    signal, peak = _peak_mb(lambda: load_signal(str(mat73_path), store=store))
+    assert signal.data.shape == (N_CHANNELS, N_SAMPLES)
+    assert signal.nbytes == 0
+    store.close()
+    _check("load_store", peak)
+
+
 def test_preview_stage(mat_path: Path) -> None:
     _, peak = _peak_mb(lambda: preview_service._build_preview_core(str(mat_path)))
     _check("preview", peak)
@@ -230,7 +268,7 @@ def test_qc_auto_stage(upload_token: str) -> None:
     _check("qc_auto", peak)
 
 
-def test_preprocess_stage(mat_path: Path, upload_token: str) -> None:
+def test_preprocess_stage(mat_path: Path, upload_token: str, run_store: SessionStore) -> None:
     from muedit.api.cache import _get_upload_signal
 
     def _run() -> Any:
@@ -246,6 +284,7 @@ def test_preprocess_stage(mat_path: Path, upload_token: str) -> None:
             bids_root=None,
             bids_entities=None,
             bids_metadata=None,
+            store=run_store,
         )
 
     _, peak = _peak_mb(_run)
@@ -266,7 +305,9 @@ def test_decompose_stage(prepared: Any) -> None:
     _check("decompose", peak)
 
 
-def test_postprocess_windowed_stage(prepared: Any, decomposed: Any) -> None:
+def test_postprocess_windowed_stage(
+    prepared: Any, decomposed: Any, run_store: SessionStore
+) -> None:
     _, prep = prepared
 
     _, peak = _peak_mb(
@@ -275,27 +316,36 @@ def test_postprocess_windowed_stage(prepared: Any, decomposed: Any) -> None:
             decomposed=decomposed,
             params=DecompositionParameters(niter=NITER),
             progress_cb=None,
+            store=run_store,
         )
     )
     _check("post_windowed", peak)
 
 
-def test_postprocess_full_trace_stage(prepared: Any, decomposed: Any) -> None:
+def test_postprocess_full_trace_stage(
+    prepared: Any, decomposed: Any, run_store: SessionStore
+) -> None:
     _, prep = prepared
     params = DecompositionParameters(niter=NITER, full_trace=True)
 
     _, peak = _peak_mb(
-        lambda: postprocess_step(prep=prep, decomposed=decomposed, params=params, progress_cb=None)
+        lambda: postprocess_step(
+            prep=prep, decomposed=decomposed, params=params, progress_cb=None, store=run_store
+        )
     )
     _check("post_full", peak)
 
 
-def test_postprocess_adaptive_stage(prepared: Any, decomposed: Any) -> None:
+def test_postprocess_adaptive_stage(
+    prepared: Any, decomposed: Any, run_store: SessionStore
+) -> None:
     _, prep = prepared
     params = DecompositionParameters(niter=NITER, use_adaptive=True)
 
     _, peak = _peak_mb(
-        lambda: postprocess_step(prep=prep, decomposed=decomposed, params=params, progress_cb=None)
+        lambda: postprocess_step(
+            prep=prep, decomposed=decomposed, params=params, progress_cb=None, store=run_store
+        )
     )
     _check("post_adaptive", peak)
 

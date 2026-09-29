@@ -12,6 +12,7 @@ from muedit.decomp.core import decompose_step
 from muedit.decomp.postprocess import export_step, postprocess_step
 from muedit.decomp.preprocess import load_step, preprocess_step
 from muedit.decomp.types import DecompositionParameters
+from muedit.io.store import ArrayStore
 from muedit.models import SignalImport
 
 
@@ -32,8 +33,13 @@ def run_decomposition(
     include_full_preview: bool = False,
     preloaded_signal: SignalImport | None = None,
     artifact_regions: list[tuple[int, int]] | None = None,
+    store: ArrayStore | None = None,
 ) -> tuple[dict[str, Any], str]:
-    """Execute the full load → preprocess → decompose → postprocess pipeline."""
+    """Execute the full load → preprocess → decompose → postprocess pipeline.
+
+    With ``store`` (the run's T1 folder), the filtered EMG and the pulse trains are
+    memory-mapped files there; the filtered file is deleted once the run is exported.
+    """
     params = params or DecompositionParameters()
     rng = np.random.default_rng(params.random_seed)
 
@@ -50,6 +56,7 @@ def run_decomposition(
         bids_entities=bids_entities,
         bids_metadata=bids_metadata,
         artifact_regions=artifact_regions,
+        store=store,
     )
     # Only the filtered copy is needed from here on; let the raw samples go.
     loaded = replace(loaded, signal=preprocessed.signal, data=preprocessed.signal.data)
@@ -64,8 +71,9 @@ def run_decomposition(
         decomposed=decomposed,
         params=params,
         progress_cb=progress_cb,
+        store=store,
     )
-    return export_step(
+    exported = export_step(
         loaded=loaded,
         prep=preprocessed,
         post=postprocessed,
@@ -75,3 +83,6 @@ def run_decomposition(
         save_emg_data=not bool(bids_root),
         progress_cb=progress_cb,
     )
+    if store is not None:
+        store.discard(preprocessed.data)
+    return exported

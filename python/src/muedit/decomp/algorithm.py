@@ -10,6 +10,7 @@ import numpy as np
 from scipy.linalg import eigh, inv
 
 from muedit.decomp.types import ContrastFunc
+from muedit.io.store import ArrayStore, RamStore
 from muedit.models import BoolArray, FloatArray, IntArray
 from muedit.signal.decomp_primitives import (
     DECOMP_MIN_ISI_SEC,
@@ -380,8 +381,12 @@ def batch_process_filters(
     win_means_by_window: dict[int, FloatArray] | None = None,
     artifact_mask: BoolArray | None = None,
     pulse_dtype: type[np.floating[Any]] = np.float32,
+    store: ArrayStore | None = None,
 ) -> tuple[FloatArray, list[IntArray]]:
-    """Apply MU filters over their windows, or streamed over each grid's ``grid_data`` (full trace)."""
+    """Apply MU filters over their windows, or streamed over each grid's ``grid_data`` (full trace).
+
+    The pulse trains are written into ``store`` (heap by default) as they are produced.
+    """
     sorted_wins = sorted(mu_filters_by_window.keys())
     first_row: dict[int, int] = {}
     total_mus = 0
@@ -409,7 +414,8 @@ def batch_process_filters(
         for g, ex in ex_by_grid.items()
     }
 
-    pulse_t = np.zeros((total_mus, ltime), dtype=pulse_dtype)
+    store = store if store is not None else RamStore()
+    pulse_t = store.allocate("pulse_all", (total_mus, ltime), pulse_dtype, zero=True)
     spikes_by_row: dict[int, IntArray] = {}
 
     if grid_data is not None and whiten_mat_by_window is not None:

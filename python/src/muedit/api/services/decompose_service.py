@@ -15,7 +15,7 @@ import numpy as np
 from fastapi import HTTPException
 from fastapi.responses import Response
 
-from muedit.api.binary import FRAME_FORMAT, FRAME_MEDIA_TYPE, pack_frame, unpack_frame
+from muedit.api.binary import FRAME_FORMAT, FRAME_MEDIA_TYPE, pack_frame
 from muedit.api.cache import (
     _get_upload_signal,
     _get_upload_source_path,
@@ -33,6 +33,7 @@ from muedit.api.common import (
 )
 from muedit.api.memory import DEFAULT_SESSION
 from muedit.decomp.pipeline import run_decomposition
+from muedit.io.store import SessionStore
 from muedit.models import SignalImport
 
 PREVIEW_PULSE_KEYS = ("pulse_trains_full", "pulse_trains_all")
@@ -98,7 +99,10 @@ def decomposition_event_stream(
     def worker() -> None:
         """Execute decomposition and push terminal success/error events."""
         emitted = False
+        store: SessionStore | None = None
+        store_kept = False
         try:
+            store = SessionStore.create("run")
             param_obj = build_params(params_raw)
             result, save_path = run_decomposition(
                 run_path,
@@ -116,12 +120,11 @@ def decomposition_event_stream(
                 include_full_preview=include_full_preview,
                 preloaded_signal=preloaded_signal,
                 artifact_regions=artifact_regions,
+                store=store,
             )
             preview_raw = result.get("preview", {})
             if binary_preview:
                 frame = _encode_decompose_preview(preview_raw)
-                # The run save reads the pulse trains from the frame instead of a second copy.
-                pulse_full = unpack_frame(frame)[1]["pulse_trains_full"]
                 preview_payload = make_json_safe(
                     {k: v for k, v in preview_raw.items() if k not in PREVIEW_PULSE_KEYS}
                 )
@@ -129,10 +132,14 @@ def decomposition_event_stream(
                     frame, session
                 )
             else:
-                pulse_full = _as_matrix(preview_raw.get("pulse_trains_full")).astype(np.float32)
                 preview_payload = make_json_safe(preview_raw)
+            # The run save reads the pulse trains from the run's store, not from the frame.
+            pulse_full = _as_matrix(preview_raw.get("pulse_trains_full")).astype(
+                np.float32, copy=False
+            )
             if pulse_full.size:
-                preview_payload["run_result_token"] = _store_run_result(pulse_full, session)
+                preview_payload["run_result_token"] = _store_run_result(pulse_full, session, store)
+                store_kept = True
             q.put(
                 {
                     "stage": "done",
@@ -155,6 +162,8 @@ def decomposition_event_stream(
             )
             emitted = True
         finally:
+            if store is not None and not store_kept:
+                store.close()
             if not emitted:
                 q.put(
                     {

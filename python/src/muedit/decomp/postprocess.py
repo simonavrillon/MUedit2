@@ -28,6 +28,7 @@ from muedit.decomp.types import (
     PostprocessStepOutput,
     PreprocessStepOutput,
 )
+from muedit.io.store import ArrayStore
 from muedit.models import DecompositionExport, DecompositionSignalExport, FloatArray, IntArray
 from muedit.signal.filters import demean
 from muedit.signal.streaming import RowSelection
@@ -81,6 +82,16 @@ def dedup_survivors(
     return kept, kept_grids
 
 
+def _kept_rows(pulse_t: FloatArray, kept: list[int], store: ArrayStore | None) -> FloatArray:
+    """``pulse_t[kept]``, copied row by row into ``store`` when one is given."""
+    if store is None:
+        return pulse_t[kept]
+    out = store.allocate("pulse_trains", (len(kept), pulse_t.shape[1]), pulse_t.dtype)
+    for i, row in enumerate(kept):
+        out[i] = pulse_t[row]
+    return store.seal(out)
+
+
 def remove_duplicates_by_grid(
     pulse_t: FloatArray,
     distime: list[IntArray],
@@ -88,8 +99,12 @@ def remove_duplicates_by_grid(
     ngrid: int,
     params: DecompositionParameters,
     fsamp: float,
+    store: ArrayStore | None = None,
 ) -> tuple[FloatArray, list[IntArray], list[int], list[int]]:
-    """Remove duplicate motor units within each grid and optionally across grids."""
+    """Remove duplicate motor units within each grid and optionally across grids.
+
+    The kept pulse trains are indexed once, into ``store`` when one is given.
+    """
     if len(distime) == 0:
         return np.array([]), [], [], []
 
@@ -97,7 +112,7 @@ def remove_duplicates_by_grid(
     kept, kept_grids = dedup_survivors(
         distime, mu_grid_index, ngrid, params, fsamp, pulse_t.shape[1]
     )
-    pulse_t_out = pulse_t[kept] if kept else np.array([])
+    pulse_t_out = _kept_rows(pulse_t, kept, store) if kept else np.array([])
     return pulse_t_out, [distime[idx] for idx in kept], kept_grids, kept
 
 
@@ -139,8 +154,13 @@ def postprocess_step(
     decomposed: DecomposeStepOutput,
     params: DecompositionParameters,
     progress_cb: Callable[[str, dict[str, Any]], None] | None,
+    store: ArrayStore | None = None,
 ) -> PostprocessStepOutput:
-    """Batch filters and remove duplicates."""
+    """Batch filters and remove duplicates.
+
+    With ``store``, the pulse trains of every unit and then of the kept ones are
+    written there instead of the heap.
+    """
     logger.info("Batch processing...")
     if progress_cb:
         progress_cb("progress", {"message": "Batch processing filters", "pct": 92})
@@ -178,6 +198,7 @@ def postprocess_step(
             cov_alpha=params.adapt_cov_alpha,
             spike_prev_weight=params.adapt_spike_prev_weight,
             artifact_mask=prep.artifact_mask,
+            store=store,
         )
     else:
         if params.full_trace:
@@ -193,16 +214,22 @@ def postprocess_step(
             window_to_grid={nwin: nwin // max(1, nwindows) for nwin in decomposed.mu_filters},
             win_means_by_window=decomposed.win_means if params.full_trace else None,
             artifact_mask=prep.artifact_mask,
+            store=store,
         )
 
+    pulse_all = pulse_t
     pulse_t, distime, mu_grid_index, kept_global = remove_duplicates_by_grid(
-        pulse_t,
+        pulse_all,
         distime,
         decomposed.mu_grid_index,
         prep.ngrid,
         params,
         prep.fsamp,
+        store=store,
     )
+    if store is not None:
+        store.discard(pulse_all)
+    del pulse_all
 
     mu_window_map: list[tuple[int, int]] = [
         (nwin, j)
