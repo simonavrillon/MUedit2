@@ -4,16 +4,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
-from fastapi.exceptions import RequestValidationError
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from fastapi.responses import Response
-from pydantic import ValidationError
 
-from muedit.api.binary import FRAME_MEDIA_TYPE, unpack_frame
 from muedit.api.common import request_session
 from muedit.api.contracts import success_payload
 from muedit.api.schemas import (
     EditOpPayload,
+    EditPrepareGridPayload,
     EditRecoverPayload,
     EditSavePayload,
     EditSessionSavePayload,
@@ -23,6 +21,7 @@ from muedit.api.services.editing_service import (
     apply_edit,
     edit_session_state,
     open_edit_session,
+    prepare_edit_grid,
     recover_edits,
     save_edit_session,
     save_edits,
@@ -60,6 +59,15 @@ def recover_endpoint(
     return recover_edits(payload, session)
 
 
+@router.post("/edit/session/prepare-grid")
+def prepare_grid_endpoint(
+    payload: EditPrepareGridPayload, session: str = Depends(request_session)
+) -> dict[str, Any]:
+    """Filter a grid's EMG ahead of its first filter update; answers once it is done."""
+    prepare_edit_grid(payload, session)
+    return success_payload({"grid": payload.grid})
+
+
 @router.post("/edit/session/save")
 def save_session_endpoint(
     payload: EditSessionSavePayload, session: str = Depends(request_session)
@@ -78,32 +86,7 @@ def edit_op_endpoint(
     return apply_edit(op, payload, session)
 
 
-@router.post(
-    "/edit/save",
-    openapi_extra={
-        "requestBody": {
-            "content": {
-                "application/json": {"schema": EditSavePayload.model_json_schema()},
-                FRAME_MEDIA_TYPE: {"schema": {"type": "string", "format": "binary"}},
-            },
-            "required": True,
-        }
-    },
-)
-async def save_edits_endpoint(request: Request) -> dict[str, Any]:
-    """Save a run; the body is JSON, or a MUB1 frame with float32 ``pulse_trains``."""
-    body = await request.body()
-    pulse_trains = None
-    try:
-        if request.headers.get("content-type", "").startswith(FRAME_MEDIA_TYPE):
-            try:
-                meta, arrays = unpack_frame(body)
-            except ValueError as exc:
-                raise HTTPException(status_code=400, detail=f"Invalid frame: {exc}") from exc
-            payload = EditSavePayload.model_validate(meta)
-            pulse_trains = arrays.get("pulse_trains")
-        else:
-            payload = EditSavePayload.model_validate_json(body)
-    except ValidationError as exc:
-        raise RequestValidationError(exc.errors(include_url=False)) from exc
-    return success_payload(save_edits(payload, pulse_trains))
+@router.post("/edit/save")
+def save_edits_endpoint(payload: EditSavePayload) -> dict[str, Any]:
+    """Save a run: its discharge times and pulse trains stay on the server under its token."""
+    return success_payload(save_edits(payload))

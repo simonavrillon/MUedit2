@@ -214,6 +214,22 @@ export function createApiClient({ apiFetch, apiJson, API_BASE, sessionId }) {
     },
 
     /**
+     * Filter a grid's EMG on the server before its first filter update; it
+     * answers once the grid is filtered, which takes a while on long recordings.
+     *
+     * @param {string} token
+     * @param {number} grid
+     * @param {string} project
+     */
+    editPrepareGrid(token, grid, project) {
+      return postJson(
+        `${API_BASE}${routes.editSessionPrepareGrid}`,
+        { token, grid, project },
+        600000,
+      );
+    },
+
+    /**
      * Apply one edit on the server; the frame says what changed.
      *
      * @param {string} op

@@ -40,13 +40,14 @@ frontend/
     │   ├── dom.js                       Typed getElementById map (els)
     │   ├── http.js                      apiFetch, apiJson, waitForBackend, app token header
     │   ├── platform.js                  Desktop vs browser: pywebview bridge, token, dialogs
-    │   ├── state.js                     Global state object + createEditSlice
+    │   ├── state.js                     Global state object + createEditSlice (mirror of the edit session)
     │   ├── services/
     │   │   ├── navigation.js            Stepper, showWorkspace, keyboard nav, view math
     │   │   ├── ui.js                    UI service (toggles, progress, status, layout)
     │   │   ├── layout.js                Settings panel, resize observer
     │   │   ├── file-session.js          BIDS form fields, file type detection, save
-    │   │   ├── editing-service.js        Edit API calls (ROI, filter, save, load)
+    │   │   ├── editing-service.js        Edit session calls (open, recover, ops, save, restore)
+    │   │   ├── view-fetcher.js          One pulse-window request in flight, only the latest waits
     │   │   └── error-service.js         Error handler
     │   └── stages/
     │       ├── lifecycle.js             Stage registry: switchStage, enter/exit/render hooks
@@ -61,7 +62,7 @@ frontend/
     │   ├── params.js                    Decompose parameter builder
     │   └── run.js                       Decomposition runner + stream handler
     ├── editing/
-    │   └── operations.js                Edit operations (backup, restore, add/delete spikes)
+    │   └── operations.js                Drawn boxes → edit requests, discharge rates, dropdown model
     ├── io/
     │   ├── bids.js                      BIDS entity builders and parsers
     │   └── grid.js                      Grid dimension inference

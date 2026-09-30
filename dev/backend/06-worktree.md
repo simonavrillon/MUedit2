@@ -29,6 +29,7 @@ Use this to trace what the user can reach.
 | `GET /series/emg` | User-exposed | HTTP |
 | `GET /series/overview` | User-exposed | HTTP |
 | `GET /series/aux` | User-exposed | HTTP |
+| `GET /series/pulse` | User-exposed | HTTP |
 
 ### `routes/decompose.py`
 
@@ -36,6 +37,7 @@ Use this to trace what the user can reach.
 |---|---|---|
 | `decompose_router` | User-exposed | `include_routers()` |
 | `POST /decompose_stream` | User-exposed | HTTP |
+| `POST /decompose/cancel` | User-exposed | HTTP |
 | `GET /decompose_preview/{token}` | User-exposed | HTTP |
 
 ### `routes/editing.py`
@@ -43,16 +45,13 @@ Use this to trace what the user can reach.
 | Symbol | Category | Reachable via |
 |---|---|---|
 | `editing_router` | User-exposed | `include_routers()` |
-| `POST /edit/load-by-path` | User-exposed | HTTP |
+| `POST /edit/session/open` | User-exposed | HTTP |
+| `GET /edit/session` | User-exposed | HTTP |
+| `POST /edit/ops/{op}` | User-exposed | HTTP |
+| `POST /edit/session/recover` | User-exposed | HTTP |
+| `POST /edit/session/prepare-grid` | User-exposed | HTTP |
+| `POST /edit/session/save` | User-exposed | HTTP |
 | `POST /edit/save` | User-exposed | HTTP |
-| `POST /edit/update-filter` | User-exposed | HTTP |
-| `POST /edit/add-spikes` | User-exposed | HTTP |
-| `POST /edit/add-artifact` | User-exposed | HTTP |
-| `POST /edit/delete-spikes` | User-exposed | HTTP |
-| `POST /edit/delete-dr` | User-exposed | HTTP |
-| `POST /edit/remove-outliers` | User-exposed | HTTP |
-| `POST /edit/remove-duplicates` | User-exposed | HTTP |
-| `POST /edit/flag-mu` | User-exposed | HTTP |
 
 ### `routes/dialog.py`
 
@@ -62,6 +61,14 @@ Use this to trace what the user can reach.
 | `GET /open-file` | User-exposed | HTTP |
 | `_open_dialog_macos()` | App-internal | Called by route handler (macOS) |
 | `_open_dialog_tkinter()` | App-internal | Called by route handler (non-macOS) |
+
+### `routes/memory.py`
+
+| Symbol | Category | Reachable via |
+|---|---|---|
+| `memory_router` | User-exposed | `include_routers()` |
+| `POST /session/close` | User-exposed | HTTP (a `keepalive` fetch from a closing tab) |
+| `GET /debug/memory` | User-exposed | HTTP (diagnostics) |
 
 ### `services/preview_service.py`
 
@@ -79,7 +86,8 @@ Use this to trace what the user can reach.
 | Symbol | Category | Reachable via |
 |---|---|---|
 | `build_signal_views(signal, store, grid_counts, emg_types)` | App-internal | Called by `_build_preview_core`; pyramids, overview and channel means in one pass |
-| `series_frame(kind, upload_token, start, end, bins, grid)` | App-internal | `GET /series/*` routes |
+| `series_frame(kind, upload_token, start, end, bins, grid)` | App-internal | `GET /series/emg`, `/series/overview`, `/series/aux` |
+| `pulse_frame(token, mu, start, end, bins)` | App-internal | `GET /series/pulse`; an edit session's or a run's train |
 | `bandpassed_rows(signal, lo, hi, emg_type)` | App-internal | Preview pass and auto-QC |
 | `grid_rows(grid_counts, n_rows)`, `grid_emg_type(emg_types, grid)` | App-internal | Preview and auto-QC |
 
@@ -93,60 +101,57 @@ Use this to trace what the user can reach.
 | `stop_decompositions()` | App-internal | App lifespan shutdown |
 | `fetch_decompose_preview_binary(token)` | App-internal | `GET /decompose_preview/{token}` route |
 | `parse_stream_options(...)` | App-internal | Called by decompose_stream route |
-| `_Run` | App-internal | One run: its worker process (or thread) and the supervisor thread relaying events |
-| `_encode_decompose_preview(preview)` | App-internal | Called by `_Run._done_event` |
+| `_Run` | App-internal | One run: its worker process and the supervisor thread relaying events |
+| `_encode_decompose_preview(meta, spikes)` | App-internal | Called by `_Run._done_event` |
 
 ### `services/decompose_worker.py`
 
 | Symbol | Category | Reachable via |
 |---|---|---|
 | `RunJob` | App-internal | Built by `start_decomposition`; pickled to the worker (memmaps as file locations) |
-| `execute(job, store, send, cancelled)` | App-internal | Worker process body and thread fallback |
+| `execute(job, store, send)` | App-internal | Worker process body |
 | `child_main(job, store_path, conn)` | App-internal | `spawn` target of the worker process |
 
 ### `services/editing_service.py`
 
 | Symbol | Category | Reachable via |
 |---|---|---|
-| `load_decomposition_from_path(path)` | App-internal | `POST /edit/load-by-path` route |
-| `load_decomposition_binary_from_path(path)` | App-internal | `POST /edit/load-by-path` route (binary) |
-| `save_edits(payload)` | App-internal | `POST /edit/save` route |
-| `update_filter(payload)` | App-internal | `POST /edit/update-filter` route |
-| `add_spikes(payload)` | App-internal | `POST /edit/add-spikes` route |
-| `add_artifact(payload)` | App-internal | `POST /edit/add-artifact` route |
-| `delete_spikes(payload)` | App-internal | `POST /edit/delete-spikes` route |
-| `delete_dr(payload)` | App-internal | `POST /edit/delete-dr` route |
-| `remove_outliers(payload)` | App-internal | `POST /edit/remove-outliers` route |
-| `remove_duplicates_service(payload)` | App-internal | `POST /edit/remove-duplicates` route |
-| `flag_mu(payload)` | App-internal | `POST /edit/flag-mu` route |
-| `EditLoadResult` | App-internal | Built by `load_decomposition_from_path` |
-| `_encode_edit_load_f32(loaded)` | App-internal | Called by binary load functions |
-| `_wrap_edit_load_binary(loaded)` | App-internal | Called by binary load functions |
-| `_dedup(...)` | App-internal | Called by `save_edits`/`remove_duplicates_service` |
-| `_export_bids_from_mat_context(...)` | App-internal | Called by `save_edits` |
+| `open_edit_session(path, session)` | App-internal | `POST /edit/session/open` route |
+| `edit_session_state(token, session)` | App-internal | `GET /edit/session` route |
+| `apply_edit(op, payload, session)` | App-internal | `POST /edit/ops/{op}` route |
+| `recover_edits(payload, session)` | App-internal | `POST /edit/session/recover` route |
+| `prepare_edit_grid(payload, session)` | App-internal | `POST /edit/session/prepare-grid` route |
+| `save_edit_session(payload, session)` | App-internal | `POST /edit/session/save` route |
+| `save_edits(payload)` | App-internal | `POST /edit/save` route (the run save) |
+| `_new_session(...)`, `_file_extras(...)` | App-internal | Called by `open_edit_session`: the `EditSession` and what the BIDS sidecars and `.json` edit log add |
+| `_state_response(...)`, `_change_response(...)` | App-internal | The MUB1 state and change frames |
+| `_SaveRequest`, `_save(req)` | App-internal | Called by both saves |
+| `_dedup(...)` | App-internal | Called by `_save` and the session's `remove-duplicates` |
+| `_export_bids_emg(...)` | App-internal | Called by `_save` |
+| `_dataset_root(edit, project)` | App-internal | Where a session save writes and a refit reads BIDS EMG |
 
 ### `services/bids_helpers.py`
 
 | Symbol | Category | Reachable via |
 |---|---|---|
-| `read_bids_sidecar_meta(root, entity_label)` | App-internal | Called by preview/editing services |
+| `read_bids_sidecar_meta(root, entity_label)` | App-internal | Called by the preview service and `_file_extras` |
 | `_read_bids_grid(...)` | App-internal | Called by the edit session's first refit of a grid |
 | `_parse_all_bids_entities(entity_label)` | App-internal | Called by editing services |
 | `_parse_subject_session_from_entity_label(label)` | App-internal | Called by `read_bids_sidecar_meta` |
 | `_infer_bids_root_from_decomp_path(filepath)` | App-internal | Called by editing services |
 | `_normalize_bids_meta_value(value)` | App-internal | Called by `read_bids_sidecar_meta` |
 | `_grid_sort_key(group)` | App-internal | Called by `_read_bids_channels_sidecar` |
-| `_read_bids_channels_sidecar(path)` | App-internal | Called by `load_decomposition_from_path` |
+| `_read_bids_channels_sidecar(path)` | App-internal | Called by `_file_extras` |
 
 ### `services/edit_helpers.py`
 
 | Symbol | Category | Reachable via |
 |---|---|---|
-| `_expected_grid_count(decomp)` | App-internal | Called by `load_decomposition_from_path` |
-| `_pad_grid_names(names, expected, fallback)` | App-internal | Called by `save_edits` |
-| `_normalize_muscle_names(raw)` | App-internal | Called by `save_edits` |
-| `_normalize_flagged(raw, nmu)` | App-internal | Called by `save_edits` |
-| `_generate_mu_uids(mu_grid_index)` | App-internal | Called by `save_edits` |
+| `_expected_grid_count(decomp)` | App-internal | Called by `_file_extras` |
+| `_pad_grid_names(names, expected, fallback)` | App-internal | Called by `_file_extras`, `_save` |
+| `_normalize_muscle_names(raw)` | App-internal | Called by `_save` |
+| `_normalize_flagged(raw, nmu)` | App-internal | Called by `_save` |
+| `_generate_mu_uids(mu_grid_index)` | App-internal | Called by `_new_session`, `save_edits` |
 | `_normalize_mu_grid_index(raw, nmu)` | App-internal | Called by `save_edits` |
 | `_coerce_dup_tol(raw, default)` | App-internal | Called by `_dedup` |
 | `_coerce_bool_param(raw)` | App-internal | Called by `_dedup` (`duplicatesbgrids`) |
@@ -155,13 +160,14 @@ Use this to trace what the user can reach.
 
 | Symbol | Category | Reachable via |
 |---|---|---|
-| `PathPayload` | User-exposed | `POST /preview-by-path`, `POST /edit/load-by-path` |
+| `PathPayload` | User-exposed | `POST /preview-by-path`, `POST /edit/session/open` |
+| `QcAutoPayload` | User-exposed | `POST /qc/auto` |
+| `BidsSaveFields` | App-internal | Base of both save payloads |
 | `EditSavePayload` | User-exposed | `POST /edit/save` |
-| `EditFilterPayload` | User-exposed | `POST /edit/update-filter` |
-| `EditRoiPayload` | User-exposed | `POST /edit/add-spikes`, `/edit/add-artifact`, `/edit/delete-spikes`, `/edit/delete-dr` |
-| `EditOutliersPayload` | User-exposed | `POST /edit/remove-outliers` |
-| `EditDeduplicatePayload` | User-exposed | `POST /edit/remove-duplicates` |
-| `EditFlagPayload` | User-exposed | `POST /edit/flag-mu` |
+| `EditSessionSavePayload` | User-exposed | `POST /edit/session/save` |
+| `EditRecoverPayload` | User-exposed | `POST /edit/session/recover` |
+| `EditPrepareGridPayload` | User-exposed | `POST /edit/session/prepare-grid` |
+| `EditOpPayload` | User-exposed | `POST /edit/ops/{op}` |
 
 ### Other API modules
 
@@ -172,8 +178,8 @@ Use this to trace what the user can reach.
 | `app_factory.TokenMiddleware` | App-internal | Added by `create_app(token=...)` (desktop app) |
 | `routes.include_routers()` | App-internal | Called by `cli.serve_api`, `desktop._Server` |
 | `contracts.success_payload()` | App-internal | Called by all route handlers |
-| `binary.pack_frame()` | App-internal | Called by decompose/edit services |
-| `binary.unpack_frame()` | App-internal | Called by the `/edit/save` route and the decompose service |
+| `binary.pack_frame()` | App-internal | Called by the series, decompose and editing services |
+| `binary.unpack_frame()` | App-internal | Tests only (every frame goes from server to client) |
 | `errors.register_exception_handlers()` | App-internal | Called by `create_app` |
 | `errors.error_payload()` | App-internal | Called by exception handlers |
 | `errors.http_exception_handler` | App-internal | Registered on app |
@@ -192,25 +198,31 @@ Use this to trace what the user can reach.
 | `common.parse_rois()` | App-internal | Called by decompose routes |
 | `common.parse_json_object()` | App-internal | Called by decompose routes |
 | `common.parse_entity_label()` | App-internal | Called by editing services |
+| `common.request_session()` | App-internal | Router dependency: the `X-MUedit-Session` header, made the active session |
 | `common.summarize_result()` | App-internal | Called by decompose service |
 | `common.require_existing_path()` | App-internal | Called by preview/editing route handlers |
 | `common._coerce_param_value()` | App-internal | Called by `build_params` |
+| `cache.BUDGET` | App-internal | The one `MemoryBudget`; swept by the app lifespan |
+| `cache.close_session()` | App-internal | Called by `POST /session/close` |
+| `cache._release_upload()` | App-internal | Called by the preview service before the next load |
 | `cache._store_upload_signal()` | App-internal | Called by preview service |
-| `cache._get_upload_signal()` | App-internal | Called by decompose service |
-| `cache._get_upload_source_path()` | App-internal | Called by decompose service |
+| `cache._hold_upload()` | App-internal | Called by decompose, preview (`/qc/auto`) and series services |
+| `cache._get_upload_signal()`, `cache._get_upload_source_path()`, `cache._get_signal_views()`, `cache._get_run_result()` | App-internal | Tests (the services use `_hold_upload` / `_get_run_result_entry`) |
 | `cache._store_signal_views()` | App-internal | Called by preview service |
-| `cache._get_signal_views()` | App-internal | Called by series service |
 | `cache._store_decomp_preview_binary()` | App-internal | Called by decompose service |
 | `cache._pop_decomp_preview_binary()` | App-internal | Called by decompose service |
 | `cache._store_run_result()` | App-internal | Called by decompose service |
-| `cache._get_run_result()` | App-internal | Called by editing service |
-| `cache._drop_run_result()` | App-internal | Called by editing service |
-| `cache._store_edit_signal_context()` | App-internal | Called by editing service |
-| `cache._get_edit_signal_context()` | App-internal | Called by editing service |
-| `cache._get_edit_signal_context_by_label()` | App-internal | Called by editing service |
-| `cache._purge_expired_caches_locked()` | App-internal | Called by cache operations |
-| `cache.SignalViews` | App-internal | Returned by `_get_signal_views`; used by series service |
-| `cache._evict_to_budget_locked()` | App-internal | Called by cache store functions |
+| `cache._get_run_result_entry()` | App-internal | Called by series service (`/series/pulse`) and `save_edits` |
+| `cache._release_edit_sessions()`, `cache._store_edit_session()` | App-internal | Called by `open_edit_session` |
+| `cache._get_edit_session()` | App-internal | Called by editing and series services |
+| `cache._resize_edit_session()` | App-internal | Called after each edit, recovery and save |
+| `cache._live_edit_logs()` | App-internal | Called by `open_edit_session` (logs not offered for recovery) |
+| `cache.SignalViews`, `cache.RunResult`, `cache.HeldUpload` | App-internal | Cache entry types |
+| `memory.MemoryBudget` | App-internal | Byte budget over every cache: eviction, idle-session sweep, `usage()` |
+| `memory.BudgetedLRU` | App-internal | One token-keyed cache: `pin`, `get`, `move`, `pop`, `discard`, `resize`, `release_session` |
+| `memory.default_budget_bytes()` | App-internal | 10% of RAM in [256 MB, 1 GB], or `MUEDIT_CACHE_BUDGET_MB` |
+| `memory.session_id_or_default()` | App-internal | Validates a session id |
+| `memory.process_memory_bytes()`, `peak_rss_bytes()`, `physical_memory_bytes()` | App-internal | `/debug/memory`, the memory tests |
 
 ---
 
@@ -228,7 +240,8 @@ Use this to trace what the user can reach.
 | `select_roi_interactively()` | User-exposed | CLI `--manual-roi` (imports matplotlib lazily; `plot` extra) |
 | `build_manual_artifact_mask()` | App-internal | Called by `preprocess_step`, editing service save |
 | `batch_process_filters()` | App-internal | Called by `postprocess_step` |
-| `remove_duplicates_by_grid()` | App-internal | Called by `postprocess_step`, editing service `_dedup` |
+| `remove_duplicates_by_grid()` | App-internal | Called by `postprocess_step` |
+| `dedup_survivors()` | App-internal | Called by `remove_duplicates_by_grid`, editing service `_dedup` |
 | `rem_duplicates()` | App-internal | Called by `remove_duplicates_by_grid` |
 | `compute_silhouette()` | App-internal | Called by `decompose_step` |
 | `extend_signal()` | App-internal | Called by `decompose_step`, `operations.py` |
@@ -240,11 +253,11 @@ Use this to trace what the user can reach.
 | `whiten_extended_signal()` | App-internal | Called by `decompose_step`, `operations.py` |
 | `adaptive_batch_process()` | App-internal | Called by `postprocess_step` |
 | `build_preview_payload()` | App-internal | Called by `export_step` |
-| `downsample_vector()` | App-internal | Called by `build_preview_payload` |
+| `abs_means()` | App-internal | Called by `build_preview_payload` (channel means, row by row) |
 | `load_decomposition_file()` | App-internal | `load_decomposition()` without the EMG; tests and scripts |
 | `load_decomposition_signal_context()` | App-internal | The EMG context alone; tests and scripts |
 | `normalize_distimes()` | App-internal | Called by editing service |
-| `build_pulse_trains_from_distimes()` | App-internal | Called by editing service |
+| `build_pulse_trains_from_distimes()` | App-internal | Called by the decomposition loader for a file without pulse trains |
 | `save_editlog()` | App-internal | Called by editing service |
 | `save_decomposition_npz()` | App-internal | Called by `export_step`, editing service save — owns the `.npz` schema |
 | `load_decomposition()` | App-internal | Called by editing service; one read of the file for both the decomposition and its EMG |
@@ -276,7 +289,11 @@ Use this to trace what the user can reach.
 | `read_bids_emg_grid()` | App-internal | Called by `bids_helpers._read_bids_grid` |
 | `resolve_bids_emg_path()` | App-internal | Called by `_bids_reader`, `bids_helpers` |
 | `select_grid_channels()` | App-internal | Called by `load_bids_emg_grid` |
-| `NpzWriter`, `NpzArchive` (`io/npz.py`) | App-internal | Called by `decomposition_file` |
+| `NpzWriter`, `NpzArchive`, `RowSource` (`io/npz.py`) | App-internal | Called by `decomposition_file` and the saves (rows written as they are read) |
+| `SessionStore`, `RamStore`, `ArrayStore` (`io/store.py`) | App-internal | Where loaders, runs and edit sessions put full-length arrays |
+| `copy_into()`, `store_signal()`, `sample_blocks()` | App-internal | Block-by-block copies into a store |
+| `purge_stale_sessions()` | App-internal | Called by the app lifespan at startup |
+| `store_usage()` | App-internal | Called by `/debug/memory` |
 | All `_`-prefixed functions | App-internal | Internal helpers |
 
 ---
@@ -302,7 +319,9 @@ Use this to trace what the user can reach.
 | `find_refractory_peaks()` | App-internal | Called by `decompose_step`, `operations.py` |
 | `split_by_amplitude()` | App-internal | Called by `decompose_step`, `operations.py` |
 | `isi_cov()` | App-internal | Called by `rem_duplicates`, `minimize_isi_covariance` |
-| `MinMaxPyramid`, `view()` (`signal/pyramid.py`) | App-internal | Built by `build_signal_views`; read by `series_frame` |
+| `bandpass_inplace()`, `notch_inplace()`, `emg_filter_inplace()` | App-internal | Filters a few rows at a time in place (`preprocess_step`, series service, edit session) |
+| `MinMaxPyramid`, `view()`, `envelope()` (`signal/pyramid.py`) | App-internal | Built by `build_signal_views`; read by `series_frame`, `pulse_frame` |
+| `StreamedExtender`, `RowSelection`, `extend_mask()` (`signal/streaming.py`) | App-internal | Extended signal read batch by batch (full-trace and adaptive postprocess) |
 | `moving_average_ms()` | App-internal | Called by series service |
 | `get_grid_electrode_metadata()` | App-internal | Called by `export_bids_emg` |
 | `ArtifactMaskConfig` | App-internal | Used by artifact mask functions |
@@ -327,6 +346,9 @@ Use this to trace what the user can reach.
 | `SpikeTimes` | User-exposed | `muedit.editing.__init__` (type alias) |
 | `FilterUpdateResult` | User-exposed | `muedit.editing.__init__` (type alias) |
 | `_recompute_spikes_in_window()` | App-internal | Called by `update_motor_unit_filter_window` |
+| `EditSession` (`session.py`) | App-internal | Built by `open_edit_session`; every edit operation, undo, saves |
+| `EditError`, `Change`, `spike_array()` | App-internal | Refused edit (400), what an edit changed, sorted int32 spikes |
+| `EditLog`, `find_recoverable()`, `purge_old_logs()` (`edit_log.py`) | App-internal | Per-session operation log; recovery on reopen; startup cleanup |
 
 ---
 
@@ -337,19 +359,13 @@ Use this to trace what the user can reach.
 | `AdaptiveDecomp` | User-exposed | `muedit.adapt_decomp.__init__` |
 | `Config` | User-exposed | `muedit.adapt_decomp.__init__` |
 | `run_adaptive_decomposition()` | User-exposed | `muedit.adapt_decomp.__init__`, `adaptive_batch.py` |
-| `AdaptiveDecomp.run()` | App-internal | Called by `run_adaptive_decomposition` |
-| `AdaptiveDecomp._whiten()` | App-internal | Called by `run` |
-| `AdaptiveDecomp._separate()` | App-internal | Called by `run` |
-| `AdaptiveDecomp._detect_spikes()` | App-internal | Called by `run` |
-| `AdaptiveDecomp._edge_ipts()` | App-internal | Called by `_detect_spikes_with_context` |
-| `AdaptiveDecomp._detect_spikes_with_context()` | App-internal | Called by `run` |
-| `AdaptiveDecomp._kl_divergence()` | App-internal | Called by `_wh_loss` |
-| `AdaptiveDecomp._wh_loss()` | App-internal | Called by `run` |
-| `AdaptiveDecomp._contrast_value()` | App-internal | Called by `_sv_loss` |
-| `AdaptiveDecomp._sv_loss()` | App-internal | Called by `run` |
+| `AdaptiveDecomp.run()` | App-internal | Called by `run_adaptive_decomposition`, `adaptive_batch` passes |
+| `Calibration`, `calibration_centroids()` | App-internal | The calibration a forward pass fits and the backward pass reuses |
+| `AdaptiveDecomp._calibrate()`, `_set_centroids()` | App-internal | Called by `__init__` |
+| `AdaptiveDecomp._whiten()`, `_separate()`, `_project()` | App-internal | Called by `run` |
+| `AdaptiveDecomp._detect_spikes_with_context()`, `_detect_spikes()` | App-internal | Called by `run` |
+| `AdaptiveDecomp._kl_divergence()`, `_wh_loss()`, `_contrast_value()`, `_sv_loss()` | App-internal | Losses, called by `run` |
 | `AdaptiveDecomp._update_separation_vectors()` | App-internal | Called by `run` |
-| `AdaptiveDecomp._init_whitening_calibration()` | App-internal | Called by `__init__` |
-| `AdaptiveDecomp._init_contrast_calibration()` | App-internal | Called by `__init__` |
 
 ---
 
@@ -359,7 +375,7 @@ Use this to trace what the user can reach.
 |---|---|---|
 | `SignalImport` | User-exposed | Returned by `load_signal`; used by `decomp`, `cache`, API services |
 | `FloatArray`, `IntArray`, `BoolArray` | App-internal | Array annotations in `signal`, `decomp`, `editing` |
-| `EditSignalContext` | App-internal | Built by `decomp.decomposition_file`; cached and read by the editing service |
+| `EditSignalContext` | App-internal | Built by `decomp.decomposition_file`; held by the `EditSession` |
 | `LoadedDecomposition` | App-internal | Used by `decomp.decomposition_file` |
 | `DecompositionSignalExport` | App-internal | Used by `decomp.postprocess.export_step` |
 | `DecompositionExport` | App-internal | Used by `decomp.postprocess.export_step` |

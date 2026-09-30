@@ -175,8 +175,10 @@ peel-off (`P`) removes the other units' contributions first, and spike-locking
 
 If a unit is beyond saving, flag it and it will be dropped when you save. If one
 unit clearly contains two, duplicate it and edit the two copies apart. **Undo**
-steps back through your edits on the current unit and **Reset** returns it to how
-the decomposition left it, so nothing you try here is irreversible.
+steps back through your edits, one at a time, and **Reset** returns the current
+unit to how the file had it, so nothing you try here is irreversible. MUedit also
+records your edits on disk as you go: if it closes or crashes before you save,
+opening the file again offers to restore them.
 
 After each edit MUedit leaves a bookmark where you were working; zoom out and it
 appears, so you can find your way back.

@@ -213,31 +213,6 @@ class EditSignalContext:
     # Schema v1 .npz files embed the EMG already notch- and bandpass-filtered, not raw.
     prefiltered: bool = False
 
-    def compact_copy(self) -> EditSignalContext:
-        """Return an independent copy with EMG and auxiliary data as float32.
-
-        Empty auxiliary data and artifact masks become ``None``.
-        """
-        aux = self.aux_data
-        mask = self.artifact_mask
-        return EditSignalContext(
-            data=(
-                np.array(self.data, dtype=np.float32)
-                if self.data.size
-                else np.zeros((0, 0), dtype=np.float32)
-            ),
-            fsamp=float(self.fsamp),
-            grid_names=list(self.grid_names),
-            emgmask=[np.array(m, dtype=int) for m in self.emgmask],
-            coordinates=[np.array(c, dtype=float) for c in self.coordinates],
-            ied=list(self.ied) if self.ied is not None else None,
-            aux_data=np.array(aux, dtype=np.float32) if aux is not None and aux.size else None,
-            aux_names=list(self.aux_names),
-            artifact_mask=np.array(mask, dtype=bool) if mask is not None and mask.size else None,
-            loader_meta=dict(self.loader_meta),
-            prefiltered=self.prefiltered,
-        )
-
     def readonly_view(self) -> EditSignalContext:
         """Share the arrays read-only; lists and metadata are independent copies."""
         return EditSignalContext(

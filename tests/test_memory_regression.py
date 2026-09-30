@@ -50,27 +50,19 @@ EXT_WINDOW_MB = EXT_ROWS * ROI_SAMPLES * 8 / 1e6
 #
 # Each budget is ``factor x working-set MB`` where the working set is the
 # smallest full-size array the stage must materialise.  The factors are the
-# tracemalloc baseline on this input plus 25% headroom, re-measured when a
-# memory-plan stage lowers them (stage 3: preprocess, edit_load, update_filter;
-# stages 4-5: decompose, update_filter and the three postprocess branches;
-# stages 6-7: preview, preprocess and save; stages 9-10: preview, preprocess,
-# full-trace and adaptive, with the loaded, filtered and pulse arrays memory-mapped
-# in session stores; stage 12: qc_auto, and ``series`` replacing ``qc_window``;
-# stage 13: save and edit_load, the .npz written and read uncompressed, the edit
-# EMG copied into a store and the pulse trains memory-mapped from the file, so
-# edit_load holds little more than the float32 pulse frame; stage 14: edit_load opens a
-# server-side edit session and sends discharge times only, no pulse trains).
-# A factor that grows means the stage started keeping an
+# tracemalloc baseline on this input plus 25% headroom; re-measure when a change
+# lowers them. A factor that grows means the stage started keeping an
 # extra full copy.  ``load`` reads a v5 .mat, which scipy can only read whole;
 # ``load_store`` reads the same recording as v7.3 into a store, slice by slice.
-# Full-trace and adaptive stream the recording, so their budgets are no longer
-# multiples of the full-length extension: full-trace holds one ~64 MB batch,
-# adaptive one calibration chunk; their pulse trains are in the run store.
-# ``series`` reads the min/max pyramids, so it depends on the bins asked for, not on
-# the recording: its budget is in MB. So does ``bids_export`` (stage 15), which reads one
-# ``BLOCK_BYTES`` block of data records at a time. Stage 16 (float32 ``compute_dtype``)
-# lowered preprocess, decompose, post_windowed and update_filter; ``RAW_MB`` and ``EXT_WINDOW_MB`` stay
-# float64 sizes, so the float32 working sets are half of them.
+# Loaded, filtered and pulse arrays are memory-mapped in session stores, and
+# edit_load opens a server-side edit session that holds little more than the
+# float32 pulse frame. Full-trace and adaptive stream the recording: full-trace
+# holds one ~64 MB batch, adaptive one calibration chunk; their pulse trains are
+# in the run store. ``series`` reads the min/max pyramids, so it depends on the
+# bins asked for, not on the recording: its budget is in MB. So does
+# ``bids_export``, which reads one ``BLOCK_BYTES`` block of data records at a time.
+# ``RAW_MB`` and ``EXT_WINDOW_MB`` are float64 sizes; the float32 compute working
+# sets are half of them.
 
 BUDGETS_MB: dict[str, float] = {
     "load": 1.9 * RAW_MB,

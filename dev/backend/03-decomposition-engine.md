@@ -285,9 +285,9 @@ Steps:
 
 | Function | Description |
 |---|---|
-| `remove_duplicates_by_grid(pulse_t, distime, mu_grid_index, ngrid, params, fsamp)` | Within-grid (and optionally cross-grid) dedup |
-| `_reconstruct_window_signal(prep, params, win_global, whiten_mat) -> (win_data, w_sig)` | Recompute window data for filter application |
-| `_make_window_reconstructors(prep, params, decomposed) -> (get_win_data, get_w_sig)` | Returns cached callable reconstructors |
+| `dedup_survivors(distime, mu_grid_index, ngrid, params, fsamp, n_samples) -> (kept, grids)` | Indices of the MUs duplicate removal keeps, within grids then across; works on spike times only (also the edit stage's dedup) |
+| `remove_duplicates_by_grid(pulse_t, distime, mu_grid_index, ngrid, params, fsamp)` | `dedup_survivors`, then the kept pulse rows indexed once |
+| `_reconstruct_window_signal(prep, params, win_global, whiten_mat) -> w_sig` | Recompute a window's whitened extended signal for filter application; `postprocess_step` wraps it in `get_w_sig(nwin)` |
 
 ---
 

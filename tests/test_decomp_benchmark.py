@@ -18,6 +18,7 @@ from muedit.decomp.postprocess import postprocess_step
 from muedit.decomp.preprocess import load_step, preprocess_step
 from muedit.decomp.types import POSTPROCESS_MODES, DecompositionParameters
 from muedit.models import SignalImport
+from muedit.signal.decomp_primitives import POSTPROC_MIN_ISI_SEC
 from tests._metrics_helpers import (
     Match,
     active_reference_count,
@@ -149,7 +150,7 @@ def _run_branches(
     dataset: str,
     compare: Any,
 ) -> dict[str, dict[str, Any]]:
-    """Decompose once, then time and score each postprocess branch."""
+    """Decompose once, then time and score each postprocess branch (with its ``distime``)."""
     rng = np.random.default_rng(base.random_seed)
     t0 = time.perf_counter()
     decomposed = decompose_step(prep=prep, params=base, rng=rng, progress_cb=None)
@@ -171,7 +172,7 @@ def _run_branches(
 
         name = dataset if label == "windowed" else f"{dataset}_{label}"
         _log_result(name, params, results)
-        out[label] = results
+        out[label] = {**results, "distime": distime}
     return out
 
 
@@ -272,10 +273,16 @@ def test_real_units_match_edited_reference(real_benchmark: dict[str, dict[str, A
 
 @pytest.mark.parametrize("pct", [20, 40, 60])
 def test_sim_matches_ground_truth(
-    sim_benchmarks: dict[int, dict[str, dict[str, Any]]], pct: int
+    sim_benchmarks: dict[int, dict[str, dict[str, Any]]],
+    simulation_loaded: dict[int, dict[str, Any]],
+    pct: int,
 ) -> None:
-    """The windowed branch reaches a mean RoA of 0.9; the others match something."""
+    """The windowed branch finds 5+ valid units at a mean RoA of 0.9; the others match something."""
     r = sim_benchmarks[pct]["windowed"]
+    assert r["n_units"] >= 5, f"{pct}%: expected >= 5 MUs, got {r['n_units']}"
+    refractory = int(np.round(simulation_loaded[pct]["fsamp"] * POSTPROC_MIN_ISI_SEC))
+    for i, d in enumerate(r["distime"]):
+        assert np.all(np.diff(d) >= refractory), f"{pct}% MU {i}: unsorted or refractory violated"
     assert r["n_matched"] > 0, f"{pct}%: no GT matches"
     assert r["mean_roa"] >= _ROA_THRESHOLD, f"{pct}%: mean RoA {r['mean_roa']:.3f}"
     # The full-signal branches adapt online and can land lower; the benchmark

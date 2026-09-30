@@ -29,7 +29,7 @@ The backend serves four user-facing stages (mirroring the frontend):
 1. **File Loading** — Raw EMG import from `.mat`, `.otb+`, `.otb4`, `.bdf`/`.edf`, `.rhd` formats. Signal preview computation, grid geometry inference, BIDS export.
 2. **Quality Check & Experiment Info** — Automatic QC pipeline: bad-channel detection, artifact masking. BIDS metadata enrichment (participant, hardware, electrode placement).
 3. **Decomposition** — FastICA-based convolutive source separation with optional adaptive online post-processing. SIL scoring, duplicate removal, preview payload generation.
-4. **Editing** — Interactive motor-unit spike editing: filter updates, spike add/delete, artifact marking, discharge-rate pruning, outlier removal, deduplication, flagging, and BIDS save.
+4. **Editing** — A server-side edit session per tab: filter updates, spike add/delete, artifact marking, discharge-rate pruning, outlier removal, deduplication, flagging, undo, recovery of unsaved edits after a crash, and BIDS save.
 
 ## Backend File Map
 
@@ -48,22 +48,24 @@ python/src/muedit/
 │   ├── routes/
 │   │   ├── __init__.py                       include_routers()
 │   │   ├── preview.py                        /preview-by-path, /qc/auto, /health
-│   │   ├── series.py                         /series/emg, /series/overview, /series/aux
+│   │   ├── series.py                         /series/emg, /series/overview, /series/aux, /series/pulse
 │   │   ├── decompose.py                      /decompose_stream, /decompose/cancel, /decompose_preview/{token}
-│   │   ├── editing.py                        /edit/* (load-by-path, save, update-filter, add/delete, dedup, flag)
-│   │   └── dialog.py                         /dialog/open-file
+│   │   ├── editing.py                        /edit/session/*, /edit/ops/{op}, /edit/save
+│   │   ├── dialog.py                         /dialog/open-file
+│   │   └── memory.py                         /session/close, /debug/memory
 │   ├── services/
 │   │   ├── preview_service.py                Preview building + on-demand auto-QC
-│   │   ├── series_service.py                 QC pyramids and viewport envelopes
+│   │   ├── series_service.py                 QC pyramids, viewport envelopes, pulse-train frames
 │   │   ├── decompose_service.py              One run at a time, cancel, NDJSON streaming
 │   │   ├── decompose_worker.py               Run body, executed in a spawned worker process
-│   │   ├── editing_service.py                Edit operation dispatch + BIDS save
+│   │   ├── editing_service.py                Edit sessions: open, apply, recover, save + BIDS save
 │   │   ├── bids_helpers.py                   BIDS sidecar parsing + entity resolution
 │   │   └── edit_helpers.py                   Normalization helpers for edit payloads
 │   ├── schemas.py                            Pydantic request models
 │   ├── contracts.py                          Response envelope
 │   ├── binary.py                             MUB1 frame packer and unpacker
-│   ├── cache.py                              In-memory TTL cache (upload, QC, preview, edit context)
+│   ├── cache.py                              The session-scoped caches (upload, preview, run, edit session)
+│   ├── memory.py                             MemoryBudget + BudgetedLRU: one byte budget over every cache
 │   ├── common.py                             Shared parsing + serialization utilities
 │   ├── config.py                             DATA_ROOT, resolve_bids_root(), project_of()
 │   └── errors.py                             Exception handlers + error envelope
@@ -86,19 +88,25 @@ python/src/muedit/
 │   ├── _bids_reader.py                       BIDS EMG reading (pyedflib + channels.tsv)
 │   ├── _intan.py                             Intan RHD loader (3 save layouts)
 │   ├── mat.py                                MATLAB .mat v5 + v7.3 (HDF5) loader
-│   └── _otb.py                               OT Bioelettronica OTB+ and OTB4 loaders
+│   ├── _otb.py                               OT Bioelettronica OTB+ and OTB4 loaders
+│   ├── npz.py                                Aligned .npz writer, memory-mapping reader, legacy unpickler
+│   └── store.py                              Session stores: full-length arrays as memory-mapped .npy files
 │
 ├── signal/
-│   ├── filters.py                            demean, bandpass, notch
-│   ├── downsample.py                         decimation, moving average
+│   ├── filters.py                            demean, bandpass, notch (whole or in place, by row block)
+│   ├── downsample.py                         moving average (the QC overview)
 │   ├── decomp_primitives.py                  extend_signal, signed_square, peak picking, k-means split
 │   ├── grid.py                               GridSpec catalog, format_hdemg_signal
+│   ├── pyramid.py                            Min/max pyramids and viewport envelopes
+│   ├── streaming.py                          StreamedExtender: the extended signal read batch by batch
 │   ├── channel_qc.py                         Bad-channel detection (7 criteria)
 │   ├── artifact_mask.py                      Artifact region detection
 │   └── qc_pipeline.py                        Auto QC orchestration (run_auto_qc)
 │
 ├── editing/
-│   └── operations.py                         MU editing operations (filter update, spike/artifact add/delete, rate pruning)
+│   ├── operations.py                         MU editing operations (filter update, spike/artifact add/delete, rate pruning)
+│   ├── session.py                            EditSession: the decomposition being edited, undo, pulse-train copies
+│   └── edit_log.py                           Per-session JSONL log of operations, replayed to recover unsaved edits
 │
 └── adapt_decomp/
     ├── config.py                             Config dataclass for adaptive decomposition

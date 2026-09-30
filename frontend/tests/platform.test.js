@@ -48,7 +48,7 @@ test("the browser page sends no token and uses the dialog route", async () => {
   assert.equal((await sentHeaders())?.has(TOKEN_HEADER), false);
   const platform = await loadPlatform("");
   assert.equal(platform.IS_DESKTOP, false);
-  await platform.initPlatform();
+  assert.equal(await platform.initPlatform(), true);
   const picked = { path: "/data/rec.otb+", name: "rec.otb+" };
   assert.deepEqual(await platform.openFile(async () => picked), picked);
   assert.equal((await sentHeaders())?.has(TOKEN_HEADER), false);
@@ -76,7 +76,7 @@ test("the desktop page waits for the bridge and sends its token", async () => {
       },
     };
     target.dispatchEvent(new Event("pywebviewready"));
-    await ready;
+    assert.equal(await ready, true);
     assert.equal((await sentHeaders())?.get(TOKEN_HEADER), "t0ken");
     const fallback = async () => {
       throw new Error("the browser dialog must not open");
@@ -91,5 +91,17 @@ test("the desktop page waits for the bridge and sends its token", async () => {
     globalThis.addEventListener = realAdd;
     delete globalThis.pywebview;
     setAppToken("");
+  }
+});
+
+test("the desktop page gives up when the bridge never comes", async () => {
+  const platform = await loadPlatform("?desktop=1");
+  const realAdd = globalThis.addEventListener;
+  globalThis.addEventListener = () => {};
+  try {
+    assert.equal(await platform.initPlatform({ timeoutMs: 10 }), false);
+    assert.equal((await sentHeaders())?.has(TOKEN_HEADER), false);
+  } finally {
+    globalThis.addEventListener = realAdd;
   }
 });

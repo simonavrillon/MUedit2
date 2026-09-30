@@ -6,7 +6,6 @@ import asyncio
 import json
 import logging
 import multiprocessing
-import os
 import queue
 import tempfile
 import threading
@@ -36,11 +35,9 @@ from muedit.api.common import (
 )
 from muedit.api.memory import DEFAULT_SESSION
 from muedit.api.services.decompose_worker import (
-    CANCELLED_EVENT,
     RESULT_STAGE,
     RunJob,
     child_main,
-    execute,
 )
 from muedit.decomp.decomposition_file import pack_csr
 from muedit.editing.session import spike_array
@@ -53,11 +50,14 @@ logger = logging.getLogger(__name__)
 PREVIEW_PULSE_KEYS = ("pulse_trains_full",)
 #: Preview fields the binary frame replaces: discharge times travel as CSR arrays.
 PREVIEW_ARRAY_KEYS = (*PREVIEW_PULSE_KEYS, "distime_all")
-#: ``process`` (default) runs each decomposition in a spawned worker process, ``thread`` in-process.
-WORKER_ENV = "MUEDIT_DECOMPOSE_WORKER"
 #: How often a stream waiting for the next event checks that its client is still connected.
 DISCONNECT_POLL_SEC = 1.0
 SHUTDOWN_WAIT_SEC = 10.0
+CANCELLED_EVENT: dict[str, Any] = {
+    "stage": "cancelled",
+    "pct": 0,
+    "message": "Decomposition cancelled",
+}
 
 
 def _as_matrix(value: Any) -> np.ndarray:
@@ -93,11 +93,6 @@ def fetch_decompose_preview_binary(token: str) -> Response:
     )
 
 
-def worker_mode() -> str:
-    """``thread`` when ``MUEDIT_DECOMPOSE_WORKER`` asks for it, else ``process``."""
-    return "thread" if os.environ.get(WORKER_ENV, "").strip().lower() == "thread" else "process"
-
-
 class _Run:
     """One decomposition: its worker and a thread turning the worker's messages into events."""
 
@@ -123,7 +118,7 @@ class _Run:
         self._supervisor.start()
 
     def cancel(self) -> None:
-        """Stop the worker: a process at once, a thread at its next progress event."""
+        """Stop the worker process."""
         with self._lock:
             self.cancelled.set()
             process = self._process
@@ -137,9 +132,7 @@ class _Run:
 
     def _supervise(self) -> None:
         kept = False
-        messages = (
-            self._process_messages() if worker_mode() == "process" else self._thread_messages()
-        )
+        messages = self._process_messages()
         try:
             kept = self._relay(messages)
         except Exception as exc:
@@ -192,26 +185,6 @@ class _Run:
                 process.join()
                 self._exitcode = process.exitcode
 
-    def _thread_messages(self) -> Generator[dict[str, Any], None, None]:
-        """Messages from the run executed on a thread of this process."""
-        assert self.store is not None
-        messages: queue.Queue[dict[str, Any] | None] = queue.Queue()
-        store = self.store
-
-        def body() -> None:
-            try:
-                execute(self.job, store, messages.put, self.cancelled)
-            finally:
-                messages.put(None)
-
-        thread = threading.Thread(target=body, name="muedit-decompose-worker", daemon=True)
-        thread.start()
-        try:
-            while (message := messages.get()) is not None:
-                yield message
-        finally:
-            thread.join()
-
     def _relay(self, messages: Iterator[dict[str, Any]]) -> bool:
         """Forward the worker's events; True when the result keeps the run's store."""
         ended = False
@@ -229,7 +202,7 @@ class _Run:
                         message.get("traceback", ""),
                     )
                 self.events.put(message)
-                ended = ended or message.get("stage") in ("error", "cancelled")
+                ended = ended or message.get("stage") == "error"
         if not ended:
             if self.cancelled.is_set():
                 self.events.put(dict(CANCELLED_EVENT))

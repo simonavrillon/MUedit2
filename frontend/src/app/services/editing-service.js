@@ -128,6 +128,24 @@ export async function requestRoiEdit(app, action, payload) {
   }
 }
 
+/**
+ * Have the server filter a grid's EMG now, while the user looks at it, rather
+ * than on the grid's first filter update. Nothing waits for it: a filter
+ * update sent meanwhile waits on the server for the same filtering.
+ *
+ * @param {App} app
+ * @param {number} grid
+ */
+export function prepareEditGrid(app, grid) {
+  const { state, api } = app;
+  if (!state.edit.token) return;
+  api
+    .editPrepareGrid(state.edit.token, grid, state.edit.project || "")
+    .catch(() => {
+      // The filter update filters the grid itself, and reports what fails.
+    });
+}
+
 /** @param {App} app */
 export async function requestFilterUpdate(app) {
   const { state, els, setEditStatus, renderEditExplorer } = app;
@@ -460,6 +478,7 @@ function showEditSession(app, file, frame) {
   app.renderBidsMuscleFields?.();
   app.renderEditExplorer();
   if (els.landing) els.landing.classList.add("hidden");
+  prepareEditGrid(app, state.edit.currentMuGrid);
 }
 
 /**

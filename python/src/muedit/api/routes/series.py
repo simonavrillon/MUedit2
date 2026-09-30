@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import Response
 
 from muedit.api.common import request_session
-from muedit.api.services.series_service import MAX_BINS, pulse_frame, series_frame, spikes_frame
+from muedit.api.services.series_service import MAX_BINS, pulse_frame, series_frame
 
 router = APIRouter(prefix="/api/v1", dependencies=[Depends(request_session)])
 
@@ -56,9 +56,3 @@ def series_pulse(
     ``token`` names an edit session or a finished run.
     """
     return pulse_frame(token, mu, start, end, bins)
-
-
-@router.get("/spikes")
-def spikes(token: str, mu: str = Query("all", description="An MU index, or ``all``")) -> Response:
-    """Discharge times as CSR (MUB1: ``spikes`` int32, ``spike_offsets`` int64)."""
-    return spikes_frame(token, mu)

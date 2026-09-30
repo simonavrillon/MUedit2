@@ -16,7 +16,6 @@ from muedit.api.cache import (
     _get_run_result_entry,
     _hold_upload,
 )
-from muedit.decomp.decomposition_file import pack_csr
 from muedit.io.store import ArrayStore
 from muedit.models import FloatArray, IntArray, SignalImport
 from muedit.signal.downsample import PREVIEW_MOVING_AVG_MS, moving_average_ms
@@ -305,46 +304,6 @@ def pulse_frame(token: str, mu: int, start: int, end: int, bins: int) -> Respons
         arrays["max"] = (series.maxs, "f4")
     return Response(
         content=pack_frame(meta, arrays),
-        media_type=FRAME_MEDIA_TYPE,
-        headers={"x-muedit-format": FRAME_FORMAT},
-    )
-
-
-def spikes_frame(token: str, mu: str) -> Response:
-    """Discharge times of every MU (``mu`` ``all``) or one, as CSR ``spikes``/``spike_offsets``.
-
-    An edit session adds its artifacts the same way (``artifacts``/``artifact_offsets``).
-    """
-    edit = _get_edit_session(token)
-    artifacts: list[IntArray] | None = None
-    if edit is not None:
-        with edit.lock:
-            spikes, artifacts = list(edit.spikes), list(edit.artifacts)
-    else:
-        run = _get_run_result_entry(token)
-        if run is None:
-            raise _missing_token()
-        spikes = list(run.spikes)
-    if mu != "all":
-        try:
-            index = int(mu)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail="mu must be an index or 'all'") from exc
-        if not 0 <= index < len(spikes):
-            raise HTTPException(status_code=400, detail="mu out of range")
-        spikes = [spikes[index]]
-        artifacts = [artifacts[index]] if artifacts is not None else None
-    values, offsets = pack_csr(spikes, np.int32)
-    arrays: dict[str, tuple[Any, str]] = {
-        "spikes": (values, "i4"),
-        "spike_offsets": (offsets, "i8"),
-    }
-    if artifacts is not None:
-        art_values, art_offsets = pack_csr(artifacts, np.int32)
-        arrays["artifacts"] = (art_values, "i4")
-        arrays["artifact_offsets"] = (art_offsets, "i8")
-    return Response(
-        content=pack_frame({"n_mu": len(spikes)}, arrays),
         media_type=FRAME_MEDIA_TYPE,
         headers={"x-muedit-format": FRAME_FORMAT},
     )

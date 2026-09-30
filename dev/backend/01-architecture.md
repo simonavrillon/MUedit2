@@ -39,11 +39,14 @@ cli.serve_api()
       → TrustedHostMiddleware (localhost, 127.0.0.1), only when bound to loopback:
         rejects DNS-rebound requests, which arrive same-origin
       → errors.register_exception_handlers(app)
+      → lifespan: at startup purge_stale_sessions() (store folders of exited
+        processes), purge_old_logs() (edit logs > 30 days), BUDGET.start_sweeper();
+        at shutdown stop_decompositions(), stop the sweeper, BUDGET.clear()
   → routes.include_routers(app)
       → app.include_router(preview_router)    # /api/v1: health, preview-by-path, qc/auto
-      → app.include_router(series_router)     # /api/v1/series: emg, overview, aux
+      → app.include_router(series_router)     # /api/v1: series/emg, series/overview, series/aux, series/pulse
       → app.include_router(decompose_router)  # /api/v1: decompose_stream, decompose/cancel, decompose_preview
-      → app.include_router(editing_router)    # /api/v1: edit/*
+      → app.include_router(editing_router)    # /api/v1: edit/session/*, edit/ops/{op}, edit/save
       → app.include_router(dialog_router)   # /api/v1/dialog: open-file
       → app.include_router(memory_router)   # /api/v1: debug/memory, session/close
   → app_factory.mount_frontend(app, paths.frontend_dir())
@@ -159,9 +162,10 @@ Methods: `from_mapping(payload)` (normalizes loader dicts), `clone()`, `to_dict(
 
 ### `EditSignalContext`
 EMG embedded in a decomposition file (`.mat`/`.npz`), built by
-`load_decomposition()` and held in the API edit cache for filter updates and BIDS export.
-The editing service passes `load_decomposition()` an edit `SessionStore`, so the EMG is a
-float32 memory map in that store, which the cache entry deletes when it is dropped.
+`load_decomposition()` and held by the `EditSession` for filter updates and BIDS export.
+The editing service passes `load_decomposition()` the session's `SessionStore`, so the EMG is a
+float32 memory map in that store (or a `.npz` member mapped in place), which closing the
+session deletes.
 
 | Field | Type | Default |
 |---|---|---|
@@ -177,11 +181,12 @@ float32 memory map in that store, which the cache entry deletes when it is dropp
 | `loader_meta` | `dict[str, Any]` | `{}` (the `LOADER_BIDS_META_KEYS` the file recorded) |
 | `prefiltered` | `bool` | `False`; `True` for a schema v1 `.npz`, whose EMG is notch- and bandpass-filtered: the filter update skips its bandpass and the BIDS export skips it |
 
-Methods: `compact_copy()` (independent copy, EMG/aux as float32), `readonly_view()` (shares arrays read-only), `nbytes` (property; memory-mapped EMG/aux count 0)
+Methods: `readonly_view()` (shares arrays read-only), `nbytes` (property; memory-mapped EMG/aux count 0)
 
 ### `LoadedDecomposition`
-Decomposition state loaded from `.npz`/`.mat` for editing. Returned by
-`load_decomposition_file()`; the editing service wraps it in `EditLoadResult`.
+Decomposition state loaded from `.npz`/`.mat` for editing. Returned by `load_decomposition()`
+(or `load_decomposition_file()` without the EMG); `open_edit_session` builds the
+`EditSession` from it.
 
 | Field | Type | Default |
 |---|---|---|
@@ -237,21 +242,23 @@ Methods: `to_dict()`
 | `app_factory.py` | Construct FastAPI app, Host and desktop-token checks, exception handlers; `mount_frontend()` |
 | `routes/__init__.py` | Register all routers on the app |
 | `routes/preview.py` | File preview, on-demand auto-QC, health check |
-| `routes/series.py` | Viewport envelopes of the upload's EMG, grid overview and aux channels |
+| `routes/series.py` | Viewport envelopes of the upload's EMG, grid overview and aux channels, and of an MU's pulse train |
 | `routes/decompose.py` | Streaming decomposition, cancel, binary preview fetch |
-| `routes/editing.py` | All edit endpoints (load, save, filter update, spike/artifact ops) |
+| `routes/editing.py` | Edit sessions (open, state, operations, recovery, save) and the run save |
 | `routes/dialog.py` | Native file-open dialog (macOS AppleScript / tkinter) |
+| `routes/memory.py` | `/session/close` (a closing tab) and `/debug/memory` |
 | `services/preview_service.py` | Preview building, on-demand auto-QC |
-| `services/series_service.py` | One bandpass pass building the QC pyramids; serves `/series/*` frames |
+| `services/series_service.py` | One bandpass pass building the QC pyramids; serves `/series/*` frames, pulse trains included |
 | `services/decompose_service.py` | One run at a time (409), cancel, worker supervision, NDJSON streaming, binary preview |
-| `services/decompose_worker.py` | Run body, executed in a `spawn` worker process (or a thread with `MUEDIT_DECOMPOSE_WORKER=thread`) |
-| `services/editing_service.py` | Edit operation dispatch, BIDS save, MAT signal context management |
+| `services/decompose_worker.py` | Run body, executed in a `spawn` worker process |
+| `services/editing_service.py` | Opens edit sessions, applies edits, recovers unsaved edits, both saves + BIDS export |
 | `services/bids_helpers.py` | BIDS sidecar parsing, entity label resolution |
 | `services/edit_helpers.py` | Payload normalization helpers for edits |
-| `schemas.py` | Pydantic request models (9 models) |
+| `schemas.py` | Pydantic request models (7 models) |
 | `contracts.py` | `success_payload()` response envelope |
 | `binary.py` | `pack_frame()` / `unpack_frame()`: the MUB1 wire format |
-| `cache.py` | In-memory TTL cache (4 caches, thread-safe, budget-based eviction) |
+| `cache.py` | The four session-scoped caches (uploads, previews, runs, edit sessions) |
+| `memory.py` | `MemoryBudget` (one byte budget, idle-session sweep) and `BudgetedLRU` (one cache) |
 | `common.py` | JSON parsing, param building, serialization, path checks |
 | `config.py` | `DATA_ROOT`, `resolve_bids_root()`, `project_of()` |
 | `errors.py` | Error envelope, exception handlers |
@@ -277,7 +284,7 @@ Methods: `to_dict()`
 | `postprocess.py` | Filter application, dedup, export, NPZ save |
 | `adaptive_batch.py` | Online adaptive post-processing (bidirectional) |
 | `preview.py` | Downsampled preview payload builder |
-| `decomposition_file.py` | Decomposition file load/save (NPZ schema + MAT v5/v7.3) |
+| `decomposition_file.py` | Decomposition file load/save (NPZ schema v2, legacy v1 reader, MAT v5/v7.3) |
 | `types.py` | `DecompositionParameters` + step output dataclasses |
 
 ### `io/` — File I/O
@@ -291,14 +298,17 @@ Methods: `to_dict()`
 | `_intan.py` | Intan RHD loader (3 save layouts: traditional, per-channel, per-signal-type) |
 | `mat.py` | MATLAB .mat v5 (scipy) + v7.3 (h5py/HDF5) loader |
 | `_otb.py` | OT Bioelettronica OTB+ and OTB4 archive loaders |
+| `npz.py` | `NpzWriter` (aligned, uncompressed, written row block by row block), `NpzArchive` (one open, members memory-mapped), the restricted unpickler for legacy files |
+| `store.py` | `SessionStore`: a folder of memory-mapped `.npy` files per upload, run or edit session; `RamStore` on the heap |
 
 ### `signal/` — Signal Processing
 
 | Component | Responsibility |
 |---|---|
-| `filters.py` | `demean()`, `bandpass_signals()`, `notch_signals()` |
+| `filters.py` | `demean()`, `bandpass_signals()`, `notch_signals()`, and their in-place, row-block versions |
 | `downsample.py` | `moving_average_ms()` |
 | `pyramid.py` | `MinMaxPyramid` (min/max levels at bins of 16, 64, 256, … samples) and `view()`, the envelope of any window |
+| `streaming.py` | `StreamedExtender`: the extended signal read batch by batch instead of whole |
 | `decomp_primitives.py` | `extend_signal()`, `signed_square()`, `find_refractory_peaks()`, `split_by_amplitude()`, `isi_cov()` |
 | `grid.py` | `GridSpec` catalog, `format_hdemg_signal()`, `get_grid_electrode_metadata()` |
 | `channel_qc.py` | Bad-channel detection (7 criteria: flat, saturated, quantized, noisy, low-SNR, intermittent, contact-loss) |
@@ -310,6 +320,8 @@ Methods: `to_dict()`
 | Component | Responsibility |
 |---|---|
 | `operations.py` | All MU editing operations: filter update, spike add/delete, artifact add/delete, discharge-rate pruning, outlier removal |
+| `session.py` | `EditSession`: the decomposition being edited, its undo stack and pulse-train copies |
+| `edit_log.py` | `EditLog`: each session's operations on disk, replayed to recover unsaved edits |
 
 ### `adapt_decomp/` — Adaptive Online Decomposition
 
@@ -360,4 +372,7 @@ save goes back into that dataset (`EditSession.bids_root`), wherever it lies.
 | `MUEDIT_OPEN_BROWSER` | `1` | Open the browser once the server answers (launchers, browser mode) |
 | `MUEDIT_DEBUG` | `0` | `1` opens the WebView's developer tools in the desktop app |
 | `MUEDIT_LOG_FILE` | set by the desktop app | The log file its spawned workers append to |
+| `MUEDIT_CACHE_DIR` | the per-user cache folder | Session stores, edit logs, the desktop lock |
+| `MUEDIT_CACHE_BUDGET_MB` | 10% of RAM, 256–1024 | Byte budget of the API caches |
+| `MUEDIT_DISK_RESERVE_MB` | `1024` | Free disk a session store leaves; arrays past it stay in RAM |
 | `MUEDIT_NO_UV` | `0` | `1` makes the launchers use the active `python` instead of `uv run` |

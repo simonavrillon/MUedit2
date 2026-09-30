@@ -77,10 +77,6 @@ class StreamedExtender:
         """First sample whose look-back lies entirely inside the recording."""
         return self.ex_factor - 1
 
-    def complete(self, start: int, stop: int) -> BoolArray:
-        """Per-sample flag: False where the look-back reaches before the recording start."""
-        return np.arange(start, stop) >= self.first_complete
-
     def mask(self, start: int, stop: int) -> BoolArray | None:
         """Extended artifact mask of samples ``[start, stop)`` (see ``extend_mask``), or None."""
         if self.artifact_mask is None:

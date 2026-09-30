@@ -2,6 +2,12 @@
 
 The edit stage is the most complex section. This document lists every control button, canvas interaction, keyboard shortcut, and operation available to the user.
 
+The decomposition being edited lives on the server, in an edit session (see
+[backend 05-editing-operations.md](../backend/05-editing-operations.md)). The page holds its
+token, every MU's discharge and artifact times, the per-MU fields and the edit history. It
+fetches the current MU's pulse train for the window on screen only (`GET /series/pulse`). Every
+edit is one `POST /edit/ops/{op}`, and the page applies the change the server returns.
+
 ## Edit Stage Layout
 
 ```
@@ -40,19 +46,19 @@ The edit stage is the most complex section. This document lists every control bu
 
 | Button ID | Label | Handler | API Call | Description |
 |---|---|---|---|---|
-| `editFlagBtn` | Flag MU | `flagMuForDeletion()` | `POST /edit/flag-mu` | Toggles deletion flag for current MU. Flagged MUs display zeroed pulse trains and are excluded from save. |
-| `editDeduplicateBtn` | Remove Duplicates | `removeDuplicateMus()` | `POST /edit/remove-duplicates` | Removes duplicate MUs with the decomposition's rules (within each grid, then across grids unless `duplicatesbgrids` is false). Reorders all parallel arrays via `keepEditMus(kept_indices)`. |
-| `editDuplicateBtn` | Duplicate MU | `duplicateMu()` | (local, no API) | Appends a copy of the current MU (distimes + pulse train) with a new UID `g{gridIdx}_mu{n}`. Switches to the new MU. |
-| `editOutliersBtn` | Remove Outliers | `removeOutliers()` | `POST /edit/remove-outliers` | Removes outlier spikes from the current MU based on discharge rate statistics. |
-| `editAddBtn` | Add Spike | `setEditMode("add")` | (no API yet) | Enters "add" mode. User then drags a box on the pulse canvas to add spikes. |
-| `editAddArtifactBtn` | Add Artifact | `setEditMode("add_artifact")` | (no API yet) | Enters "add_artifact" mode. User drags on pulse canvas to mark an artifact region. |
-| `editDeleteSpikeBtn` | Delete Spike/Artifact | `setEditMode("delete_spikes")` | (no API yet) | Enters "delete_spikes" mode. User drags on pulse canvas to delete spikes in the selected region. |
-| `editUpdateBtn` | Update Filter | `updateMuFilter()` | `POST /edit/update-filter` | Re-runs the separation filter on the current MU using current distimes. Sends peel-off and lock-spike flags. 120s timeout. |
-| `editPeelOffToggle` | Peel-off: Off/On | `applyLabeledToggle(...)` | (no direct API) | Toggle that sets `use_peeloff` flag, read by `requestFilterUpdate` when "Update Filter" is clicked. |
-| `editLockSpikesToggle` | Lock: Off/On | `applyLabeledToggle(...)` | (no direct API) | Toggle that sets `lock_spikes` flag, read by `requestFilterUpdate` when "Update Filter" is clicked. |
-| `editUndoBtn` | Undo | `restoreEditBackup()` | (local, no API) | Restores the last backup (single-level undo). Disabled when `state.edit.backup === null`. |
-| `editResetBtn` | Reset | `resetCurrentMuEdits()` | (local, no API) | Restores current MU to its original loaded state (originalDistimes, originalPulseTrains). Clears artifacts and logs a `reset_mu` entry. |
-| `editSaveBtn` | Save | `saveEditedFile()` | `POST /edit/save` | Saves the edited decomposition to a .npz file. Disabled until dirty. 120s timeout. |
+| `editFlagBtn` | Flag MU | `flagMuForDeletion()` | `op: flag` | Toggles the deletion flag of the current MU. A flagged MU is drawn as a flat line and is dropped on save. |
+| `editDeduplicateBtn` | Remove Duplicates | `removeDuplicateMus()` | `op: remove-duplicates` | Removes duplicate MUs with the decomposition's rules (within each grid, then across grids unless `duplicatesbgrids` is false). The change's `kept_indices` reorder every per-MU array (`keepEditMus`). Clears the undo stack. |
+| `editDuplicateBtn` | Duplicate MU | `duplicateMu()` | `op: duplicate` | Appends a copy of the current MU with a new UID `g{grid}_mu{n}` and switches to it. |
+| `editOutliersBtn` | Remove Outliers | `removeOutliers()` | `op: remove-outliers` | Removes outlier spikes from the current MU based on discharge rate statistics. |
+| `editAddBtn` | Add Spike | `setEditMode("add")` | — | Enters "add" mode. The user then drags a box on the pulse canvas to add spikes. |
+| `editAddArtifactBtn` | Add Artifact | `setEditMode("add_artifact")` | — | Enters "add_artifact" mode. The user drags a box on the pulse canvas to mark artifacts. |
+| `editDeleteSpikeBtn` | Delete Spike/Artifact | `setEditMode("delete_spikes")` | — | Enters "delete_spikes" mode. The user drags a box on the pulse canvas to delete the spikes and artifacts in it. |
+| `editUpdateBtn` | Update Filter | `updateMuFilter()` | `op: update-filter` | Refits the current MU's filter on the EMG in view. Sends the peel-off and lock-spike toggles and the project. 120s timeout. |
+| `editPeelOffToggle` | Peel-off: Off/On | `applyLabeledToggle(...)` | — | Sets `use_peeloff`, read by `requestFilterUpdate`. |
+| `editLockSpikesToggle` | Lock: Off/On | `applyLabeledToggle(...)` | — | Sets `lock_spikes`, read by `requestFilterUpdate`. |
+| `editUndoBtn` | Undo | `undoEdit()` | `op: undo` | Takes back the last edit, whichever MU it touched (up to 100 levels). Disabled while `state.edit.canUndo` is false. |
+| `editResetBtn` | Reset | `resetCurrentMuEdits()` | `op: reset` | Brings the current MU back to the file's discharge times and pulse train, and clears its artifacts and flag. |
+| `editSaveBtn` | Save | `saveEditedFile()` | `POST /edit/session/save` | Saves the edited decomposition to a .npz file. Enabled once a decomposition is open. 120s timeout. |
 
 ### Button Busy State
 
@@ -69,14 +75,20 @@ All mutating edit actions are wrapped by `runEditAction(button, fn)` which:
 
 | Interaction | Action |
 |---|---|
-| Mouse drag (in "add" mode) | Selects a region; on release, calls `addSpikesInSelection(sel)` → `POST /edit/add-spikes` |
-| Mouse drag (in "add_artifact" mode) | Selects a region; on release, calls `addArtifactInSelection(sel)` → `POST /edit/add-artifact` |
-| Mouse drag (in "delete_spikes" mode) | Selects a region; on release, calls `deleteSpikesInSelection(sel)` → `POST /edit/delete-spikes` |
-| Double-click | Resets view to full `[0, pulse.length]` and shows bookmark |
+| Mouse drag (in "add" mode) | Selects a region; on release, calls `addSpikesInSelection(sel)` → `op: add-spikes` |
+| Mouse drag (in "add_artifact" mode) | Selects a region; on release, calls `addArtifactInSelection(sel)` → `op: add-artifact` |
+| Mouse drag (in "delete_spikes" mode) | Selects a region; on release, calls `deleteSpikesInSelection(sel)` → `op: delete-spikes` |
+| Double-click | Resets view to the whole recording and shows the bookmark |
+
+The canvas draws `state.edit.pulseView`, the window `ensureEditPulseView` fetched: one min/max
+pair per pixel column, or the samples when zoomed in far enough. It is refetched when the MU,
+the view, the canvas width or the MU's `version` changes. `createViewFetcher` keeps one request
+in flight and drops the windows asked for in between. A drawn box is only mapped to samples and
+pulse values (`getPulseViewMeta`) once the window on screen matches the MU's current version.
 
 Renders:
-- Pulse train line trace (uniform pulse color)
-- Spike markers (purple circles at `COLORS.muPurple`)
+- Pulse train trace (uniform pulse color); a flagged MU is a flat line at 0
+- Spike markers (purple circles at `COLORS.muPurple`), at the values the frame carries
 - Artifact markers (larger, dark outline, `COLORS.artifactMarker`)
 - Selection rectangles (draft during drag + committed)
 - Bookmark (green vertical line + "You stopped here" label)
@@ -85,10 +97,10 @@ Renders:
 
 | Interaction | Action |
 |---|---|
-| Mouse drag (always available) | Selects a DR range; on release, calls `deleteDrInSelection(sel)` → `POST /edit/delete-dr` |
+| Mouse drag (always available) | Selects a DR range; on release, calls `deleteDrInSelection(sel)` → `op: delete-dr` |
 
 Renders:
-- Instantaneous discharge rate series (line trace, `COLORS.warning`)
+- Instantaneous discharge rate (`dischargeRates`: one point per interval, at its midpoint), 0 Hz at the bottom and the fastest rate in view (`fastestRateInView`) at the top
 - DR markers at midpoints between consecutive spikes
 - Selection rectangles (draft + committed)
 - "No data" message if flagged or no spikes
@@ -146,97 +158,87 @@ All shortcuts fire only when `state.currentStage === "edit"` and focus is not in
 
 | Function | Parameters | What It Does |
 |---|---|---|
-| `ensureEditFlagged` | `(state)` | Ensures `state.edit.flagged` array matches `distimes` length; fills with `false` if mismatched |
-| `getRawPulse` | `(state, muIdx)` | Returns `state.edit.pulseTrains[muIdx]` or `[]` |
-| `getDisplayPulse` | `(state, muIdx)` | Returns raw pulse, or all-zeros if MU is flagged for deletion |
-| `backupEditMu` | `(state)` | Snapshots current MU's `distimes`, `flagged`, `pulseTrain`, `artifactTimes` and the history length into `state.edit.backup` |
-| `restoreEditBackup` | `(app)` | Restores the backup; drops that MU's history entries logged since the backup; clears backup; clears selections; re-renders |
-| `recomputeEditDirty` | `(state)` | Compares `distimes` vs `originalDistimes` by JSON stringify; sets `state.edit.dirty` |
-| `getEditTotalSamples` | `(state)` | Returns `totalSamples` or `pulseTrains[0].length` |
-| `getPulseViewMeta` | `(state)` | Returns `{s, e, minVal, maxVal, span, slice}` for the current view window of the current MU's pulse |
-| `refreshEditTotals` | `(state)` | Calls `setEditTotalSamples` with `getEditTotalSamples` |
+| `getPulseViewMeta` | `(state)` | `{s, e, minVal, maxVal, span}` of the window on screen, or `null` until it has been fetched for the current MU at its current version |
 | `buildEditDropdownModel` | `(state, getEditMuIndices)` | Pure logic: resolves target grid (first non-empty), MU options list, whether grid/MU switch is needed |
 | `resetEditState` | `(app)` | Calls `resetEditSlice(state)` + `refreshEditModeButtons()` |
-| `addSpikesInSelection` | `(app, sel)` | Converts canvas-pixel selection to sample/value coords, backs up MU, calls `requestRoiEdit("add-spikes", {...})` |
-| `addArtifactInSelection` | `(app, sel)` | Same but calls `requestRoiEdit("add-artifact", {...})` |
-| `deleteSpikesInSelection` | `(app, sel)` | Converts selection to value range, backs up MU, calls `requestRoiEdit("delete-spikes", {...})` with `artifact_times` |
-| `deleteDrInSelection` | `(app, sel)` | Converts DR-canvas selection to a DR threshold; backs up MU; calls `requestRoiEdit("delete-dr", {...})` |
-| `computeInstantaneousDr` | `(spikes, fsamp, totalSamples)` | Pure: builds a series of length `totalSamples` with DR values at midpoints between consecutive spikes |
-| `duplicateMu` | `(app)` | Appends a copy of the current MU with a new UID `g{gridIdx}_mu{n}`, `n` above every uid the history has named; switches to the new MU; appends history `duplicate_mu` |
-| `resetCurrentMuEdits` | `(app)` | Restores current MU's `distimes`/`pulseTrain` from `originalDistimes`/`originalPulseTrains`; clears artifacts; appends history `reset_mu` with the spikes/artifacts it changed; clears backup |
+| `dischargeRates` | `(spikes, fsamp, totalSamples)` | Pure: `{positions, rates}`, one rate (Hz) per positive interval at its midpoint |
+| `fastestRateInView` | `({positions, rates}, view)` | Pure: the fastest rate whose midpoint is in view; the top of the rate plot |
+| `addSpikesInSelection` | `(app, sel)` | Maps the drawn box to samples and a pulse value (`pulseBox`), calls `requestRoiEdit("add-spikes", …)` |
+| `addArtifactInSelection` | `(app, sel)` | Same, with `requestRoiEdit("add-artifact", …)` |
+| `deleteSpikesInSelection` | `(app, sel)` | Same, with the box's value range: `requestRoiEdit("delete-spikes", …)` |
+| `deleteDrInSelection` | `(app, sel)` | Maps the rate-canvas box to a rate threshold on the plot's own scale; calls `requestRoiEdit("delete-dr", …)` |
 
----
+## Edit Actions (`app/services/editing-service.js`)
 
-## ROI Edit Operations (Backend Calls)
+Every action goes through `requestEditOp(app, op, args)`: it posts `/edit/ops/{op}` with the
+session token, applies the change frame (`applyEditChange`) and refreshes the mode buttons.
 
-Each ROI-based edit sends a request to the backend and updates local state from the response.
-
-| Action | API Route | Payload Keys | Response Updates |
+| Function | `op` | Arguments sent | Then |
 |---|---|---|---|
-| `add-spikes` | `POST /edit/add-spikes` | `distimes, mu_index, pulse_train, fsamp, x_start, x_end, y_min, y_max` | `distimes` for current MU |
-| `add-artifact` | `POST /edit/add-artifact` | same + `artifact_times` | `distimes` + `artifactTimes` for current MU |
-| `delete-spikes` | `POST /edit/delete-spikes` | same + `artifact_times` | `distimes` + `artifactTimes` for current MU |
-| `delete-dr` | `POST /edit/delete-dr` | `distimes, mu_index, pulse_train, fsamp, x_start, x_end, y_min` | `distimes` for current MU |
-| `update-filter` | `POST /edit/update-filter` | `project, edit_signal_token, file_label, grid_index, mu_index, distimes, mu_grid_index, pulse_train, view_start, view_end, use_peeloff, lock_spikes, flagged, artifact_times` | `distimes` + `pulseTrain` for current MU |
-| `remove-outliers` | `POST /edit/remove-outliers` | `distimes, mu_index, pulse_train, fsamp` | `distimes` for current MU |
-| `remove-duplicates` | `POST /edit/remove-duplicates` | `distimes, fsamp, total_samples, mu_grid_index, parameters` | `keepEditMus(kept_indices)` reorders all parallel arrays together, remaps current MU/bookmark, clears the undo backup |
-| `flag-mu` | `POST /edit/flag-mu` | `distimes, mu_index, flag` | `flagged` for current MU |
-| `save` | `POST /edit/save` | `distimes, flagged, pulse_trains, total_samples, fsamp, grid_names, mu_grid_index, mu_uids, parameters, muscle, edit_history, artifact_times, entity_label, file_label, edit_signal_token, software_versions` | Saved path, `kept_indices`, `edit_history`; the backend drops flagged and duplicate MUs, and the edit state adopts both so it mirrors the file |
+| `requestRoiEdit(app, action, payload)` | `add-spikes`, `add-artifact`, `delete-spikes`, `delete-dr` | `mu, x_start, x_end, y_min, y_max` | Bookmark at the box's centre, clear the selections, leave the mode |
+| `requestFilterUpdate(app)` | `update-filter` | `mu, view_start, view_end, use_peeloff, lock_spikes, project` | Bookmark at the view's centre |
+| `removeOutliers(app)` | `remove-outliers` | `mu` | "Outliers removed" or "No outliers detected" (`removed_count`) |
+| `removeDuplicateMus(app)` | `remove-duplicates` | — | "N duplicates removed" |
+| `flagMuForDeletion(app)` | `flag` | `mu, flag` | — |
+| `undoEdit(app)` | `undo` | — | Clear the selections |
+| `resetCurrentMuEdits(app)` | `reset` | `mu` | Clear the selections |
+| `duplicateMu(app)` | `duplicate` | `mu` | Switch to the new MU (`changed[0]`) |
+| `saveEditedFile(app)` | — (`POST /edit/session/save`) | the session form's fields | `applyEditSave` |
+| `loadDecompositionForEdit(app, file, path)` | — (`POST /edit/session/open`) | `path` | Offer recovery, `showEditSession` |
+| `restoreEditSession(app)` | — (`GET /edit/session`) | the token `sessionStorage` kept | `showEditSession` |
 
 ---
 
 ## Modification Flow (Per Edit)
 
 ```
-1. backupEditMu()          -- snapshot current MU state to state.edit.backup
-2. Convert canvas selection -> sample/value coordinates
-3. requestRoiEdit(action, payload)
-   -> api.editAction(action, payload)   POST /edit/<action>
-   -> setEditDistimesForMu(muIdx, response.distimes)
-   -> setEditArtifactTimesForMu(muIdx, response.artifact_times)  [if applicable]
-4. ensureEditFlagged() + setEditFlagForMu(muIdx, false)  -- un-flag after edit
-5. appendEditHistory(entry)  -- log entry with spikes_added/removed, artifacts_added/removed
-6. setEditBookmark({muIdx, position}) + setShowBookmark(false)
-7. Clear all selections + setEditMode(null)
-8. recomputeEditDirty() + renderEditExplorer()
+1. Canvas selection -> samples and pulse values (pulseBox; needs the fetched window)
+2. requestRoiEdit(action, payload) / another action
+   -> requestEditOp(app, op, args)
+      -> api.editOp(op, {token, ...args})       POST /edit/ops/{op}
+      -> applyEditChange(state, frame):
+           keepEditMus(kept_indices)            [when MUs were removed or reordered]
+           distimes/artifactTimes of the `changed` MUs
+           flagged, muUids, muGridIndex, versions, hasPulse, dirty, canUndo
+           editHistory cut at history_start, `history` appended
+      -> refreshEditModeButtons()               [Undo follows canUndo]
+3. setEditBookmark({muIdx, position}) + setShowBookmark(false)
+4. Clear the selections + setEditMode(null)
+5. renderEditExplorer()                         [the MU's new version refetches its window]
 ```
 
 ---
 
-## Undo / Redo
+## Undo
 
-### Undo (single-level)
-
-- `backupEditMu()` snapshots the current MU's `distimes`, `flagged`, `pulseTrain`, `artifactTimes` into `state.edit.backup` **before** any mutating action.
-- `restoreEditBackup()` restores that snapshot, then:
-  - Calls `dropEditHistoryForMuSince(state, muUid, backup.historyLength)` to remove every entry the undone action logged (a delete can log both `delete_spikes` and `delete_artifact`; a no-op logs none)
-  - Sets `state.edit.backup = null` (undo is one-shot)
-  - Clears all selections
-  - Recomputes dirty and re-renders
-- The `editUndoBtn` is **disabled** when `state.edit.backup === null`.
-- There is **no redo** — once undone, the backup is gone.
+- The server keeps an undo stack of up to 100 edits across all MUs. Each step restores the
+  MU's discharge times, artifacts, flag and pulse train as they were, and cuts the history back
+  to where it was.
+- `state.edit.canUndo` mirrors the server's; `editUndoBtn` is disabled while it is false.
+- `remove-duplicates` and a save clear the stack (the MUs were renumbered).
+- There is **no redo**.
 
 ### Per-MU Reset (broader than undo)
 
-- `resetCurrentMuEdits()` restores the current MU to its **original** loaded state (`originalDistimes`, `originalPulseTrains`), clears artifacts, logs a `reset_mu` entry, and clears the backup. Earlier entries are kept: after a reload they describe edits already in the baseline.
+- `op: reset` restores the current MU to the file's state (discharge times and pulse train),
+  clears its artifacts and flag, and logs a `reset_mu` entry. It can itself be undone. Earlier
+  entries are kept: after a reload they describe edits already in the file.
 
 ---
 
 ## Edit History Log
 
-`state.edit.editHistory` is an array of entries, each tagged with:
+`state.edit.editHistory` mirrors the session's history, entry for entry. Each is tagged with:
 
 | Field | Description |
 |---|---|
 | `type` | Entry type (see below) |
 | `mu_uid` | Stable identifier of the MU |
-| `timestamp` | When the edit was made |
-| `spikes_added` | Count of spikes added |
-| `spikes_removed` | Count of spikes removed |
-| `artifacts_added` | Count of artifacts added |
-| `artifacts_removed` | Count of artifacts removed |
-| `view_start` / `view_end` | View window at time of edit |
-| `use_peeloff` / `lock_spikes` | Filter flags at time of edit |
+| `timestamp` | When the edit was made (UTC, ISO 8601) |
+| `spikes_added` / `spikes_removed` | The samples added / removed |
+| `artifacts_added` / `artifacts_removed` | Likewise for artifacts |
+| `view_start` / `view_end` | View window of a filter update |
+| `use_peeloff` / `lock_spikes` | Filter flags of a filter update |
 | `flagged` | Flag state |
 | `source_mu_uid` | For duplicate operations |
 | `removed_count` / `removed_mu_uids` | For dedup operations |
@@ -245,17 +247,20 @@ Each ROI-based edit sends a request to the backend and updates local state from 
 
 `add_spikes`, `delete_spikes`, `delete_dr`, `add_artifact`, `delete_artifact`, `update_filter`, `remove_outliers`, `remove_duplicates`, `flag_mu`, `duplicate_mu`, `reset_mu`; the backend appends `remove_flagged` and `remove_duplicates` with `on_save: true` when saving drops MUs
 
-History is **persisted to the saved file** (included in `editSave` payload as `edit_history`).
+History is **persisted with the saved file** (the `.json` edit log next to the `.npz`).
 
-On **reload**, `loadDecompositionForEdit` reads `data.edit_history` and restores the view to the last edited MU/position.
+On **open**, `showEditSession` restores the view to the last edited MU and position
+(`resumePosition`): the view of its last filter update, else around the samples it changed.
 
-### History Mutation Functions
+### Unsaved Edits
 
-| Function | Description |
-|---|---|
-| `appendEditHistoryEntry(state, entry)` | Push a new entry |
-| `dropEditHistoryForMuSince(state, muUid, fromIndex)` | Remove a MU's entries at or after `fromIndex` (used by undo) |
-| `setEditHistory(state, history)` | Replace entire array (used by load) |
+The server also logs every operation to disk as it is applied. When a file is opened and an
+earlier session left unsaved edits to it (the app crashed or was closed before saving), the open
+reports `recoverable_edits`. `loadDecompositionForEdit` asks "N unsaved edits to this file were
+left from an earlier session. Restore them?" and posts `/edit/session/recover` with the answer.
+
+A page reload (a WebView that crashed, not a restart of the app) keeps the session: its token is
+in `sessionStorage`, and `restoreEditSession` reopens it at startup.
 
 ---
 
@@ -275,18 +280,17 @@ Status messages are set after each operation (e.g., "Spikes added", "Filter upda
 User clicks Save (#editSaveBtn)
   -> runEditAction(editSaveBtn, saveEditedFile)
      -> saveEditedFile(app)
-        1. Build payload from state.edit:
-           - distimes, flagged, pulse_trains, total_samples, fsamp
-           - grid_names, mu_grid_index, mu_uids, parameters
-           - muscle, edit_history, artifact_times
-           - entity_label (from BIDS entities)
-           - file_label, edit_signal_token, software_versions
-        2. persistNpzBySaveTarget(payload, fallbackName, fileSession, ui)
-           -> api.editSave(payload)    POST /edit/save  [120s timeout]
-           -> returns { mode, path, keptIndices, editHistory }
-        3. setEditHistory(state, saved.editHistory)  [adopts the backend's remove_flagged/remove_duplicates entries]
-        4. keepEditMus(state, saved.keptIndices) + renderEditExplorer()  [only if the save dropped MUs]
-        5. setEditOriginalDistimes(state, state.edit.distimes) + recomputeEditDirty()  [clears dirty]
-        6. setEditStatus("Edited decomposition saved to {path}", "success")
-        7. (on error: handleError(err, setEditStatus, "Save failed"))
+        1. api.editSessionSave(withBidsSaveFields({
+             token, muscle, entity_label, file_label, software_versions
+           }))                                   POST /edit/session/save  [120s timeout]
+           Only the session form's fields travel; the server writes its own state
+           (discharge times, pulse trains, flags, uids, history, artifacts).
+        2. applyEditSave(state, saved):
+           keepEditMus(saved.kept_indices)       [the server dropped flagged and duplicate MUs]
+           the per-MU fields (dirty is false again)
+           editHistory = saved.edit_history      [with the remove_flagged/remove_duplicates entries]
+        3. refreshEditModeButtons()               [the undo stack starts over]
+        4. renderEditExplorer()                   [only if the save dropped or reordered MUs]
+        5. setEditStatus("Edited decomposition saved to {path}", "success")
+        6. (on error: handleError(err, setEditStatus, "Save failed"))
 ```

@@ -21,7 +21,6 @@ BUDGET_RAM_FRACTION = 0.10
 BUDGET_MIN_BYTES = 256 * MIB
 BUDGET_MAX_BYTES = 1024 * MIB
 BUDGET_ENV = "MUEDIT_CACHE_BUDGET_MB"
-ADMIT_FRACTION = 0.25
 SESSION_IDLE_SEC = 20 * 60
 SWEEP_INTERVAL_SEC = 60.0
 DEFAULT_SESSION = "default"
@@ -171,7 +170,6 @@ class _Slot(Generic[V]):
     value: V
     nbytes: int
     session: str
-    pinned: bool
     last_used: int
     expires_at: float | None
 
@@ -208,33 +206,26 @@ class MemoryBudget:
         with self.lock:
             return sum(cache.nbytes for cache in self.caches.values())
 
-    def admits(self, nbytes: int) -> bool:
-        """Whether an unpinned entry of ``nbytes`` is small enough to be cached at all."""
-        return nbytes <= ADMIT_FRACTION * self.limit_bytes
-
     def touch(self, session: str) -> None:
         """Record a request from ``session``, which becomes the active session."""
         with self.lock:
             self.sessions[session] = self.clock()
             self.active_session = session
 
-    def _evictable(self, slot: _Slot[Any]) -> bool:
-        return not (slot.pinned and slot.session == self.active_session)
-
     def make_room(self, nbytes: int, keep: str | None = None) -> None:
-        """Evict entries until ``nbytes`` more fit: unpinned ones first, then other sessions' pins."""
+        """Evict other sessions' entries, least recently used first, until ``nbytes`` more fit."""
         with self.lock:
             used = self.used_bytes
             while used + nbytes > self.limit_bytes:
                 victims = [
-                    (slot.pinned, slot.last_used, cache, token)
+                    (slot.last_used, cache, token)
                     for cache in self.caches.values()
                     for token, slot in cache.slots.items()
-                    if token != keep and self._evictable(slot)
+                    if token != keep and slot.session != self.active_session
                 ]
                 if not victims:
                     return  # what is left belongs to the active session; it may exceed the budget
-                _, _, cache, token = min(victims, key=lambda v: (v[0], v[1]))
+                _, cache, token = min(victims, key=lambda v: v[0])
                 evicted = cache.drop(token)
                 used -= evicted.nbytes
                 logger.debug(
@@ -316,7 +307,6 @@ class MemoryBudget:
             return {
                 "limit_bytes": self.limit_bytes,
                 "used_bytes": sum(slot.nbytes for slot in slots),
-                "pinned_bytes": sum(slot.nbytes for slot in slots if slot.pinned),
                 "active_session": self.active_session,
                 "caches": {
                     name: {"entries": len(cache.slots), "bytes": cache.nbytes}
@@ -372,15 +362,6 @@ class BudgetedLRU(Generic[V]):
 
     def pin(self, value: V, session: str = DEFAULT_SESSION) -> str:
         """Store session data that is never evicted while ``session`` is active, and return its token."""
-        token = self._insert(value, session, pinned=True)
-        assert token is not None
-        return token
-
-    def offer(self, value: V, session: str = DEFAULT_SESSION) -> str | None:
-        """Store a derived entry that may be evicted any time; None when it is too large to cache."""
-        return self._insert(value, session, pinned=False)
-
-    def _insert(self, value: V, session: str, *, pinned: bool) -> str | None:
         nbytes = int(value.nbytes)
         with self.budget.lock:
             self.budget.touch(session)
@@ -388,15 +369,12 @@ class BudgetedLRU(Generic[V]):
                 own = [t for t, slot in self.slots.items() if slot.session == session]
                 for token in own[: max(len(own) - self.per_session + 1, 0)]:
                     self.drop(token)
-            if not pinned and not self.budget.admits(nbytes):
-                return None
             self.budget.make_room(nbytes)
             token = uuid.uuid4().hex
             self.slots[token] = _Slot(
                 value=value,
                 nbytes=nbytes,
                 session=session,
-                pinned=pinned,
                 last_used=self.budget.next_tick(),
                 expires_at=None if self.ttl_sec is None else self.budget.clock() + self.ttl_sec,
             )

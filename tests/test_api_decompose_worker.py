@@ -1,4 +1,4 @@
-"""Decompositions in a worker process: one at a time, cancellable, isolated (plan stage 11)."""
+"""Decompositions in a worker process: one at a time, cancellable, isolated."""
 
 from __future__ import annotations
 
@@ -22,7 +22,6 @@ from starlette.testclient import TestClient
 from muedit.api import cache
 from muedit.api.services import decompose_service
 from muedit.api.services.decompose_service import (
-    WORKER_ENV,
     active_run,
     decomposition_event_stream,
     start_decomposition,
@@ -156,27 +155,6 @@ class _Background:
 
 
 class TestWorkerProcess:
-    def test_matches_the_thread_run_exactly(
-        self, client: TestClient, recording: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        results = {}
-        for mode in ("process", "thread"):
-            monkeypatch.setenv(WORKER_ENV, mode)
-            token = _upload(client, recording, f"parity-{mode}")
-            events = _run(client, token, f"parity-{mode}", QUICK, full_preview="true")
-            done = events[-1]
-            assert done["stage"] == "done", done
-            pulse = cache._get_run_result(done["preview"].pop("run_result_token"))
-            assert pulse is not None
-            done["preview"].pop("preview_binary_token")
-            results[mode] = (events[:-1], done, np.array(pulse))
-        process_events, process_done, process_pulse = results["process"]
-        thread_events, thread_done, thread_pulse = results["thread"]
-        assert process_done["summary"]["mu_count"] > 0
-        assert process_events == thread_events
-        assert process_done == thread_done
-        np.testing.assert_array_equal(process_pulse, thread_pulse)
-
     def test_pulse_trains_come_back_as_the_run_store_file(
         self, client: TestClient, recording: Path
     ) -> None:
@@ -256,15 +234,6 @@ class TestOneRunAtATime:
     def test_cancel_without_a_run(self, client: TestClient) -> None:
         resp = client.post(f"{API}/decompose/cancel", headers={SESSION_HEADER: "idle"})
         assert resp.json()["data"]["cancelled"] is False
-
-    def test_the_thread_fallback_stops_at_its_next_progress_event(
-        self, client: TestClient, recording: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setenv(WORKER_ENV, "thread")
-        token = _upload(client, recording, "thread-cancel")
-        run = _Background(client, token, "thread-cancel", SLOW)
-        assert decompose_service.cancel_decomposition("thread-cancel")
-        assert run.finish()[-1]["stage"] == "cancelled"
 
     def test_closing_the_tab_cancels_its_run(self, client: TestClient, recording: Path) -> None:
         token = _upload(client, recording, "closing")

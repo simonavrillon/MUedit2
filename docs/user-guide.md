@@ -131,7 +131,7 @@ Once decomposition finishes, the app automatically loads the result into **Edit 
 
 ## Step 4 — Edit
 
-The Edit stage opens automatically after a decomposition (Step 3); you can also load a saved decomposition file (`.npz`) manually to resume work. It gives you tools to review and correct individual motor unit spike trains.
+The Edit stage opens automatically after a decomposition (Step 3); you can also open a saved decomposition file (`.npz`, or a MATLAB MUedit `.mat`) to resume work. It gives you tools to review and correct individual motor unit spike trains.
 
 ### Layout
 
@@ -150,21 +150,21 @@ Use the **Grid** and **Motor Unit** dropdowns, or the keyboard shortcuts `<` (pr
 | Add Artifact | `X` | Activate artifact mode, then drag a box to mark a peak as an artifact (see below) |
 | Delete Spike/Artifact | `D` | Activate delete mode, then drag a box (or click) to remove both spikes and artifact markers within the selection |
 | Remove Outliers | `R` | Automatically remove spikes with abnormally high discharge rates |
-| Update Filter | `Space` | Recompute the MU filter from the BIDS EMG signal over the current view window |
+| Update Filter | `Space` | Recompute the MU filter from the EMG over the current view window (the recording in the BIDS dataset, or the EMG saved in the decomposition file) |
 | Peel-off | `P` | Toggle peel-off for filter updates (see below) |
 | Lock Spikes | `L` | Toggle spike-locking for filter updates — preserves your existing spikes when recomputing the filter (see below) |
 | Flag MU | — | Mark the current MU for deletion — it will be excluded when saving |
 | Duplicate MU | — | Create an identical copy of the current MU in the same grid (same pulse train and discharge times) — intended as a starting point for separating two merged units |
 | Remove Duplicates | — | Run duplicate detection immediately, exactly as the decomposition does: within each grid and then across grids (unless the decomposition's parameters set `duplicatesbgrids` to false), pairs whose lag-corrected spike overlap exceeds the **Duplicates thresh** setting are deduplicated, keeping the unit with the lowest inter-spike interval variability |
-| Undo | — | Undo the last edit on the current MU |
-| Reset | — | Revert all edits on the current MU to the original decomposition values |
+| Undo | — | Take back the last edit, whichever MU it was on; repeat to go further back (up to 100 edits). **Remove Duplicates** and **Save** start the undo history over |
+| Reset | — | Bring the current MU back to its state in the file (spike times and pulse train), clearing its artifacts and flag. Reset can itself be undone |
 | Save | — | Write the edited decomposition to disk |
 
 **Peel-off during filter update:** when the Peel-off toggle is **On**, Update Filter subtracts the waveform contributions of all other motor units on the same grid from the whitened signal before recomputing the filter. This can improve separation in crowded windows where spike trains overlap, but may also overcorrect if the other units are not well estimated. It is off by default. Toggle it on or off as needed before pressing Update Filter or `Space`.
 
 **Lock Spikes during filter update:** when the Lock Spikes toggle is **On**, Update Filter keeps the spikes you already have in the window instead of letting the recomputed filter replace them. Each existing spike is realigned to its nearest signal peak (within ±10 samples) and then merged with any newly detected spikes. Use this when you have already curated a window and want a filter refresh to *add* missed discharges without discarding your manual edits. With it **Off** (the default), the window's spikes are taken solely from the new filter. Toggle it before pressing Update Filter or `Space`; it is independent of Peel-off, so the two can be combined.
 
-**Add Artifact workflow:** use this when a high-amplitude peak in the pulse train is clearly a noise artifact rather than a real discharge. Press `X` or click **Add Artifact** to enter artifact mode (button highlights), then drag a box around the peak. The peak is marked with an orange dot and recorded as an artifact for the current MU. Artifacts are **not** added to the spike train — they are excluded from it. The next time you press **Update Filter**, the signal around each artifact peak is subtracted from the whitened EMG (peel-off style, 25 ms window) before the filter is recomputed, preventing the artifact from corrupting the new filter. Artifact markers are preserved when you save and reload the file. To remove an artifact, use **Delete Spike** mode and drag a box over it — delete mode removes both spikes and artifact markers within the selection. **Undo** removes the most recently added artifact; **Reset** clears all artifacts for the current MU.
+**Add Artifact workflow:** use this when a high-amplitude peak in the pulse train is clearly a noise artifact rather than a real discharge. Press `X` or click **Add Artifact** to enter artifact mode (button highlights), then drag a box around the peak. The peak is marked with an orange dot and recorded as an artifact for the current MU. Artifacts are **not** added to the spike train — they are excluded from it. The next time you press **Update Filter**, the signal around each artifact peak is subtracted from the whitened EMG (peel-off style, 25 ms window) before the filter is recomputed, preventing the artifact from corrupting the new filter. Artifact markers are preserved when you save and reload the file. To remove an artifact, use **Delete Spike** mode and drag a box over it — delete mode removes both spikes and artifact markers within the selection. **Undo** takes back an artifact you just added; **Reset** clears all artifacts for the current MU.
 
 **Add / Delete workflow:** press the shortcut or click the button to enter the mode (button highlights), then drag a rectangular region on the pulse train canvas. The action applies to all spikes within the box. Press the shortcut again or click elsewhere to exit the mode.
 
@@ -179,6 +179,13 @@ Use the **Grid** and **Motor Unit** dropdowns, or the keyboard shortcuts `<` (pr
 | `<` / `>` | Previous / next MU |
 
 **Edit bookmark:** after each edit, MUedit drops a bookmark at the region you just worked on. Zoom out (`↓`) to reveal the marker so you can quickly relocate and return to where you were editing.
+
+### Unsaved edits
+
+MUedit records every edit on disk as you make it. If the app closes or crashes before you save,
+opening the same file again asks whether to restore the unsaved edits: **OK** replays them,
+**Cancel** discards them. Edits to a file that has since changed on disk are not offered.
+Reloading the page (not the app) keeps the file open with all its edits.
 
 ### Saving
 

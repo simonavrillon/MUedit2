@@ -18,6 +18,8 @@ All elements are registered in `dom.js` as `els.*` properties.
 | Element ID | [U/A] | Purpose |
 |---|---|---|
 | `browseSignalBtn` | [U] | Button to open file dialog |
+| `outputFolderRow` | [U] | Output folder row (desktop app only) |
+| `outputFolderBtn` | [U] | Button to choose the output folder (desktop app only) |
 | `landing` | [U] | Landing page container |
 | `workspace` | [U] | Main workspace container |
 | `uploadLoader` | [U] | Upload spinner |
@@ -38,9 +40,6 @@ All elements are registered in `dom.js` as `els.*` properties.
 | `settingsToggleBtn` | [U] | Settings gear toggle |
 | `settingsOverlay` | [U] | Settings overlay backdrop |
 | `settingsPanel` | [U] | Settings panel container |
-| `recordingSection` | [U] | Session Info section (collapsible) |
-| `decompSettingsSection` | [U] | Decomposition Settings section (collapsible) |
-| `filterSettingsSection` | [U] | Quality Filters section (collapsible) |
 | `bidsProject` | [U] | BIDS project input |
 | `bidsSubject` | [U] | BIDS subject input |
 | `bidsSession` | [U] | BIDS session input |
@@ -81,6 +80,10 @@ All elements are registered in `dom.js` as `els.*` properties.
 | `stageQc` | [U] | QC stage container |
 | `qcGridTabs` | [U] | Dynamic grid tab buttons |
 | `startBtn` | [U] | "Decompose Signal" button |
+| `qcAutoBtn` | [U] | Run automatic QC (bad channels + artifact regions) |
+| `artifactAddBtn` | [U] | Toggle artifact-region drawing on the EMG overview |
+| `artifactRemoveBtn` | [U] | Remove the last artifact region |
+| `artifactCount` | [U] | Number of artifact regions |
 | `qcSection` | [U] | Channel quality grid container |
 | `emgCanvas` | [U] | EMG overview canvas + ROI selection |
 | `auxSelector` | [U] | Auxiliary channel selector |
@@ -92,6 +95,7 @@ All elements are registered in `dom.js` as `els.*` properties.
 |---|---|---|
 | `stageRun` | [U] | Run stage container |
 | `runPhase` | [U] | Pipeline phase KPI card |
+| `cancelRunBtn` | [U] | Cancel the running decomposition (shown while it runs) |
 | `muGridSelect` | [U] | Grid dropdown (run explorer) |
 | `muSelect` | [U] | MU dropdown (run explorer) |
 | `muMeta` | [U] | Discharge time count text |
@@ -179,8 +183,9 @@ All elements are registered in `dom.js` as `els.*` properties.
 
 | Export | [A/?] | Used By |
 |---|---|---|
-| `apiFetch` | [A] | api/client.js |
+| `apiFetch` | [A] | api/client.js; sends `X-MUedit-Session` and, in the desktop app, `X-MUedit-Token` |
 | `apiJson` | [A] | api/client.js |
+| `SESSION_ID`, `SESSION_HEADER` | [A] | createApiClient (`closeSession`), apiFetch |
 | `waitForBackend` | [A] | initializeApp |
 | `parseApiError` | [A] | http.js (internal) |
 | `setAppToken` | [A] | platform.initPlatform |
@@ -277,15 +282,16 @@ All elements are registered in `dom.js` as `els.*` properties.
 | `showUnsupportedUploadFormatError` | [A] | import-stage |
 | `detectLandingFileType` | [A] | import-stage |
 | `setUploadLoading` | [A] | import-stage, qc.js requestPreview, loadDecompositionForEdit |
-| `getBidsEntityInputs` | [A] | persistNpzBySaveTarget |
-| `getBidsSaveFields` | [A] | persistNpzBySaveTarget |
+| `getBidsEntityInputs` | [A] | withBidsSaveFields |
+| `getBidsSaveFields` | [A] | withBidsSaveFields |
+| `withBidsSaveFields` | [A] | persistNpzBySaveTarget, saveEditedFile |
 | `collectBidsEntities` | [A] | runDecomposition (FormData) |
 | `setBidsEntitiesInput` | [A] | import-stage (BDF/EDF entity label) |
 | `applyPreviewMetadata` | [A] | qc.js requestPreview |
 | `applySessionInfoFromDecomposition` | [A] | loadDecompositionForEdit |
 | `renderBidsAutoInfo` | [A] | qc.js requestPreview, run.js applyPreviewData |
 | `renderBidsMuscleFields` | [A] | qc.js requestPreview, run.js applyPreviewData, loadDecompositionForEdit |
-| `persistNpzBySaveTarget` | [A] | autoSaveRunDecomposition, saveEditedFile |
+| `persistNpzBySaveTarget` | [A] | autoSaveRunDecomposition (the run save, `POST /edit/save`) |
 
 ---
 
@@ -293,16 +299,31 @@ All elements are registered in `dom.js` as `els.*` properties.
 
 | Function | [A/?] | Called By |
 |---|---|---|
-| `spikesDiff` (private) | [A] | requestRoiEdit, requestFilterUpdate |
-| `generateMuUids` (private) | [A] | loadDecompositionForEdit |
-| `setEditBookmarkAndHide` (private) | [A] | requestRoiEdit |
+| `requestEditOp` | [A] | every action below: `POST /edit/ops/{op}` + `applyEditChange` |
 | `requestRoiEdit` | [A] | operations.js (addSpikes, addArtifact, deleteSpikes, deleteDr) |
 | `requestFilterUpdate` | [A] | edit-stage (updateMuFilter) |
 | `removeOutliers` | [A] | edit-stage |
 | `removeDuplicateMus` | [A] | edit-stage |
 | `flagMuForDeletion` | [A] | edit-stage |
+| `undoEdit` | [A] | edit-stage (undo button) |
+| `resetCurrentMuEdits` | [A] | edit-stage (reset button) |
+| `duplicateMu` | [A] | edit-stage (duplicate button) |
 | `saveEditedFile` | [A] | edit-stage |
 | `loadDecompositionForEdit` | [A] | edit-stage |
+| `restoreEditSession` | [A] | edit-stage ← initializeApp, after the backend answers |
+| `showEditSession` (private) | [A] | loadDecompositionForEdit, restoreEditSession |
+| `resumePosition` (private) | [A] | showEditSession |
+| `confirmRecovery` (private) | [A] | loadDecompositionForEdit |
+| `setEditBookmarkAndHide` (private) | [A] | requestRoiEdit, requestFilterUpdate, removeOutliers |
+| `rememberSessionToken`, `rememberedSessionToken`, `forgetSessionToken` (private) | [A] | the session token in `sessionStorage` |
+
+---
+
+## Module: `app/services/view-fetcher.js`
+
+| Function | [A/?] | Called By |
+|---|---|---|
+| `createViewFetcher` | [A] | edit-stage (`/series/pulse` for the edit canvas), run-stage (the run explorer): one request in flight, only the latest window waits |
 
 ---
 
@@ -368,25 +389,19 @@ All elements are registered in `dom.js` as `els.*` properties.
 | Function | [A/?] | Called By |
 |---|---|---|
 | `createEditStageService` | [A] | createApp |
-| `refreshEditModeButtons` | [A] | setEditMode, backupEditMu, resetEditState |
+| `refreshEditModeButtons` | [A] | setEditMode, requestEditOp, saveEditedFile, resetEditState |
 | `setEditMode` | [A] | edit toolbar, keyboard nav (a/d/x), Edit stage exit |
-| `ensureEditFlagged` | [A] | requestRoiEdit, loadDecompositionForEdit |
-| `getRawPulse` | [A] | renderEditExplorer |
-| `getDisplayPulse` | [A] | renderEditExplorer |
-| `backupEditMu` | [A] | operations.js (all mutating ops) |
-| `recomputeEditDirty` | [A] | all mutating ops |
-| `appendEditHistory` | [A] | all mutating ops |
-| `getEditTotalSamples` | [A] | refreshEditTotals |
-| `getPulseViewMeta` | [A] | edit-canvas.js |
-| `refreshEditTotals` | [A] | loadDecompositionForEdit |
+| `getPulseViewMeta` | [A] | edit-canvas.js, operations.js |
+| `getPulsePlotHeight`, `getDrPlotHeight` | [A] | operations.js (drawn box → values) |
+| `ensureEditPulseView` | [A] | edit-canvas.renderEditExplorer: fetch the window on screen when it changed |
 | `resetEditState` | [A] | loadDecompositionForEdit (on error) |
 | `getEditMuIndices` | [A] | renderEditDropdowns |
 | `renderEditDropdowns` | [A] | renderEditExplorer |
 | `renderInstantaneousDr` | [A] | renderEditExplorer |
-| `renderEditExplorer` | [A] | Edit stage render, all mutating ops |
-| `restoreEditBackup` | [A] | setupEditEvents (undo button) |
+| `renderEditExplorer` | [A] | Edit stage render, every edit action |
+| `undoEdit` | [A] | setupEditEvents (undo button) |
+| `restoreEditSession` | [A] | initializeApp |
 | `requestRoiEdit` | [A] | operations.js |
-| `requestFilterUpdate` | [A] | updateMuFilter |
 | `updateMuFilter` | [A] | setupEditEvents (update button, Space key) |
 | `addSpikesInSelection` | [A] | bindEditCanvas (mouseup in add mode) |
 | `addArtifactInSelection` | [A] | bindEditCanvas (mouseup in add_artifact mode) |
@@ -401,8 +416,8 @@ All elements are registered in `dom.js` as `els.*` properties.
 | `bindEditDrCanvas` | [A] | setupEditEvents |
 | `bindEditTimeline` | [A] | setupEditEvents |
 | `saveEditedFile` | [A] | setupEditEvents (save button) |
-| `loadDecompositionForEdit` | [A] | import-stage, autoSaveRunDecomposition |
-| `loadDecompositionForEditByPath` | [A] | import-stage |
+| `loadDecompositionForEdit` | [A] | import-stage |
+| `loadDecompositionForEditByPath` | [A] | import-stage, autoSaveRunDecomposition (opens the saved run) |
 | `setupEditEvents` | [A] | initializeApp |
 
 ---
@@ -420,21 +435,23 @@ All elements are registered in `dom.js` as `els.*` properties.
 | Function | [A/?] | Called By |
 |---|---|---|
 | `createApiClient` | [A] | initializeApp |
-| `postJson` (internal) | [A] | editAction, editMode, etc. |
+| `postJson` (internal) | [A] | runAutoQc, fetchPreviewByPath, cancelDecomposition, editSessionSave, editSave |
+| `postForSession` (internal) | [A] | editOpen, editRecover, editOp (decodes the MUB1 session frame) |
 | `fetchSeries` | [A] | qc-stage.requestQcGridWindow (`emg`), qc-stage.requestPreview (`overview`, `aux`) |
 | `fetchPreviewByPath` | [A] | qc-stage.requestPreview, decomp/run.js (token re-mint on expiry) |
 | `runAutoQc` | [A] | signal/qc.requestAutoQc |
 | `decomposeStream` | [A] | run-stage.runDecomposition |
+| `cancelDecomposition` | [A] | run-stage.cancelDecomposition (cancelRunBtn) |
 | `fetchDecomposePreview` | [A] | run-stage.handleStreamMessage |
+| `fetchPulse` | [A] | edit-stage.ensureEditPulseView, run-stage explorer (through createViewFetcher) |
 | `openFileDialog` | [A] | import-stage.handleNativeDialogOpen (browser only, through platform.openFile) |
 | `closeSession` | [A] | initializeApp (pagehide) |
-| `editAction` | [A] | editing-service.requestRoiEdit |
-| `editMode` | [A] | editing-service.requestFilterUpdate |
-| `editRemoveOutliers` | [A] | editing-service.removeOutliers |
-| `editRemoveDuplicates` | [A] | editing-service.removeDuplicateMus |
-| `editFlagMu` | [A] | editing-service.flagMuForDeletion |
-| `editLoadByPath` | [A] | editing-service.loadDecompositionForEdit |
-| `editSave` | [A] | editing-service.saveEditedFile, autoSaveRunDecomposition |
+| `editOpen` | [A] | editing-service.loadDecompositionForEdit |
+| `editRecover` | [A] | editing-service.loadDecompositionForEdit |
+| `editSessionState` | [A] | editing-service.restoreEditSession |
+| `editOp` | [A] | editing-service.requestEditOp |
+| `editSessionSave` | [A] | editing-service.saveEditedFile |
+| `editSave` | [A] | file-session.persistNpzBySaveTarget (the run save) |
 | `healthUrl` | [A] | initializeApp (waitForBackend) |
 
 ---
@@ -451,9 +468,11 @@ All elements are registered in `dom.js` as `els.*` properties.
 
 | Function | [A/?] | Called By |
 |---|---|---|
-| `toFiniteNumber` | [A] | normalizeEditLoadPayload, normalizePreviewPayload |
-| `normalizeEditLoadPayload` | [A] | editing-service.loadDecompositionForEdit |
-| `normalizePreviewPayload` | [A] | qc-stage.requestPreview |
+| `toFiniteNumber` | [A] | normalizePreviewPayload |
+| `toSpikeArray` | [A] | normalizePreviewPayload (JSON discharge times → `Int32Array`) |
+| `toSpans` | [A] | normalizePreviewPayload, signal/qc.js (artifact regions) |
+| `totalSamplesFromDistimes` | [A] | normalizePreviewPayload, decomp/run.js |
+| `normalizePreviewPayload` | [A] | api.fetchDecomposePreview |
 
 ---
 
@@ -462,14 +481,16 @@ All elements are registered in `dom.js` as `els.*` properties.
 | Function | [A/?] | Called By |
 |---|---|---|
 | `hasMagic` | [A] | isFrame, decodeFrame |
-| `to2d` | [A] | frameRows |
-| `decodeSeriesFrame` | [A] | fetchSeries |
-| `isFrame` | [A] | decodeEditLoadPayload, decodeDecomposePreviewPayload |
-| `decodeFrame` | [A] | decodeEditLoadPayload, decodeDecomposePreviewPayload, decodeSeriesFrame |
-| `encodeFrame` | [A] | editSave |
-| `frameRows` | [A] | decodeEditLoadPayload, decodeDecomposePreviewPayload |
-| `decodeEditLoadPayload` | [A] | editLoadByPath |
+| `frameAligned`, `frameCount` | [A] | decodeFrame, encodeFrame |
+| `isFrame` | [A] | decodeDecomposePreviewPayload |
+| `decodeFrame` | [A] | every decoder below |
+| `encodeFrame` | [?] | tests only (builds the decoders' input) |
+| `csrRows` | [A] | decodeDecomposePreviewPayload, decodeEditSessionFrame |
 | `decodeDecomposePreviewPayload` | [A] | fetchDecomposePreview |
+| `decodeEditSessionFrame` | [A] | editOpen, editRecover, editOp, editSessionState |
+| `frameRowViews` (private) | [A] | decodeSeriesFrame, decodePulseFrame |
+| `decodeSeriesFrame` | [A] | fetchSeries |
+| `decodePulseFrame` | [A] | fetchPulse |
 
 ---
 
@@ -499,6 +520,7 @@ All elements are registered in `dom.js` as `els.*` properties.
 |---|---|---|
 | `autoSaveRunDecomposition` | [A] | run-stage.autoSaveRunDecomposition |
 | `runDecomposition` | [A] | run-stage.runDecomposition |
+| `cancelDecomposition` | [A] | run-stage.cancelDecomposition |
 | `applyPreviewData` (private) | [A] | handleStreamMessage |
 | `hydrateBinaryDecomposePreview` (private) | [A] | handleStreamMessage |
 | `handleStreamMessage` | [A] | run-stage.handleStreamMessage |
@@ -509,24 +531,16 @@ All elements are registered in `dom.js` as `els.*` properties.
 
 | Export | [A/?] | Called By |
 |---|---|---|
-| `ensureEditFlagged` | [A] | edit-stage, requestRoiEdit, loadDecompositionForEdit |
-| `getRawPulse` | [A] | edit-stage.renderEditExplorer |
-| `getDisplayPulse` | [A] | edit-stage.renderEditExplorer |
-| `backupEditMu` | [A] | edit-stage (all mutating ops) |
-| `restoreEditBackup` | [A] | edit-stage.restoreEditBackup |
-| `recomputeEditDirty` | [A] | edit-stage (all mutating ops) |
-| `getEditTotalSamples` | [A] | edit-stage.refreshEditTotals |
-| `getPulseViewMeta` | [A] | edit-canvas.js |
-| `refreshEditTotals` | [A] | edit-stage.refreshEditTotals |
+| `getPulseViewMeta` | [A] | edit-stage.getPulseViewMeta |
 | `buildEditDropdownModel` | [A] | edit-stage.renderEditDropdowns |
 | `resetEditState` | [A] | edit-stage.resetEditState |
+| `dischargeRates` | [A] | edit-canvas.renderInstantaneousDr, deleteDrInSelection |
+| `fastestRateInView` | [A] | edit-canvas.renderInstantaneousDr, deleteDrInSelection |
+| `pulseBox` (private) | [A] | addSpikesInSelection, addArtifactInSelection, deleteSpikesInSelection |
 | `addSpikesInSelection` | [A] | edit-stage.addSpikesInSelection |
 | `addArtifactInSelection` | [A] | edit-stage.addArtifactInSelection |
 | `deleteSpikesInSelection` | [A] | edit-stage.deleteSpikesInSelection |
 | `deleteDrInSelection` | [A] | edit-stage.deleteDrInSelection |
-| `computeInstantaneousDr` | [A] | edit-canvas.renderInstantaneousDr |
-| `duplicateMu` | [A] | edit-stage.duplicateMu |
-| `resetCurrentMuEdits` | [A] | edit-stage.resetCurrentMuEdits |
 
 ---
 
@@ -551,8 +565,8 @@ All elements are registered in `dom.js` as `els.*` properties.
 | Function | [A/?] | Called By |
 |---|---|---|
 | `safeNonNegativeInt` | [A] | inferGridCount, normalizeGridNames |
-| `inferGridCount` | [A] | loadDecompositionForEdit, buildEditDropdownModel |
-| `normalizeGridNames` | [A] | loadDecompositionForEdit |
+| `inferGridCount` | [A] | showEditSession |
+| `normalizeGridNames` | [A] | showEditSession |
 | `gridDimensionsFor` | [A] | renderChannelQC |
 
 ---
@@ -561,7 +575,6 @@ All elements are registered in `dom.js` as `els.*` properties.
 
 | Function | [A/?] | Called By |
 |---|---|---|
-| `channelsToEnv` | [A] | requestQcGridWindow |
 | `syncRois` | [A] | qc-stage.syncRois |
 | `requestAutoQc` | [A] | qc-stage.runAutoQc |
 | `requestQcGridWindow` | [A] | qc-stage.requestQcGridWindow |
@@ -584,8 +597,9 @@ All functions are state mutators (`set*` functions). Each is called by at least 
 - `setRunDownloadInFlight`, `setLastRunDownloadKey`
 - `setCurrentStage`, `setCurrentGrid`
 - `clearPreviewState`
-- Edit slice: `setEditMode`, `setEditCurrentMuGrid`, `setEditCurrentMu`, `setEditProject`, `setEditSignalToken`, `setEditView`, `setEditDistimesForMu`, `setEditArtifactTimesForMu`, `setEditPulseTrainForMu`, `setEditFlagForMu`, `clearEditPulseSelections`, `clearEditDrSelections`, `clearAllEditSelections`, `setEditFile`, `setEditFilename`, `setEditPulseTrains`, `setEditOriginalPulseTrains`, `setEditDistimes`, `setEditOriginalDistimes`, `setEditGridNames`, `setEditMuGridIndex`, `setEditFsamp`, `setEditParameters`, `setEditTotalSamples`, `setEditFlaggedArray`, `setEditMuUids`, `setEditHistory`, `setEditArtifactTimes`, `appendEditHistoryEntry`, `dropEditHistoryForMuSince`, `setEditBackup`, `setEditBookmark`, `setShowBookmark`, `setEditDirty`, `setEditPulseSelection`, `setEditPulseDraftSelection`, `setEditDrSelection`, `setEditDrDraftSelection`, `resetEditSlice`, `appendEditMu`, `keepEditMus`, `setEditSoftwareVersions`
-
+- Run explorer: `setRunPulseView`, `setRunResultToken`
+- Edit slice: `setEditMode`, `setEditCurrentMuGrid`, `setEditCurrentMu`, `setEditProject`, `setEditView`, `setEditFile`, `setEditFilename`, `setEditGridNames`, `setEditBookmark`, `setShowBookmark`, `setEditPulseSelection`, `setEditPulseDraftSelection`, `setEditDrSelection`, `setEditDrDraftSelection`, `clearEditPulseSelections`, `clearEditDrSelections`, `clearAllEditSelections`, `setEditPulseView`, `setEditSoftwareVersions`, `resetEditSlice`
+- Edit session mirror: `setEditSession` (a state frame: the whole session), `applyEditChange` (a change frame), `applyEditSave` (a session save), `keepEditMus` (keep MUs by index across every per-MU array)
 ---
 
 ## Module: `state/selectors.js`
@@ -595,7 +609,6 @@ All functions are state mutators (`set*` functions). Each is called by at least 
 | `getCurrentGrid` | [A] | qc.js, run.js, qc-renderer |
 | `roiStart` | [A] | qc-renderer, plots, qc.js |
 | `roiEnd` | [A] | qc-renderer, plots, qc.js |
-| `muUidFor` | [A] | editing-service, operations.js |
 | `muIndicesForGrid` (private) | [A] | getRunMuIndicesForGrid, getEditMuIndicesForGrid |
 | `getRunMuIndicesForGrid` | [A] | run-stage.getMuIndicesForGrid |
 | `getEditMuIndicesForGrid` | [A] | edit-stage.getEditMuIndices |
@@ -606,7 +619,7 @@ All functions are state mutators (`set*` functions). Each is called by at least 
 
 | Function | [A/?] | Called By |
 |---|---|---|
-| `beginRawPreviewTransition` | [A] | qc-stage.handleRawFile, handleRawFilePath |
+| `beginRawPreviewTransition` | [A] | qc-stage.handleRawFilePath |
 | `rollbackRawPreviewTransition` | [A] | qc-stage (on preview failure) |
 
 ---
@@ -616,7 +629,7 @@ All functions are state mutators (`set*` functions). Each is called by at least 
 | Function | [A/?] | Called By |
 |---|---|---|
 | `makeInfoItem` | [A] | renderBidsAutoInfo |
-| `resetBidsEntityDefaults` | [A] | qc-stage.handleRawFile, handleRawFilePath |
+| `resetBidsEntityDefaults` | [A] | qc-stage.handleRawFilePath |
 | `applyParticipantFields` | [A] | applySessionInfoToDom |
 | `renderBidsAutoInfo` | [A] | file-session renderBidsAutoInfo |
 | `renderBidsMuscleFields` | [A] | file-session renderBidsMuscleFields |
@@ -628,9 +641,12 @@ All functions are state mutators (`set*` functions). Each is called by at least 
 
 | Function | [A/?] | Called By |
 |---|---|---|
+| `pxToViewSample`, `clampView` (private) | [A] | the canvas and timeline bindings |
 | `renderBookmark` (private) | [A] | renderEditExplorer |
 | `clampY` (private) | [A] | bindEditCanvas, bindEditDrCanvas |
 | `createDragState` (private) | [A] | bindEditCanvas, bindEditDrCanvas |
+| `displayedPulse` (private) | [A] | renderEditExplorer (a flagged MU as a flat line) |
+| `fillTicks` (private) | [A] | renderEditTimeline |
 | `renderEditDropdownsView` | [A] | edit-stage.renderEditDropdowns |
 | `renderEditExplorer` | [A] | edit-stage.renderEditExplorer |
 | `renderInstantaneousDr` | [A] | edit-stage.renderInstantaneousDr |
@@ -655,14 +671,17 @@ All functions are state mutators (`set*` functions). Each is called by at least 
 | Function | [A/?] | Called By |
 |---|---|---|
 | `nextFrame` | [A] | qc.js requestPreview, qc-renderer renderChannelQC |
+| `resolveCanvas`, `prepareCanvas` (private) | [A] | the draw functions (device-pixel sizing) |
 | `getAxisPadding` (private) | [A] | getCanvasPlotMetrics |
-| `getCanvasPlotMetrics` | [A] | drawSeries, drawGridOverlay, edit-canvas, qc-renderer |
-| `drawSelectionRect` (private) | [A] | drawSeries |
+| `getCanvasPlotMetrics` | [A] | drawTrace, drawGridOverlay, edit-canvas, edit-stage, qc-renderer |
+| `drawSelectionRect` (private) | [A] | drawTrace |
+| `drawAxes`, `drawTimeAxis` (private) | [A] | drawTrace |
 | `drawRoiRects` | [A] | drawGridOverlay, renderAuxiliaryChannels |
-| `drawSeries` | [A] | edit-canvas, explorer, qc-renderer |
+| `drawTrace` | [A] | edit-canvas, explorer (a pulse window with its markers) |
+| `traceRange` | [A] | drawTrace, operations.getPulseViewMeta |
 | `drawGridOverlay` | [A] | qc-renderer.refreshVisuals |
 | `drawMiniSeries` | [A] | qc-renderer.renderChannelQC |
-| `seriesPoints`, `seriesRange`, `strokeSeries` | [A] | drawGridOverlay, drawMiniSeries, renderAuxiliaryChannels (envelopes and samples) |
+| `isValues`, `isEnvelope`, `seriesPoints`, `seriesRange`, `strokeSeries` | [A] | drawTrace, drawGridOverlay, drawMiniSeries, renderAuxiliaryChannels (envelopes and samples) |
 
 ---
 
@@ -701,8 +720,8 @@ All functions are state mutators (`set*` functions). Each is called by at least 
 
 | Stage | Buttons | Canvases | Form Fields | Dropdowns | Other |
 |---|---|---|---|---|---|
-| Import | 1 | 0 | 0 | 0 | 4 (loader, error, filename, global status) |
-| QC | 1 (start) + N (grid tabs) + N (channel cells) | 2 (emg, aux) | 18 (BIDS) + 8 (decomp) + 3 (filters) | 1 (aux) | 3 (auto-info, phase, progress) |
-| Run | 0 | 1 (pulse) | 0 | 2 (grid, MU) | 3 (phase, progress, meta) |
+| Import | 2 (browse, output folder) | 0 | 0 | 0 | 4 (loader, error, filename, global status) |
+| QC | 4 (start, auto QC, add/remove artifact) + N (grid tabs) + N (channel cells) | 2 (emg, aux) | 18 (BIDS) + 8 (decomp) + 3 (filters) | 1 (aux) | 4 (auto-info, phase, progress, artifact count) |
+| Run | 1 (cancel) | 1 (pulse) | 0 | 2 (grid, MU) | 3 (phase, progress, meta) |
 | Edit | 13 (toolbar) | 3 (pulse, DR, timeline) | 1 (project) | 2 (grid, MU) | 1 (edit status) |
-| **Total** | **~16 + N** | **6** | **~30** | **6** | **~12** |
+| **Total** | **~20 + N** | **6** | **~30** | **6** | **~13** |

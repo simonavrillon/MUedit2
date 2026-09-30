@@ -14,21 +14,22 @@ All HTTP endpoints used by the frontend, their payloads, and binary formats.
 | 5 | POST | `/qc/auto` | `api.runAutoQc(payload)` | `qcStage.runAutoQc` | 300s | Run automatic QC: detect bad channels + artifact windows |
 | 6 | POST | `/decompose_stream` | `api.decomposeStream(formData)` | `runStage.runDecomposition` | 15min | Main decomposition (streaming NDJSON response); 409 while another run is active |
 | 6b | POST | `/decompose/cancel` | `api.cancelDecomposition()` | `runStage.cancelDecomposition` (Cancel button) | 120s | Stop this tab's run; its stream ends with `cancelled` |
-| 7 | GET | `/decompose_preview/{token}` | `api.fetchDecomposePreview(token)` | `handleStreamMessage` (binary fast-path) | 120s | Fetch heavy MU arrays in binary format |
-| 8 | POST | `/edit/load-by-path` | `api.editLoadByPath(filepath)` | `editStage.loadDecompositionForEdit` | 120s | Load decomposition file by server path |
-| 9 | POST | `/edit/add-spikes` | `api.editAction("add-spikes", payload)` | `requestRoiEdit` | 120s | Add spikes in a selected region |
-| 10 | POST | `/edit/add-artifact` | `api.editAction("add-artifact", payload)` | `requestRoiEdit` | 120s | Mark an artifact region |
-| 11 | POST | `/edit/delete-spikes` | `api.editAction("delete-spikes", payload)` | `requestRoiEdit` | 120s | Delete spikes in a selected region |
-| 12 | POST | `/edit/delete-dr` | `api.editAction("delete-dr", payload)` | `requestRoiEdit` | 120s | Delete discharge-rate outliers in a selected range |
-| 13 | POST | `/edit/update-filter` | `api.editMode("update-filter", payload)` | `requestFilterUpdate` | 120s | Re-run separation filter on current MU |
-| 14 | POST | `/edit/remove-outliers` | `api.editRemoveOutliers(payload)` | `removeOutliers` | 120s | Remove outlier spikes from current MU |
-| 15 | POST | `/edit/remove-duplicates` | `api.editRemoveDuplicates(payload)` | `removeDuplicateMus` | 120s | Remove duplicate MUs |
-| 16 | POST | `/edit/flag-mu` | `api.editFlagMu(payload)` | `flagMuForDeletion` | 120s | Toggle MU deletion flag |
-| 17 | POST | `/edit/save` | `api.editSave(payload, pulseTrains?)` | `saveEditedFile`, `autoSaveRunDecomposition` | 120s | Save edited decomposition to .npz |
+| 7 | GET | `/decompose_preview/{token}` | `api.fetchDecomposePreview(token)` | `handleStreamMessage` (binary fast-path) | 120s | Fetch the run's discharge times in binary format |
+| 8 | GET | `/series/pulse` | `api.fetchPulse(params)` | the run explorer and the edit canvas, through `createViewFetcher` | 120s | One MU's pulse train over the window on screen, with its discharges there |
+| 9 | POST | `/edit/save` | `api.editSave(payload)` | `fileSession.persistNpzBySaveTarget` ← `autoSaveRunDecomposition` | 120s | Save a finished run (its pulse trains and discharge times stay on the server) |
+| 10 | POST | `/edit/session/open` | `api.editOpen(filepath)` | `loadDecompositionForEdit` | 120s | Open a decomposition in a server-side edit session |
+| 11 | POST | `/edit/session/recover` | `api.editRecover(token, apply)` | `loadDecompositionForEdit`, when the open reports `recoverable_edits` | 120s | Replay or drop the unsaved edits an earlier session left |
+| 11b | POST | `/edit/session/prepare-grid` | `api.editPrepareGrid(token, grid, project)` | `prepareEditGrid` ← `showEditSession` (the grid on screen) and the grid dropdown | 10min | Filter a grid's EMG ahead of its first Update Filter; nothing waits for the answer |
+| 12 | GET | `/edit/session` | `api.editSessionState(token)` | `restoreEditSession` (page reload) | 120s | The whole state of the session this page had open |
+| 13 | POST | `/edit/ops/{op}` | `api.editOp(op, payload)` | `requestEditOp` ← every edit action | 120s | Apply one edit; the frame says what changed |
+| 14 | POST | `/edit/session/save` | `api.editSessionSave(payload)` | `saveEditedFile` | 120s | Save the session's edits |
+| 15 | POST | `/session/close` | `api.closeSession()` | `initializeApp`'s `pagehide` handler | — | Free what the server holds for this tab and stop its run |
 
 > **Origin and token.** The page and the API share one origin (the server serves `frontend/` at `/`), so `API_BASE` is `${location.origin}/api/v1` and there is no CORS. In the desktop app (`?desktop=1`), `platform.initPlatform()` takes a token from the pywebview bridge and `apiFetch` sends it as `X-MUedit-Token` on every request; the server answers 401 (`unauthorized`) without it, except for `/health`. `closeSession()` posts `/session/close` with `fetch(..., { keepalive: true })` rather than a beacon, because a beacon cannot carry that header.
 
-> Files are only ever opened by path through the native dialog. The browser-upload routes (`POST /preview`, `POST /edit/load`) and their client code were removed (audit F2/F4); `tests/test_api_http.py` fails if `routes.js` names a route the backend does not serve.
+> Files are only ever opened by path through the native dialog. `tests/test_api_http.py` fails if `routes.js` names a route the backend does not serve.
+
+> **Session header.** `http.js` creates one `SESSION_ID` per page load and `apiFetch` sends it as `X-MUedit-Session`. The server scopes the tab's upload, run and edit session to it, and `/session/close` frees them.
 
 ## Route Definitions (`api/routes.js`)
 
@@ -37,19 +38,21 @@ export const routes = {
   seriesEmg: "/series/emg",
   seriesOverview: "/series/overview",
   seriesAux: "/series/aux",
+  seriesPulse: "/series/pulse",
   qcAuto: "/qc/auto",
   previewByPath: "/preview-by-path",
   decomposeStream: "/decompose_stream",
   decomposeCancel: "/decompose/cancel",
   decomposePreview: (token) => `/decompose_preview/${encodeURIComponent(token)}`,
   editSave: "/edit/save",
-  editAction: (action) => `/edit/${action}`,
-  editMode: (mode) => `/edit/${mode}`,
-  editRemoveOutliers: "/edit/remove-outliers",
-  editRemoveDuplicates: "/edit/remove-duplicates",
-  editFlagMu: "/edit/flag-mu",
-  editLoadByPath: "/edit/load-by-path",
+  editSessionOpen: "/edit/session/open",
+  editSession: "/edit/session",
+  editSessionRecover: "/edit/session/recover",
+  editSessionPrepareGrid: "/edit/session/prepare-grid",
+  editSessionSave: "/edit/session/save",
+  editOp: (op) => `/edit/ops/${op}`,
   dialogOpenFile: "/dialog/open-file",
+  sessionClose: "/session/close",
   health: "/health",
 };
 ```
@@ -144,163 +147,97 @@ Response (MUB1 frame; the server serves it once):
 Pulse trains stay on the server: /series/pulse with the run_result_token.
 ```
 
-### POST /edit/load-by-path
+### GET /series/pulse
 
 ```
-Request:  { path: string }
-Headers: Accept: application/octet-stream (implied)
-Response (MUB1 frame or JSON fallback):
+Query:    token (an edit session, or a run's run_result_token), mu, start, end, bins
+Response: MUB1 frame, decoded by decodePulseFrame into a PulseView
   {
-    pulse_trains: number[][],
-    pulse_trains_full: number[][],
-    distime_all: number[][],
-    grid_names: string[],
-    mu_grid_index: number[],
-    parameters: object,
-    total_samples: number,
-    fsamp: number,
-    file_label: string,
-    edit_signal_token: string,
-    muscle?: string[],
-    project?: string,
-    participant_meta?: object,
-    manufacturer?: string,
-    artifact_times?: number[][],
-    mu_uids?: string[],
-    edit_history?: object[]
+    mu, start, end, bins,
+    version,            // changes with every edit of the MU: the edit stage
+                        //   refetches when it differs from state.edit.versions[mu]
+    flagged,
+    row,                // { min, max } per bin, or the samples (like /series/*)
+    spikes, spikeValues,        // discharges in view, and the train's value at each
+    artifacts, artifactValues   // edit session only
   }
 ```
 
-### POST /edit/add-spikes
+### Edit session frames
+
+`/edit/session/open`, `/edit/session`, `/edit/session/recover` and `/edit/ops/{op}` all answer a
+MUB1 frame, decoded by `decodeEditSessionFrame` into `{ meta, spikes, artifacts }`, where `spikes`
+and `artifacts` are `Int32Array` rows cut from CSR arrays.
+
+```
+Every frame's meta carries the per-MU fields:
+  n_mu, mu_uids, mu_grid_index, flagged, versions, has_pulse, dirty, can_undo
+
+State frame (open, state, recover) — setEditSession(state, frame):
+  meta: token, file_label, source_path, fsamp, total_samples, grid_names, rois,
+        parameters, muscle, sil, project?, BIDS sidecar fields,
+        edit_history, recoverable_edits, recovered_edits? (recover)
+  rows: every MU's spikes and artifacts
+
+Change frame (ops) — applyEditChange(state, frame):
+  meta: changed (MU indices), history_start, history, kept_indices?
+        (MUs were removed or reordered), removed_count?, fsamp?, undone?
+  rows: spikes and artifacts of the `changed` MUs only
+  The client cuts editHistory at history_start and appends history.
+```
+
+### POST /edit/session/open
+
+```
+Request:  { path: string }     // a .npz or .mat decomposition
+Response: state frame
+```
+
+When `meta.recoverable_edits > 0`, `loadDecompositionForEdit` asks the user (`window.confirm`)
+and posts `/edit/session/recover` with `{ token, apply }` before showing the file.
+
+### POST /edit/ops/{op}
+
+```
+Request: { token, ...args }    // built by requestEditOp; unset args are left out
+  add-spikes, add-artifact   { mu, x_start, x_end, y_min }          (drawn box → samples, pulse value)
+  delete-spikes              { mu, x_start, x_end, y_min, y_max }
+  delete-dr                  { mu, x_start, x_end, y_min }          (y_min: rate in Hz)
+  update-filter              { mu, view_start, view_end, use_peeloff, lock_spikes, project }
+  remove-outliers, reset, duplicate   { mu }
+  flag                       { mu, flag }
+  remove-duplicates, undo    {}
+Response: change frame
+```
+
+### POST /edit/session/save
+
+```
+Request: withBidsSaveFields({ token, muscle, entity_label, file_label, software_versions })
+         plus the session form's fields (project, participant_meta, powerline_freq, …)
+Response: { saved, path, kept_indices, mu_uids, edit_history,
+            bids_emg_paths?, bids_deriv_paths?, …per-MU fields }
+          applyEditSave mirrors the saved file: flagged and duplicate MUs are gone.
+```
+
+### POST /edit/save (the run save)
 
 ```
 Request: {
-  distimes: number[],
-  mu_index: number,
-  pulse_train: number[],
-  fsamp: number,
-  x_start: number,
-  x_end: number,
-  y_min: number,
-  y_max: number
-}
-Response: { distimes: number[] }
-```
-
-### POST /edit/add-artifact
-
-```
-Request: same as add-spikes + { artifact_times: number[] }
-Response: { distimes: number[], artifact_times: number[] }
-```
-
-### POST /edit/delete-spikes
-
-```
-Request: same as add-spikes + { artifact_times: number[] }
-Response: { distimes: number[], artifact_times: number[] }
-```
-
-### POST /edit/delete-dr
-
-```
-Request: {
-  distimes: number[],
-  mu_index: number,
-  pulse_train: number[],
-  fsamp: number,
-  x_start: number,
-  x_end: number,
-  y_min: number
-}
-Response: { distimes: number[] }
-```
-
-### POST /edit/update-filter
-
-```
-Request: {
-  project: string,
-  edit_signal_token: string,
-  file_label: string,
-  grid_index: number,
-  mu_index: number,
-  distimes: number[],
-  mu_grid_index: number[],
-  pulse_train: number[],
-  view_start: number,
-  view_end: number,
-  use_peeloff: boolean,
-  lock_spikes: boolean,
-  flagged: boolean,
-  artifact_times: number[]
-}
-Response: { distimes: number[], pulse_train: number[] }
-```
-
-### POST /edit/remove-outliers
-
-```
-Request: {
-  distimes: number[],
-  mu_index: number,
-  pulse_train: number[],
-  fsamp: number
-}
-Response: { distimes: number[] }
-```
-
-### POST /edit/remove-duplicates
-
-```
-Request: {
-  distimes: number[][],
-  fsamp: number,
-  total_samples: number,
-  mu_grid_index: number[],
-  parameters: object
-}
-Response: { kept_indices: number[] /* ascending */, distimes: number[][], removed_count: number }
-```
-
-### POST /edit/flag-mu
-
-```
-Request: {
-  distimes: number[],
-  mu_index: number,
-  flag: boolean
-}
-Response: { flag: boolean }
-```
-
-### POST /edit/save
-
-```
-Request: MUB1 frame (application/x-muedit-frame) with this object as meta and
-         `pulse_trains` as an f4 [n_mu, total_samples] array; or plain JSON
-         when there are no pulse trains to send (the run save sends
-         `run_result_token` instead, and the server uses its stored copy)
-{
-  distimes: number[][],
-  flagged: boolean[],
-  run_result_token?: string,
+  run_result_token: string,     // the run's pulse trains and discharge times stay on the server
+  distimes?: number[][],        // only when there is no token
   total_samples: number,
   fsamp: number,
   grid_names: string[],
   mu_grid_index: number[],
-  mu_uids: string[],
   parameters: object,
   muscle: string[],
-  edit_history: object[],
-  artifact_times: number[][],
   artifact_regions: number[][],
-  entity_label: string,
   file_label: string,
-  edit_signal_token: string,
-  software_versions: object
+  ...BIDS form fields (withBidsSaveFields)
 }
-Response: { mode: string, path: string, keptIndices: number[], editHistory: object[] }
+Response: { saved, path, kept_indices, mu_uids, edit_history, bids_emg_paths?, bids_deriv_paths? }
+          400 (field: run_result_token) when the server no longer holds the run
 ```
 
 ---
@@ -342,7 +279,7 @@ Mode keys match `POSTPROCESS_MODES` in `decomp/types.py` and the CLI `--postproc
 
 All integers and floats are little-endian. When the magic prefix is absent, the buffer is parsed as JSON text.
 
-### MUB1 frame — `/series/*`, `/edit/load-by-path`, `/decompose_preview/{token}`, `/edit/save` request
+### MUB1 frame — `/series/*`, `/decompose_preview/{token}`, the edit session routes
 
 ```
 Offset      Size        Field
@@ -353,9 +290,9 @@ aligned 8   ...         array data; each array at dataStart + offset (8-byte ali
 ```
 
 `decodeFrame` returns typed-array views into the response buffer (no copy);
-`encodeFrame` writes rows straight into one `ArrayBuffer`. dtypes: `f4`,
-`i4`, `i8`, `u1`, `i2`. Pulse matrices are still turned into `number[][]` for
-state until the edit session moves server-side.
+`csrRows` cuts CSR `values`/`offsets` pairs into one `Int32Array` view per MU.
+dtypes: `f4`, `i4`, `i8`, `u1`, `i2`. Every frame goes from server to client;
+`encodeFrame` only builds the decoder tests' input.
 
 ---
 
@@ -382,6 +319,13 @@ The backend caches the loaded signal under the upload token; it is lost on backe
 3. Retries the decomposition once; if the reload fails the original error is shown
 
 The QC-stage calls (`/series/*`, `/qc/auto`) do not retry; they report the error.
+
+### Edit Session Expiry
+
+An edit call naming a session the server no longer holds (a server restart, the tab's session
+closed) is a 400 on `token`: "Edit session expired; open the file again". On a page reload,
+`restoreEditSession` reopens the session whose token `sessionStorage` kept; if it is gone, the
+token is forgotten and the page starts empty.
 
 ### Silent Failure (Ambiguous .mat)
 

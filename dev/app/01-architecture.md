@@ -72,7 +72,7 @@ The annotations follow five rules:
 
 - **Intended types.** A parameter is typed as what callers should pass. When the function guards against missing or malformed input, write `T | null | undefined` and keep the guard: `@param {Span[] | null | undefined} rois`.
 - **`unknown` only for values that really can be anything:** caught errors (`errorMessage(err)`) and the helpers that validate raw input (`toFiniteNumber`, the payload normalisers in `api/payloads.js`).
-- **Untyped backend JSON is `JsonObject`** (`Record<string, any>`, defined in `context.js`). A payload with guaranteed fields gets a named type that intersects `JsonObject` with them, like `EditLoadPayload`. Wire formats are converted where they enter: the backend sends regions (ROIs, artifact windows) as `[start, end]` pairs, and `toSpans` in `api/payloads.js` turns them into `Span` objects, so state and views never see a pair.
+- **Untyped backend JSON is `JsonObject`** (`Record<string, any>`, defined in `context.js`). A payload with guaranteed fields gets a named type that intersects `JsonObject` with them, like `PreviewPayload`. Wire formats are converted where they enter: the backend sends regions (ROIs, artifact windows) as `[start, end]` pairs, and `toSpans` in `api/payloads.js` turns them into `Span` objects, so state and views never see a pair.
 - **Shared shapes have names**, declared next to the code that owns them: state shapes in `state.js` (`Selection`, `EditHistoryEntry`, `Bookmark`), cross-module contracts in `context.js` (`RoiEditRequest`, `WorkflowStep`), and view models beside their builders (`EditDropdownModel = ReturnType<typeof buildEditDropdownModel>`). Single-use parameter bags stay inline.
 - **Service and stage methods take their types from `context.js`:** `/** @type {EditStage["duplicateMu"]} */`. Only private helpers inside a factory carry their own `@param`s.
 
@@ -126,7 +126,9 @@ To add a service method: add its signature to the matching typedef in `context.j
   parameters,
 
   // Run stage (directly on global state)
-  muPulseTrains, muDistimes, muGridIndex,
+  muDistimes, muGridIndex,
+  runResultToken,             // the server keeps the run's pulse trains under it
+  runPulseView,               // the run explorer's window of the current MU's train
   currentMuGrid, currentMu,
   runView,
   runDownloadInFlight, lastRunDownloadKey,
@@ -138,14 +140,19 @@ To add a service method: add its signature to the matching typedef in `context.j
 
 ### Per-stage edit slice (`state.edit`)
 
+The edit slice mirrors the server-side edit session: the pulse trains stay on the server, and
+`pulseView` holds the window of the current MU on screen. It changes only through
+`setEditSession` (a whole session), `applyEditChange` (one edit) and `applyEditSave` (a save),
+plus the view, selection and bookmark setters.
+
 ```javascript
 {
   file, filename,
-  pulseTrains: [],           // current (possibly edited) pulse trains
-  originalPulseTrains: [],    // pristine copies for reset
-  distimes: [],               // discharge times per MU
-  originalDistimes: [],
-  artifactTimes: [],
+  token,                      // the server's edit session
+  distimes: [],               // Int32Array per MU
+  artifactTimes: [],          // Int32Array per MU
+  versions: [],               // per MU; changes whenever the server edits it
+  hasPulse: [],               // per MU; false when the file has only discharge times
   gridNames: [], muGridIndex: [],
   fsamp, totalSamples,
   currentMuGrid, currentMu,
@@ -153,12 +160,11 @@ To add a service method: add its signature to the matching typedef in `context.j
   selectionPulse, selectionDr,
   draftSelectionPulse, draftSelectionDr,
   mode,                       // "add" | "add_artifact" | "delete_spikes" | "delete_dr" | null
-  dirty,
+  dirty, canUndo,             // the server's
   parameters,
   flagged: [],                // per-MU deletion flags
-  backup,                      // single-level undo backup
   bidsRoot, project,
-  editSignalToken,
+  pulseView,                  // the fetched window: { mu, version, start, end, bins, row, spikes, … }
   muUids: [],
   editHistory: [],
   bookmarkPosition, showBookmark,
@@ -177,23 +183,22 @@ To add a service method: add its signature to the matching typedef in `context.j
 │    gridSeries, channelMeans, coordinates,    │
 │    discardMasks, artifactRegions, artifactMode,│
 │    currentGrid, fsamp,                         │
-│    muPulseTrains, muDistimes, muGridIndex,   │
+│    muDistimes, muGridIndex, runPulseView,    │
 │    currentMuGrid, currentMu, runView         │
 │                                             │
 │  ┌─────────────────────────────────────┐    │
 │  │        state.edit (per-stage)       │    │
 │  │                                     │    │
 │  │  Edit-only:                          │    │
-│  │    pulseTrains, originalPulseTrains, │    │
-│  │    distimes, originalDistimes,       │    │
-│  │    artifactTimes, mode, dirty,        │    │
-│  │    flagged, backup, editHistory,     │    │
+│  │    token, distimes, artifactTimes,   │    │
+│  │    versions, pulseView, mode, dirty, │    │
+│  │    canUndo, flagged, editHistory,    │    │
 │  │    bookmarkPosition, muUids, view    │    │
 │  └─────────────────────────────────────┘    │
 └─────────────────────────────────────────────┘
 ```
 
-The run stage uses `state.muPulseTrains` / `state.currentMu` / `state.runView` directly on the global state. The edit stage uses `state.edit.pulseTrains` / `state.edit.currentMu` / `state.edit.view` on the nested slice. This prevents run and edit from clobbering each other's view state.
+The run stage uses `state.runPulseView` / `state.currentMu` / `state.runView` directly on the global state. The edit stage uses `state.edit.pulseView` / `state.edit.currentMu` / `state.edit.view` on the nested slice. This prevents run and edit from clobbering each other's view state.
 
 ---
 
@@ -245,7 +250,7 @@ The import and layout stages have no service: `setupImportEvents` and `setupLayo
 
 ## Stage Navigation
 
-### `switchStage()` — `stages/lifecycle.js`
+### `switchStage()` — `app/stages/lifecycle.js`
 
 ```
 switchStage(app, target):

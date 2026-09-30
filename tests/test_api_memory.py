@@ -80,41 +80,24 @@ class TestBudgetedLRU:
         with pytest.raises(ValueError):
             BudgetedLRU[Blob]("a", budget)
 
-    def test_offer_refuses_entries_over_a_quarter_of_the_budget(self, budget: MemoryBudget) -> None:
-        lru = BudgetedLRU[Blob]("derived", budget)
-        assert lru.offer(Blob(251)) is None
-        assert lru.offer(Blob(250)) is not None
-        assert lru.pin(Blob(900)) is not None
-
     def test_least_recently_used_goes_first_across_caches(self, budget: MemoryBudget) -> None:
         first = BudgetedLRU[Blob]("first", budget)
         second = BudgetedLRU[Blob]("second", budget)
-        old = first.offer(Blob(200))
-        used = second.offer(Blob(200))
-        newer = first.offer(Blob(200))
+        old = first.pin(Blob(200), "a")
+        used = second.pin(Blob(200), "b")
+        newer = first.pin(Blob(200), "c")
         assert second.get(used) is not None
-        second.offer(Blob(250))
-        first.offer(Blob(250))
+        second.pin(Blob(250), "d")
+        first.pin(Blob(250), "e")
         assert set(first.slots) & {old, newer} == {newer}
-        first.offer(Blob(200))
+        first.pin(Blob(200), "f")
         assert newer not in first.slots
         assert used in second.slots
         assert budget.used_bytes == 900
 
-    def test_unpinned_entries_go_before_other_sessions_pins(self, budget: MemoryBudget) -> None:
-        session_data = BudgetedLRU[Blob]("session", budget)
-        derived = BudgetedLRU[Blob]("derived", budget)
-        pinned = session_data.pin(Blob(400), "tab-a")
-        extra = derived.offer(Blob(200), "tab-b")
-        session_data.pin(Blob(500), "tab-b")
-        assert extra not in derived.slots
-        assert pinned in session_data.slots
-        session_data.pin(Blob(400), "tab-c")
-        assert pinned not in session_data.slots
-
-    def test_active_sessions_pins_are_never_evicted(self, budget: MemoryBudget) -> None:
+    def test_active_sessions_entries_are_never_evicted(self, budget: MemoryBudget) -> None:
         lru = BudgetedLRU[Blob]("session", budget)
-        tokens = [lru.pin(Blob(600), "tab-a"), lru.offer(Blob(200), "tab-a")]
+        tokens = [lru.pin(Blob(600), "tab-a"), lru.pin(Blob(200), "tab-b")]
         lru.pin(Blob(600), "tab-a")
         assert lru.get(tokens[0]) is not None
         assert lru.get(tokens[1]) is None
@@ -130,7 +113,7 @@ class TestBudgetedLRU:
 
     def test_resize_evicts_others_to_fit(self, budget: MemoryBudget) -> None:
         lru = BudgetedLRU[Blob]("session", budget)
-        other = lru.offer(Blob(200), "tab-b")
+        other = lru.pin(Blob(200), "tab-b")
         blob = Blob(100)
         token = lru.pin(blob, "tab-a")
         blob.nbytes = 850

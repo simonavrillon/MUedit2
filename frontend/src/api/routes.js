@@ -18,6 +18,7 @@ export const routes = {
   editSessionOpen: "/edit/session/open",
   editSession: "/edit/session",
   editSessionRecover: "/edit/session/recover",
+  editSessionPrepareGrid: "/edit/session/prepare-grid",
   editSessionSave: "/edit/session/save",
   editOp: (/** @type {string} */ op) => `/edit/ops/${op}`,
   dialogOpenFile: "/dialog/open-file",

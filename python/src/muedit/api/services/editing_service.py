@@ -35,6 +35,7 @@ from muedit.api.memory import DEFAULT_SESSION
 from muedit.api.schemas import (
     BidsSaveFields,
     EditOpPayload,
+    EditPrepareGridPayload,
     EditRecoverPayload,
     EditSavePayload,
     EditSessionSavePayload,
@@ -391,6 +392,15 @@ def recover_edits(payload: EditRecoverPayload, session: str = DEFAULT_SESSION) -
     return response
 
 
+def prepare_edit_grid(payload: EditPrepareGridPayload, session: str = DEFAULT_SESSION) -> None:
+    """Filter a grid's EMG now, so its first filter update does not wait for it; edits go on."""
+    edit = _require_session(payload.token, session)
+    try:
+        edit.prepare_grid(payload.project, payload.grid)
+    except EditError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 # ── saving ───────────────────────────────────────────────────────────────────
 
 
@@ -654,15 +664,11 @@ def save_edit_session(
     return make_json_safe(result)
 
 
-def save_edits(payload: EditSavePayload, pulse_trains: np.ndarray | None = None) -> dict[str, Any]:
-    """Save a run: discharge times from the request, else from the stored run.
-
-    Pulse trains come from the request frame, else the stored run.
-    """
+def save_edits(payload: EditSavePayload) -> dict[str, Any]:
+    """Save a run: discharge times from the request, else from the stored run, and its pulse trains."""
     run = _get_run_result_entry(payload.run_result_token)
-    raw = payload.distimes or payload.discharge_times
-    if raw:
-        distimes = [spike_array(d) for d in normalize_distimes(raw)]
+    if payload.distimes:
+        distimes = [spike_array(d) for d in normalize_distimes(payload.distimes)]
     elif run is not None:
         distimes = list(run.spikes)
     else:
@@ -681,13 +687,9 @@ def save_edits(payload: EditSavePayload, pulse_trains: np.ndarray | None = None)
     if fsamp is None:
         raise HTTPException(status_code=400, detail="fsamp is required to save edits")
 
-    if pulse_trains is None and run is not None:
-        pulse_trains = run.pulse_trains
-    if pulse_trains is not None and (
-        pulse_trains.size == 0 or pulse_trains.shape != (len(distimes), total_samples)
-    ):
-        pulse_trains = None  # the loader draws them from the discharge times
-    matrix = pulse_trains
+    matrix = run.pulse_trains if run is not None else None
+    if matrix is not None and (matrix.size == 0 or matrix.shape != (len(distimes), total_samples)):
+        matrix = None  # the loader draws them from the discharge times
 
     def pulse(kept: list[int]) -> FloatArray | RowSource | None:
         if matrix is None or len(kept) == matrix.shape[0]:
@@ -696,7 +698,6 @@ def save_edits(payload: EditSavePayload, pulse_trains: np.ndarray | None = None)
         return RowSource((len(kept), matrix.shape[1]), lambda a, b: matrix[kept[a:b]])
 
     mu_grid_index = _normalize_mu_grid_index(payload.mu_grid_index, len(distimes))
-    uids = payload.mu_uids
     regions: list[tuple[int, int]] = []
     for row in payload.artifact_regions or []:
         pair: tuple[Any, Any] | None = None
@@ -713,13 +714,11 @@ def save_edits(payload: EditSavePayload, pulse_trains: np.ndarray | None = None)
 
     req = _SaveRequest(
         distimes=distimes,
-        flagged=_normalize_flagged(payload.flagged, len(distimes)),
+        flagged=[False] * len(distimes),
         mu_grid_index=mu_grid_index,
-        mu_uids=list(uids)
-        if isinstance(uids, list) and len(uids) == len(distimes)
-        else _generate_mu_uids(mu_grid_index),
-        edit_history=list(payload.edit_history or []),
-        artifact_times=[list(row) for row in payload.artifact_times or []],
+        mu_uids=_generate_mu_uids(mu_grid_index),
+        edit_history=[],
+        artifact_times=[],
         fsamp=fsamp,
         total_samples=total_samples,
         grid_names=list(payload.grid_names or []),

@@ -22,7 +22,8 @@ Loader dispatch is registry-based in `python/src/muedit/io/factory.py`:
 - `register_loader(ext, loader, *, overwrite=False)` — register/override an extension (`overwrite` is keyword-only)
 - `get_loader(filepath)` — resolve the loader for a path (or a BIDS/Intan recording directory)
 - `supported_extensions()` — list registered extensions
-- `load_signal(filepath)` — load a file and return a `SignalImport`
+- `load_signal(filepath, store=None)` — load a file and return a `SignalImport`; with a
+  `store`, its EMG and auxiliary arrays are written into that session store (memory-mapped)
 
 > The `LoaderFactory` class facade was removed in v2; call the module-level
 > functions above directly.
@@ -34,6 +35,10 @@ Loader dispatch is registry-based in `python/src/muedit/io/factory.py`:
    - Return: a `SignalImport`, preferably built with `SignalImport.build(data=..., fsamp=..., ...)`
      so the shared type coercion applies. A plain `dict` with the same keys also works;
      `load_signal` converts it with `SignalImport.from_mapping(...)`.
+   - Optional keyword `store: ArrayStore`: allocate the full-length arrays with
+     `store.allocate(...)` and fill them block by block (`io.store.sample_blocks`), so a long
+     recording never sits whole on the heap. A loader without `store` still works: its result
+     is copied into the store afterwards.
 
 2. Re-export the loader from `python/src/muedit/io/loaders.py`:
    ```python

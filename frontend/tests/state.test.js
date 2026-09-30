@@ -344,12 +344,6 @@ describe("selectors", () => {
     assert.deepEqual(selectors.getRunMuIndicesForGrid(state, 0), []);
   });
 
-  test("muUidFor falls back to a positional id", () => {
-    state.edit.muUids = ["x"];
-    assert.equal(selectors.muUidFor(state, 0), "x");
-    assert.equal(selectors.muUidFor(state, 3), "mu3");
-  });
-
   test("ROI bounds use the fallback when not finite", () => {
     assert.equal(selectors.roiStart({ start: 5 }), 5);
     assert.equal(selectors.roiStart({ start: NaN }, 7), 7);

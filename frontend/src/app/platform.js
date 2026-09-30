@@ -36,10 +36,35 @@ function bridge() {
   return bridgePromise;
 }
 
-/** In the desktop app, wait for the bridge and send its token from now on. */
-export async function initPlatform() {
-  if (!IS_DESKTOP) return;
-  setAppToken(await (await bridge()).token());
+/** How long the desktop page waits for the bridge's token before giving up. */
+const BRIDGE_TIMEOUT_MS = 15000;
+
+/**
+ * In the desktop app, wait for the bridge and send its token from now on;
+ * false when no token came within `timeoutMs`.
+ *
+ * @param {{ timeoutMs?: number }} [options]
+ * @returns {Promise<boolean>}
+ */
+export async function initPlatform({ timeoutMs = BRIDGE_TIMEOUT_MS } = {}) {
+  if (!IS_DESKTOP) return true;
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let timer;
+  /** @type {Promise<null>} */
+  const timedOut = new Promise((resolve) => {
+    timer = setTimeout(() => resolve(null), timeoutMs);
+  });
+  try {
+    const token = await Promise.race([
+      bridge().then((api) => api.token()),
+      timedOut,
+    ]);
+    if (token === null) return false;
+    setAppToken(token);
+    return true;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**

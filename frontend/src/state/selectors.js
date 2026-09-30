@@ -29,15 +29,6 @@ export function roiEnd(roi, fallback = /** @type {F} */ (0)) {
   return typeof v === "number" && Number.isFinite(v) ? v : fallback;
 }
 
-/**
- * @param {State} state
- * @param {number} muIdx
- * @returns {string}
- */
-export function muUidFor(state, muIdx) {
-  return state.edit.muUids?.[muIdx] ?? `mu${muIdx}`;
-}
-
 // Return the MU indices belonging to a given grid. When no grid mapping is
 // available, every MU is treated as belonging to the requested grid.
 /**

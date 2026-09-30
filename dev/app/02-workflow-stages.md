@@ -52,7 +52,7 @@ User clicks #browseSignalBtn
         │                      -> requestPreview({ filepath: path })  POST /preview-by-path
         │                      -> showWorkspace() -> switchStage("qc")
         ├─ "decomposition"  -> editStage.loadDecompositionForEditByPath(path)
-        │                      -> api.editLoadByPath(path)   POST /edit/load-by-path
+        │                      -> api.editOpen(path)   POST /edit/session/open
         │                      -> showWorkspace() -> switchStage("edit")
         └─ "ambiguous_mat"  -> try raw first (silent),
                                fall back to decomposition on failure
@@ -273,7 +273,7 @@ User clicks "Decompose Signal"
         - each line -> handleStreamMessage(msg)
           - msg.pct?       -> updateProgress(pct, message, stage)
           - msg.message?   -> updateProgress(undefined, message, stage)
-          - msg.preview?   -> applyPreviewData() [hydrates MU pulse trains]
+          - msg.preview?   -> applyPreviewData() [the run's discharge times and run_result_token]
           - msg.summary?   -> progressText = "Grid 1: N MU | Grid 2: M MU | Total: X MU"
           - msg.stage=="error" -> setStatus(error)
           - msg.stage=="done"  -> autoSaveRunDecomposition()
@@ -281,8 +281,8 @@ User clicks "Decompose Signal"
 
 [On done]:
   -> autoSaveRunDecomposition()
-     -> persistNpzBySaveTarget()     POST /edit/save
-     -> loadDecompositionForEditByPath(saved.path)  POST /edit/load-by-path
+     -> persistNpzBySaveTarget()     POST /edit/save (the run stays on the server under run_result_token)
+     -> loadDecompositionForEditByPath(saved.path)  POST /edit/session/open
      -> switchStage("edit")
 ```
 
@@ -303,7 +303,9 @@ User clicks "Decompose Signal"
 | Endpoint | When | Purpose |
 |---|---|---|
 | `POST /decompose_stream` | On "Decompose Signal" click | Main decomposition call (streaming NDJSON) |
-| `GET /decompose_preview/{token}` | On preview event (binary fast-path) | Fetch heavy MU arrays in binary format |
+| `GET /decompose_preview/{token}` | On preview event (binary fast-path) | Fetch the run's discharge times in binary format |
+| `GET /series/pulse` | When the run explorer shows an MU | The current MU's pulse train over the window on screen |
+| `POST /decompose/cancel` | On "Cancel" click | Stop the run; the stream ends with `cancelled` |
 | `POST /edit/save` | On auto-save after completion | Save decomposition result as .npz |
 
 ---
@@ -314,28 +316,32 @@ The most complex stage. The user manually refines motor unit decomposition resul
 
 ### High-Level Flow
 
+The decomposition being edited lives on the server, in an edit session. The page holds the
+discharge times and per-MU fields and fetches the current MU's pulse train for the window on
+screen.
+
 ```
-Load .npz decomposition -> populate state.edit.*
-  |
+Open .npz/.mat decomposition -> POST /edit/session/open -> setEditSession(state.edit)
+  |   (unsaved edits left from an earlier session? ask, then POST /edit/session/recover)
   v
 Render explorer: grid dropdown + MU dropdown + pulse canvas + DR canvas + timeline
+  (GET /series/pulse for the window on screen, refetched when the MU's version changes)
   |
   v
 User edits per-MU spike trains via:
   - Drag-box ROI on pulse canvas  -> add-spikes / delete-spikes / add-artifact
   - Drag-box ROI on DR canvas     -> delete-dr (discharge-rate outliers)
-  - Button actions                -> update-filter, remove-outliers, flag-mu,
-                                     duplicate-mu, remove-duplicate-mus, reset, undo
+  - Button actions                -> update-filter, remove-outliers, flag,
+                                     duplicate, remove-duplicates, reset, undo
   - Timeline drag                -> pan/zoom the view window
   - Keyboard                      -> shortcuts
   |
   v
-Each edit: backupEditMu() -> API call -> setEditDistimesForMu -> recomputeEditDirty ->
-           appendEditHistory -> renderEditExplorer
+Each edit: POST /edit/ops/{op} -> applyEditChange (changed MUs' times, per-MU fields,
+           history) -> renderEditExplorer
   |
   v
-Save -> POST /edit/save -> setEditHistory + keepEditMus (mirror the saved file) ->
-        setEditOriginalDistimes (dirty cleared)
+Save -> POST /edit/session/save -> applyEditSave (mirror the saved file; dirty cleared)
 ```
 
 ### Can Also Be Reached Directly
@@ -344,8 +350,8 @@ Loading a `.npz` file from the Import stage skips QC and Decompose, going straig
 
 ```
 Import (.npz file) -> editStage.loadDecompositionForEditByPath(path)
-  -> api.editLoadByPath(filepath)   POST /edit/load-by-path
-  -> populate state.edit.*
+  -> api.editOpen(filepath)   POST /edit/session/open
+  -> setEditSession(state.edit)
   -> showWorkspace() -> switchStage("edit")
   -> renderEditExplorer()
 ```

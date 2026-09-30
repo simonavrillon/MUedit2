@@ -35,8 +35,8 @@ export async function initializeApp() {
   if (els.browseSignalBtn) els.browseSignalBtn.disabled = true;
   app.setStatus("Connecting to backend…", "muted");
 
-  await initPlatform();
-  const ready = await waitForBackend(app.api.healthUrl());
+  const ready =
+    (await initPlatform()) && (await waitForBackend(app.api.healthUrl()));
   if (ready) {
     await setupOutputFolder(app);
     if (els.browseSignalBtn) els.browseSignalBtn.disabled = false;

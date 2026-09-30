@@ -140,6 +140,10 @@ class EditSession:
         self.meta: dict[str, Any] = {}  # file fields the client shows and the save writes back
         self.bids_root: Path | None = None  # BIDS dataset the file was opened from
         self._filtered: dict[tuple[str | None, int], tuple[FloatArray, float, IntArray]] = {}
+        # One lock per grid, so a grid filters once while edits go on under ``lock``.
+        self._filter_locks: dict[tuple[str | None, int], threading.Lock] = {}
+        self._filter_locks_guard = threading.Lock()
+        self._closed = False
 
         self.arrays: dict[str, np.ndarray] = {}
         has_pulse = pulse is not None and pulse.ndim == 2 and pulse.shape[0] == n_mu
@@ -545,12 +549,27 @@ class EditSession:
         self._touch(mu)
         return Change([mu], start, info={"fsamp": fsamp})
 
+    def prepare_grid(self, project: str | None, grid: int) -> None:
+        """Filter one grid's EMG ahead of its first filter update; call it without ``lock``."""
+        if grid not in self.mu_grid_index:
+            return  # no MU to refit there
+        self.store.hold()  # a close meanwhile deletes the store only once this returns
+        try:
+            self._grid_emg(project, grid)
+        finally:
+            self.store.release()
+
     def _grid_emg(self, project: str | None, grid: int) -> tuple[FloatArray, float, IntArray]:
         """``(emg, fsamp, discard mask)`` of one grid, filtered as the decomposition was (cached)."""
         key = (project, grid)
-        if key not in self._filtered:
-            self._filtered[key] = self._filter_grid(project, grid)
-        return self._filtered[key]
+        with self._filter_locks_guard:
+            lock = self._filter_locks.setdefault(key, threading.Lock())
+        with lock:
+            if self._closed:
+                raise EditError("Edit session closed")
+            if key not in self._filtered:
+                self._filtered[key] = self._filter_grid(project, grid)
+            return self._filtered[key]
 
     def _filter_grid(self, project: str | None, grid: int) -> tuple[FloatArray, float, IntArray]:
         """One grid's EMG, BIDS or embedded, notched and bandpassed whole into the session store."""
@@ -595,10 +614,11 @@ class EditSession:
         _, _, _, emg_types = format_hdemg_signal(list(grid_names or []) or ["Grid 1"])
         return emg_types[grid] if grid < len(emg_types) else 1
 
-    @staticmethod
-    def _filter_rows(rows: FloatArray, out: FloatArray, fsamp: float, emg_type: int) -> None:
+    def _filter_rows(self, rows: FloatArray, out: FloatArray, fsamp: float, emg_type: int) -> None:
         """``rows`` notched and bandpassed into float32 ``out``, a few channels at a time."""
         for lo in range(0, rows.shape[0], FILTER_BLOCK_ROWS):
+            if self._closed:
+                raise EditError("Edit session closed")
             block = out[lo : lo + FILTER_BLOCK_ROWS]
             block[...] = rows[lo : lo + FILTER_BLOCK_ROWS]
             emg_filter_inplace(block, fsamp, emg_type)
@@ -798,6 +818,7 @@ class EditSession:
 
     def close(self) -> None:
         """Keep the log only if it holds edits that were not saved, then delete the store."""
+        self._closed = True  # a grid being prepared stops at its next block
         with self.lock:
             if self.log is not None:
                 self.log.close(keep=self.log.net > 0)

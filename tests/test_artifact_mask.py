@@ -162,7 +162,7 @@ def test_multi_grid_masks_are_per_grid_and_ored() -> None:
     np.testing.assert_array_equal(global_mask, per_grid[0] | per_grid[1])
 
 
-# ── Blocks of samples vs the whole-grid detector (plan stage 12) ─────────────
+# ── Blocks of samples vs the whole-grid detector ────────────────────────────
 
 
 def _reference_mask(data: np.ndarray, fsamp: float, cfg: ArtifactMaskConfig) -> np.ndarray:

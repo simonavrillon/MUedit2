@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+import threading
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -235,6 +236,40 @@ class TestUpdateFilter:
             assert not edit.arrays["base"].any()
         finally:
             edit.close()
+
+    def test_a_prepared_grid_is_filtered_while_edits_hold_the_lock(
+        self, synthetic_mu: dict[str, np.ndarray]
+    ) -> None:
+        edit = _session(
+            [synthetic_mu["target"].tolist()],
+            np.zeros((1, N_SAMPLES), np.float32),
+            signal=_emg_signal(synthetic_mu),
+        )
+        held, done = threading.Event(), threading.Event()
+
+        def edit_in_progress() -> None:
+            with edit.lock:
+                held.set()
+                done.wait(10)
+
+        other = threading.Thread(target=edit_in_progress)
+        other.start()
+        try:
+            held.wait(10)
+            edit.prepare_grid(None, 0)
+            edit.prepare_grid(None, 3)  # no MU on that grid: nothing to filter
+            done.set()
+            other.join()
+            assert list(edit._filtered) == [(None, 0)]
+            emg = edit._filtered[(None, 0)][0]
+            edit.apply("update-filter", {"mu": 0, "view_start": VIEW_START, "view_end": VIEW_END})
+            assert edit._grid_emg(None, 0)[0] is emg
+        finally:
+            done.set()
+            other.join()
+            edit.close()
+        with pytest.raises(EditError, match="closed"):
+            edit.prepare_grid(None, 0)
 
     def test_artifact_mask_is_applied(self, synthetic_mu: dict[str, np.ndarray]) -> None:
         mask = np.zeros(N_SAMPLES, dtype=bool)
@@ -620,6 +655,15 @@ class TestSessionApi:
         )
         assert resp.status_code == 400  # nothing to undo
 
+    def test_prepare_grid(self, api: TestClient, decomp_file: Path) -> None:
+        token = _open(api, decomp_file)[0]["token"]
+        url = f"{API}/edit/session/prepare-grid"
+        headers = {SESSION_HEADER: "tab-edit"}
+        resp = api.post(url, json={"token": token, "grid": 9}, headers=headers)
+        assert resp.status_code == 200 and resp.json()["data"] == {"grid": 9}
+        resp = api.post(url, json={"token": "gone", "grid": 0}, headers=headers)
+        assert resp.status_code == 400
+
     def test_pulse_viewport_is_exact(self, api: TestClient, decomp_file: Path) -> None:
         token = _open(api, decomp_file)[0]["token"]
         with np.load(decomp_file) as z:
@@ -641,15 +685,6 @@ class TestSessionApi:
         )
         assert meta["kind"] == "samples"
         np.testing.assert_array_equal(arrays["samples"][0], row[500:900])
-
-    def test_spikes_csr(self, api: TestClient, decomp_file: Path) -> None:
-        token = _open(api, decomp_file)[0]["token"]
-        meta, arrays = _frame(api.get(f"{API}/spikes", params={"token": token}))
-        assert meta["n_mu"] == 3
-        assert arrays["spike_offsets"].dtype == np.int64
-        _, one = _frame(api.get(f"{API}/spikes", params={"token": token, "mu": "1"}))
-        assert one["spikes"].tolist() == _spike_train(10.0, seed=2).tolist()
-        assert api.get(f"{API}/spikes", params={"token": token, "mu": "x"}).status_code == 400
 
     def test_a_reloaded_page_takes_the_session_over(
         self, api: TestClient, decomp_file: Path

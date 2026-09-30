@@ -40,31 +40,19 @@ class BidsSaveFields(BaseModel):
 
 
 class EditSavePayload(BidsSaveFields):
-    """A save of discharge times sent by the client: the run save.
+    """The run save: pulse trains stay on the server under ``run_result_token``.
 
-    Pulse trains travel as a MUB1 frame array, or stay on the server under
-    ``run_result_token``, which also supplies the discharge times when none are sent.
+    The run also supplies the discharge times when none are sent.
     """
 
     distimes: list[list[int]] | None = None
-    discharge_times: list[list[int]] | None = None
-    flagged: list[bool] | None = None
     run_result_token: str | None = None
     total_samples: int
     fsamp: float | None = None
     grid_names: list[str] | None = None
     mu_grid_index: list[int] | None = None
-    mu_uids: list[str] | None = None
     parameters: dict[str, Any] | None = None
-    edit_history: list[dict[str, Any]] | None = None
-    artifact_times: list[list[int]] | None = None
     artifact_regions: list[Any] | None = None
-
-
-class EditSessionPayload(BaseModel):
-    """Names an open edit session."""
-
-    token: str
 
 
 class EditSessionSavePayload(BidsSaveFields):
@@ -78,6 +66,14 @@ class EditRecoverPayload(BaseModel):
 
     token: str
     apply: bool = True
+
+
+class EditPrepareGridPayload(BaseModel):
+    """Filter one grid's EMG before its first filter update, with that update's ``project``."""
+
+    token: str
+    grid: int
+    project: str | None = None
 
 
 class EditOpPayload(BaseModel):

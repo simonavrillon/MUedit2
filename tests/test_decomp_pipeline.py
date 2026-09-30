@@ -13,7 +13,6 @@ from muedit.decomp.types import DecompositionParameters
 from muedit.models import SignalImport
 from muedit.signal.decomp_primitives import POSTPROC_MIN_ISI_SEC
 from tests._metrics_helpers import central_roi, discharge_times
-from tests._report import describe, record
 
 # Keep the per-iteration budget modest so the real-data run finishes in well
 # under a minute while still exercising the full FastICA + CoV-ISI + peel-off
@@ -39,19 +38,15 @@ def novecento_roi(novecento_emg: SignalImport) -> tuple[int, int]:
 def decomp_results(
     novecento_otb4_file: Path, novecento_emg: SignalImport, novecento_roi: tuple[int, int]
 ) -> dict[str, Any]:
-    """Run the full pipeline twice (peel-off on and off) on real Novecento EMG."""
-    results: dict[str, Any] = {}
-    for label, peel in (("off", False), ("on", True)):
-        params = DecompositionParameters(niter=_NITER, peel_off_enabled=peel)
-        result, _save_path = run_decomposition(
-            str(novecento_otb4_file),
-            roi=novecento_roi,
-            params=params,
-            save_npz=False,
-            preloaded_signal=novecento_emg,
-        )
-        results[label] = result
-    return results
+    """Run the full pipeline with peel-off on real Novecento EMG."""
+    result, _save_path = run_decomposition(
+        str(novecento_otb4_file),
+        roi=novecento_roi,
+        params=DecompositionParameters(niter=_NITER, peel_off_enabled=True),
+        save_npz=False,
+        preloaded_signal=novecento_emg,
+    )
+    return result
 
 
 # ── Pipeline structure & output validity ─────────────────────────────────────
@@ -61,7 +56,7 @@ class TestDecompositionStructure:
     """Validate the shape and internal consistency of the export payload."""
 
     def test_counts_are_consistent(self, decomp_results: dict[str, Any]) -> None:
-        result = decomp_results["on"]
+        result = decomp_results
         assert {"signal", "sil", "mu_grid_index", "parameters"} <= set(result)
         assert {"data", "fsamp", "PulseT", "Dischargetimes"} <= set(result["signal"])
         dt = discharge_times(result)
@@ -76,7 +71,7 @@ class TestDecompositionStructure:
         assert len(grid_idx) == n_mu
 
     def test_pulse_trains_match_signal_length(self, decomp_results: dict[str, Any]) -> None:
-        result = decomp_results["on"]
+        result = decomp_results
         pulse_t = np.asarray(result["signal"]["PulseT"])
         data = np.asarray(result["signal"]["data"])
         assert pulse_t.ndim == 2
@@ -93,11 +88,11 @@ class TestMotorUnitQuality:
     """Assert the separators the pipeline accepted are genuinely motor units."""
 
     def test_finds_multiple_motor_units(self, decomp_results: dict[str, Any]) -> None:
-        dt = discharge_times(decomp_results["on"])
+        dt = discharge_times(decomp_results)
         assert len(dt) >= _MIN_MU_COUNT, f"expected >= {_MIN_MU_COUNT} motor units, got {len(dt)}"
 
     def test_sil_above_acceptance_threshold(self, decomp_results: dict[str, Any]) -> None:
-        result = decomp_results["on"]
+        result = decomp_results
         sil = result["sil"]
         sil_thr = result["parameters"]["sil_thr"]
         assert sil, "no SIL scores returned"
@@ -107,7 +102,7 @@ class TestMotorUnitQuality:
         self, decomp_results: dict[str, Any], novecento_roi: tuple[int, int]
     ) -> None:
         """Every MU spike train is sorted, in-bounds, and refractory-clean."""
-        result = decomp_results["on"]
+        result = decomp_results
         fsamp = float(result["signal"]["fsamp"])
         n_samples = np.asarray(result["signal"]["data"]).shape[1]
         refractory = int(np.round(fsamp * POSTPROC_MIN_ISI_SEC))
@@ -124,48 +119,3 @@ class TestMotorUnitQuality:
                 assert min_isi >= refractory, (
                     f"MU {i}: min ISI {min_isi} < refractory {refractory} samples"
                 )
-
-
-# ── Peel-off ─────────────────────────────────────────────────────────────────
-
-
-class TestPeelOff:
-    """Validate that peel-off source subtraction exposes additional motor units."""
-
-    def test_measure_peel_off_yield(self, decomp_results: dict[str, Any]) -> None:
-        """Record how many extra motor units peel-off exposed."""
-        dt_off = discharge_times(decomp_results["off"])
-        dt_on = discharge_times(decomp_results["on"])
-        n_off, n_on = len(dt_off), len(dt_on)
-
-        sil_off = list(decomp_results["off"]["sil"])
-        sil_on = list(decomp_results["on"]["sil"])
-        spikes_off = int(sum(d.size for d in dt_off))
-        spikes_on = int(sum(d.size for d in dt_on))
-
-        record(
-            "peel_off",
-            caption="Motor units recovered with and without peel-off (real Novecento, central 10 s)",
-            config="peel_off=False",
-            units=n_off,
-            total_spikes=spikes_off,
-            **{f"sil_{k}": v for k, v in describe(sil_off).items() if k != "n"},
-        )
-        record(
-            "peel_off",
-            config="peel_off=True",
-            units=n_on,
-            total_spikes=spikes_on,
-            **{f"sil_{k}": v for k, v in describe(sil_on).items() if k != "n"},
-        )
-        record(
-            "peel_off",
-            config="delta (on - off)",
-            units=n_on - n_off,
-            total_spikes=spikes_on - spikes_off,
-        )
-
-        # Deterministic floor: a decomposition that returns nothing is broken
-        # regardless of how the two configurations compare to each other.
-        assert n_off > 0, "no-peel run produced zero motor units"
-        assert n_on > 0, "peel-off run produced zero motor units"

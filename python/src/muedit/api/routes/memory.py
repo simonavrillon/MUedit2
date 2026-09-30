@@ -22,7 +22,7 @@ router = APIRouter(prefix="/api/v1")
 
 @router.post("/session/close", status_code=204)
 def close_session_endpoint(session: str = Query(...)) -> Response:
-    """Drop what a closing tab held and stop its run; the frontend sends it with ``navigator.sendBeacon``."""
+    """Drop what a closing tab held and stop its run; the frontend sends it as a ``keepalive`` fetch."""
     if session_id_or_default(session) == session:
         cancel_decomposition(session)
         close_session(session)

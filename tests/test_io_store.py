@@ -1,4 +1,4 @@
-"""T1 session store (``muedit.io.store``) and the loaders that write into it (plan stage 9)."""
+"""T1 session store (``muedit.io.store``) and the loaders that write into it."""
 
 from __future__ import annotations
 
@@ -142,7 +142,7 @@ class TestSessionStore:
 
 
 class TestMemmapPickling:
-    """Stored arrays cross to the worker process as file locations (plan stage 11)."""
+    """Stored arrays cross to the worker process as file locations."""
 
     def _stored(self) -> np.ndarray:
         st = SessionStore.create("t")

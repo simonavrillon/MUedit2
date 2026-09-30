@@ -17,8 +17,8 @@ from httpx import Response
 from starlette.testclient import TestClient
 
 from muedit.api import cache
-from muedit.api.binary import FRAME_FORMAT, FRAME_MEDIA_TYPE, pack_frame, unpack_frame
-from muedit.decomp.decomposition_file import load_decomposition_file, unpack_csr
+from muedit.api.binary import FRAME_FORMAT, FRAME_MEDIA_TYPE, unpack_frame
+from muedit.decomp.decomposition_file import unpack_csr
 from tests._synthetic_emg import motor_unit_emg
 from tests.conftest import REPO_ROOT
 
@@ -41,10 +41,10 @@ LIVE_ENDPOINTS: list[tuple[str, str]] = [
     ("POST", "/decompose/cancel"),
     ("GET", "/decompose_preview/{token}"),
     ("GET", "/series/pulse"),
-    ("GET", "/spikes"),
     ("POST", "/edit/session/open"),
     ("GET", "/edit/session"),
     ("POST", "/edit/session/recover"),
+    ("POST", "/edit/session/prepare-grid"),
     ("POST", "/edit/session/save"),
     ("POST", "/edit/ops/{op}"),
     ("POST", "/edit/save"),
@@ -661,8 +661,6 @@ class TestDecomposePreview:
         assert arrays["max"][0].max() == row.max() and arrays["min"][0].min() == row.min()
         np.testing.assert_array_equal(arrays["spikes"], run.spikes[0])
         np.testing.assert_array_equal(arrays["spike_values"], row[run.spikes[0]])
-        _, csr = _unpack_frame_response(client.get(f"{API}/spikes", params={"token": token}))
-        assert csr["spike_offsets"][-1] == sum(s.size for s in run.spikes)
 
 
 # ── /edit/session ────────────────────────────────────────────────────────────
@@ -770,31 +768,6 @@ class TestEditSave:
             assert "pulse_trains" not in z.files  # spikes only: no IPTs were sent
             assert z["artifact_intervals"].tolist() == [[10, 20], [30, 40]]
 
-    def test_frame_body_saves_the_sent_pulse_trains_of_kept_mus(
-        self, client: TestClient, decomp_npz: Path
-    ) -> None:
-        pulse = np.random.default_rng(2).random((3, N_SAMPLES)).astype(np.float32)
-        meta = {
-            "distimes": [[1000, 1400], [1200], [3000]],
-            "flagged": [False, True, False],
-            "remove_duplicates": False,
-            "total_samples": N_SAMPLES,
-            "fsamp": FSAMP,
-            "grid_names": [GRID],
-            "project": "smoke",
-            "file_label": decomp_npz.name,
-        }
-        data = _ok(
-            client.post(
-                f"{API}/edit/save",
-                content=bytes(pack_frame(meta, {"pulse_trains": (pulse, "f4")})),
-                headers={"content-type": FRAME_MEDIA_TYPE},
-            )
-        )
-        assert data["kept_indices"] == [0, 2]
-        with np.load(data["path"]) as z:
-            np.testing.assert_array_equal(z["pulse_trains"], pulse[[0, 2]])
-
     def test_run_save_uses_the_stored_run_result(
         self, client: TestClient, mu_run: dict[str, Any]
     ) -> None:
@@ -869,44 +842,6 @@ class TestEditSave:
         assert err["detail"]["field"] == "run_result_token"
         after = set(derivatives.rglob("*.npz")) if derivatives.exists() else set()
         assert after == before
-
-    def test_mismatched_pulse_trains_save_spikes_only(
-        self, client: TestClient, decomp_npz: Path
-    ) -> None:
-        meta = {
-            "distimes": [[1000, 1400]],
-            "total_samples": N_SAMPLES,
-            "fsamp": FSAMP,
-            "project": "smoke",
-            "file_label": decomp_npz.name,
-        }
-        data = _ok(
-            client.post(
-                f"{API}/edit/save",
-                content=bytes(pack_frame(meta, {"pulse_trains": (np.ones((1, 10)), "f4")})),
-                headers={"content-type": FRAME_MEDIA_TYPE},
-            )
-        )
-        with np.load(data["path"]) as z:
-            assert "pulse_trains" not in z.files
-            assert z["spike_times"].tolist() == [1000, 1400]
-        loaded = load_decomposition_file(data["path"])
-        assert loaded.pulse_trains_full.shape == (1, N_SAMPLES)
-        assert np.flatnonzero(loaded.pulse_trains_full[0]).tolist() == [1000, 1400]
-
-    def test_malformed_frame_is_400(self, client: TestClient) -> None:
-        resp = client.post(
-            f"{API}/edit/save", content=b"MUB1junk", headers={"content-type": FRAME_MEDIA_TYPE}
-        )
-        assert "Invalid frame" in _err(resp, 400)["message"]
-
-    def test_frame_without_total_samples_is_422(self, client: TestClient) -> None:
-        resp = client.post(
-            f"{API}/edit/save",
-            content=bytes(pack_frame({"distimes": [[1]]}, {})),
-            headers={"content-type": FRAME_MEDIA_TYPE},
-        )
-        _err(resp, 422, "validation_error")
 
     def test_missing_total_samples_is_422(self, client: TestClient) -> None:
         _err(client.post(f"{API}/edit/save", json={"distimes": [[1]]}), 422, "validation_error")

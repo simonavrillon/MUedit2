@@ -28,6 +28,7 @@ import {
   duplicateMu as duplicateMuFeature,
   undoEdit as undoEditFeature,
   restoreEditSession as restoreEditSessionFeature,
+  prepareEditGrid,
 } from "../services/editing-service.js";
 import {
   setEditMode as setEditModeAction,
@@ -279,6 +280,7 @@ export function setupEditEvents(app) {
     const idx = Number(els.editMuGridSelect.value) || 0;
     setEditCurrentMuGrid(state, idx, { resetView: true });
     renderEditExplorer();
+    prepareEditGrid(app, idx);
     els.editMuGridSelect.blur();
   });
 

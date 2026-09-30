@@ -1,9 +1,8 @@
-"""The body of a decomposition run, executed in a worker process (or a thread as a fallback)."""
+"""The body of a decomposition run, executed in a spawned worker process."""
 
 from __future__ import annotations
 
 import contextlib
-import threading
 import traceback
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -19,11 +18,6 @@ from muedit.models import SignalImport
 
 #: Stage of the message carrying the finished run, which the server turns into ``done``.
 RESULT_STAGE = "result"
-CANCELLED_EVENT: dict[str, Any] = {
-    "stage": "cancelled",
-    "pct": 0,
-    "message": "Decomposition cancelled",
-}
 
 Send = Callable[[dict[str, Any]], None]
 
@@ -47,18 +41,10 @@ class RunJob:
     artifact_regions: list[tuple[int, int]] | None = None
 
 
-class RunCancelled(Exception):
-    """Stops a thread run at its next progress event."""
-
-
-def execute(
-    job: RunJob, store: ArrayStore, send: Send, cancelled: threading.Event | None = None
-) -> None:
-    """Run ``job`` into ``store``: progress events, then one result, error or cancelled message."""
+def execute(job: RunJob, store: ArrayStore, send: Send) -> None:
+    """Run ``job`` into ``store``: progress events, then one result or error message."""
 
     def progress(stage: str, payload: dict[str, Any]) -> None:
-        if cancelled is not None and cancelled.is_set():
-            raise RunCancelled
         if stage == "done":
             return
         event = {"stage": stage}
@@ -85,9 +71,6 @@ def execute(
             store=store,
         )
         summary = make_json_safe(summarize_result(result, save_path, job.persist_output))
-    except RunCancelled:
-        send(dict(CANCELLED_EVENT))
-        return
     except Exception as exc:  # noqa: BLE001
         send(
             {

@@ -1,4 +1,4 @@
-"""Decomposition .npz schema v2, the legacy v1 reader and one-pass loading (plan stage 13)."""
+"""Decomposition .npz schema v2, the legacy v1 reader and one-pass loading."""
 
 from __future__ import annotations
 

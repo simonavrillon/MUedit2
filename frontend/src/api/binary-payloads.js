@@ -26,7 +26,6 @@ function hasMagic(buffer, magic) {
   return true;
 }
 
-export const FRAME_MEDIA_TYPE = "application/x-muedit-frame";
 const FRAME_MAGIC = "MUB1";
 const FRAME_FORMAT = "mub1";
 const FRAME_ALIGN = 8;
