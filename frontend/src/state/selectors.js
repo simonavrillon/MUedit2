@@ -54,14 +54,6 @@ function muIndicesForGrid(distimes, mapping, gridIdx) {
  * @param {State} state
  * @param {number} gridIdx
  */
-export function getRunMuIndicesForGrid(state, gridIdx) {
-  return muIndicesForGrid(state.muDistimes, state.muGridIndex, gridIdx);
-}
-
-/**
- * @param {State} state
- * @param {number} gridIdx
- */
 export function getEditMuIndicesForGrid(state, gridIdx) {
   return muIndicesForGrid(state.edit.distimes, state.edit.muGridIndex, gridIdx);
 }

@@ -1,4 +1,5 @@
 import { renderActiveStage } from "../stages/lifecycle.js";
+import { positionStepIndicator } from "./navigation.js";
 
 /** @typedef {import("../context.js").App} App */
 
@@ -49,10 +50,18 @@ export function ensureSettingsToggleIcon(els) {
   svg.setAttribute("width", "24");
   svg.setAttribute("height", "24");
 
+  const rect = document.createElementNS(ns, "rect");
+  rect.setAttribute("x", "3.75");
+  rect.setAttribute("y", "3.75");
+  rect.setAttribute("width", "16.5");
+  rect.setAttribute("height", "16.5");
+  rect.setAttribute("rx", "2");
+  svg.appendChild(rect);
+
   const path = document.createElementNS(ns, "path");
   path.setAttribute("stroke-linecap", "round");
   path.setAttribute("stroke-linejoin", "round");
-  path.setAttribute("d", "M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5");
+  path.setAttribute("d", "M9.75 3.75v16.5");
   svg.appendChild(path);
   els.settingsToggleBtn.appendChild(svg);
 }
@@ -100,9 +109,6 @@ export function initLayoutResizePolicy(app) {
     els.stageQc,
     els.stageRun,
     els.stageEdit,
-    ...document.querySelectorAll(
-      ".stage-run .run-kpis, .stage-run .progress-row, .stage-run .chart-card, .stage-run .mu-controls",
-    ),
     document.querySelector(".edit-top-row"),
     ...document.querySelectorAll(".stage-edit .edit-full"),
     els.settingsPanel,
@@ -116,9 +122,11 @@ export function initLayoutResizePolicy(app) {
   }
 
   window.addEventListener("resize", () => {
+    positionStepIndicator(els);
     scheduleLayoutRerender(0);
   });
   window.addEventListener("orientationchange", () => {
+    positionStepIndicator(els);
     scheduleLayoutRerender(0);
   });
 }

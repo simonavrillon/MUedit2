@@ -39,7 +39,6 @@ LIVE_ENDPOINTS: list[tuple[str, str]] = [
     ("POST", "/qc/auto"),
     ("POST", "/decompose_stream"),
     ("POST", "/decompose/cancel"),
-    ("GET", "/decompose_preview/{token}"),
     ("GET", "/series/pulse"),
     ("POST", "/edit/session/open"),
     ("GET", "/edit/session"),
@@ -329,7 +328,6 @@ class TestSessions:
         assert budget["limit_bytes"] == cache.BUDGET.limit_bytes
         assert set(budget["caches"]) == {
             "uploads",
-            "decompose_previews",
             "run_results",
             "edit_sessions",
         }
@@ -526,7 +524,7 @@ class TestQcAuto:
         assert err["detail"]["field"] == "upload_token"
 
 
-# ── /decompose_stream, /decompose_preview/{token} ────────────────────────────
+# ── /decompose_stream ────────────────────────────────────────────────────────
 
 
 class TestDecomposeStream:
@@ -552,8 +550,7 @@ class TestDecomposeStream:
         } <= set(summary)
         assert summary["parameters"]["niter"] == 5
         preview = done["preview"]
-        assert isinstance(preview["preview_binary_token"], str)
-        assert "pulse_trains_full" not in preview
+        assert not {"pulse_trains_full", "distime_all"} & set(preview)
         assert "run_result_token" not in preview  # no motor units, nothing to save
         # Whole-recording series come from the upload's /series/* endpoints, never from here.
         dropped = {"mean_abs", "grid_mean_abs", "auxiliary", "pulse_trains", "pulse_trains_all"}
@@ -566,21 +563,12 @@ class TestDecomposeStream:
         assert pulse.dtype == np.float32
         assert pulse.shape == (mu_run["summary"]["mu_count"], mu_run["preview"]["total_samples"])
 
-    def test_json_preview_when_binary_disabled(self, client: TestClient, upload_token: str) -> None:
-        resp = client.post(
-            f"{API}/decompose_stream",
-            data={
-                "upload_token": upload_token,
-                "params": json.dumps({"niter": 2, "nbextchan": 200}),
-                "full_preview": "true",
-            },
-            headers={"x-muedit-binary": "0"},
-        )
-        done = json.loads(resp.text.splitlines()[-1])
-        assert done["stage"] == "done"
-        assert "preview_binary_token" not in done["preview"]
-        assert "pulse_trains_full" not in done["preview"]  # stays on the server here too
-        assert isinstance(done["preview"]["distime_all"], list)
+    def test_discharge_times_stay_on_the_server(self, mu_run: dict[str, Any]) -> None:
+        preview = mu_run["preview"]
+        assert not {"distime_all", "pulse_trains_full", "preview_binary_token"} & set(preview)
+        run = cache._get_run_result_entry(preview["run_result_token"])
+        assert run is not None
+        assert len(run.spikes) == mu_run["summary"]["mu_count"]
 
     def test_artifact_regions_accepted(self, client: TestClient, upload_token: str) -> None:
         resp = client.post(
@@ -628,25 +616,7 @@ class TestDecomposeStream:
         assert expected.is_file()
 
 
-class TestDecomposePreview:
-    def test_binary_payload_is_served_once(
-        self, client: TestClient, mu_run: dict[str, Any]
-    ) -> None:
-        token = mu_run["preview"]["preview_binary_token"]
-        meta, arrays = _unpack_frame_response(client.get(f"{API}/decompose_preview/{token}"))
-        # Pulse trains stay on the server; discharge times come as CSR arrays.
-        assert set(arrays) == {"spikes", "spike_offsets"}
-        assert not {"distime_all", "distime", "pulse_trains_full"} & set(meta)
-        run = cache._get_run_result_entry(mu_run["preview"]["run_result_token"])
-        assert run is not None
-        rows = unpack_csr(arrays["spikes"], arrays["spike_offsets"])
-        assert [r.tolist() for r in rows] == [s.tolist() for s in run.spikes]
-        assert len(rows) == mu_run["summary"]["mu_count"]
-        _err(client.get(f"{API}/decompose_preview/{token}"), 404)
-
-    def test_unknown_token_is_404(self, client: TestClient) -> None:
-        _err(client.get(f"{API}/decompose_preview/not-a-token"), 404)
-
+class TestRunPulseTrains:
     def test_the_explorer_reads_the_runs_pulse_trains(
         self, client: TestClient, mu_run: dict[str, Any]
     ) -> None:

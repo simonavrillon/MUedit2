@@ -79,26 +79,6 @@ export function setEditCurrentMu(state, idx, { resetView = true } = {}) {
 
 /**
  * @param {State} state
- * @param {number} idx
- * @param {{ resetView?: boolean }} [options]
- */
-export function setRunCurrentMuGrid(state, idx, { resetView = true } = {}) {
-  state.currentMuGrid = Math.max(0, idx || 0);
-  if (resetView) state.runView = null;
-}
-
-/**
- * @param {State} state
- * @param {number} idx
- * @param {{ resetView?: boolean }} [options]
- */
-export function setRunCurrentMu(state, idx, { resetView = true } = {}) {
-  state.currentMu = Number.isNaN(idx) ? 0 : idx;
-  if (resetView) state.runView = null;
-}
-
-/**
- * @param {State} state
  * @param {string | null | undefined} value
  */
 export function setEditProject(state, value) {
@@ -119,14 +99,6 @@ export function setMuscle(state, muscle) {
  */
 export function setEditView(state, view) {
   state.edit.view = view;
-}
-
-/**
- * @param {State} state
- * @param {Span | null} view
- */
-export function setRunView(state, view) {
-  state.runView = view;
 }
 
 /**
@@ -265,21 +237,10 @@ export function setAuxData(state, auxiliary, auxiliaryNames) {
 
 /**
  * @param {State} state
- * @param {Int32Array[] | null | undefined} distimes
- * @param {number[] | null | undefined} gridIndex
+ * @param {import("../decomp/live.js").RunLive | null} live
  */
-export function setMuPreviewData(state, distimes, gridIndex) {
-  state.muDistimes = Array.isArray(distimes) ? distimes : [];
-  state.muGridIndex = Array.isArray(gridIndex) ? gridIndex : [];
-  state.runPulseView = null;
-}
-
-/**
- * @param {State} state
- * @param {PulseView | null} view
- */
-export function setRunPulseView(state, view) {
-  state.runPulseView = view || null;
+export function setRunLive(state, live) {
+  state.runLive = live;
 }
 
 /**

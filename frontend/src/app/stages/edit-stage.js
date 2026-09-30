@@ -206,13 +206,13 @@ export function createEditStageService(app) {
   /** @type {EditStage["saveEditedFile"]} */
   const saveEditedFile = () => saveEditedFileFeature(app);
   /** @type {EditStage["loadDecompositionForEdit"]} */
-  const loadDecompositionForEdit = (file, absolutePath) =>
-    loadDecompositionForEditFeature(app, file, absolutePath);
+  const loadDecompositionForEdit = (file, absolutePath, options) =>
+    loadDecompositionForEditFeature(app, file, absolutePath, options);
 
   /** @type {EditStage["loadDecompositionForEditByPath"]} */
-  function loadDecompositionForEditByPath(path) {
+  function loadDecompositionForEditByPath(path, options) {
     const name = path.split("/").pop()?.split("\\").pop() || path;
-    return loadDecompositionForEdit({ name }, path);
+    return loadDecompositionForEdit({ name }, path, options);
   }
 
   return {

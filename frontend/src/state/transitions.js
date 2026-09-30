@@ -4,6 +4,8 @@ import {
   setChannelTraces,
   setFile,
   setQcWindowLoading,
+  setRunLive,
+  setRunResultToken,
   setUploadToken,
 } from "./actions.js";
 
@@ -25,6 +27,11 @@ export function beginRawPreviewTransition(state, fileLike) {
   setChannelTraces(state, []);
   setQcWindowLoading(state, {});
   state.discardMasks = [];
+  // The previous file's run no longer applies; one still streaming keeps its page.
+  if (!state.isRunning) {
+    setRunLive(state, null);
+    setRunResultToken(state, "");
+  }
 }
 
 /**

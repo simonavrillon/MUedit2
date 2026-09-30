@@ -5,7 +5,6 @@ import assert from "node:assert/strict";
 
 import {
   csrRows,
-  decodeDecomposePreviewPayload,
   decodeEditSessionFrame,
   decodeFrame,
   decodePulseFrame,
@@ -213,30 +212,6 @@ describe("decodePulseFrame", () => {
     const view = decodePulseFrame(buf);
     assert.ok(view.row instanceof Float32Array);
     assert.deepEqual(Array.from(view.row), [1, 2, 3]);
-  });
-});
-
-describe("decodeDecomposePreviewPayload", () => {
-  test("rebuilds each MU's discharge times from CSR", () => {
-    const { values, offsets } = csr([[1, 2], [5]]);
-    const buf = encodeFrame(
-      { sil: [0.91, 0.95] },
-      { spikes: values, spike_offsets: offsets },
-    );
-    const out = decodeDecomposePreviewPayload(buf);
-    assert.deepEqual(out.sil, [0.91, 0.95]);
-    assert.deepEqual(
-      out.distime_all.map((r) => Array.from(r)),
-      [[1, 2], [5]],
-    );
-  });
-
-  test("falls back to JSON without magic or header", () => {
-    const payload = { distime_all: [[1]] };
-    assert.deepEqual(
-      decodeDecomposePreviewPayload(jsonBuffer(payload)),
-      payload,
-    );
   });
 });
 

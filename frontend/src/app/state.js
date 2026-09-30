@@ -91,15 +91,10 @@ import { GRID_COLORS } from "../config.js";
  * @property {string[]} muscle
  * @property {StageKey} currentStage
  * @property {number} currentGrid
- * @property {Int32Array[]} muDistimes
- * @property {PulseView | null} runPulseView The run explorer's window, from the run's pulse trains.
- * @property {number[]} muGridIndex
- * @property {number} currentMuGrid
- * @property {number} currentMu
+ * @property {import("../decomp/live.js").RunLive | null} runLive The latest decomposition, as the run page shows it.
  * @property {boolean} runDownloadInFlight
  * @property {string} lastRunDownloadKey
  * @property {string} runResultToken
- * @property {Span | null} runView
  * @property {Span | null} roiDraft
  * @property {Span[]} artifactRegions
  * @property {Span | null} artifactDraft
@@ -169,15 +164,10 @@ export const state = {
   muscle: [],
   currentStage: "qc",
   currentGrid: 0,
-  muDistimes: [],
-  runPulseView: null,
-  muGridIndex: [],
-  currentMuGrid: 0,
-  currentMu: 0,
+  runLive: null,
   runDownloadInFlight: false,
   lastRunDownloadKey: "",
   runResultToken: "",
-  runView: null,
   roiDraft: null,
   artifactRegions: [],
   artifactDraft: null,

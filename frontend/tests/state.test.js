@@ -326,9 +326,9 @@ describe("setFsamp", () => {
 
 describe("selectors", () => {
   test("MU indices without a grid mapping belong to every grid", () => {
-    state.muDistimes = [ints(1), ints(2), ints(3)];
-    state.muGridIndex = [];
-    assert.deepEqual(selectors.getRunMuIndicesForGrid(state, 4), [0, 1, 2]);
+    state.edit.distimes = [ints(1), ints(2), ints(3)];
+    state.edit.muGridIndex = [];
+    assert.deepEqual(selectors.getEditMuIndicesForGrid(state, 4), [0, 1, 2]);
   });
 
   test("MU indices filter by grid, matching numeric strings", () => {
@@ -336,12 +336,6 @@ describe("selectors", () => {
     state.edit.muGridIndex = [0, "1", 1, 0];
     assert.deepEqual(selectors.getEditMuIndicesForGrid(state, 1), [1, 2]);
     assert.deepEqual(selectors.getEditMuIndicesForGrid(state, "0"), [0, 3]);
-  });
-
-  test("no MUs means no MU indices", () => {
-    state.muDistimes = [];
-    state.muGridIndex = [0, 1];
-    assert.deepEqual(selectors.getRunMuIndicesForGrid(state, 0), []);
   });
 
   test("ROI bounds use the fallback when not finite", () => {

@@ -5,14 +5,13 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, Form, Request
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import StreamingResponse
 
 from muedit.api.common import bids_root_for, request_session
 from muedit.api.contracts import success_payload
 from muedit.api.services.decompose_service import (
     cancel_decomposition,
     decomposition_event_stream,
-    fetch_decompose_preview_binary,
     parse_stream_options,
     start_decomposition,
 )
@@ -71,7 +70,6 @@ async def decompose_stream(
             "include_full_preview": full_preview,
             "artifact_regions": artifact_region_list,
         },
-        binary_preview=request.headers.get("x-muedit-binary", "1") != "0",
         session=session,
     )
     return StreamingResponse(
@@ -84,9 +82,3 @@ async def decompose_stream(
 def decompose_cancel(session: str = Depends(request_session)) -> dict[str, Any]:
     """Stop the run this session started; ``cancelled`` is false when it has none."""
     return success_payload({"cancelled": cancel_decomposition(session)})
-
-
-@router.get("/decompose_preview/{token}")
-async def decompose_preview_binary(token: str) -> Response:
-    """Fetch a cached binary preview blob referenced by stream token."""
-    return fetch_decompose_preview_binary(token)

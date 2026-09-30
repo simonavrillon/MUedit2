@@ -1,7 +1,7 @@
 /* ── Workspace & Layout── */
 
 .workspace {
-  padding: 14px;
+  padding: 14px 14px 14px 52px;
   position: relative;
   flex: 1;
   min-height: 0;
@@ -15,10 +15,10 @@
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   gap: 12px;
-  padding: 8px 14px 10px;
-  border-bottom: 1px solid var(--border);
+  padding: 8px 14px 4px;
   border-radius: 0;
-  margin: 10px 14px 0;
+  /* Equal sides clear the settings rail and keep the stepper on the window's centre. */
+  margin: 10px 52px 0;
 }
 
 .status-pill {
@@ -48,18 +48,16 @@
 }
 
 .settings-toggle-btn {
-  position: absolute;
-  left: 14px;
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
+  width: 100%;
   color: var(--text);
   border-radius: 0;
-  width: auto;
-  height: auto;
-  padding: 2px;
+  padding: 6px 0;
   line-height: 0;
   box-shadow: none;
+  border-bottom: 1px solid var(--border);
 }
 
 .settings-toggle-btn:hover {
@@ -70,24 +68,9 @@
   color: var(--accent);
 }
 
-.hamburger-icon {
-  display: inline-flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 4px;
-}
-
-.hamburger-icon span {
-  display: block;
-  width: 16px;
-  height: 2px;
-  border-radius: 2px;
-  background: currentColor;
-}
-
 .settings-toggle-btn svg {
-  width: 26px;
-  height: 26px;
+  width: 20px;
+  height: 20px;
 }
 
 .status-pill[data-tone="error"] {
@@ -106,9 +89,55 @@
   justify-content: center;
   gap: 6px;
   flex-wrap: wrap;
+  position: relative;
+  min-height: 40px;
+  padding: 3px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  transition: border-color 0.2s ease;
+}
+
+.workflow-stepper:has(.step-chip.active[data-step="import"]) {
+  border-color: var(--mu-1);
+}
+
+.workflow-stepper:has(.step-chip.active[data-step="qc"]) {
+  border-color: var(--mu-2);
+}
+
+.workflow-stepper:has(.step-chip.active[data-step="run"]) {
+  border-color: var(--mu-3);
+}
+
+.workflow-stepper:has(.step-chip.active[data-step="edit"]) {
+  border-color: var(--mu-4);
+}
+
+.step-indicator {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  background: var(--bg);
+  border-radius: calc(var(--radius-sm) - 1px);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.step-indicator.ready {
+  opacity: 1;
+  transition:
+    left 0.2s ease,
+    top 0.2s ease,
+    width 0.2s ease,
+    height 0.2s ease;
 }
 
 .step-chip {
+  position: relative;
+  z-index: 1;
   flex: 0 0 auto;
   display: inline-flex;
   flex-direction: column;
@@ -126,16 +155,24 @@
   cursor: pointer;
   transition:
     color 0.15s ease,
-    opacity 0.15s ease,
-    transform 0.15s ease,
-    font-size 0.15s ease;
+    opacity 0.15s ease;
   appearance: none;
   -webkit-appearance: none;
 }
 
 .step-chip-label {
+  display: inline-grid;
   font-size: var(--fs-md);
   line-height: 1.05;
+}
+
+/* Reserve the bold label's width so the active chip never resizes the bar. */
+.step-chip-label::after {
+  content: attr(data-label);
+  height: 0;
+  font-weight: var(--fw-bold);
+  visibility: hidden;
+  overflow: hidden;
 }
 
 .step-chip:hover {
@@ -172,11 +209,6 @@
 .step-chip.active {
   opacity: 1;
   font-weight: var(--fw-bold);
-  transform: translateY(-1px);
-}
-
-.step-chip.active .step-chip-label {
-  font-size: var(--fs-xl);
 }
 
 .step-chip.complete {
@@ -219,15 +251,16 @@
   position: fixed;
   top: 0;
   left: 0;
-  width: min(380px, 90vw);
+  width: 52px;
   height: 100dvh;
-  padding: 14px 12px 12px;
+  padding: 14px 16px 12px;
   background: var(--panel);
   border-right: 1px solid var(--border);
-  overflow-y: auto;
-  transform: translateX(-100%);
-  transition: transform 0.2s ease;
+  border-radius: 0;
+  overflow: hidden;
+  transition: width 0.2s ease;
   z-index: 21;
+  gap: 0;
   font-weight: var(--fw-light);
 }
 
@@ -243,28 +276,51 @@
 }
 
 .workspace.settings-open .settings-panel {
-  transform: translateX(0);
+  width: min(290px, 90vw);
+  overflow-y: auto;
+}
+
+/* Contracted rail: section icons only */
+.workspace:not(.settings-open) .settings-panel .section-header-main span {
+  display: none;
+}
+
+.workspace:not(.settings-open) .settings-panel .section-header::after {
+  content: none;
+}
+
+.workspace:not(.settings-open) .settings-panel .section-content {
+  display: none;
 }
 
 /* ── Settings Panel Density ── */
 
 .settings-panel .panel-section {
-  padding: 8px 0 10px;
+  padding: 6px 0;
 }
 
 .settings-panel .section-header {
   font-size: var(--fs-xs);
   font-weight: var(--fw-regular);
   letter-spacing: 0.08em;
-  margin-bottom: 8px;
+  margin-bottom: 0;
+  height: 20px;
 }
 
 .settings-panel .section-header::after {
   font-size: var(--fs-sm);
+  line-height: 1;
 }
 
 .settings-panel .section-content {
-  gap: 8px;
+  gap: 5px;
+  margin-top: 5px;
+}
+
+#bidsMuscleContainer {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
 }
 
 .settings-panel .field-label,
@@ -275,7 +331,8 @@
 }
 
 .settings-panel .form-row {
-  gap: 8px;
+  grid-template-columns: 110px 140px;
+  gap: 5px;
 }
 
 .settings-panel .form-row input,
@@ -287,12 +344,8 @@
 }
 
 .settings-panel .form-row select {
-  background-position:
-    calc(100% - 15px) calc(50% - 3px),
-    calc(100% - 10px) calc(50% - 3px);
-  background-size:
-    7px 7px,
-    7px 7px;
+  background-position: calc(100% - 13px) center;
+  background-size: 10px 5px;
   padding-right: 24px;
 }
 
@@ -344,9 +397,9 @@
 }
 
 .section-header-main svg {
-  width: 16px;
-  height: 16px;
-  flex: 0 0 16px;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
 }
 
 .section-header::after {
@@ -440,15 +493,13 @@
 }
 
 .form-row select {
-  background-image:
-    linear-gradient(45deg, transparent 50%, var(--muted) 50%),
-    linear-gradient(135deg, var(--muted) 50%, transparent 50%);
-  background-position:
-    calc(100% - 18px) calc(50% - 3px),
-    calc(100% - 13px) calc(50% - 3px);
-  background-size:
-    8px 8px,
-    8px 8px;
+  background-image: conic-gradient(
+    from 315deg at 50% 100%,
+    var(--muted) 0 90deg,
+    transparent 90deg
+  );
+  background-position: calc(100% - 18px) center;
+  background-size: 10px 5px;
   background-repeat: no-repeat;
   padding-right: 28px;
   background-color: var(--surface);
@@ -552,58 +603,11 @@
   overflow: auto;
 }
 
-/* ── Progress ── */
-
-.progress-row {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.progress-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.cancel-run-btn {
-  width: auto;
-  padding: 4px 14px;
-}
-
-.cancel-run-btn[hidden] {
-  display: none;
-}
-
-.progress-text {
-  color: var(--muted);
-  font-size: var(--fs-md);
-  font-weight: var(--fw-light);
-}
-
-.progress-track {
-  width: 100%;
-  height: 8px;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  overflow: hidden;
-}
-
-.progress-bar {
-  height: 100%;
-  background: var(--accent-2);
-  width: 0%;
-  transition: width 0.2s ease;
-}
-
 /* ── Chart Cards ── */
 
 .chart-card {
   border-radius: 0;
   padding: 4px 0 12px;
-  border-bottom: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   min-height: 0;

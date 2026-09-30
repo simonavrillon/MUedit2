@@ -47,7 +47,7 @@ export const POSTPROCESS_MODES = {
   },
   "full-trace": {
     label: "Full trace",
-    hint: "Filters dewhitened and applied across the whole recording, so units extend beyond the ROI.",
+    hint: "Filters applied batch by batch across the whole recording, without adaptation. Units extend beyond the ROI.",
     flags: { use_adaptive: 0, full_trace: 1 },
   },
   adaptive: {

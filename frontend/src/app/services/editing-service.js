@@ -439,8 +439,9 @@ function resumePosition(state) {
  * @param {App} app
  * @param {FileRef} file
  * @param {EditSessionFrame} frame
+ * @param {{ open?: boolean }} [options] `open: false` loads it without leaving the current page.
  */
-function showEditSession(app, file, frame) {
+function showEditSession(app, file, frame, { open = true } = {}) {
   const { state, els, applySessionInfoFromDecomposition } = app;
   const { meta } = frame;
   const resolvedGridNames = normalizeGridNames(meta.grid_names, {
@@ -473,11 +474,15 @@ function showEditSession(app, file, frame) {
   clearAllEditSelections(state);
   app.refreshEditModeButtons();
   if (els.editSaveBtn) els.editSaveBtn.disabled = false;
-  app.showWorkspace({ keepLandingVisible: true });
-  app.switchStage("edit");
   app.renderBidsMuscleFields?.();
-  app.renderEditExplorer();
-  if (els.landing) els.landing.classList.add("hidden");
+  if (open) {
+    app.showWorkspace({ keepLandingVisible: true });
+    app.switchStage("edit");
+    app.renderEditExplorer();
+    if (els.landing) els.landing.classList.add("hidden");
+  } else {
+    app.updateStepAvailability();
+  }
   prepareEditGrid(app, state.edit.currentMuGrid);
 }
 
@@ -501,8 +506,14 @@ function confirmRecovery(count) {
  * @param {App} app
  * @param {FileRef} file
  * @param {string} filepath
+ * @param {{ open?: boolean }} [options] `open: false` loads it without leaving the current page.
  */
-export async function loadDecompositionForEdit(app, file, filepath) {
+export async function loadDecompositionForEdit(
+  app,
+  file,
+  filepath,
+  options = {},
+) {
   const { state, api, setUploadLoading, setEditStatus, resetEditState } = app;
 
   if (!filepath) return;
@@ -519,7 +530,7 @@ export async function loadDecompositionForEdit(app, file, filepath) {
       frame = await api.editRecover(token, confirmRecovery(recoverable));
       recovered = Number(frame.meta.recovered_edits) || 0;
     }
-    showEditSession(app, file, frame);
+    showEditSession(app, file, frame, options);
     setEditStatus(
       recovered
         ? `Loaded, with ${recovered} unsaved edit${recovered !== 1 ? "s" : ""} restored.`

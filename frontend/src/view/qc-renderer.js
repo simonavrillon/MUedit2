@@ -9,6 +9,7 @@ import {
   strokeSeries,
 } from "./plots.js";
 import { gridDimensionsFor } from "../io/grid.js";
+import { pickRoiSlot } from "../signal/qc.js";
 import { getCurrentGrid, roiStart, roiEnd } from "../state/selectors.js";
 import {
   addArtifactRegion,
@@ -76,7 +77,7 @@ export function renderArtifactControls(els, state) {
 
 /** @param {App} app */
 export function refreshVisuals(app) {
-  const { state, els, renderAuxiliaryChannels, renderMuExplorer } = app;
+  const { state, els, renderAuxiliaryChannels } = app;
   const selections = buildSelections(state);
   renderArtifactControls(els, state);
   drawGridOverlay(
@@ -87,7 +88,6 @@ export function refreshVisuals(app) {
     state.seriesLength,
   );
   renderAuxiliaryChannels();
-  renderMuExplorer();
 }
 
 /**
@@ -101,7 +101,7 @@ export function enableRoiSelection(app, canvasId) {
     syncRois,
     refreshVisuals,
     requestQcGridWindow,
-    updateProgress,
+    setStatus,
   } = app;
   const canvas = els[canvasId];
   if (!canvas || canvas.dataset.roiBound === "1") return;
@@ -127,19 +127,15 @@ export function enableRoiSelection(app, canvasId) {
     const { startSample, endSample } = toSamples(startX, endX);
     const nwin = Number(els.nwindows?.value) || 1;
     syncRois(nwin);
-    let idx = 0;
-    let best = Number.MAX_SAFE_INTEGER;
-    state.rois.forEach((r, i) => {
-      const dist = Math.abs(r.start - startSample);
-      if (dist < best) {
-        best = dist;
-        idx = i;
-      }
-    });
-    setRoiForIndex(state, idx, {
+    const span = {
       start: startSample,
       end: Math.max(startSample + 1, endSample),
-    });
+    };
+    setRoiForIndex(
+      state,
+      pickRoiSlot(state.rois, span, state.seriesLength),
+      span,
+    );
     setRoiDraft(state, null);
     setChannelTraces(state, []);
     refreshVisuals();
@@ -148,8 +144,7 @@ export function enableRoiSelection(app, canvasId) {
       state.rois[0]?.start || 0,
       state.rois[0]?.end || state.seriesLength,
     );
-    updateProgress(
-      undefined,
+    setStatus(
       `ROI updated (${state.rois.length} window${state.rois.length > 1 ? "s" : ""})`,
     );
   };
@@ -165,10 +160,7 @@ export function enableRoiSelection(app, canvasId) {
     setArtifactMode(state, false);
     refreshVisuals();
     const n = state.artifactRegions.length;
-    updateProgress(
-      undefined,
-      `Artifact window added (${n} window${n > 1 ? "s" : ""})`,
-    );
+    setStatus(`Artifact window added (${n} window${n > 1 ? "s" : ""})`);
   };
 
   canvas.addEventListener("mousedown", (e) => {

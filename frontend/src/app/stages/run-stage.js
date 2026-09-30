@@ -4,29 +4,17 @@ import {
   runDecomposition as runDecompositionFeature,
   handleStreamMessage as handleStreamMessageFeature,
 } from "../../decomp/run.js";
+import { buildRunPlan } from "../../decomp/live.js";
 import {
-  buildRunMuDropdownModel as buildRunMuDropdownModelFeature,
-  buildRunMuExplorerModel as buildRunMuExplorerModelFeature,
-} from "../../decomp/explorer.js";
-import {
-  renderMuDropdowns as renderMuDropdownsController,
-  renderMuExplorer as renderMuExplorerController,
-} from "../../view/explorer.js";
-import {
-  setRunCurrentMu,
-  setRunCurrentMuGrid,
-  setRunPulseView,
-  setRunView,
-} from "../../state/actions.js";
-import { getRunMuIndicesForGrid } from "../../state/selectors.js";
+  renderRunStage as renderRunStageView,
+  renderRunTime,
+  updateRunDots as updateRunDotsView,
+} from "../../view/run-live.js";
 import {
   DEFAULT_POSTPROCESS_MODE,
   POSTPROCESS_MODES,
   buildDecomposeParams,
 } from "../../decomp/params.js";
-import { getCanvasPlotMetrics } from "../../view/plots.js";
-import { createViewFetcher } from "../services/view-fetcher.js";
-import { errorMessage } from "../services/error-service.js";
 
 /** @typedef {import("../context.js").App} App */
 /** @typedef {import("../context.js").RunStage} RunStage */
@@ -40,8 +28,9 @@ export function createRunStageService(app) {
 
   /** @type {RunStage["updateStartAvailability"]} */
   function updateStartAvailability() {
-    if (els.start) {
-      els.start.disabled = !state.file || state.isRunning;
+    const blocked = !state.file || state.isRunning;
+    for (const btn of [els.start, els.runStartBtn, els.runAgainBtn]) {
+      if (btn) btn.disabled = blocked;
     }
     if (els.cancelRun) {
       els.cancelRun.hidden = !state.isRunning;
@@ -64,78 +53,27 @@ export function createRunStageService(app) {
     });
   }
 
-  /** @type {RunStage["getMuIndicesForGrid"]} */
-  function getMuIndicesForGrid(gridIdx) {
-    return getRunMuIndicesForGrid(state, gridIdx);
-  }
-
-  /** @type {RunStage["renderMuDropdowns"]} */
-  function renderMuDropdowns() {
-    const model = buildRunMuDropdownModelFeature({
-      state,
-      getMuIndicesForGrid,
+  /** @type {RunStage["renderRunStage"]} */
+  function renderRunStage() {
+    const plan = state.runLive
+      ? []
+      : buildRunPlan(
+          state,
+          buildParams(),
+          els.postprocessMode?.value || DEFAULT_POSTPROCESS_MODE,
+        );
+    renderRunStageView(els, state.runLive, {
+      gridNames: state.gridNames || [],
+      plan,
+      now: Date.now(),
     });
-    const selectedGrid = model.selectedGrid ?? state.currentMuGrid ?? 0;
-    setRunCurrentMuGrid(state, selectedGrid, {
-      resetView: false,
-    });
-    const selectedMu = Number.isFinite(model.selectedMu)
-      ? model.selectedMu
-      : model.muOptions?.length
-        ? Number(model.muOptions[0].value)
-        : Number.isFinite(state.currentMu)
-          ? state.currentMu
-          : 0;
-    setRunCurrentMu(state, selectedMu, { resetView: false });
-    renderMuDropdownsController(els, model);
-  }
-
-  const pulseFetcher = createViewFetcher(
-    (params) => app.api.fetchPulse(params),
-    (view) => {
-      setRunPulseView(state, view);
-      if (state.currentStage === "run") renderMuExplorer();
-    },
-    (err) => app.setStatus(`Pulse train failed: ${errorMessage(err)}`, "error"),
-  );
-
-  /** @type {RunStage["renderMuExplorer"]} */
-  function renderMuExplorer() {
-    renderMuDropdowns();
-    const model = buildRunMuExplorerModelFeature({
-      state,
-      fsamp: state.fsamp,
-    });
-    if (model.nextView) {
-      setRunView(state, model.nextView);
-      model.view = model.nextView;
-    }
-    renderMuExplorerController(els, model);
-    const token = state.runResultToken;
-    const canvas = els.muPulseCanvas;
-    if (!token || !model.total || !model.view || !canvas) return;
-    const bins = Math.round(getCanvasPlotMetrics(canvas, true).plotWidth);
-    const { start, end } = model.view;
-    const shown = model.trace;
-    if (
-      shown &&
-      shown.start === start &&
-      shown.end === end &&
-      shown.bins === bins
-    ) {
-      return;
-    }
-    const params = { token, mu: model.muIdx, start, end, bins };
-    pulseFetcher.want(
-      `${token}:${model.muIdx}:${start}:${end}:${bins}`,
-      params,
-    );
   }
 
   return {
-    getMuIndicesForGrid,
-    renderMuDropdowns,
-    renderMuExplorer,
+    renderRunStage,
+    renderRunClock: () => renderRunTime(els, state.runLive, Date.now()),
+    updateRunDots: (change) =>
+      state.runLive && updateRunDotsView(els, state.runLive, change),
     autoSaveRunDecomposition: () => autoSaveRunDecompositionFeature(app),
     handleStreamMessage: (msg) => handleStreamMessageFeature(app, msg),
     runDecomposition: () => runDecompositionFeature(app),
@@ -160,14 +98,18 @@ export function setupRunEvents(app) {
     toggleConditional,
     updateStartAvailability,
     renderAuxiliaryChannels,
-    renderMuExplorer,
     runAutoQc,
     toggleArtifactMode,
     removeLastArtifact,
   } = app;
 
   els.start?.addEventListener("click", runDecomposition);
+  els.runStartBtn?.addEventListener("click", runDecomposition);
+  els.runAgainBtn?.addEventListener("click", runDecomposition);
   els.cancelRun?.addEventListener("click", cancelDecomposition);
+  els.runRetrySaveBtn?.addEventListener("click", () => {
+    void app.autoSaveRunDecomposition();
+  });
   els.qcAutoBtn?.addEventListener("click", runAutoQc);
   els.artifactAddBtn?.addEventListener("click", toggleArtifactMode);
   els.artifactRemoveBtn?.addEventListener("click", removeLastArtifact);
@@ -205,22 +147,15 @@ export function setupRunEvents(app) {
   );
   updateStartAvailability();
 
+  // Keep the plan shown before a run in step with the settings panel.
+  const refreshPlan = () => {
+    if (state.currentStage === "run" && !state.runLive) app.renderRunStage();
+  };
+  els.settingsPanel?.addEventListener("change", refreshPlan);
+  els.settingsPanel?.addEventListener("click", refreshPlan);
+
   els.auxSelector?.addEventListener("change", () => {
     renderAuxiliaryChannels();
     els.auxSelector.blur();
-  });
-
-  els.muGridSelect?.addEventListener("change", () => {
-    const idx = Number(els.muGridSelect.value) || 0;
-    setRunCurrentMuGrid(state, idx, { resetView: true });
-    renderMuExplorer();
-    els.muGridSelect.blur();
-  });
-
-  els.muSelect?.addEventListener("change", () => {
-    const idx = Number(els.muSelect.value);
-    setRunCurrentMu(state, idx, { resetView: true });
-    renderMuExplorer();
-    els.muSelect.blur();
   });
 }

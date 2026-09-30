@@ -52,7 +52,6 @@
  * @typedef {object} UiService
  * @property {(text: string, tone?: Tone) => void} setStatus
  * @property {(text: string, tone?: Tone) => void} setEditStatus
- * @property {(pct?: number, message?: string, stage?: string) => void} updateProgress
  * @property {(target: WorkflowStep) => void} updateWorkflowStepper
  * @property {() => void} updateStepAvailability
  * @property {(open: boolean) => void} setSettingsOpen
@@ -111,9 +110,9 @@
 
 /**
  * @typedef {object} RunStage
- * @property {(gridIdx: number) => number[]} getMuIndicesForGrid
- * @property {() => void} renderMuDropdowns
- * @property {() => void} renderMuExplorer
+ * @property {() => void} renderRunStage Draw the run page for the current run, or the plan without one.
+ * @property {() => void} renderRunClock
+ * @property {(change: { row: number, from: number, to: number }) => void} updateRunDots
  * @property {() => Promise<void>} autoSaveRunDecomposition
  * @property {(msg: JsonObject) => void} handleStreamMessage
  * @property {() => Promise<void>} runDecomposition
@@ -152,8 +151,8 @@
  * @property {() => Promise<void>} duplicateMu
  * @property {() => Promise<void>} removeDuplicateMus
  * @property {() => Promise<void>} saveEditedFile
- * @property {(file: FileRef, path: string) => Promise<void>} loadDecompositionForEdit
- * @property {(path: string) => Promise<void>} loadDecompositionForEditByPath
+ * @property {(file: FileRef, path: string, options?: { open?: boolean }) => Promise<void>} loadDecompositionForEdit
+ * @property {(path: string, options?: { open?: boolean }) => Promise<void>} loadDecompositionForEditByPath Load a decomposition into Edit; `open: false` stays on the current page.
  */
 
 /** @typedef {Core & UiService & FileSessionService & QcStage & RunStage & EditStage} App */

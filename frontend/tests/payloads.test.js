@@ -6,7 +6,6 @@ import {
   normalizePreviewPayload,
   toSpikeArray,
   toSpans,
-  totalSamplesFromDistimes,
 } from "../src/api/payloads.js";
 
 describe("toSpikeArray", () => {
@@ -97,22 +96,5 @@ describe("toSpans", () => {
   test("anything but an array gives no regions", () => {
     assert.deepEqual(toSpans(undefined), []);
     assert.deepEqual(toSpans("0-10"), []);
-  });
-});
-
-describe("totalSamplesFromDistimes", () => {
-  test("last spike + 1 across MUs, skipping empty and non-numeric entries", () => {
-    assert.equal(totalSamplesFromDistimes([[3, 9], null, [], [7, NaN]]), 10);
-  });
-
-  test("no spikes gives 1", () => {
-    assert.equal(totalSamplesFromDistimes([]), 1);
-    assert.equal(totalSamplesFromDistimes([[], null]), 1);
-  });
-
-  test("20 min x 100 MUs of spikes does not overflow the argument limit", () => {
-    const mu = Array.from({ length: 24_000 }, (_, i) => i * 100);
-    const distimes = Array.from({ length: 100 }, () => mu);
-    assert.equal(totalSamplesFromDistimes(distimes), 2_399_901);
   });
 });

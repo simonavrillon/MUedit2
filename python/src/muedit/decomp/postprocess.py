@@ -163,7 +163,9 @@ def postprocess_step(
     """
     logger.info("Batch processing...")
     if progress_cb:
-        progress_cb("progress", {"message": "Batch processing filters", "pct": 92})
+        progress_cb(
+            "progress", {"message": "Batch processing filters", "pct": 92, "phase": "postprocess"}
+        )
 
     nwindows = len(prep.roi_list)
     adaptive_losses: dict[int, Any] = {}
@@ -249,7 +251,7 @@ def postprocess_step(
                 sil_by_window.setdefault(win, []).append(old_sil[local])
 
     if progress_cb:
-        progress_cb("progress", {"message": "Finalizing output", "pct": 97})
+        progress_cb("progress", {"message": "Finalizing output", "pct": 97, "phase": "postprocess"})
 
     return PostprocessStepOutput(
         pulse_t=pulse_t,
@@ -272,6 +274,8 @@ def export_step(
     progress_cb: Callable[[str, dict[str, Any]], None] | None,
 ) -> tuple[dict[str, Any], str]:
     """Build export payloads and optionally persist the default NPZ artifact, with ``raw_emg``."""
+    if progress_cb:
+        progress_cb("progress", {"message": "Writing output", "pct": 98, "phase": "export"})
     bids_entity_label = prep.loader_meta.get("bids_entity_label")
     bids_emg_path = prep.loader_meta.get("bids_emg_path")
     if bids_entity_label and bids_emg_path:

@@ -17,14 +17,10 @@ from typing import Any
 
 import numpy as np
 from fastapi import HTTPException
-from fastapi.responses import Response
 
-from muedit.api.binary import FRAME_FORMAT, FRAME_MEDIA_TYPE, pack_frame
 from muedit.api.cache import (
     HeldUpload,
     _hold_upload,
-    _pop_decomp_preview_binary,
-    _store_decomp_preview_binary,
     _store_run_result,
 )
 from muedit.api.common import (
@@ -39,17 +35,14 @@ from muedit.api.services.decompose_worker import (
     RunJob,
     child_main,
 )
-from muedit.decomp.decomposition_file import pack_csr
 from muedit.editing.session import spike_array
 from muedit.io.store import SessionStore
 from muedit.models import IntArray
 
 logger = logging.getLogger(__name__)
 
-#: Pulse trains stay on the server (``/series/pulse``); no preview encoding sends them.
-PREVIEW_PULSE_KEYS = ("pulse_trains_full",)
-#: Preview fields the binary frame replaces: discharge times travel as CSR arrays.
-PREVIEW_ARRAY_KEYS = (*PREVIEW_PULSE_KEYS, "distime_all")
+#: Preview fields that stay on the server under the run token: the save reads them back.
+PREVIEW_ARRAY_KEYS = ("pulse_trains_full", "distime_all")
 #: How often a stream waiting for the next event checks that its client is still connected.
 DISCONNECT_POLL_SEC = 1.0
 SHUTDOWN_WAIT_SEC = 10.0
@@ -75,31 +68,12 @@ def _preview_spikes(preview: dict[str, Any]) -> list[IntArray]:
     return [spike_array(d) for d in preview.get("distime_all") or []]
 
 
-def _encode_decompose_preview(meta: dict[str, Any], spikes: list[IntArray]) -> memoryview:
-    """Encode the run preview as a MUB1 frame: JSON fields, then CSR discharge times."""
-    values, offsets = pack_csr(spikes, np.int32)
-    return pack_frame(meta, {"spikes": (values, "i4"), "spike_offsets": (offsets, "i8")})
-
-
-def fetch_decompose_preview_binary(token: str) -> Response:
-    """Return the preview frame for ``token`` and drop it from the cache."""
-    payload = _pop_decomp_preview_binary(token)
-    if payload is None:
-        raise HTTPException(status_code=404, detail="Preview binary token not found or expired")
-    return Response(
-        content=payload,
-        media_type=FRAME_MEDIA_TYPE,
-        headers={"x-muedit-format": FRAME_FORMAT},
-    )
-
-
 class _Run:
     """One decomposition: its worker and a thread turning the worker's messages into events."""
 
-    def __init__(self, job: RunJob, session: str, binary_preview: bool, upload: HeldUpload) -> None:
+    def __init__(self, job: RunJob, session: str, upload: HeldUpload) -> None:
         self.job = job
         self.session = session
-        self.binary_preview = binary_preview
         self.upload = upload
         self.events: queue.Queue[dict[str, Any] | None] = queue.Queue()
         self.cancelled = threading.Event()
@@ -222,19 +196,10 @@ class _Run:
         """The ``done`` event for a finished run, and whether its pulse trains were kept."""
         preview_raw: dict[str, Any] = message.get("preview") or {}
         spikes = _preview_spikes(preview_raw)
-        if self.binary_preview:
-            meta = make_json_safe(
-                {k: v for k, v in preview_raw.items() if k not in PREVIEW_ARRAY_KEYS}
-            )
-            preview_payload = dict(meta)
-            preview_payload["preview_binary_token"] = _store_decomp_preview_binary(
-                _encode_decompose_preview(meta, spikes), self.session
-            )
-        else:
-            preview_payload = make_json_safe(
-                {k: v for k, v in preview_raw.items() if k not in PREVIEW_PULSE_KEYS}
-            )
-        # The explorer and the run save read the pulse trains from the run's store.
+        preview_payload = make_json_safe(
+            {k: v for k, v in preview_raw.items() if k not in PREVIEW_ARRAY_KEYS}
+        )
+        # The run save reads the pulse trains and discharge times from the run's store.
         pulse_full = _as_matrix(preview_raw.get("pulse_trains_full")).astype(np.float32, copy=False)
         kept = bool(pulse_full.size)
         if kept:
@@ -279,7 +244,6 @@ def start_decomposition(
     upload_token: str | None,
     options: dict[str, Any],
     *,
-    binary_preview: bool,
     session: str = DEFAULT_SESSION,
 ) -> _Run:
     """Start a run on the upload behind ``upload_token``; 409 while another one runs.
@@ -303,7 +267,7 @@ def start_decomposition(
             )
         run_path = held.source_path or str(Path(tempfile.gettempdir()) / "muedit_cached_input")
         job = RunJob(run_path=run_path, signal=held.signal, **options)
-        run = _Run(job, session, binary_preview, held)
+        run = _Run(job, session, held)
         _SLOT.run = run
     try:
         run.start()

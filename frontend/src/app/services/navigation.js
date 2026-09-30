@@ -1,8 +1,6 @@
 import {
   setEditCurrentMu,
   setEditView,
-  setRunCurrentMu,
-  setRunView,
   setShowBookmark,
 } from "../../state/actions.js";
 
@@ -36,7 +34,7 @@ export function updateWorkflowStepper(app, targetStage) {
   const steps = [
     { key: "import", el: els.stepImport, complete: !!state.file },
     { key: "qc", el: els.stepQc, complete: !!state.gridSeries?.length },
-    { key: "run", el: els.stepRun, complete: !!state.muDistimes?.length },
+    { key: "run", el: els.stepRun, complete: !!state.runResultToken },
     { key: "edit", el: els.stepEdit, complete: !!state.edit.distimes?.length },
   ];
   /** @type {Record<WorkflowStep, WorkflowStep>} */
@@ -58,6 +56,29 @@ export function updateWorkflowStepper(app, targetStage) {
       step.el.classList.add("pending");
     }
   });
+  positionStepIndicator(els);
+}
+
+/**
+ * Place the sliding pill behind the active workflow chip. Called on stage
+ * changes and on resizes so the pill follows the chips' current geometry.
+ *
+ * @param {Els} els
+ */
+export function positionStepIndicator(els) {
+  const stepper = els.stepImport?.closest(".workflow-stepper");
+  const indicator = stepper?.querySelector(".step-indicator");
+  if (!stepper || !(indicator instanceof HTMLElement)) return;
+  const active = stepper.querySelector(".step-chip.active");
+  if (!(active instanceof HTMLElement)) {
+    indicator.classList.remove("ready");
+    return;
+  }
+  indicator.classList.add("ready");
+  indicator.style.left = `${active.offsetLeft}px`;
+  indicator.style.top = `${active.offsetTop}px`;
+  indicator.style.width = `${active.offsetWidth}px`;
+  indicator.style.height = `${active.offsetHeight}px`;
 }
 
 /**
@@ -79,7 +100,7 @@ export function updateStepAvailability(app) {
   const { els, state } = app;
   const hasFile = !!state.file;
   const hasPreview = !!state.gridSeries?.length;
-  const hasRunResults = !!state.muDistimes?.length;
+  const hasRunResults = !!state.runResultToken;
   const hasEditData = !!state.edit.distimes?.length;
 
   if (els.stepRun) {
@@ -122,13 +143,6 @@ function getViewForStage(state, stage) {
     }
     return { view: state.edit.view, total };
   }
-  if (stage === "run") {
-    const total = state.muDistimes?.length ? state.seriesLength || 0 : 0;
-    if (!state.runView && total) {
-      setRunView(state, { start: 0, end: total });
-    }
-    return { view: state.runView, total };
-  }
   return { view: null, total: 0 };
 }
 
@@ -142,11 +156,6 @@ function setViewForStage(app, stage, view) {
   if (stage === "edit") {
     setEditView(state, view);
     app.renderEditExplorer();
-    return;
-  }
-  if (stage === "run") {
-    setRunView(state, view);
-    app.renderMuExplorer();
   }
 }
 
@@ -215,16 +224,6 @@ function goToMu(app, direction, stage) {
     const next = mus[(idx + offset + mus.length) % mus.length];
     setEditCurrentMu(state, next, { resetView: true });
     app.renderEditExplorer();
-  } else if (stage === "run") {
-    const gridIdx = state.currentMuGrid || 0;
-    const mus = app.getMuIndicesForGrid(gridIdx);
-    if (!mus.length) return;
-    const current = state.currentMu ?? mus[0];
-    const idx = mus.indexOf(current);
-    const next =
-      mus[(idx + (direction === "prev" ? -1 : 1) + mus.length) % mus.length];
-    setRunCurrentMu(state, next, { resetView: true });
-    app.renderMuExplorer();
   }
 }
 
@@ -247,7 +246,7 @@ export function handleKeyboardNavigation(app, e) {
   if (active && ["INPUT", "TEXTAREA", "SELECT"].includes(active.tagName))
     return;
   const stage = state.currentStage;
-  if (stage !== "run" && stage !== "edit") return;
+  if (stage !== "edit") return;
 
   /** @type {ViewAction | null} */
   let action = null;

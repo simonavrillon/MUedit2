@@ -70,6 +70,27 @@ def decompose_step(
                 nwin + 1,
             )
 
+            # Where the live view places this window's iterations.
+            where = {
+                "phase": "decompose",
+                "grid": i,
+                "ngrid": prep.ngrid,
+                "window": nwin,
+                "nwindows": nwindows,
+                "niter": params.niter,
+            }
+            if progress_cb:
+                progress_cb(
+                    "progress",
+                    {
+                        "message": f"Grid {i + 1}/{prep.ngrid} • Window {nwin + 1}/{nwindows}",
+                        "pct": min(90, int(10 + win_global * span)),
+                        **where,
+                        "iter": 0,
+                        "outcomes": "",
+                    },
+                )
+
             start = coordinates_plateau[win_global * 2]
             end = coordinates_plateau[win_global * 2 + 1]
             grid_block = prep.data[ch_idx : ch_idx + n_channels_grid, start:end]
@@ -117,6 +138,9 @@ def decompose_step(
             refractory = max(1, int(round(prep.fsamp * DECOMP_MIN_ISI_SEC)))
             consumed = np.zeros(x.shape[1] if use_activity_init else 0, dtype=bool)
             energy = column_energy(x) if use_activity_init else None
+            # Per iteration since the last event: k kept, r rejected, f too few spikes.
+            outcomes: list[str] = []
+            iters_done = 0
 
             for j in range(params.niter):
                 w: FloatArray = rng.standard_normal(int(x.shape[0]))
@@ -175,8 +199,14 @@ def decompose_step(
                         subtract_mu_waveforms(x, spikes_final, prep.fsamp, params.peel_off_win)
                         if energy is not None:
                             energy = column_energy(x)
+                    kept = sil_val >= params.sil_thr and (
+                        not params.covfilter or cov_final <= params.cov_thr
+                    )
+                    outcomes.append("k" if kept else "r")
                 else:
                     basis[:, j] = w
+                    outcomes.append("f")
+                iters_done = j + 1
 
                 if progress_cb and (j % 5 == 4 or j == params.niter - 1):
                     pct_iter = 10 + win_global * span + ((j + 1) / params.niter) * span
@@ -189,8 +219,12 @@ def decompose_step(
                                 f"Iter {j + 1}/{params.niter}"
                             ),
                             "pct": min(90, int(pct_iter)),
+                            **where,
+                            "iter": iters_done,
+                            "outcomes": "".join(outcomes),
                         },
                     )
+                    outcomes.clear()
 
             good_indices = (sil_scores >= params.sil_thr) & fitted
             if params.covfilter:
@@ -211,6 +245,11 @@ def decompose_step(
                         ),
                         "pct": pct,
                         "sil": sil_by_window[win_global],
+                        **where,
+                        "iter": iters_done,
+                        # Flushed here when the basis ran out before the next event.
+                        "outcomes": "".join(outcomes),
+                        "window_done": True,
                     },
                 )
         ch_idx += n_channels_grid

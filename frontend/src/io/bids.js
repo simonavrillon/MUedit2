@@ -1,4 +1,4 @@
-import { inferGridCount, normalizeGridNames } from "./grid.js";
+import { inferGridCount } from "./grid.js";
 
 /** @typedef {import("../app/state.js").State} State */
 /** @typedef {import("../app/state.js").FileRef} FileRef */
@@ -154,12 +154,9 @@ export function buildBidsMuscleRowsModel(state) {
     muGridIndex: inEditStage ? state.edit?.muGridIndex : [],
     muscles,
   });
-  const normalizedGridNames = normalizeGridNames(gridNames, {
-    minimumCount: rowCount,
-  });
   return Array.from({ length: rowCount }, (_, i) => ({
     id: `bidsMuscle_${i}`,
-    label: `Muscle Grid ${i + 1}${normalizedGridNames[i] ? ` (${normalizedGridNames[i]})` : ""}`,
+    label: `Muscle Grid ${i + 1}`,
     value: muscles[i] || "",
   }));
 }

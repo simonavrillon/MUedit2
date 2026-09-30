@@ -44,6 +44,8 @@ def run_decomposition(
     rng = np.random.default_rng(params.random_seed)
 
     loaded = load_step(filepath, file_label, preloaded_signal, progress_cb)
+    if progress_cb:
+        progress_cb("progress", {"message": "Filtering signal", "pct": 8, "phase": "preprocess"})
     preprocessed = preprocess_step(
         loaded=loaded,
         duration=duration,

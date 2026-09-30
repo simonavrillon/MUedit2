@@ -29,6 +29,44 @@ import { OVERVIEW_BINS, QC_TRACE_BINS } from "../config.js";
 /** @typedef {import("../app/state.js").State} State */
 
 /**
+ * The analysis window a new drag should replace. A drag over a drawn window
+ * adjusts the one it overlaps most; otherwise it fills the first window not
+ * drawn yet (a placeholder spanning the whole recording); once every window is
+ * drawn, the one starting nearest the drag.
+ *
+ * @param {{ start: number, end: number }[]} rois
+ * @param {{ start: number, end: number }} span
+ * @param {number} total
+ */
+export function pickRoiSlot(rois, span, total) {
+  const drawn = (/** @type {{ start: number, end: number }} */ r) =>
+    !(r.start <= 0 && r.end >= total);
+  let overlapIdx = -1;
+  let overlapBest = 0;
+  rois.forEach((r, i) => {
+    if (!drawn(r)) return;
+    const overlap = Math.min(r.end, span.end) - Math.max(r.start, span.start);
+    if (overlap > overlapBest) {
+      overlapBest = overlap;
+      overlapIdx = i;
+    }
+  });
+  if (overlapIdx >= 0) return overlapIdx;
+  const empty = rois.findIndex((r) => !drawn(r));
+  if (empty >= 0) return empty;
+  let idx = 0;
+  let best = Number.MAX_SAFE_INTEGER;
+  rois.forEach((r, i) => {
+    const dist = Math.abs(r.start - span.start);
+    if (dist < best) {
+      best = dist;
+      idx = i;
+    }
+  });
+  return idx;
+}
+
+/**
  * @param {State} state
  * @param {number} nwin
  */
@@ -49,15 +87,7 @@ export function syncRois(state, nwin) {
  */
 /** @param {App} app */
 export async function requestAutoQc(app) {
-  const {
-    state,
-    els,
-    api,
-    setStatus,
-    updateProgress,
-    renderChannelQC,
-    refreshVisuals,
-  } = app;
+  const { state, els, api, setStatus, renderChannelQC, refreshVisuals } = app;
 
   if (!state.uploadToken) {
     setStatus("Load a signal first", "error");
@@ -65,7 +95,6 @@ export async function requestAutoQc(app) {
   }
 
   if (els?.qcAutoBtn) els.qcAutoBtn.disabled = true;
-  updateProgress(undefined, "Running automatic QC...");
   setStatus("Running automatic QC...", "muted");
 
   try {
@@ -86,11 +115,10 @@ export async function requestAutoQc(app) {
 
     await renderChannelQC(false);
     refreshVisuals();
-    updateProgress(
-      undefined,
+    setStatus(
       `Automatic QC: ${nBad} bad channel(s), ${nArtifact} artifact window(s)`,
+      "success",
     );
-    setStatus("Automatic QC complete", "success");
     return true;
   } catch (err) {
     console.error(err);
@@ -149,7 +177,6 @@ export async function requestPreview(app, options = {}) {
     els,
     api,
     setUploadLoading,
-    updateProgress,
     populateAuxSelector,
     populateGridTabs,
     requestQcGridWindow,
@@ -166,7 +193,6 @@ export async function requestPreview(app, options = {}) {
 
   if (!filepath) return false;
   setUploadLoading(true);
-  updateProgress(0, "Fetching preview...");
 
   try {
     const data = await api.fetchPreviewByPath(filepath);
@@ -215,7 +241,6 @@ export async function requestPreview(app, options = {}) {
     renderBidsAutoInfo();
     renderBidsMuscleFields();
 
-    updateProgress(0, "Preview ready - drag to select ROI");
     setStatus("Preview ready", "success");
     showWorkspace({ keepLandingVisible: true });
     await nextFrame();
@@ -226,7 +251,6 @@ export async function requestPreview(app, options = {}) {
   } catch (err) {
     console.error(err);
     setUploadToken(state, null);
-    updateProgress(0, "Preview failed");
     if (!silentFailure) {
       setStatus("Preview failed", "error");
     }

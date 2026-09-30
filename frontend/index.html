@@ -8,45 +8,38 @@
       content="default-src 'self'; script-src 'self' 'unsafe-eval'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'"
     />
     <title>MUedit</title>
-    <link rel="icon" href="data:," />
-    <link rel="shortcut icon" href="data:," />
-    <link rel="stylesheet" href="css/tokens.css?v=64" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><path d='M6 42h20l8-30 8 34h8l6-4' fill='none' stroke='%239dd0ff' stroke-width='5' stroke-linecap='round' stroke-linejoin='round'/></svg>"
+    />
+    <link
+      rel="shortcut icon"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><path d='M6 42h20l8-30 8 34h8l6-4' fill='none' stroke='%239dd0ff' stroke-width='5' stroke-linecap='round' stroke-linejoin='round'/></svg>"
+    />
+    <link rel="stylesheet" href="css/tokens.css?v=65" />
     <link rel="stylesheet" href="css/base.css?v=64" />
     <link rel="stylesheet" href="css/stages/landing.css?v=64" />
-    <link rel="stylesheet" href="css/stages/workspace.css?v=64" />
-    <link rel="stylesheet" href="css/stages/run.css?v=64" />
+    <link rel="stylesheet" href="css/stages/workspace.css?v=85" />
+    <link rel="stylesheet" href="css/stages/run.css?v=71" />
     <link rel="stylesheet" href="css/stages/qc.css?v=64" />
     <link rel="stylesheet" href="css/stages/edit.css?v=64" />
     <link rel="stylesheet" href="css/stages/import.css?v=64" />
-    <link rel="stylesheet" href="css/responsive.css?v=64" />
+    <link rel="stylesheet" href="css/responsive.css?v=65" />
   </head>
 
   <body>
     <div id="app">
       <main class="page">
         <div class="workspace-header">
-          <button
-            class="settings-toggle-btn icon-btn"
-            id="settingsToggleBtn"
-            type="button"
-            aria-controls="settingsPanel"
-            aria-expanded="false"
-            aria-label="Toggle settings panel"
-          >
-            <span class="hamburger-icon" aria-hidden="true">
-              <span></span>
-              <span></span>
-              <span></span>
-            </span>
-          </button>
           <div class="workflow-stepper" aria-label="Workflow">
+            <span class="step-indicator" aria-hidden="true"></span>
             <button
               class="step-chip active"
               id="stepImport"
               data-step="import"
               type="button"
             >
-              <span class="step-chip-label">Import</span>
+              <span class="step-chip-label" data-label="Import">Import</span>
             </button>
             <button
               class="step-chip pending"
@@ -54,7 +47,9 @@
               data-step="qc"
               type="button"
             >
-              <span class="step-chip-label">QC / ROI</span>
+              <span class="step-chip-label" data-label="QC / ROI"
+                >QC / ROI</span
+              >
             </button>
             <button
               class="step-chip pending"
@@ -62,7 +57,9 @@
               data-step="run"
               type="button"
             >
-              <span class="step-chip-label">Decompose</span>
+              <span class="step-chip-label" data-label="Decompose"
+                >Decompose</span
+              >
             </button>
             <button
               class="step-chip pending"
@@ -70,7 +67,7 @@
               data-step="edit"
               type="button"
             >
-              <span class="step-chip-label">Edit</span>
+              <span class="step-chip-label" data-label="Edit">Edit</span>
             </button>
           </div>
           <span
@@ -134,6 +131,30 @@
             aria-hidden="true"
           ></div>
           <aside class="control-panel glass settings-panel" id="settingsPanel">
+            <button
+              class="settings-toggle-btn icon-btn"
+              id="settingsToggleBtn"
+              type="button"
+              aria-controls="settingsPanel"
+              aria-expanded="false"
+              aria-label="Toggle settings panel"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke-width="1.5"
+                stroke="currentColor"
+                aria-hidden="true"
+              >
+                <rect x="3.75" y="3.75" width="16.5" height="16.5" rx="2" />
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  d="M9.75 3.75v16.5"
+                />
+              </svg>
+            </button>
             <!-- Session Info -->
             <section class="panel-section collapsed">
               <div class="section-header" role="button" aria-expanded="false">
@@ -351,7 +372,7 @@
                   <input type="number" id="niter" value="150" min="1" />
                 </div>
                 <div class="form-row">
-                  <label for="nwindows">Analysis windows (count)</label>
+                  <label for="nwindows">Analysis windows</label>
                   <input type="number" id="nwindows" value="1" min="1" />
                 </div>
                 <div class="form-row">
@@ -545,16 +566,52 @@
               </div>
 
               <!-- Run Stage -->
-              <div class="stage stage-run" id="stageRun">
-                <div class="run-kpis">
-                  <div class="kpi-card">
-                    <div class="kpi-label">Pipeline Phase</div>
-                    <div class="kpi-value" id="runPhase">Idle</div>
+              <div class="stage stage-run" id="stageRun" data-mode="pre">
+                <section class="run-pre" aria-labelledby="runPreTitle">
+                  <div class="chart-title" id="runPreTitle">
+                    Ready to decompose
                   </div>
-                </div>
-                <div class="progress-row">
-                  <div class="progress-head">
-                    <div class="progress-text" id="progressText">Idle</div>
+                  <dl class="run-plan" id="runPlan"></dl>
+                  <button
+                    class="start-btn qc-run-btn run-action-btn"
+                    id="runStartBtn"
+                    type="button"
+                  >
+                    Start decomposition
+                  </button>
+                </section>
+
+                <section class="run-live" aria-label="Decomposition progress">
+                  <ol class="run-phases" id="runPhases">
+                    <li data-phase="load">
+                      <span class="run-phase-dot"></span>Load
+                    </li>
+                    <li data-phase="preprocess">
+                      <span class="run-phase-dot"></span>Filter
+                    </li>
+                    <li data-phase="decompose">
+                      <span class="run-phase-dot"></span>Decompose
+                    </li>
+                    <li data-phase="postprocess">
+                      <span class="run-phase-dot"></span>Post-process
+                    </li>
+                    <li data-phase="save">
+                      <span class="run-phase-dot"></span>Save
+                    </li>
+                  </ol>
+
+                  <div class="run-head">
+                    <div class="run-count">
+                      <span class="run-count-value" id="runCount">0</span>
+                      <span class="run-count-label" id="runCountLabel">
+                        motor units found
+                      </span>
+                      <span class="run-count-grids" id="runCountGrids"></span>
+                    </div>
+                    <div class="run-time">
+                      <span id="runElapsed"></span>
+                      <span id="runEta"></span>
+                    </div>
                     <button
                       class="pill-toggle cancel-run-btn"
                       id="cancelRunBtn"
@@ -564,28 +621,61 @@
                       Cancel
                     </button>
                   </div>
-                  <div class="progress-track">
-                    <div class="progress-bar" id="progressBar"></div>
-                  </div>
-                </div>
-                <div class="chart-card glass">
-                  <div class="chart-title">Motor Unit Pulse Trains</div>
-                  <div class="mu-controls">
-                    <select id="muGridSelect" aria-label="Grid"></select>
-                    <select id="muSelect" aria-label="Motor unit"></select>
-                    <div class="mu-meta" id="muMeta">
-                      Decompose to see results
+
+                  <div
+                    class="run-error"
+                    id="runError"
+                    role="alert"
+                    hidden
+                  ></div>
+
+                  <div class="run-result" id="runResult">
+                    <dl
+                      class="run-plan run-result-stats"
+                      id="runResultStats"
+                    ></dl>
+                    <p class="run-save-text" id="runSaveText"></p>
+                    <div class="run-result-actions">
+                      <button
+                        class="start-btn qc-run-btn run-action-btn"
+                        id="runRetrySaveBtn"
+                        type="button"
+                        hidden
+                      >
+                        Retry save
+                      </button>
+                      <button
+                        class="start-btn qc-run-btn run-action-btn"
+                        id="runAgainBtn"
+                        type="button"
+                      >
+                        Run again
+                      </button>
                     </div>
                   </div>
-                  <canvas id="muPulseCanvas" height="220"></canvas>
-                </div>
+
+                  <div class="run-search">
+                    <div class="run-search-head">
+                      <div class="chart-title">
+                        Search · one dot per iteration
+                      </div>
+                      <div class="run-legend" aria-hidden="true">
+                        <span><i class="run-dot is-kept"></i>kept</span>
+                        <span><i class="run-dot is-rejected"></i>rejected</span>
+                        <span
+                          ><i class="run-dot is-few"></i>too few spikes</span
+                        >
+                      </div>
+                    </div>
+                    <div class="run-dots" id="runDots"></div>
+                  </div>
+                </section>
               </div>
 
               <!-- Edit Stage -->
               <div class="stage stage-edit" id="stageEdit">
                 <div class="edit-top-row">
                   <div class="chart-card glass">
-                    <div class="chart-title">Editing Workspace</div>
                     <div class="edit-controls-row">
                       <div class="mu-controls edit-selects">
                         <select
@@ -909,6 +999,6 @@
       </main>
     </div>
 
-    <script type="module" src="app.js?v=64"></script>
+    <script type="module" src="app.js?v=72"></script>
   </body>
 </html>

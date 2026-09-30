@@ -172,35 +172,6 @@ class TestSignalViews:
         assert cache.BUDGET.used_bytes == before + views.nbytes
 
 
-# ── decompose preview binary cache ───────────────────────────────────────────
-
-
-class TestDecompPreviewBinary:
-    def test_first_fetch_removes_it(self, clock: FakeClock) -> None:
-        token = cache._store_decomp_preview_binary(b"MUB1" + b"\0" * 12)
-        assert cache._pop_decomp_preview_binary(token) == b"MUB1" + b"\0" * 12
-        assert token not in cache._DECOMP_PREVIEW_BLOBS.slots
-        assert cache._pop_decomp_preview_binary(token) is None
-
-    def test_expiry(self, clock: FakeClock) -> None:
-        token = cache._store_decomp_preview_binary(b"x")
-        clock.advance(cache.DECOMP_PREVIEW_BINARY_TTL_SEC)
-        assert cache._pop_decomp_preview_binary(token) is None
-
-    def test_the_next_run_drops_an_unfetched_preview(self, clock: FakeClock) -> None:
-        first = cache._store_decomp_preview_binary(b"a", "tab-a")
-        other = cache._store_decomp_preview_binary(b"b", "tab-b")
-        second = cache._store_decomp_preview_binary(b"c", "tab-a")
-        assert set(cache._DECOMP_PREVIEW_BLOBS.slots) == {other, second}
-        assert cache._pop_decomp_preview_binary(first) is None
-
-    def test_sweep_drops_an_unfetched_preview(self, clock: FakeClock) -> None:
-        token = cache._store_decomp_preview_binary(b"x")
-        clock.advance(cache.DECOMP_PREVIEW_BINARY_TTL_SEC)
-        cache.BUDGET.sweep()
-        assert token not in cache._DECOMP_PREVIEW_BLOBS.slots
-
-
 # ── run result kept for the run save ─────────────────────────────────────────
 
 
@@ -349,7 +320,6 @@ class TestSessions:
         assert usage["active_session"] == "tab-a"
         assert usage["used_bytes"] == cache.BUDGET.used_bytes > 0
         assert usage["caches"]["uploads"]["entries"] == 1
-        assert usage["caches"]["decompose_previews"]["entries"] == 0
         [session] = usage["sessions"]
         assert session["id"] == "tab-a"
         assert session["active"] is True

@@ -24,8 +24,6 @@ from muedit.signal.pyramid import MinMaxPyramid
 
 logger = logging.getLogger(__name__)
 
-DECOMP_PREVIEW_BINARY_TTL_SEC = 10 * 60
-
 
 @dataclass
 class SignalViews:
@@ -97,21 +95,9 @@ def _close_edit_session(entry: _EditSessionEntry) -> None:
     entry.session.close()
 
 
-@dataclass
-class _PreviewBlob:
-    payload: bytes | memoryview
-
-    @property
-    def nbytes(self) -> int:
-        return len(self.payload)
-
-
 BUDGET = MemoryBudget(default_budget_bytes())
 _UPLOADS: BudgetedLRU[_UploadEntry] = BudgetedLRU(
     "uploads", BUDGET, per_session=1, on_drop=_close_store
-)
-_DECOMP_PREVIEW_BLOBS: BudgetedLRU[_PreviewBlob] = BudgetedLRU(
-    "decompose_previews", BUDGET, per_session=1, ttl_sec=DECOMP_PREVIEW_BINARY_TTL_SEC
 )
 _RUN_RESULTS: BudgetedLRU[RunResult] = BudgetedLRU(
     "run_results", BUDGET, per_session=1, on_drop=_close_store
@@ -202,19 +188,6 @@ def _get_signal_views(token: str | None) -> SignalViews | None:
     """The pyramids and overview of the upload for ``token`` (sealed, so read-only)."""
     entry = _UPLOADS.get(token)
     return entry.views if entry is not None else None
-
-
-def _store_decomp_preview_binary(
-    payload: bytes | memoryview, session: str = DEFAULT_SESSION
-) -> str:
-    """Store binary decompose-preview payload and return short-lived token."""
-    return _DECOMP_PREVIEW_BLOBS.pin(_PreviewBlob(payload), session)
-
-
-def _pop_decomp_preview_binary(token: str | None) -> bytes | memoryview | None:
-    """Remove and return the decompose-preview payload: the frontend fetches it once."""
-    blob = _DECOMP_PREVIEW_BLOBS.pop(token)
-    return blob.payload if blob is not None else None
 
 
 def _store_run_result(

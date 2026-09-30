@@ -192,15 +192,15 @@ class TestWorkerProcess:
     def test_a_failure_in_the_server_part_is_an_error_event(
         self, client: TestClient, recording: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        def broken(*_: Any) -> memoryview:
-            raise RuntimeError("frame encoding broke")
+        def broken(*_: Any) -> list[Any]:
+            raise RuntimeError("result packing broke")
 
         token = _upload(client, recording, "relay")
         before = _run_folders()
-        monkeypatch.setattr(decompose_service, "_encode_decompose_preview", broken)
+        monkeypatch.setattr(decompose_service, "_preview_spikes", broken)
         last = _run(client, token, "relay", QUICK)[-1]
         assert last["stage"] == "error"
-        assert last["detail"] == "frame encoding broke"
+        assert last["detail"] == "result packing broke"
         assert _run_folders() == before
 
 
@@ -264,7 +264,6 @@ class TestStreamEnd:
         return start_decomposition(
             _upload(client, recording, session),
             {"params_raw": json.dumps(SLOW), "duration": None, "persist_output": False},
-            binary_preview=True,
             session=session,
         )
 

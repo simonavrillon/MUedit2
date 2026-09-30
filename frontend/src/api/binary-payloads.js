@@ -27,7 +27,6 @@ function hasMagic(buffer, magic) {
 }
 
 const FRAME_MAGIC = "MUB1";
-const FRAME_FORMAT = "mub1";
 const FRAME_ALIGN = 8;
 
 const FRAME_TYPES = {
@@ -53,14 +52,6 @@ function frameAligned(n) {
 /** @param {number[]} shape */
 function frameCount(shape) {
   return shape.reduce((n, d) => n * d, 1);
-}
-
-/**
- * @param {ArrayBuffer} buffer
- * @param {string | null} [formatHeader]
- */
-function isFrame(buffer, formatHeader = "") {
-  return formatHeader === FRAME_FORMAT || hasMagic(buffer, FRAME_MAGIC);
 }
 
 /**
@@ -168,25 +159,6 @@ export function csrRows(values, offsets) {
     rows.push(data.subarray(Number(ends[i]), Number(ends[i + 1])));
   }
   return rows;
-}
-
-/**
- * A run's preview: its JSON fields, with `distime_all` rebuilt from the CSR
- * discharge times. The pulse trains stay on the server (`/series/pulse`).
- *
- * @param {ArrayBuffer} buffer
- * @param {string | null} [formatHeader]
- * @returns {JsonObject}
- */
-export function decodeDecomposePreviewPayload(buffer, formatHeader = "") {
-  if (!isFrame(buffer, formatHeader)) {
-    return JSON.parse(textDecoder.decode(new Uint8Array(buffer)));
-  }
-  const { meta, arrays } = decodeFrame(buffer);
-  return {
-    ...meta,
-    distime_all: csrRows(arrays.spikes, arrays.spike_offsets),
-  };
 }
 
 /**

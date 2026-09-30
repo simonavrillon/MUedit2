@@ -198,7 +198,7 @@ describe("muscles and metadata", () => {
 });
 
 describe("buildBidsMuscleRowsModel", () => {
-  test("outside Edit, the run's grids label the rows", () => {
+  test("outside Edit, the run's grids set the row count", () => {
     const rows = buildBidsMuscleRowsModel({
       currentStage: "run",
       gridNames: ["GR08MM1305", "GR04MM1305"],
@@ -206,8 +206,8 @@ describe("buildBidsMuscleRowsModel", () => {
       edit: { gridNames: [] },
     });
     assert.deepEqual(rows, [
-      { id: "bidsMuscle_0", label: "Muscle Grid 1 (GR08MM1305)", value: "TA" },
-      { id: "bidsMuscle_1", label: "Muscle Grid 2 (GR04MM1305)", value: "" },
+      { id: "bidsMuscle_0", label: "Muscle Grid 1", value: "TA" },
+      { id: "bidsMuscle_1", label: "Muscle Grid 2", value: "" },
     ]);
   });
 
@@ -220,14 +220,14 @@ describe("buildBidsMuscleRowsModel", () => {
     });
     assert.deepEqual(
       rows.map((r) => r.label),
-      ["Muscle Grid 1 (A)", "Muscle Grid 2 (Grid 2)", "Muscle Grid 3 (Grid 3)"],
+      ["Muscle Grid 1", "Muscle Grid 2", "Muscle Grid 3"],
     );
   });
 
   test("with nothing loaded there is one default row", () => {
     const rows = buildBidsMuscleRowsModel({ currentStage: "import" });
     assert.deepEqual(rows, [
-      { id: "bidsMuscle_0", label: "Muscle Grid 1 (Grid 1)", value: "" },
+      { id: "bidsMuscle_0", label: "Muscle Grid 1", value: "" },
     ]);
   });
 });

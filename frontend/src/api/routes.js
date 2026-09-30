@@ -12,8 +12,6 @@ export const routes = {
   previewByPath: "/preview-by-path",
   decomposeStream: "/decompose_stream",
   decomposeCancel: "/decompose/cancel",
-  decomposePreview: (/** @type {string} */ token) =>
-    `/decompose_preview/${encodeURIComponent(token)}`,
   editSave: "/edit/save",
   editSessionOpen: "/edit/session/open",
   editSession: "/edit/session",

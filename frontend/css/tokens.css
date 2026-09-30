@@ -33,6 +33,12 @@
   --mu-3: #ffd99f;
   --mu-4: #e7c1ff;
   --mu-5: #ffb7c3;
+  /* Past the five step colours, for up to ten grids on the run page. */
+  --mu-6: #d4f09a;
+  --mu-7: #ffb98a;
+  --mu-8: #aab4ff;
+  --mu-9: #8fe6f0;
+  --mu-10: #f0f0a0;
   --mu-4-dim: rgba(231, 193, 255, 0.12);
   /* Artifact windows — matches COLORS.artifactStroke in src/config.js. */
   --artifact-clr: #ff8c66;

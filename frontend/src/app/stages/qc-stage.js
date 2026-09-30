@@ -105,8 +105,7 @@ export function createQcStageService(app) {
   function toggleArtifactMode() {
     setArtifactMode(state, !state.artifactMode);
     refreshVisuals();
-    app.updateProgress(
-      undefined,
+    app.setStatus(
       state.artifactMode
         ? "Drag on the EMG plot to mark an artifact window"
         : "Artifact selection cancelled",
@@ -119,8 +118,7 @@ export function createQcStageService(app) {
     setArtifactMode(state, false);
     refreshVisuals();
     const n = state.artifactRegions.length;
-    app.updateProgress(
-      undefined,
+    app.setStatus(
       removed
         ? `Artifact window removed (${n} left)`
         : "No artifact windows to remove",

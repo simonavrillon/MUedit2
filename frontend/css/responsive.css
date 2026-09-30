@@ -1,7 +1,7 @@
 /* ── Responsive ── */
 
-@media (max-width: 1100px) {
-  .settings-panel {
+@media (max-width: 600px) {
+  .workspace.settings-open .settings-panel {
     width: 100vw;
   }
 

@@ -7,27 +7,28 @@ import {
   setIsRunning,
   setLastRunDownloadKey,
   setMetadata,
-  setMuPreviewData,
   setMuscle,
   setParameters,
   setRois,
   setRunDownloadInFlight,
+  setRunLive,
   setRunResultToken,
   setSeriesLength,
   setUploadToken,
 } from "../state/actions.js";
 import { getCurrentGrid, roiStart, roiEnd } from "../state/selectors.js";
-import {
-  normalizePreviewPayload,
-  totalSamplesFromDistimes,
-} from "../api/payloads.js";
+import { normalizePreviewPayload } from "../api/payloads.js";
 import { getSuggestedNpzName } from "../io/bids.js";
 import { drawGridOverlay } from "../view/plots.js";
 import { errorMessage } from "../app/services/error-service.js";
+import { applyRunEvent, buildRunSummary, createRunLive } from "./live.js";
 
 /** @typedef {import("../app/context.js").App} App */
 /** @typedef {import("../app/context.js").JsonObject} JsonObject */
 /** @typedef {import("../api/payloads.js").PreviewPayload} PreviewPayload */
+
+/** How often the elapsed time and estimate refresh during a run. */
+const CLOCK_TICK_MS = 1000;
 
 /** @param {App} app */
 export async function autoSaveRunDecomposition(app) {
@@ -37,53 +38,58 @@ export async function autoSaveRunDecomposition(app) {
     getBidsMuscleNames,
     setStatus,
     loadDecompositionForEditByPath,
+    renderRunStage,
   } = app;
+  const live = state.runLive;
 
-  if (state.runDownloadInFlight) return;
-  if (!state.muDistimes?.length) return;
+  if (state.runDownloadInFlight || !live?.summary?.muCount) return;
+  // The server kept this run's pulse trains and discharge times under its token.
+  const token = state.runResultToken;
+  if (!token) return;
   const fileBase = state.file?.name || "decomposition";
   const suggestedName = getSuggestedNpzName(fileBase, "_decomposition");
-  const key = `${suggestedName}:${state.muDistimes.length}:${state.seriesLength || 0}`;
+  const key = `${suggestedName}:${token}`;
   if (state.lastRunDownloadKey === key) return;
 
-  const muscleNames = getBidsMuscleNames();
-  const totalSamples =
-    state.seriesLength || totalSamplesFromDistimes(state.muDistimes);
   const fs = state.fsamp;
-  // The server kept this run's pulse trains and discharge times under its token.
   const payload = {
-    ...(state.runResultToken
-      ? {}
-      : { distimes: state.muDistimes.map((d) => Array.from(d)) }),
-    run_result_token: state.runResultToken || null,
-    total_samples: totalSamples,
+    run_result_token: token,
+    total_samples: state.seriesLength || 0,
     fsamp: fs != null && Number.isFinite(fs) && fs > 0 ? fs : null,
     grid_names: state.gridNames || ["Grid 1"],
-    mu_grid_index: state.muGridIndex || [],
+    mu_grid_index: live.summary.muGridIndex,
     parameters: state.parameters || {},
-    muscle: muscleNames,
+    muscle: getBidsMuscleNames(),
     artifact_regions: state.artifactRegions || [],
     file_label: suggestedName,
   };
   setRunDownloadInFlight(state, true);
+  live.saving = true;
+  live.saveError = "";
+  renderRunStage();
   try {
     setStatus("Saving decomposition...", "muted");
     const saved = await persistNpzBySaveTarget(payload, suggestedName);
     setLastRunDownloadKey(state, key);
+    live.savedPath = saved?.path || "";
     setStatus(
       saved?.path
         ? `Decomposition saved to ${saved.path}`
         : "Decomposition saved",
       "success",
     );
+    // Preloaded for the Edit step; the page stays on the run's result.
     if (saved?.path) {
-      loadDecompositionForEditByPath(saved.path);
+      void loadDecompositionForEditByPath(saved.path, { open: false });
     }
   } catch (err) {
     console.error(err);
-    setStatus(`Save failed: ${errorMessage(err)}`, "error");
+    live.saveError = errorMessage(err);
+    setStatus(`Save failed: ${live.saveError}`, "error");
   } finally {
+    live.saving = false;
     setRunDownloadInFlight(state, false);
+    renderRunStage();
   }
 }
 
@@ -98,8 +104,9 @@ export async function runDecomposition(app) {
     updateStartAvailability,
     switchStage,
     setStatus,
-    updateProgress,
     handleStreamMessage,
+    renderRunStage,
+    renderRunClock,
   } = app;
 
   if (state.isRunning) {
@@ -112,15 +119,15 @@ export async function runDecomposition(app) {
   }
 
   setIsRunning(state, true);
-  updateStartAvailability();
-  switchStage("run");
   setParameters(state, buildParams());
-  setMuPreviewData(state, [], []);
   setLastRunDownloadKey(state, "");
   setRunResultToken(state, "");
-
+  setRunLive(state, createRunLive(Date.now()));
+  updateStartAvailability();
+  switchStage("run");
+  renderRunStage();
   setStatus("Running decomposition...", "muted");
-  updateProgress(5, "Starting decomposition");
+  const clock = globalThis.setInterval(renderRunClock, CLOCK_TICK_MS);
 
   const buildRunFormData = () => {
     const formData = new FormData();
@@ -164,11 +171,11 @@ export async function runDecomposition(app) {
       const sourcePath = state.file?.path;
       if (!message.includes("upload_token") || !sourcePath) throw err;
       setUploadToken(state, null);
-      updateProgress(5, "Session expired, reloading file...");
+      setStatus("Session expired, reloading file...", "muted");
       const preview = await api.fetchPreviewByPath(sourcePath);
       if (!preview?.upload_token) throw err;
       setUploadToken(state, preview.upload_token);
-      updateProgress(5, "Starting decomposition");
+      setStatus("Running decomposition...", "muted");
       response = await api.decomposeStream(buildRunFormData(), 15 * 60 * 1000);
     }
 
@@ -211,14 +218,32 @@ export async function runDecomposition(app) {
         "muted",
       );
     }
+    // A stream that ends without `done`, `error` or `cancelled` left the run unfinished.
+    if (state.runLive?.status === "running") {
+      failRun(app, "The decomposition stopped without a result");
+    }
   } catch (err) {
     console.error(err);
     setStatus(`Error: ${errorMessage(err)}`, "error");
-    updateProgress(0, "Run failed. Check console for details.", "error");
+    failRun(app, errorMessage(err));
   } finally {
+    globalThis.clearInterval(clock);
     setIsRunning(state, false);
     updateStartAvailability();
+    renderRunStage();
   }
+}
+
+/**
+ * @param {App} app
+ * @param {string} message
+ */
+function failRun(app, message) {
+  const live = app.state.runLive;
+  if (!live) return;
+  live.status = "failed";
+  live.error = message;
+  live.finishedAt = Date.now();
 }
 
 /** @param {App} app */
@@ -240,23 +265,20 @@ export async function cancelDecomposition(app) {
 /**
  * @param {App} app
  * @param {PreviewPayload} preview
- * @param {{ skipMuData?: boolean }} [options]
  */
-function applyPreviewData(app, preview, options = {}) {
+function applyPreviewData(app, preview) {
   const {
     state,
     els,
     renderChannelQC,
     requestQcGridWindow,
     showWorkspace,
-    renderMuExplorer,
     renderBidsAutoInfo,
     renderBidsMuscleFields,
     populateAuxSelector,
     renderAuxiliaryChannels,
     enableRoiSelection,
   } = app;
-  const { skipMuData = false } = options;
 
   // The overview and aux traces stay the upload's envelopes (/series/*); the
   // run preview's copies of them are not used.
@@ -268,8 +290,6 @@ function applyPreviewData(app, preview, options = {}) {
     coordinates,
     metadata,
     muscle,
-    distime_all,
-    mu_grid_index,
   } = preview;
 
   if (total_samples) {
@@ -295,13 +315,6 @@ function applyPreviewData(app, preview, options = {}) {
   if (muscle) {
     setMuscle(state, muscle);
   }
-  if (!skipMuData) {
-    setMuPreviewData(
-      state,
-      distime_all.length ? distime_all : state.muDistimes,
-      mu_grid_index.length ? mu_grid_index : state.muGridIndex,
-    );
-  }
   populateAuxSelector();
   renderAuxiliaryChannels();
   enableRoiSelection("auxCanvas");
@@ -321,22 +334,8 @@ function applyPreviewData(app, preview, options = {}) {
     state.seriesLength,
   );
   showWorkspace();
-  renderMuExplorer();
   renderBidsAutoInfo();
   renderBidsMuscleFields();
-}
-
-/**
- * @param {{ api: App["api"], token: string, applyPreview: (preview: JsonObject) => void, onError: (err: unknown) => void }} deps
- */
-async function hydrateBinaryDecomposePreview(deps) {
-  const { api, token, applyPreview, onError } = deps;
-  try {
-    const preview = await api.fetchDecomposePreview(token);
-    applyPreview(preview);
-  } catch (err) {
-    onError(err);
-  }
 }
 
 /**
@@ -346,108 +345,56 @@ async function hydrateBinaryDecomposePreview(deps) {
 export function handleStreamMessage(app, msg) {
   const {
     state,
-    els,
-    api,
     setStatus,
-    updateProgress,
-    renderMuExplorer,
+    renderRunStage,
+    updateRunDots,
     autoSaveRunDecomposition,
+    updateStepAvailability,
   } = app;
-
-  let pendingAutoSave = false;
+  const live = state.runLive;
+  if (!live) return;
 
   if (msg.stage === "error") {
     const detail = msg.detail
       ? `: ${typeof msg.detail === "string" ? msg.detail : JSON.stringify(msg.detail)}`
       : "";
     setStatus(`Error${detail}`, "error");
-    updateProgress(0, msg.message || "Run failed", msg.stage);
+    failRun(app, `${msg.message || "Run failed"}${detail}`);
+    renderRunStage();
     return;
   }
 
   if (msg.stage === "cancelled") {
     setStatus("Decomposition cancelled", "muted");
-    updateProgress(0, msg.message || "Decomposition cancelled", msg.stage);
+    setRunLive(state, null);
+    renderRunStage();
     return;
   }
 
-  if (msg.pct !== undefined) {
-    updateProgress(msg.pct, msg.message || "", msg.stage);
-  } else if (msg.message) {
-    updateProgress(undefined, msg.message, msg.stage);
+  const change = applyRunEvent(live, msg, Date.now());
+  if (change) {
+    updateRunDots(change);
+    renderRunStage();
+  }
+
+  if (msg.stage !== "done") {
+    if (!change && msg.phase) renderRunStage();
+    return;
   }
 
   if (msg.preview) {
     setRunResultToken(state, msg.preview.run_result_token);
-    if (msg.preview.preview_binary_token && api) {
-      const previewNoToken = { ...msg.preview };
-      delete previewNoToken.preview_binary_token;
-      applyPreviewData(app, normalizePreviewPayload(previewNoToken), {
-        skipMuData: true,
-      });
-      void hydrateBinaryDecomposePreview({
-        api,
-        token: msg.preview.preview_binary_token,
-        applyPreview: (previewPayload) => {
-          applyPreviewData(app, normalizePreviewPayload(previewPayload));
-          if (pendingAutoSave) {
-            renderMuExplorer();
-            void autoSaveRunDecomposition();
-          }
-        },
-        onError: (err) => {
-          console.error(err);
-          setStatus("Preview hydration failed", "error");
-        },
-      });
-    } else {
-      applyPreviewData(app, normalizePreviewPayload(msg.preview));
-    }
+    applyPreviewData(app, normalizePreviewPayload(msg.preview));
   }
-
   if (msg.summary) {
-    const { mu_count, grid_names, parameters } = msg.summary;
-    const totalMu = Number.isFinite(mu_count)
-      ? mu_count
-      : state.muDistimes?.length || 0;
-    const gridNames = Array.isArray(grid_names) ? grid_names : [];
-    const previewMapping = Array.isArray(msg.preview?.mu_grid_index)
-      ? msg.preview.mu_grid_index
-      : [];
-    const stateMapping = Array.isArray(state.muGridIndex)
-      ? state.muGridIndex
-      : [];
-    const mapping = previewMapping.length ? previewMapping : stateMapping;
-    const gridCount = Math.max(
-      gridNames.length,
-      mapping.length
-        ? Math.max(
-            ...mapping.map((/** @type {number} */ v) => Number(v) || 0),
-          ) + 1
-        : 0,
-      totalMu > 0 ? 1 : 0,
-    );
-    const counts = new Array(gridCount).fill(0);
-    for (let idx = 0; idx < totalMu; idx++) {
-      const g = Number(mapping[idx]);
-      const gridIdx = Number.isFinite(g) && g >= 0 && g < gridCount ? g : 0;
-      counts[gridIdx] += 1;
-    }
-    const perGrid = counts.map((n, idx) => `Grid ${idx + 1}: ${n} MU`);
-    const summaryText = `${perGrid.join(" • ")}${perGrid.length ? " • " : ""}Total: ${totalMu} MU`;
-    if (els.progressText) els.progressText.textContent = summaryText;
-    if (parameters) {
-      setParameters(state, parameters);
-    }
+    live.summary = buildRunSummary(msg.summary, msg.preview);
+    if (msg.summary.parameters) setParameters(state, msg.summary.parameters);
   }
-
-  if (msg.stage === "done") {
-    if (state.muDistimes?.length) {
-      renderMuExplorer();
-      void autoSaveRunDecomposition();
-    } else {
-      pendingAutoSave = true;
-    }
-    setStatus("Complete", "success");
-  }
+  live.phase = "save";
+  live.status = "done";
+  live.finishedAt = Date.now();
+  setStatus("Complete", "success");
+  updateStepAvailability();
+  renderRunStage();
+  void autoSaveRunDecomposition();
 }

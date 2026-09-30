@@ -53,7 +53,6 @@ function testApp(state, api) {
   const app = createApp({ state, els: {}, api });
   Object.assign(app, {
     setStatus: recorder(),
-    updateProgress: recorder(),
     switchStage: recorder(),
     handleStreamMessage: recorder(),
   });

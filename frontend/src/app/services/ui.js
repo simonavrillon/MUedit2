@@ -42,52 +42,6 @@ export function createUiService(app) {
   /** @type {UiService["updateStepAvailability"]} */
   const updateStepAvailability = () => updateStepAvailabilityController(app);
 
-  /**
-   * @param {number | undefined} pct
-   * @param {string} [message]
-   * @param {string} [stage]
-   */
-  function setRunPhase(pct, message = "", stage = "") {
-    if (!els.runPhase) return;
-    const stageText =
-      typeof stage === "string" ? stage.trim().toLowerCase() : "";
-    const messageText = typeof message === "string" ? message.trim() : "";
-    const msgLower = messageText.toLowerCase();
-    let phase = "Idle";
-    if (stageText === "error" || msgLower.includes("error")) {
-      phase = "Failed";
-    } else if (stageText === "done") {
-      phase = "Complete";
-    } else if (msgLower.includes("loading")) {
-      phase = "Loading";
-    } else if (msgLower.includes("preprocess")) {
-      phase = "Preprocessing";
-    } else if (msgLower.includes("finalizing")) {
-      phase = "Finalizing";
-    } else if (msgLower.includes("grid")) {
-      phase = "Decomposing";
-    } else if (stageText) {
-      phase = stageText.charAt(0).toUpperCase() + stageText.slice(1);
-    } else if (typeof pct === "number" && pct > 0) {
-      phase = "Running";
-    }
-    els.runPhase.textContent = phase;
-  }
-
-  /** @type {UiService["updateProgress"]} */
-  function updateProgress(pct, message = "", stage = "") {
-    if (els.progressBar && pct !== undefined) {
-      const clamped = Math.max(0, Math.min(100, pct));
-      els.progressBar.style.width = `${clamped}%`;
-      setRunPhase(clamped, message, stage);
-    } else {
-      setRunPhase(pct, message, stage);
-    }
-    if (els.progressText) {
-      els.progressText.textContent = message || "";
-    }
-  }
-
   /** @type {UiService["scheduleLayoutRerender"]} */
   const scheduleLayoutRerender = (delay = 90) =>
     scheduleLayoutRerenderController(app, delay);
@@ -212,7 +166,6 @@ export function createUiService(app) {
   return {
     setStatus,
     setEditStatus,
-    updateProgress,
     updateWorkflowStepper,
     updateStepAvailability,
     setSettingsOpen,

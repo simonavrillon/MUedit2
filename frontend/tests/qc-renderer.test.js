@@ -51,7 +51,7 @@ beforeEach(() => {
   Object.assign(app, {
     refreshVisuals: recorder(),
     requestQcGridWindow: recorder(),
-    updateProgress: recorder(),
+    setStatus: recorder(),
   });
 });
 
@@ -65,17 +65,45 @@ function dragOverview(fromX, toX) {
 describe("ROI drag on the overview", () => {
   beforeEach(() => app.enableRoiSelection("emgCanvas"));
 
-  test("moves the nearest analysis window to the dragged span", () => {
+  test("a drag over a drawn window adjusts that window", () => {
     dragOverview(50, 150);
     assert.deepEqual(app.state.rois, [
+      { start: 0, end: 1000 },
       { start: 250, end: 750 },
-      { start: 600, end: 1000 },
     ]);
     assert.equal(app.state.roiDraft, null);
-    assert.deepEqual(app.requestQcGridWindow.calls, [[0, 250, 750]]);
-    assert.deepEqual(app.updateProgress.calls.at(-1), [
-      undefined,
-      "ROI updated (2 windows)",
+    assert.deepEqual(app.requestQcGridWindow.calls, [[0, 0, 1000]]);
+    assert.deepEqual(app.setStatus.calls.at(-1), ["ROI updated (2 windows)"]);
+  });
+
+  test("drawing windows one after another fills each in turn", () => {
+    els.nwindows.value = "4";
+    app.state.rois = [{ start: 0, end: 1000 }];
+    for (const [from, to] of [
+      [10, 40],
+      [50, 80],
+      [90, 120],
+      [130, 160],
+    ]) {
+      dragOverview(from, to);
+    }
+    assert.deepEqual(app.state.rois, [
+      { start: 50, end: 200 },
+      { start: 250, end: 400 },
+      { start: 450, end: 600 },
+      { start: 650, end: 800 },
+    ]);
+  });
+
+  test("once every window is drawn, a drag elsewhere moves the nearest", () => {
+    app.state.rois = [
+      { start: 0, end: 100 },
+      { start: 900, end: 1000 },
+    ];
+    dragOverview(140, 160);
+    assert.deepEqual(app.state.rois, [
+      { start: 0, end: 100 },
+      { start: 700, end: 800 },
     ]);
   });
 
@@ -104,8 +132,7 @@ describe("ROI drag on the overview", () => {
     assert.deepEqual(app.state.artifactRegions, [{ start: 250, end: 750 }]);
     assert.equal(app.state.artifactMode, false);
     assert.deepEqual(app.state.rois[0], { start: 0, end: 1000 });
-    assert.deepEqual(app.updateProgress.calls.at(-1), [
-      undefined,
+    assert.deepEqual(app.setStatus.calls.at(-1), [
       "Artifact window added (1 window)",
     ]);
   });

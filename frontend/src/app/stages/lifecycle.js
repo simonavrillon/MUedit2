@@ -52,7 +52,7 @@ const STAGES = {
       return null;
     },
     render(app) {
-      app.renderMuExplorer();
+      app.renderRunStage();
     },
   },
   edit: {

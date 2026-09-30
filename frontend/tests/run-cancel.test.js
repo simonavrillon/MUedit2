@@ -18,6 +18,7 @@ console.error = () => {};
 
 const { state: initialState } = await import("../src/app/state.js");
 const { createApp } = await import("../src/app/create-app.js");
+const { createRunLive } = await import("../src/decomp/live.js");
 
 function recorder() {
   const calls = [];
@@ -31,7 +32,6 @@ function testApp(api, els = {}) {
   const app = createApp({ state, els, api });
   Object.assign(app, {
     setStatus: recorder(),
-    updateProgress: recorder(),
     switchStage: recorder(),
   });
   return app;
@@ -83,8 +83,9 @@ describe("decomposition cancel", () => {
     assert.equal(app.setStatus.calls.at(-1)[1], "error");
   });
 
-  test("the cancelled event resets the progress without a preview", () => {
+  test("the cancelled event returns the page to the plan", () => {
     const app = testApp({});
+    app.state.runLive = createRunLive(0);
     app.handleStreamMessage({
       stage: "cancelled",
       pct: 0,
@@ -93,9 +94,7 @@ describe("decomposition cancel", () => {
     assert.deepEqual(app.setStatus.calls, [
       ["Decomposition cancelled", "muted"],
     ]);
-    assert.deepEqual(app.updateProgress.calls, [
-      [0, "Decomposition cancelled", "cancelled"],
-    ]);
+    assert.equal(app.state.runLive, null);
   });
 
   test("the button shows only while a run is going", () => {

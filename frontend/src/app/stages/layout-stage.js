@@ -15,6 +15,13 @@ export function setupLayoutEvents(app) {
     const toggle = () => {
       const section = head.parentElement;
       if (!section) return;
+      // A click on a rail icon expands the panel and opens that section.
+      if (!els.workspace?.classList.contains("settings-open")) {
+        setSettingsOpen(true);
+        section.classList.remove("collapsed");
+        head.setAttribute("aria-expanded", "true");
+        return;
+      }
       const isCollapsed = section.classList.toggle("collapsed");
       head.setAttribute("aria-expanded", isCollapsed ? "false" : "true");
     };

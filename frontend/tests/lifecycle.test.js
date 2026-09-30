@@ -139,11 +139,11 @@ describe("renderActiveStage", () => {
   test("draws only the visible stage", () => {
     app.renderChannelQC = recorder();
     app.refreshVisuals = recorder();
-    app.renderMuExplorer = recorder();
+    app.renderRunStage = recorder();
     app.renderEditExplorer = recorder();
     app.switchStage("run");
     renderActiveStage(app);
-    assert.equal(app.renderMuExplorer.calls.length, 1);
+    assert.equal(app.renderRunStage.calls.length, 1);
     assert.equal(app.renderChannelQC.calls.length, 0);
     assert.equal(app.renderEditExplorer.calls.length, 0);
   });

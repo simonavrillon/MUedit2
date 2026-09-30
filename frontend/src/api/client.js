@@ -6,11 +6,9 @@
 import { routes } from "./routes.js";
 import {
   decodeSeriesFrame,
-  decodeDecomposePreviewPayload,
   decodeEditSessionFrame,
   decodePulseFrame,
 } from "./binary-payloads.js";
-import { normalizePreviewPayload } from "./payloads.js";
 
 /** @typedef {import("../app/context.js").JsonObject} JsonObject */
 /** @typedef {"emg" | "overview" | "aux"} SeriesKind */
@@ -117,21 +115,6 @@ export function createApiClient({ apiFetch, apiJson, API_BASE, sessionId }) {
     /** Stops this tab's decomposition; its stream then ends with a `cancelled` event. */
     cancelDecomposition() {
       return postJson(`${API_BASE}${routes.decomposeCancel}`, {});
-    },
-
-    /**
-     * @param {string} token
-     */
-    async fetchDecomposePreview(token) {
-      const res = await apiFetch(
-        `${API_BASE}${routes.decomposePreview(token)}`,
-        { method: "GET", headers: { Accept: "application/octet-stream" } },
-        120000,
-      );
-      const buf = await res.arrayBuffer();
-      return normalizePreviewPayload(
-        decodeDecomposePreviewPayload(buf, res.headers.get("x-muedit-format")),
-      );
     },
 
     /**

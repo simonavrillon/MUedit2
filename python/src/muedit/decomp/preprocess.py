@@ -291,7 +291,9 @@ def load_step(
     filename = file_label or Path(filepath).name
     logger.info("Processing %s...", filename)
     if progress_cb:
-        progress_cb("start", {"message": "Loading signal", "pct": 5, "file": filename})
+        progress_cb(
+            "start", {"message": "Loading signal", "pct": 5, "file": filename, "phase": "load"}
+        )
 
     signal = (
         preloaded_signal.readonly_view() if preloaded_signal is not None else load_signal(filepath)
