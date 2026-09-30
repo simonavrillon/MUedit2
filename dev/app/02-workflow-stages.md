@@ -45,7 +45,8 @@ The user selects a signal file (raw EMG or saved decomposition). The app detects
 ```
 User clicks #browseSignalBtn
   -> importStage.handleNativeDialogOpen()
-     -> api.openFileDialog()        GET /dialog/open-file
+     -> platform.openFile(() => api.openFileDialog())
+          desktop: the bridge's open_file(); browser: GET /dialog/open-file
      -> detectLandingFileType(name)
         ├─ "raw"           -> qcStage.handleRawFilePath(path, name)
         │                      -> requestPreview({ filepath: path })  POST /preview-by-path
@@ -57,7 +58,7 @@ User clicks #browseSignalBtn
                                fall back to decomposition on failure
 ```
 
-For `.bdf`/`.edf` files, BIDS entities are parsed from the filename and the project is inferred from the directory path.
+For `.bdf`/`.edf` files, BIDS entities are parsed from the filename. The project comes from the preview (`project`, the file's folder under the output folder), which `applyPreviewMetadata` puts in the Project field.
 
 ### State Written
 

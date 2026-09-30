@@ -3,6 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'"
+    />
     <title>MUedit</title>
     <link rel="icon" href="data:," />
     <link rel="shortcut icon" href="data:," />
@@ -155,6 +159,20 @@
                 <div class="row file-row">
                   <span class="field-label">File:</span>
                   <span class="file-display" id="fileName">None</span>
+                </div>
+                <div class="row file-row hidden" id="outputFolderRow">
+                  <span class="field-label">Output:</span>
+                  <span
+                    class="file-display output-folder"
+                    id="outputFolder"
+                  ></span>
+                  <button
+                    class="pill-toggle"
+                    id="outputFolderBtn"
+                    type="button"
+                  >
+                    Change…
+                  </button>
                 </div>
                 <div class="form-row">
                   <label for="bidsProject">Project</label>
@@ -561,11 +579,7 @@
                     </button>
                   </div>
                   <div class="progress-track">
-                    <div
-                      class="progress-bar"
-                      id="progressBar"
-                      style="width: 0%"
-                    ></div>
+                    <div class="progress-bar" id="progressBar"></div>
                   </div>
                 </div>
                 <div class="chart-card glass">

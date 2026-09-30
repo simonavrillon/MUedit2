@@ -13,7 +13,7 @@ from typing import get_args
 
 import uvicorn
 
-from muedit.api.app_factory import create_app
+from muedit.api.app_factory import create_app, mount_frontend
 from muedit.api.routes import include_routers
 from muedit.decomp.pipeline import run_decomposition
 from muedit.decomp.types import (
@@ -25,6 +25,7 @@ from muedit.decomp.types import (
     ContrastFunc,
     DecompositionParameters,
 )
+from muedit.paths import frontend_dir, repo_root
 
 _DEFAULT_PARAMS = DecompositionParameters()
 
@@ -58,25 +59,21 @@ LOOPBACK_HOSTS = ("127.0.0.1", "localhost")
 
 
 def serve_api() -> None:
-    """Start the FastAPI backend server."""
+    """Start the MUedit server: the API, and the frontend at ``/`` on the same origin."""
     # Decompositions run in spawned worker processes; a frozen (bundled) app must let them start.
     multiprocessing.freeze_support()
     # /preview-by-path reads any local path, so only this machine's frontend may call it.
     host = os.environ.get("MUEDIT_HOST", "127.0.0.1")
     port = int(os.environ.get("MUEDIT_PORT") or os.environ.get("MUEDIT_BACKEND_PORT", "8000"))
-    frontend_port = os.environ.get("MUEDIT_FRONTEND_PORT", "8080")
-    origins = os.environ.get("MUEDIT_ALLOWED_ORIGINS")
     app = create_app(
         title="MUedit API",
         version="2.1.0",
-        allowed_origins=(
-            [o.strip() for o in origins.split(",") if o.strip()]
-            if origins
-            else [f"http://{h}:{frontend_port}" for h in LOOPBACK_HOSTS]
-        ),
         allowed_hosts=LOOPBACK_HOSTS if host in LOOPBACK_HOSTS else None,
     )
     include_routers(app)
+    frontend = frontend_dir()
+    if frontend is not None:
+        mount_frontend(app, frontend)
     uvicorn.run(app, host=host, port=port, log_level="warning", access_log=False)
 
 
@@ -311,7 +308,10 @@ def run_decomposition_cli(argv: list[str] | None = None) -> None:
             parser.error(f"File not found: {full_path}")
         file_label = full_path.name
     else:
-        sample_dir = Path(__file__).resolve().parents[3] / "data" / "datasamples"
+        checkout = repo_root()
+        if checkout is None:
+            parser.error("No input filepath provided, and no sample data outside a checkout.")
+        sample_dir = checkout / "data" / "datasamples"
         if not sample_dir.exists():
             parser.error(
                 f"No input filepath provided and sample directory is missing: {sample_dir}"

@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TextIO
 
-from muedit.io.store import cache_dir
+from muedit.paths import cache_dir
 
 logger = logging.getLogger(__name__)
 

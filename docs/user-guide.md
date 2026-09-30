@@ -74,7 +74,8 @@ Open the sidebar with the hamburger button (top-left). It contains three collaps
 |---|---|
 | File | Loaded filename (read-only) |
 | Fs (Hz) | Sampling frequency (read-only, from file) |
-| Project | Project name — output is saved under `data/<project>/` (your BIDS dataset root). Leave empty to use `data/muedit_out/` |
+| Output | The folder outputs go to (MUedit window only); **Change…** picks another one, which MUedit remembers |
+| Project | Project name — output is saved under `<output>/<project>/` (your BIDS dataset root). A folder name, not a path. Leave empty to use `<output>/muedit_out/` |
 | Subject | BIDS subject label — alphanumeric (e.g. `01`, `S06`, `pilot01`) |
 | Session | BIDS session label — alphanumeric (e.g. `1`, `pre`, `post`) |
 | Acquisition | BIDS `acq` label, for sequential recordings of the same task (e.g. one grid/finger recorded at a time). Optional, alphanumeric |
@@ -254,24 +255,33 @@ Additional history action types:
 
 ## Where files are saved
 
-MUedit saves into a **per-project folder inside the repository's `data/`
-directory**. You don't type a full path — you just name the project in the
-**Project** field of the Settings panel (Session Info), and that becomes your
-BIDS dataset root:
+MUedit saves into a **per-project folder inside its output folder**, which is
+the repository's `data/` directory unless you pick another one. You don't type a
+full path — you just name the project in the **Project** field of the Settings
+panel (Session Info), and that becomes your BIDS dataset root:
 
 ```
-data/<project>/        ← BIDS dataset root (the folder that contains sub-<subject>/)
+<output>/<project>/    ← BIDS dataset root (the folder that contains sub-<subject>/)
 ```
 
-- Enter a project name (e.g. `study1`) → output is written under `data/study1/`.
-- Leave it empty → MUedit uses `data/muedit_out/`.
+- Enter a project name (e.g. `study1`) → output is written under `<output>/study1/`.
+- Leave it empty → MUedit uses `<output>/muedit_out/`.
+- The project is a single folder name: a path such as `../study1` or `/data/x`
+  is refused, so outputs always stay inside the output folder.
 
 From there MUedit builds the rest of the path internally: raw EMG under
-`data/<project>/sub-<subject>/[ses-<session>/]emg/` and decomposition outputs
-under `data/<project>/derivatives/muedit/sub-<subject>/[ses-<session>/]decomp/`.
+`<output>/<project>/sub-<subject>/[ses-<session>/]emg/` and decomposition outputs
+under `<output>/<project>/derivatives/muedit/sub-<subject>/[ses-<session>/]decomp/`.
 
-> The base `data/` location can be relocated by setting the `MUEDIT_DATA_ROOT`
-> environment variable before launching MUedit.
+**Choosing the output folder.** In the MUedit window, click **Change…** next to
+**Output** in Session Info and pick a folder; MUedit uses it from then on, in
+this and later sessions. The `MUEDIT_DATA_ROOT` environment variable, set before
+launching, overrides it.
+
+**Files opened from elsewhere.** A decomposition opened from a BIDS dataset
+outside the output folder is saved back into that dataset, under its own
+`derivatives/muedit/`, as long as you leave its **Project** field unchanged.
+Type a project name to save it into the output folder instead.
 
 ---
 
@@ -298,8 +308,11 @@ so you can confirm the dataset is fully compliant before distribution.
 |---|---|
 | File won't load | Check the extension is supported; for BIDS files confirm the `_channels.tsv` sidecar exists alongside the `.bdf/.edf` |
 | Update Filter fails | Ensure the **Project** field is set and the original EMG file is accessible |
-| Save fails | Check the **Project** field is set — output is written to `data/<project>/` |
-| Port already in use | MUedit needs ports 8000 and 8080. Close any earlier MUedit terminal window, or quit the program holding the port, then relaunch |
+| Save fails | Check the **Project** field holds a folder name, not a path — output is written to `<output>/<project>/` |
+| "MUedit is already running" | Another MUedit window is open; use that one |
+| Opens in the browser instead of a window | No native window can open here (Linux without WebKitGTK, Windows without WebView2); the browser version works the same |
+| Port already in use | The browser version needs port 8000. Close any earlier MUedit terminal window, or quit the program holding the port, then relaunch |
 | "Backend unreachable — please restart the app" | The Python backend is not running or crashed; stop and relaunch MUedit (`MUedit.command` / `MUedit.bat`, or `scripts/run_MUedit.sh` / `.ps1`) |
 | "Session expired, reloading file..." during a run | The backend lost its cached copy of the signal (e.g. after a restart); MUedit reloads the file from its original path and retries once. If the file was moved, reopen it |
-| Browser does not open | Navigate manually to `http://localhost:8080` |
+| Browser does not open | Navigate manually to `http://127.0.0.1:8000` |
+| Anything else in the MUedit window | Details are in its log: `~/Library/Logs/MUedit/muedit.log` (macOS), `%LOCALAPPDATA%\MUedit\Logs\muedit.log` (Windows), `~/.local/state/muedit/log/muedit.log` (Linux) |

@@ -59,18 +59,18 @@ minutes the first time.
 ## Starting the app
 
 Open the MUedit folder and double-click **MUedit** — `MUedit.command` on macOS,
-`MUedit.bat` on Windows. A terminal window appears and reports what it is doing;
-leave it open, because that window *is* MUedit running.
+`MUedit.bat` on Windows. A terminal window appears and reports what it is doing,
+then MUedit opens in its own window. The first launch takes a little longer,
+while `uv` installs the window component. When you are finished, close the MUedit
+window: that quits the app.
 
-Your browser should open on MUedit's landing page by itself. If it does not, go
-to <http://localhost:8080> — the app is already running and waiting for you.
-
-When you are finished, quit MUedit from that terminal window rather than the
-browser: press `Ctrl+C` in it, or simply close the window. Either one stops the
-app cleanly. Closing the browser tab on its own does **not** quit MUedit — the
-tab is only a window onto the app, which keeps running in the background and
-holding on to its ports. If you close the tab by accident, nothing is lost:
-reopen <http://localhost:8080> and carry on where you were.
+Where no native window can open (on Linux without WebKitGTK, or on Windows
+without the WebView2 runtime), MUedit opens in your browser instead, at
+<http://127.0.0.1:8000>. The app then runs in the terminal window: quit it
+there with `Ctrl+C`, or by closing that window. Closing the browser tab on its
+own does **not** quit MUedit, and nothing is lost if you close it by accident:
+reopen <http://127.0.0.1:8000> and carry on where you were. To use the browser
+even where the window works, launch with `MUEDIT_BROWSER=1`.
 
 Two things to know the first time. On macOS, if you downloaded MUedit rather
 than cloning it, macOS will refuse to open the launcher from an unidentified
@@ -195,9 +195,13 @@ per spike, regenerated from your current edits.
 By default everything lands under `data/` inside the MUedit folder, in a
 subfolder named after the **Project** field you filled in. Type `study1` there
 and your results appear in `data/study1/`; leave it blank and they go to
-`data/muedit_out/`. You never type a full path. If you would rather keep your
-data somewhere else entirely, set the `MUEDIT_DATA_ROOT` environment variable
-before launching.
+`data/muedit_out/`. The project is a folder name, not a path. To keep your data
+somewhere else entirely, click **Change…** next to **Output** in the Session
+Info panel of the MUedit window and pick a folder; MUedit remembers it. The
+`MUEDIT_DATA_ROOT` environment variable, set before launching, overrides both.
+
+A decomposition you open from a BIDS dataset elsewhere on your disk is saved
+back into that dataset, as long as you leave its **Project** field unchanged.
 
 One thing to do before you share a dataset: a handful of dataset-level fields
 (authors, licence, funding, ethics, task descriptions) cannot be typed into the
@@ -206,11 +210,16 @@ in and validate the result.
 
 ## When something goes wrong
 
-If the browser never opens, go to <http://localhost:8080> manually. MUedit needs
-ports 8000 and 8080 free. If the launcher complains that a port is already in
-use, the usual culprit is an earlier MUedit still running in another terminal
-window: close that window and relaunch. Otherwise, quit whatever other program
-holds the port.
+If you launch MUedit while it is already open, a small window tells you so:
+use the MUedit window you already have. In the browser version, if the browser
+never opens, go to <http://127.0.0.1:8000> manually. That version needs port
+8000 free; if the launcher complains that the port is already in use, the usual
+culprit is an earlier MUedit still running in another terminal window: close
+that window and relaunch. Otherwise, quit whatever other program holds the port.
+
+When something fails in the MUedit window, the details are in its log file:
+`~/Library/Logs/MUedit/muedit.log` on macOS, `%LOCALAPPDATA%\MUedit\Logs\muedit.log`
+on Windows, `~/.local/state/muedit/log/muedit.log` on Linux.
 
 If the app tells you the backend is unreachable, the Python process behind the
 interface has stopped. Close the terminal and run the launcher again; your saved

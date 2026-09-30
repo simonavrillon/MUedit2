@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from muedit.api.common import build_params, make_json_safe, summarize_result
+from muedit.app_log import log_to_inherited_file
 from muedit.decomp.pipeline import run_decomposition
 from muedit.io.store import ArrayStore, SessionStore
 from muedit.models import SignalImport
@@ -103,6 +104,7 @@ def execute(
 
 def child_main(job: RunJob, store_path: str, conn: Connection) -> None:
     """Worker process: run ``job`` into the run store at ``store_path``, reporting over ``conn``."""
+    log_to_inherited_file()
     # A closed pipe means the server cancelled the run or is shutting down.
     with contextlib.suppress(BrokenPipeError, EOFError), conn:
         execute(job, SessionStore(Path(store_path)), conn.send)

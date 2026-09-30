@@ -9,6 +9,7 @@ from typing import Any, get_args
 import numpy as np
 from fastapi import Header, HTTPException
 
+from muedit.api import config
 from muedit.api.cache import BUDGET
 from muedit.api.memory import DEFAULT_SESSION, session_id_or_default
 from muedit.decomp.types import ComputeDtype, ContrastFunc, DecompositionParameters
@@ -21,6 +22,16 @@ def request_session(x_muedit_session: str | None = Header(None)) -> str:
     session = session_id_or_default(x_muedit_session)
     BUDGET.touch(session)
     return session
+
+
+def bids_root_for(project: str | None) -> Path:
+    """``resolve_bids_root``, with a project name that is not a folder name as a 400."""
+    try:
+        return config.resolve_bids_root(project)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400, detail={"field": "project", "reason": str(exc)}
+        ) from exc
 
 
 def parse_json(raw: str | None, field_name: str) -> Any:

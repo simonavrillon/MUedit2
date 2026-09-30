@@ -14,7 +14,7 @@ from muedit.api.memory import SESSION_IDLE_SEC
 from muedit.api.services.series_service import build_signal_views
 from muedit.editing.session import EditSession
 from muedit.io.store import RamStore, SessionStore
-from muedit.models import SignalImport
+from muedit.models import IntArray, SignalImport
 
 
 class FakeClock:
@@ -207,7 +207,7 @@ class TestDecompPreviewBinary:
 class TestRunResult:
     def test_read_only_view_with_its_spikes(self, clock: FakeClock) -> None:
         pulse = np.arange(6, dtype=np.float32).reshape(2, 3)
-        spikes = [np.array([0, 2], np.int32), np.array([1], np.int32)]
+        spikes: list[IntArray] = [np.array([0, 2], np.int32), np.array([1], np.int32)]
         token = cache._store_run_result(pulse, spikes=spikes)
         got = cache._get_run_result(token)
         assert got is not None

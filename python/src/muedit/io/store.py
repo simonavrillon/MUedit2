@@ -21,34 +21,18 @@ import numpy as np
 from numpy.typing import DTypeLike
 
 from muedit.models import FloatArray, SignalImport
+from muedit.paths import CACHE_DIR_ENV as CACHE_DIR_ENV
+from muedit.paths import cache_dir
 
 logger = logging.getLogger(__name__)
 
 MIB = 1024 * 1024
-CACHE_DIR_ENV = "MUEDIT_CACHE_DIR"
 DISK_RESERVE_ENV = "MUEDIT_DISK_RESERVE_MB"
 #: Free disk a store leaves untouched; an array that would cut into it is kept in RAM instead.
 DISK_RESERVE_BYTES = 1024 * MIB
 #: Size of the float64 working block a loader converts before writing it into the store.
 BLOCK_BYTES = 32 * MIB
 _OWNER_FILE = "owner.json"
-
-
-def cache_dir() -> Path:
-    """``MUEDIT_CACHE_DIR``, else the platform's per-user cache folder for MUedit."""
-    override = os.environ.get(CACHE_DIR_ENV, "").strip()
-    if override:
-        return Path(override)
-    home = Path.home()
-    if sys.platform == "win32":
-        local = os.environ.get("LOCALAPPDATA")
-        folder = (Path(local) if local else home / "AppData" / "Local") / "MUedit" / "Cache"
-    elif sys.platform == "darwin":
-        folder = home / "Library" / "Caches" / "MUedit"
-    else:
-        xdg = os.environ.get("XDG_CACHE_HOME")
-        folder = (Path(xdg) if xdg else home / ".cache") / "muedit"
-    return folder
 
 
 def sessions_dir() -> Path:

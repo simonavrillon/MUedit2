@@ -1,11 +1,5 @@
-// In desktop mode the frontend and API share the same origin (same port).
-// In web dev mode the frontend runs on :8080 and the API on :8000, so
-// MUEDIT_API_BASE can be set to override (e.g. "http://localhost:8000/api/v1").
-export const API_BASE =
-  window.MUEDIT_API_BASE ||
-  (window.location.port === "8080"
-    ? `${window.location.protocol}//${window.location.hostname}:8000/api/v1`
-    : `${window.location.origin}/api/v1`);
+// The MUedit server serves the page and the API on one origin.
+export const API_BASE = `${window.location.origin}/api/v1`;
 
 export const COLORS = {
   primary: "#ffffff",

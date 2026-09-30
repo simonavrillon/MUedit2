@@ -135,16 +135,25 @@ export function createApiClient({ apiFetch, apiJson, API_BASE, sessionId }) {
     },
 
     /**
-     * Frees what the backend holds for this tab. A beacon, because a normal
-     * request may not get out while the page is being unloaded.
+     * Frees what the backend holds for this tab. `keepalive` lets the request
+     * outlive the page being unloaded; unlike a beacon, it can carry the
+     * desktop app's token header.
      */
     closeSession() {
       const query = `session=${encodeURIComponent(sessionId)}`;
-      return navigator.sendBeacon(`${API_BASE}${routes.sessionClose}?${query}`);
+      apiFetch(`${API_BASE}${routes.sessionClose}?${query}`, {
+        method: "POST",
+        keepalive: true,
+      }).catch(() => {});
     },
 
-    openFileDialog() {
-      return apiJson(`${API_BASE}${routes.dialogOpenFile}`);
+    /** @returns {Promise<{ path: string | null, name: string | null }>} */
+    async openFileDialog() {
+      const picked = await apiJson(`${API_BASE}${routes.dialogOpenFile}`);
+      return {
+        path: typeof picked.path === "string" ? picked.path : null,
+        name: typeof picked.name === "string" ? picked.name : null,
+      };
     },
 
     /**

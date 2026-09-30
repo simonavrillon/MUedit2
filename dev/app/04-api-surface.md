@@ -7,7 +7,7 @@ All HTTP endpoints used by the frontend, their payloads, and binary formats.
 | # | Method | Route | Client Method | Used By | Timeout | Purpose |
 |---|---|---|---|---|---|---|
 | 1 | GET | `/health` | `api.healthUrl()` | `initializeApp` → `waitForBackend` | 60s poll | Backend health check |
-| 2 | GET | `/dialog/open-file` | `api.openFileDialog()` | `importStage.handleNativeDialogOpen` | 120s | Open native OS file dialog |
+| 2 | GET | `/dialog/open-file` | `api.openFileDialog()` | `importStage.handleNativeDialogOpen` (browser only) | 120s | Open native OS file dialog; the desktop app uses its bridge's `open_file()` instead |
 | 3 | POST | `/preview-by-path` | `api.fetchPreviewByPath(path)` | `qcStage.requestPreview` (with filepath) | 120s | Fetch preview metadata for raw file by path |
 | 4 | GET | `/series/emg` | `api.fetchSeries("emg", params)` | `qcStage.requestQcGridWindow` | 120s | One min/max envelope per channel of a grid over the ROI (`QC_TRACE_BINS` bins) |
 | 4b | GET | `/series/overview`, `/series/aux` | `api.fetchSeries(kind, params)` | `qcStage.requestPreview` | 120s | Whole-recording envelopes of each grid's mean \|EMG\| and of the aux channels (`OVERVIEW_BINS` bins) |
@@ -25,6 +25,8 @@ All HTTP endpoints used by the frontend, their payloads, and binary formats.
 | 15 | POST | `/edit/remove-duplicates` | `api.editRemoveDuplicates(payload)` | `removeDuplicateMus` | 120s | Remove duplicate MUs |
 | 16 | POST | `/edit/flag-mu` | `api.editFlagMu(payload)` | `flagMuForDeletion` | 120s | Toggle MU deletion flag |
 | 17 | POST | `/edit/save` | `api.editSave(payload, pulseTrains?)` | `saveEditedFile`, `autoSaveRunDecomposition` | 120s | Save edited decomposition to .npz |
+
+> **Origin and token.** The page and the API share one origin (the server serves `frontend/` at `/`), so `API_BASE` is `${location.origin}/api/v1` and there is no CORS. In the desktop app (`?desktop=1`), `platform.initPlatform()` takes a token from the pywebview bridge and `apiFetch` sends it as `X-MUedit-Token` on every request; the server answers 401 (`unauthorized`) without it, except for `/health`. `closeSession()` posts `/session/close` with `fetch(..., { keepalive: true })` rather than a beacon, because a beacon cannot carry that header.
 
 > Files are only ever opened by path through the native dialog. The browser-upload routes (`POST /preview`, `POST /edit/load`) and their client code were removed (audit F2/F4); `tests/test_api_http.py` fails if `routes.js` names a route the backend does not serve.
 
@@ -68,6 +70,8 @@ Response: { path: string, name: string }
 ```
 Request:  { path: string }
 Response: {
+  project?: string,          // the file's project folder under the output folder, when it lies
+                             //   in a BIDS dataset there; "" in a dataset elsewhere
   upload_token: string,
   grid_names: string[],
   total_samples: number,

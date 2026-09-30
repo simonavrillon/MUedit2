@@ -183,6 +183,20 @@ All elements are registered in `dom.js` as `els.*` properties.
 | `apiJson` | [A] | api/client.js |
 | `waitForBackend` | [A] | initializeApp |
 | `parseApiError` | [A] | http.js (internal) |
+| `setAppToken` | [A] | platform.initPlatform |
+| `TOKEN_HEADER` | [A] | apiFetch |
+
+---
+
+## Module: `app/platform.js`
+
+| Export | [A/?] | Used By |
+|---|---|---|
+| `IS_DESKTOP` | [A] | import-stage.setupOutputFolder, platform (internal) |
+| `initPlatform` | [A] | initializeApp |
+| `openFile` | [A] | import-stage.handleNativeDialogOpen |
+| `outputFolder` | [A] | import-stage.setupOutputFolder |
+| `chooseOutputFolder` | [A] | import-stage.setupOutputFolder (outputFolderBtn click) |
 
 ---
 
@@ -306,8 +320,8 @@ All elements are registered in `dom.js` as `els.*` properties.
 |---|---|---|
 | `handleNativeDialogOpen` (private) | [A] | setupImportEvents (browseSignalBtn click) |
 | `displayNameForPath` | [A] | handleNativeDialogOpen |
-| `inferProjectFromPath` | [A] | handleNativeDialogOpen |
 | `setupImportEvents` | [A] | initializeApp |
+| `setupOutputFolder` | [A] | initializeApp (desktop app only) |
 
 ---
 
@@ -412,7 +426,8 @@ All elements are registered in `dom.js` as `els.*` properties.
 | `runAutoQc` | [A] | signal/qc.requestAutoQc |
 | `decomposeStream` | [A] | run-stage.runDecomposition |
 | `fetchDecomposePreview` | [A] | run-stage.handleStreamMessage |
-| `openFileDialog` | [A] | import-stage.handleNativeDialogOpen |
+| `openFileDialog` | [A] | import-stage.handleNativeDialogOpen (browser only, through platform.openFile) |
+| `closeSession` | [A] | initializeApp (pagehide) |
 | `editAction` | [A] | editing-service.requestRoiEdit |
 | `editMode` | [A] | editing-service.requestFilterUpdate |
 | `editRemoveOutliers` | [A] | editing-service.removeOutliers |

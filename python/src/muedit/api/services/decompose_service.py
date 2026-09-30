@@ -222,12 +222,19 @@ class _Run:
                 self.events.put(done)
                 ended = True
             else:
+                if message.get("stage") == "error":
+                    logger.error(
+                        "Decomposition failed: %s\n%s",
+                        message.get("detail"),
+                        message.get("traceback", ""),
+                    )
                 self.events.put(message)
                 ended = ended or message.get("stage") in ("error", "cancelled")
         if not ended:
             if self.cancelled.is_set():
                 self.events.put(dict(CANCELLED_EVENT))
             else:
+                logger.error("Decomposition worker exited with code %s", self._exitcode)
                 self.events.put(
                     {
                         "stage": "error",

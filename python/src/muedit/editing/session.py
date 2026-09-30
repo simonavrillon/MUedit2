@@ -138,6 +138,7 @@ class EditSession:
         self.log: EditLog | None = None
         self.recovery: RecoverableLog | None = None  # unsaved edits an earlier session left
         self.meta: dict[str, Any] = {}  # file fields the client shows and the save writes back
+        self.bids_root: Path | None = None  # BIDS dataset the file was opened from
         self._filtered: dict[tuple[str | None, int], tuple[FloatArray, float, IntArray]] = {}
 
         self.arrays: dict[str, np.ndarray] = {}

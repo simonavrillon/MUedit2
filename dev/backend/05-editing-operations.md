@@ -362,3 +362,10 @@ Binary variant (`load_decomposition_binary_from_path`): a MUB1 frame, the JSON f
 | `_parse_subject_session_from_entity_label(entity_label)` | Extracts subject + optional session |
 | `_infer_bids_root_from_decomp_path(filepath)` | Infers BIDS root from decomposition file path (derivatives/muedit/, sub-X/, muedit_out) |
 | `read_bids_sidecar_meta(bids_root, entity_label)` | Reads participant + hardware metadata from BIDS sidecars |
+
+The edit session keeps the BIDS root it inferred from the opened file (`EditSession.bids_root`)
+and the project that root lies in under `DATA_ROOT` (`meta["project"]`, `""` outside it).
+`editing_service._dataset_root()` resolves where a save writes and where the grid EMG for a
+filter update is read: the file's own dataset while the request's `project` equals the one the
+file opened with, else `resolve_bids_root(project)`. A decomposition opened from a dataset
+outside the output folder therefore saves back into it; typing a project sends it there instead.

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pyedflib
@@ -20,7 +21,7 @@ AUX_NAMES = ["Force", "Trig"]
 
 
 def _export(tmp_path: Path, data: np.ndarray, aux: np.ndarray | None, fmt: str | None) -> Path:
-    kwargs = {} if fmt is None else {"file_format": fmt}
+    kwargs: dict[str, Any] = {} if fmt is None else {"file_format": fmt}
     out = export_bids_emg(
         data,
         FSAMP,
@@ -52,7 +53,7 @@ def _reference(path: Path, data: np.ndarray, aux: np.ndarray | None, fmt: str) -
         file_type=pyedflib.FILETYPE_BDFPLUS if use_bdf else pyedflib.FILETYPE_EDFPLUS,
     )
     writer.setStartdatetime(START)
-    headers = []
+    headers: list[dict[str, str | int | float | None]] = []
     for i, row in enumerate(rows):
         lo, hi = _physical_range(float(row.min()), float(row.max()))
         headers.append(

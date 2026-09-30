@@ -197,6 +197,10 @@ export function createFileSessionService(app) {
         Number.isFinite(fs) && fs > 0 ? String(Math.round(fs)) : "";
     }
     applyParticipantFields(els, data?.participant_meta || {});
+    // The project folder the file lies in under the output folder, when it does.
+    if (typeof data?.project === "string" && data.project) {
+      setBidsEntitiesInput({ project: data.project });
+    }
     if (els.bidsManufacturer && data?.manufacturer)
       els.bidsManufacturer.value = data.manufacturer;
     if (els.bidsDeviceModel && data?.manufacturers_model_name)

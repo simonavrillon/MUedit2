@@ -25,7 +25,6 @@ classifiers = [
 dependencies = [
   "numpy>=2.4",
   "scipy>=1.17",
-  "matplotlib>=3.9",
   "xmltodict>=0.14",
   "pydantic>=2.10",
   "PyYAML>=6.0",
@@ -35,6 +34,7 @@ dependencies = [
   "uvicorn>=0.32",
   "python-multipart>=0.0.31",  # floor clears known advisories
   "pyedflib>=0.1.36",
+  "platformdirs>=4.3",
 ]
 
 [project.optional-dependencies]
@@ -49,6 +49,10 @@ dev = [
   "pre-commit>=4.0",
   "types-PyYAML",
 ]
+# Only the CLI's ``--manual-roi`` plots; the app never imports matplotlib.
+plot = [
+  "matplotlib>=3.9",
+]
 notebook = [
   "jupyterlab>=4.6.2",  # floor clears known advisories
   "ipykernel>=6.29",
@@ -58,11 +62,18 @@ research = [
   # Phase 0 memory benchmark (research/desktop/bench_memory.py).  No Windows
   # wheels, so it stays out of ``dev``: the CI memory test uses tracemalloc.
   "memray>=1.17",
+  "matplotlib>=3.9",
+]
+# The native window of ``muedit-desktop``.  On Linux, pywebview also needs PyGObject with
+# WebKitGTK from the system (or the Flatpak runtime).
+desktop = [
+  "pywebview>=5",
 ]
 
 [project.scripts]
 muedit-api = "muedit.cli:serve_api"
 muedit-decompose = "muedit.cli:run_decomposition_cli"
+muedit-desktop = "muedit.desktop:main"
 
 [tool.setuptools]
 package-dir = {"" = "python/src"}
@@ -139,4 +150,9 @@ enable_error_code = ["possibly-undefined", "redundant-expr", "truthy-bool"]
 [[tool.mypy.overrides]]
 # Third-party packages without type information.
 module = ["scipy.*", "h5py.*", "pyedflib.*", "xmltodict.*", "matplotlib.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# Optional extras, absent from the CI environment (``--extra dev`` only).
+module = ["webview", "webview.*"]
 ignore_missing_imports = true

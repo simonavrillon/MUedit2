@@ -8,6 +8,7 @@ from typing import Any
 import numpy as np
 from fastapi import HTTPException
 
+from muedit.api import config
 from muedit.api.cache import (
     _hold_upload,
     _release_upload,
@@ -100,6 +101,7 @@ def build_preview_from_path(filepath: str, session: str = DEFAULT_SESSION) -> di
     try:
         bids_root = _infer_bids_root_from_decomp_path(filepath)
         if bids_root is not None:
+            result["project"] = config.project_of(bids_root)
             entity_label = parse_entity_label(Path(filepath).name)
             result.update(read_bids_sidecar_meta(bids_root, entity_label))
     except Exception:  # noqa: BLE001, S110

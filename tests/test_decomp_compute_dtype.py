@@ -21,7 +21,7 @@ from muedit.decomp.algorithm import (
 )
 from muedit.decomp.core import decompose_step
 from muedit.decomp.postprocess import postprocess_step
-from muedit.decomp.types import POSTPROCESS_MODES, DecompositionParameters
+from muedit.decomp.types import POSTPROCESS_MODES, DecompositionParameters, PostprocessMode
 from muedit.models import SignalImport
 from muedit.signal.decomp_primitives import extend_signal, zeroed_matmul
 from muedit.signal.filters import demean, notch_inplace
@@ -38,7 +38,7 @@ GATE_ROA = 0.99
 JITTER = 1
 MAX_LAG = 10
 
-_MODES = ("windowed", "adaptive", "full-trace")
+_MODES: tuple[PostprocessMode, ...] = ("windowed", "adaptive", "full-trace")
 
 
 def _run(prep: Any, params: DecompositionParameters) -> tuple[dict[str, list[np.ndarray]], float]:
@@ -48,12 +48,15 @@ def _run(prep: Any, params: DecompositionParameters) -> tuple[dict[str, list[np.
         prep=prep, params=params, rng=np.random.default_rng(params.random_seed), progress_cb=None
     )
     seconds = time.perf_counter() - t0
-    out = {}
+    out: dict[str, list[np.ndarray]] = {}
     for mode in _MODES:
+        flags = POSTPROCESS_MODES[mode]
         post = postprocess_step(
             prep=prep,
             decomposed=decomposed,
-            params=replace(params, **POSTPROCESS_MODES[mode]),
+            params=replace(
+                params, use_adaptive=flags["use_adaptive"], full_trace=flags["full_trace"]
+            ),
             progress_cb=None,
         )
         out[mode] = [np.asarray(d) for d in post.distime]

@@ -35,12 +35,16 @@ The backend serves four user-facing stages (mirroring the frontend):
 
 ```
 python/src/muedit/
-├── __init__.py                              Top-level exports
+├── __init__.py                              Top-level exports (imported on first use)
 ├── cli.py                                   CLI entry point (api serve, decompose)
+├── desktop.py                               Desktop app: server thread + pywebview window
+├── paths.py                                 Per-user cache/config/log folders, checkout, frontend
+├── settings.py                              settings.json (output folder picked in the app)
+├── app_log.py                               Desktop log file, shared with spawned workers
 ├── models.py                                SignalImport, LoadedDecomposition, DecompositionExport
 │
 ├── api/
-│   ├── app_factory.py                       FastAPI app construction, CORS and Host restrictions
+│   ├── app_factory.py                       FastAPI app construction, Host and token checks, frontend mount
 │   ├── routes/
 │   │   ├── __init__.py                       include_routers()
 │   │   ├── preview.py                        /preview-by-path, /qc/auto, /health
@@ -61,7 +65,7 @@ python/src/muedit/
 │   ├── binary.py                             MUB1 frame packer and unpacker
 │   ├── cache.py                              In-memory TTL cache (upload, QC, preview, edit context)
 │   ├── common.py                             Shared parsing + serialization utilities
-│   ├── config.py                             DATA_ROOT, resolve_bids_root()
+│   ├── config.py                             DATA_ROOT, resolve_bids_root(), project_of()
 │   └── errors.py                             Exception handlers + error envelope
 │
 ├── decomp/

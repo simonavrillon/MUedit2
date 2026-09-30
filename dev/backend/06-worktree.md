@@ -167,8 +167,10 @@ Use this to trace what the user can reach.
 
 | Symbol | Category | Reachable via |
 |---|---|---|
-| `app_factory.create_app()` | App-internal | Called by `cli.serve_api` |
-| `routes.include_routers()` | App-internal | Called by `cli.serve_api` |
+| `app_factory.create_app()` | App-internal | Called by `cli.serve_api`, `desktop._Server` |
+| `app_factory.mount_frontend()` | App-internal | Called by `cli.serve_api`, `desktop._Server` |
+| `app_factory.TokenMiddleware` | App-internal | Added by `create_app(token=...)` (desktop app) |
+| `routes.include_routers()` | App-internal | Called by `cli.serve_api`, `desktop._Server` |
 | `contracts.success_payload()` | App-internal | Called by all route handlers |
 | `binary.pack_frame()` | App-internal | Called by decompose/edit services |
 | `binary.unpack_frame()` | App-internal | Called by the `/edit/save` route and the decompose service |
@@ -177,8 +179,12 @@ Use this to trace what the user can reach.
 | `errors.http_exception_handler` | App-internal | Registered on app |
 | `errors.validation_exception_handler` | App-internal | Registered on app |
 | `errors.unhandled_exception_handler` | App-internal | Registered on app |
-| `config.DATA_ROOT` | App-internal | Used by `resolve_bids_root`, editing service |
-| `config.resolve_bids_root()` | App-internal | Called by decompose/edit services |
+| `config.DATA_ROOT` | App-internal | Used by `resolve_bids_root`, `project_of`, `DesktopApi` |
+| `config.default_data_root()` | App-internal | Sets `DATA_ROOT` at import |
+| `config.set_data_root()` | App-internal | Called by `DesktopApi.choose_output_folder` |
+| `config.resolve_bids_root()` | App-internal | Called through `common.bids_root_for()` and the edit session |
+| `config.project_of()` | App-internal | Called by preview and edit services |
+| `common.bids_root_for()` | App-internal | Called by the decompose route and the edit saves (400 on a bad project) |
 | `common.build_params()` | App-internal | Called by decompose service |
 | `common.make_json_safe()` | App-internal | Called by many services |
 | `common.parse_json()` | App-internal | Called by route handlers |
@@ -219,7 +225,7 @@ Use this to trace what the user can reach.
 | `decompose_step()` | App-internal | Called by `run_decomposition` |
 | `postprocess_step()` | App-internal | Called by `run_decomposition` |
 | `export_step()` | App-internal | Called by `run_decomposition` |
-| `select_roi_interactively()` | User-exposed | CLI `--manual-roi` (imports matplotlib lazily) |
+| `select_roi_interactively()` | User-exposed | CLI `--manual-roi` (imports matplotlib lazily; `plot` extra) |
 | `build_manual_artifact_mask()` | App-internal | Called by `preprocess_step`, editing service save |
 | `batch_process_filters()` | App-internal | Called by `postprocess_step` |
 | `remove_duplicates_by_grid()` | App-internal | Called by `postprocess_step`, editing service `_dedup` |
@@ -362,6 +368,27 @@ Use this to trace what the user can reach.
 | `_ensure_channel_matrix()` | App-internal | Called by `SignalImport.from_mapping` |
 
 ---
+
+## `desktop.py`
+
+| Symbol | Category | Reachable via |
+|---|---|---|
+| `main()` | User-exposed | `muedit-desktop`, `python -m muedit.desktop`, the launchers |
+| `DesktopApi` | User-exposed | `window.pywebview.api` in the page: `token`, `app_info`, `open_file`, `choose_output_folder` |
+| `acquire_instance_lock()` | App-internal | Called by `main` |
+| `_Server` | App-internal | Called by `main` |
+| `NO_WINDOW` | App-internal | Exit status the launchers read to fall back to the browser |
+
+## `paths.py`, `settings.py`, `app_log.py`
+
+| Symbol | Category | Reachable via |
+|---|---|---|
+| `paths.cache_dir()` | App-internal | Session stores, edit logs, the desktop lock (`MUEDIT_CACHE_DIR` overrides) |
+| `paths.config_dir()`, `paths.log_dir()` | App-internal | `settings.py`, `desktop.py` |
+| `paths.repo_root()`, `paths.frontend_dir()` | App-internal | `config.default_data_root`, `cli`, `desktop` |
+| `settings.load_settings()`, `settings.save_setting()` | App-internal | `config.default_data_root`, `DesktopApi.choose_output_folder` |
+| `app_log.log_to_file()` | App-internal | Called by `desktop.main` |
+| `app_log.log_to_inherited_file()` | App-internal | Called by `decompose_worker.child_main` |
 
 ## `cli.py`
 

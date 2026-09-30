@@ -27,17 +27,14 @@ test("apiFetch sends the session header and keeps the caller's", async () => {
   assert.equal(sent?.get("Accept"), "text/plain");
 });
 
-test("closeSession sends a beacon naming the session", () => {
-  /** @type {string[]} */
-  const beacons = [];
-  const realNavigator = Object.getOwnPropertyDescriptor(
-    globalThis,
-    "navigator",
-  );
-  Object.defineProperty(globalThis, "navigator", {
-    value: { sendBeacon: (/** @type {string} */ url) => beacons.push(url) > 0 },
-    configurable: true,
-  });
+test("closeSession posts a keepalive request naming the session", async () => {
+  /** @type {{ url: string, init: RequestInit | undefined }[]} */
+  const sent = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    sent.push({ url: String(url), init });
+    return new Response(null, { status: 204 });
+  };
   try {
     const api = createApiClient({
       apiFetch,
@@ -45,11 +42,18 @@ test("closeSession sends a beacon naming the session", () => {
       API_BASE: "http://api/v1",
       sessionId: "tab-1",
     });
-    assert.equal(api.closeSession(), true);
+    api.closeSession();
+    await new Promise((resolve) => setTimeout(resolve, 0));
   } finally {
-    if (realNavigator)
-      Object.defineProperty(globalThis, "navigator", realNavigator);
-    else delete (/** @type {any} */ (globalThis).navigator);
+    globalThis.fetch = realFetch;
   }
-  assert.deepEqual(beacons, ["http://api/v1/session/close?session=tab-1"]);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].url, "http://api/v1/session/close?session=tab-1");
+  assert.equal(sent[0].init?.method, "POST");
+  assert.equal(sent[0].init?.keepalive, true);
+  // Unlike a beacon, it carries the headers, the desktop app's token among them.
+  assert.equal(
+    new Headers(sent[0].init?.headers).get(SESSION_HEADER),
+    SESSION_ID,
+  );
 });

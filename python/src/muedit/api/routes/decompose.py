@@ -7,8 +7,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import Response, StreamingResponse
 
-from muedit.api.common import request_session
-from muedit.api.config import resolve_bids_root
+from muedit.api.common import bids_root_for, request_session
 from muedit.api.contracts import success_payload
 from muedit.api.services.decompose_service import (
     cancel_decomposition,
@@ -66,7 +65,7 @@ async def decompose_stream(
             "roi": roi,
             "rois": roi_list,
             "discard_channels": discard_override,
-            "bids_root": str(resolve_bids_root(project)) if bids_export else None,
+            "bids_root": str(bids_root_for(project)) if bids_export else None,
             "bids_entities": bids_entities_obj,
             "bids_metadata": bids_metadata_obj,
             "include_full_preview": full_preview,

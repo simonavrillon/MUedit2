@@ -69,9 +69,12 @@ tree and dataset-level files at the dataset root.
 
 > **Where `<bids_root>` is.** In the app you don't type a path — you name a
 > project in the **Project** field of the Settings panel, and MUedit saves under
-> `data/<project>/` inside the repository (so `<bids_root>` = `data/<project>`).
-> An empty project falls back to `data/muedit_out/`. The base `data/` directory
-> can be relocated with the `MUEDIT_DATA_ROOT` environment variable.
+> `<output>/<project>/` (so `<bids_root>` = `<output>/<project>`). `<output>` is
+> the repository's `data/` unless another folder was picked in the MUedit window
+> or set with `MUEDIT_DATA_ROOT`. An empty project falls back to
+> `<output>/muedit_out/`. An edited decomposition opened from a BIDS dataset
+> outside `<output>` is saved back into that dataset while its project is left
+> unchanged.
 
 ```text
 <bids_root>/
@@ -326,16 +329,21 @@ which should only be used on files you trust.
 ## Important Path Rule For `bids_root`
 
 **In the app**, the dataset root is chosen for you from the **Project** field in
-the Settings panel: output goes to `data/<project>/` inside the repository
-(`data/muedit_out/` when the field is empty). You only provide the project name.
+the Settings panel: output goes to `<output>/<project>/` (`<output>/muedit_out/`
+when the field is empty). You only provide the project name, which must be a
+single folder name; a path is refused with a 400.
 
 ```text
-Project = "study1"   →   bids_root = data/study1
-Project = ""         →   bids_root = data/muedit_out
+Project = "study1"      →   bids_root = <output>/study1
+Project = ""            →   bids_root = <output>/muedit_out
+Project = "../study1"   →   refused
 ```
 
-The base `data/` directory can be relocated with the `MUEDIT_DATA_ROOT`
-environment variable.
+`<output>` is, in order: `MUEDIT_DATA_ROOT`, the folder picked with **Change…**
+in the MUedit window (saved in the per-user `settings.json`), the repository's
+`data/`, and `MUedit` in the Documents folder for an installed package without a
+checkout. An edited decomposition opened from a BIDS dataset outside `<output>`
+is saved back into that dataset while its project is left unchanged.
 
 **When calling the API/CLI directly** with an explicit `bids_root`, pass the
 dataset root, i.e. the folder that directly contains `sub-<subject>/` — not a

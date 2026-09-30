@@ -15,6 +15,7 @@ import numpy as np
 from fastapi import HTTPException
 from fastapi.responses import Response
 
+from muedit.api import config
 from muedit.api.binary import FRAME_FORMAT, FRAME_MEDIA_TYPE, pack_frame
 from muedit.api.cache import (
     _get_edit_session,
@@ -24,8 +25,12 @@ from muedit.api.cache import (
     _resize_edit_session,
     _store_edit_session,
 )
-from muedit.api.common import make_json_safe, parse_entity_label, require_existing_path
-from muedit.api.config import DATA_ROOT, resolve_bids_root
+from muedit.api.common import (
+    bids_root_for,
+    make_json_safe,
+    parse_entity_label,
+    require_existing_path,
+)
 from muedit.api.memory import DEFAULT_SESSION
 from muedit.api.schemas import (
     BidsSaveFields,
@@ -122,6 +127,7 @@ class _FileExtras:
     """What the files around a decomposition add: BIDS sidecars and the saved edit log."""
 
     project: str | None = None
+    bids_root: Path | None = None
     sidecar_meta: dict[str, Any] = field(default_factory=dict)
     mu_uids: list[Any] | None = None
     edit_history: list[Any] | None = None
@@ -133,11 +139,8 @@ def _file_extras(filepath: str, file_label: str, decomp: LoadedDecomposition) ->
     extras = _FileExtras()
     bids_root = _infer_bids_root_from_decomp_path(filepath)
     if bids_root is not None:
-        try:
-            rel = bids_root.relative_to(DATA_ROOT)
-            extras.project = rel.parts[0] if rel.parts else ""
-        except ValueError:
-            extras.project = ""
+        extras.bids_root = bids_root
+        extras.project = config.project_of(bids_root)
         try:
             entity_label = parse_entity_label(file_label)
             subject, bids_session = _parse_subject_session_from_entity_label(entity_label)
@@ -179,6 +182,13 @@ def _file_extras(filepath: str, file_label: str, decomp: LoadedDecomposition) ->
     return extras
 
 
+def _dataset_root(edit: EditSession, project: str | None) -> Path:
+    """The dataset the file was opened from while its project is unchanged, else the project's."""
+    if edit.bids_root is not None and (project or "").strip() == edit.meta.get("project"):
+        return edit.bids_root
+    return bids_root_for(project)
+
+
 def _session_pulse(decomp: LoadedDecomposition, store: SessionStore) -> FloatArray | None:
     """The file's pulse trains as float32 outside the heap, or None when it has none."""
     pulse = decomp.pulse_trains_full
@@ -208,7 +218,7 @@ def _new_session(
         project: str | None, grid: int, into: SessionStore
     ) -> tuple[FloatArray, float, IntArray] | None:
         try:
-            return _read_bids_grid(resolve_bids_root(project), entity_label, grid, into)
+            return _read_bids_grid(_dataset_root(edit, project), entity_label, grid, into)
         except (ValueError, FileNotFoundError):
             return None
 
@@ -233,6 +243,7 @@ def _new_session(
         duplicates=duplicates,
     )
     decomp.pulse_trains_full = np.zeros((0, 0), dtype=np.float32)
+    edit.bids_root = extras.bids_root
     edit.meta = {
         "file_label": file_label,
         "source_path": str(Path(filepath).resolve()),
@@ -401,6 +412,7 @@ class _SaveRequest:
     pulse: Callable[[list[int]], FloatArray | RowSource | None]  # pulse trains of the kept MUs
     artifact_mask: BoolArray | None = None
     signal: EditSignalContext | None = None  # raw EMG for the BIDS export
+    bids_root: Path | None = None  # where the files go; else the form's project
     before_write: Callable[[Path], None] | None = None
 
 
@@ -529,7 +541,7 @@ def _save(req: _SaveRequest) -> tuple[dict[str, Any], list[int], list[dict[str, 
             entries.append(_save_removal_entry("remove_duplicates", removed_uids))
     edit_history = [*req.edit_history, *entries]
 
-    bids_root = resolve_bids_root(form.project)
+    bids_root = req.bids_root if req.bids_root is not None else bids_root_for(form.project)
     file_label = form.file_label or ""
     entity_label = form.entity_label or parse_entity_label(file_label)
     subject, bids_session = _parse_subject_session_from_entity_label(entity_label)
@@ -628,6 +640,7 @@ def save_edit_session(
             pulse=edit.pulse_rows,
             artifact_mask=mask if mask is not None and mask.size == edit.total_samples else None,
             signal=edit.signal,
+            bids_root=_dataset_root(edit, payload.project),
             # Windows cannot replace a file that is memory-mapped.
             before_write=(lambda path: edit.detach(str(path))) if sys.platform == "win32" else None,
         )

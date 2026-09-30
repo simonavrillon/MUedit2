@@ -28,7 +28,10 @@ logger = logging.getLogger(__name__)
 
 def select_roi_interactively(data: FloatArray, fsamp: float) -> tuple[int, int]:
     """Display a plot and let the user click ROI start/end times."""
-    import matplotlib.pyplot as plt
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError as exc:
+        raise RuntimeError("--manual-roi needs matplotlib: install muedit[plot]") from exc
 
     logger.info("Select the start and end of the analysis window on the plot.")
 

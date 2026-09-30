@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -350,15 +351,21 @@ class TestUndo:
 
     def test_undoing_a_first_refit_deletes_its_copy(self, edit: EditSession) -> None:
         _write_patch(edit, 0, 100, np.full(50, 7.0, np.float32))
-        copy = edit.arrays[edit.rows[0][0]]
+        row = edit.rows[0]
+        assert row is not None
+        copy = edit.arrays[row[0]]
         edit.apply("undo", {})
         assert set(edit.arrays) == {"base"}
+        assert isinstance(copy, np.memmap)
+        assert copy.filename is not None
         assert not Path(copy.filename).exists()
 
     def test_a_copy_a_duplicate_still_shows_is_kept(self, edit: EditSession) -> None:
         _write_patch(edit, 0, 100, np.full(50, 7.0, np.float32))
         edit.apply("duplicate", {"mu": 0})
-        key = edit.rows[3][0]
+        row = edit.rows[3]
+        assert row is not None
+        key = row[0]
         edit.apply("reset", {"mu": 0})
         edit.apply("undo", {})
         assert key in edit.arrays
@@ -370,7 +377,8 @@ class TestUndo:
         spikes = edit.spikes[0].copy()
         _write_patch(edit, 0, 100, np.full(50, 7.0, np.float32))
         edit.apply("delete-spikes", {"mu": 0, "x_start": 0, "x_end": N_SAMPLES, "y_max": 5.0})
-        assert edit.dirty
+        was_dirty = edit.dirty
+        assert was_dirty
         edit.apply("reset", {"mu": 0})
         np.testing.assert_array_equal(edit.values(0, 0, N_SAMPLES), pulse[0])
         np.testing.assert_array_equal(edit.spikes[0], spikes)
@@ -507,12 +515,10 @@ class TestEditLog:
 @pytest.fixture()
 def api(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, cache_dir: Path) -> Iterator[TestClient]:
     import muedit.api.config as config
-    import muedit.api.services.editing_service as editing_service
     from muedit.api.app_factory import create_app
     from muedit.api.routes import include_routers
 
     monkeypatch.setattr(config, "DATA_ROOT", tmp_path)
-    monkeypatch.setattr(editing_service, "DATA_ROOT", tmp_path)
     app = create_app()
     include_routers(app)
     with TestClient(app, raise_server_exceptions=False) as client:
@@ -718,6 +724,42 @@ class TestSessionApi:
             )
         )
         np.testing.assert_array_equal(arrays["samples"][0], saved_row[:1000])
+
+    def test_a_dataset_outside_the_data_root_is_saved_back_into(
+        self,
+        api: TestClient,
+        decomp_file: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import muedit.api.config as config
+
+        monkeypatch.setattr(config, "DATA_ROOT", tmp_path / "outputs")
+        dataset = tmp_path / "elsewhere" / "study"
+        path = dataset / "derivatives" / "muedit" / "sub-01" / "decomp" / decomp_file.name
+        path.parent.mkdir(parents=True)
+        shutil.copy(decomp_file, path)
+        meta, _ = _open(api, path)
+        assert meta["project"] == ""
+
+        def save(project: str) -> Response:
+            return api.post(
+                f"{API}/edit/session/save",
+                json={
+                    "token": meta["token"],
+                    "project": project,
+                    "entity_label": "sub-01_task-edit",
+                },
+                headers={SESSION_HEADER: "tab-edit"},
+            )
+
+        assert Path(save("").json()["data"]["path"]).is_relative_to(dataset)
+        assert Path(save("proj").json()["data"]["path"]).is_relative_to(
+            tmp_path / "outputs" / "proj"
+        )
+        refused = save("../escape")
+        assert refused.status_code == 400
+        assert refused.json()["error"]["detail"]["field"] == "project"
 
     def test_unsaved_edits_are_offered_when_the_file_is_reopened(
         self, api: TestClient, decomp_file: Path

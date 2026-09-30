@@ -65,12 +65,10 @@ OPENAPI_OPERATION_KEYS = {"get", "put", "post", "delete", "options", "head", "pa
 def workspace(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
     """Tmp dir used as DATA_ROOT *and* cwd (some routes write relative paths)."""
     import muedit.api.config as config
-    import muedit.api.services.editing_service as editing_service
 
     root = tmp_path_factory.mktemp("api_http")
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(config, "DATA_ROOT", root)
-        mp.setattr(editing_service, "DATA_ROOT", root)
         mp.chdir(root)
         yield root
 
@@ -803,11 +801,13 @@ class TestEditSave:
         preview = mu_run["preview"]
         token = preview["run_result_token"]
         stored = np.array(cache._get_run_result(token))
+        entry = cache._get_run_result_entry(token)
+        assert entry is not None
         data = _ok(
             client.post(
                 f"{API}/edit/save",
                 json={
-                    "distimes": [s.tolist() for s in cache._get_run_result_entry(token).spikes],
+                    "distimes": [s.tolist() for s in entry.spikes],
                     "remove_duplicates": False,
                     "total_samples": preview["total_samples"],
                     "fsamp": FSAMP,
@@ -915,7 +915,7 @@ class TestEditSave:
         _err(client.post(f"{API}/edit/save", json={"distimes": [[1]], "total_samples": 0}), 400)
 
 
-# ── Origin and host restrictions (serve_api) ─────────────────────────────────
+# ── Origin, host and token restrictions (serve_api, desktop) ─────────────────
 
 
 def _served_app(monkeypatch: pytest.MonkeyPatch, **env: str) -> tuple[FastAPI, str]:
@@ -926,19 +926,11 @@ def _served_app(monkeypatch: pytest.MonkeyPatch, **env: str) -> tuple[FastAPI, s
     monkeypatch.setattr(
         cli.uvicorn, "run", lambda app, host, **_: served.update(app=app, host=host)
     )
-    for key in ("MUEDIT_HOST", "MUEDIT_FRONTEND_PORT", "MUEDIT_ALLOWED_ORIGINS"):
-        monkeypatch.delenv(key, raising=False)
+    monkeypatch.delenv("MUEDIT_HOST", raising=False)
     for key, value in env.items():
         monkeypatch.setenv(key, value)
     cli.serve_api()
     return served["app"], served["host"]
-
-
-def _preflight(client: TestClient, origin: str) -> Response:
-    return client.options(
-        f"{API}/preview-by-path",
-        headers={"Origin": origin, "Access-Control-Request-Method": "POST"},
-    )
 
 
 class TestOriginAndHost:
@@ -946,42 +938,29 @@ class TestOriginAndHost:
         _, host = _served_app(monkeypatch)
         assert host == "127.0.0.1"
 
-    def test_only_the_frontend_origin_is_allowed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_no_other_origin_is_allowed(self, monkeypatch: pytest.MonkeyPatch) -> None:
         app, _ = _served_app(monkeypatch)
         with TestClient(app, base_url="http://127.0.0.1:8000") as c:
-            for origin in ("http://localhost:8080", "http://127.0.0.1:8080"):
-                r = _preflight(c, origin)
-                assert r.status_code == 200
-                assert r.headers["access-control-allow-origin"] == origin
-            r = _preflight(c, "https://evil.example")
-            assert r.status_code == 400
-            assert "access-control-allow-origin" not in r.headers
+            for origin in ("http://localhost:8080", "https://evil.example"):
+                r = c.options(
+                    f"{API}/preview-by-path",
+                    headers={"Origin": origin, "Access-Control-Request-Method": "POST"},
+                )
+                assert "access-control-allow-origin" not in r.headers
 
-    def test_the_frontend_may_send_its_session_header(
+    def test_the_frontend_is_served_on_the_api_origin(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         app, _ = _served_app(monkeypatch)
         with TestClient(app, base_url="http://127.0.0.1:8000") as c:
-            r = c.options(
-                f"{API}/preview-by-path",
-                headers={
-                    "Origin": "http://localhost:8080",
-                    "Access-Control-Request-Method": "POST",
-                    "Access-Control-Request-Headers": "content-type,x-muedit-session",
-                },
-            )
-            assert r.status_code == 200
-            assert "x-muedit-session" in r.headers["access-control-allow-headers"].lower()
-
-    def test_frontend_port_and_origin_overrides(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        app, _ = _served_app(monkeypatch, MUEDIT_FRONTEND_PORT="9090")
-        with TestClient(app, base_url="http://127.0.0.1:8000") as c:
-            assert _preflight(c, "http://localhost:9090").status_code == 200
-            assert _preflight(c, "http://localhost:8080").status_code == 400
-        app, _ = _served_app(monkeypatch, MUEDIT_ALLOWED_ORIGINS="http://lab-pc:8080, ")
-        with TestClient(app, base_url="http://127.0.0.1:8000") as c:
-            assert _preflight(c, "http://lab-pc:8080").status_code == 200
-            assert _preflight(c, "http://localhost:8080").status_code == 400
+            page = c.get("/")
+            assert page.status_code == 200
+            assert page.headers["content-type"].startswith("text/html")
+            assert page.headers["cache-control"] == "no-cache"
+            assert c.get("/app.js").status_code == 200
+            # The API routes come first; an unknown API path is still the JSON error envelope.
+            assert c.get(f"{API}/health").json()["data"]["status"] == "ok"
+            _err(c.get(f"{API}/no-such-route"), 404)
 
     def test_rebound_host_is_rejected_on_loopback(self, monkeypatch: pytest.MonkeyPatch) -> None:
         app, _ = _served_app(monkeypatch)

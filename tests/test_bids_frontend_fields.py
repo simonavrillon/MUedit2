@@ -143,10 +143,8 @@ def otb4_signal(otb4_file: Path) -> SignalImport:
 def bids_data_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     """Redirect the API's DATA_ROOT to a tmp dir so route 2 writes to tmp."""
     import muedit.api.config as config
-    import muedit.api.services.editing_service as editing_service
 
     monkeypatch.setattr(config, "DATA_ROOT", tmp_path)
-    monkeypatch.setattr(editing_service, "DATA_ROOT", tmp_path)
     return tmp_path
 
 

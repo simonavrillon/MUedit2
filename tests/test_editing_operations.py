@@ -387,11 +387,9 @@ def api_client(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[Test
     from fastapi import FastAPI
 
     import muedit.api.config as config
-    import muedit.api.services.editing_service as editing_service
     from muedit.api.routes import include_routers
 
     monkeypatch.setattr(config, "DATA_ROOT", tmp_path)
-    monkeypatch.setattr(editing_service, "DATA_ROOT", tmp_path)
     app = FastAPI()
     include_routers(app)
     with TestClient(app) as client:
