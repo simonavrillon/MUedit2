@@ -14,6 +14,7 @@ import numpy as np
 import pytest
 
 from muedit.decomp.core import decompose_step
+from muedit.decomp.decomposition_file import unpack_csr
 from muedit.decomp.postprocess import postprocess_step
 from muedit.decomp.preprocess import load_step, preprocess_step
 from muedit.decomp.types import POSTPROCESS_MODES, DecompositionParameters
@@ -121,6 +122,13 @@ def _mask_regions(mask: np.ndarray) -> list[tuple[int, int]]:
     ]
 
 
+def _parameters(decomp: Any) -> dict[str, Any]:
+    """The run's parameters: JSON text in schema v2, a pickled dict in older saves."""
+    raw = decomp["parameters"]
+    value = raw.item() if raw.shape == () else raw
+    return json.loads(value) if isinstance(value, str) else value
+
+
 def _prepare(
     path: str,
     signal: SignalImport,
@@ -186,13 +194,24 @@ def real_reference() -> dict[str, Any]:
     # it, and the full-signal branches need the same mask to stay comparable.
     edited = np.load(str(require_sample(_EDITED_NPZ)), allow_pickle=True)
     decomp = np.load(str(require_sample(_DECOMP_NPZ)), allow_pickle=True)
+    # Schema v2 saves spikes CSR-packed; older saves keep the per-MU lists.
+    reference = (
+        unpack_csr(edited["spike_times"], edited["spike_offsets"])
+        if "spike_times" in edited.files
+        else edited["discharge_times"]
+    )
+    artifact = (
+        [(int(a), int(b)) for a, b in decomp["artifact_intervals"]]
+        if "artifact_intervals" in decomp.files
+        else _mask_regions(decomp["artifact_mask"])
+        if "artifact_mask" in decomp.files
+        else None
+    )
     return {
-        "discharge_times": [np.asarray(x) for x in edited["discharge_times"]],
+        "discharge_times": [np.asarray(x) for x in reference],
         "roi": tuple(int(x) for x in decomp["rois"][0]),
-        "params": decomp["parameters"].item(),
-        "artifact_regions": (
-            _mask_regions(decomp["artifact_mask"]) if "artifact_mask" in decomp.files else None
-        ),
+        "params": _parameters(decomp),
+        "artifact_regions": artifact,
     }
 
 
