@@ -59,9 +59,6 @@ notebook = [
 ]
 research = [
   "optuna>=4.3",
-  # Phase 0 memory benchmark (research/desktop/bench_memory.py).  No Windows
-  # wheels, so it stays out of ``dev``: the CI memory test uses tracemalloc.
-  "memray>=1.17",
   "matplotlib>=3.9",
 ]
 # The native window of ``muedit-desktop``.  On Linux, pywebview also needs PyGObject with

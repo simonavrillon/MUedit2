@@ -22,7 +22,7 @@
 
 `numpy`, `scipy`, `xmltodict`, `pydantic`, `PyYAML`, `h5py`, `fastapi`, `starlette`, `uvicorn`, `python-multipart`, `pyedflib`, `platformdirs`
 
-Extras: `dev` (`build`, `twine`, `pytest`, `pytest-cov`, `httpx`, `ruff`, `mypy`, `pre-commit`, `types-PyYAML`), `desktop` (`pywebview`), `plot` (`matplotlib`, for the CLI's `--manual-roi` only), `notebook` (`jupyterlab`, `ipykernel`), `research` (`optuna`, `memray`, `matplotlib`). All versions are pinned in `uv.lock`.
+Extras: `dev` (`build`, `twine`, `pytest`, `pytest-cov`, `httpx`, `ruff`, `mypy`, `pre-commit`, `types-PyYAML`), `desktop` (`pywebview`), `plot` (`matplotlib`, for the CLI's `--manual-roi` only), `notebook` (`jupyterlab`, `ipykernel`), `research` (`optuna`, `matplotlib`). All versions are pinned in `uv.lock`.
 
 ---
 
