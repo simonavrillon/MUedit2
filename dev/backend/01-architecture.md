@@ -46,7 +46,7 @@ cli.serve_api()
   → routes.include_routers(app)
       → app.include_router(preview_router)    # /api/v1: health, preview-by-path, qc/auto
       → app.include_router(series_router)     # /api/v1: series/emg, series/overview, series/aux, series/pulse
-      → app.include_router(decompose_router)  # /api/v1: decompose_stream, decompose/cancel, decompose_preview
+      → app.include_router(decompose_router)  # /api/v1: decompose_stream, decompose/cancel
       → app.include_router(editing_router)    # /api/v1: edit/session/*, edit/ops/{op}, edit/save
       → app.include_router(dialog_router)   # /api/v1/dialog: open-file
       → app.include_router(memory_router)   # /api/v1: debug/memory, session/close

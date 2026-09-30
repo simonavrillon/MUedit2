@@ -35,10 +35,10 @@ Every service and feature function receives one object, `app`, typed as `App` in
 
 ```
 App = Core                # state, els, api — the three singletons
-    & UiService           # status, progress, stepper, settings panel, toggles, switchStage
+    & UiService           # status, stepper, settings panel, toggles, switchStage
     & FileSessionService  # file-type detection, upload indicator, BIDS form fields, save
     & QcStage             # preview, channel grid, ROI/artifact selection, auto-QC
-    & RunStage            # decomposition run, stream handling, MU explorer, run settings
+    & RunStage            # decomposition run, stream handling, the live run page
     & EditStage           # edit load/save, canvases, ROI edits, filters, edit modes
 ```
 
@@ -51,7 +51,7 @@ for (const service of [ui, fileSession, qcStage, runStage, editStage]) {
 }
 ```
 
-Each factory receives the same `app` it is being merged into. The QC, run and edit stages call each other (run renders QC, QC redraws the run explorer, a finished run opens the edit stage), and that works because of one rule:
+Each factory receives the same `app` it is being merged into. The QC, run and edit stages call each other (run renders QC, a finished run preloads the edit stage), and that works because of one rule:
 
 - **A factory reads only `state`, `els` and `api` while it is being constructed.** Everything else is reached as `app.x()` (or destructured from `app`) inside a function body, so it is looked up at call time, after every service has been merged.
 
@@ -123,11 +123,9 @@ To add a service method: add its signature to the matching typedef in `context.j
   parameters,
 
   // Run stage (directly on global state)
-  muDistimes, muGridIndex,
-  runResultToken,             // the server keeps the run's pulse trains under it
-  runPulseView,               // the run explorer's window of the current MU's train
-  currentMuGrid, currentMu,
-  runView,
+  runLive,                   // the current run, as the run page shows it
+                             //   (null before one): phases, per-iteration dots, summary
+  runResultToken,            // the server keeps the run's pulse trains and discharge times under it
   runDownloadInFlight, lastRunDownloadKey,
 
   // Edit stage (nested slice)
@@ -179,9 +177,7 @@ plus the view, selection and bookmark setters.
 │    file, rois, gridNames,                    │
 │    gridSeries, channelMeans, coordinates,    │
 │    discardMasks, artifactRegions, artifactMode,│
-│    currentGrid, fsamp,                         │
-│    muDistimes, muGridIndex, runPulseView,    │
-│    currentMuGrid, currentMu, runView         │
+│    currentGrid, fsamp, runLive               │
 │                                             │
 │  ┌─────────────────────────────────────┐    │
 │  │        state.edit (per-stage)       │    │
@@ -195,7 +191,7 @@ plus the view, selection and bookmark setters.
 └─────────────────────────────────────────────┘
 ```
 
-The run stage uses `state.runPulseView` / `state.currentMu` / `state.runView` directly on the global state. The edit stage uses `state.edit.pulseView` / `state.edit.currentMu` / `state.edit.view` on the nested slice. This prevents run and edit from clobbering each other's view state.
+The run stage's `runLive` sits directly on the global state; it holds no view window, so nothing the run page shows is at risk from the edit stage's view. The edit stage uses `state.edit.pulseView` / `state.edit.currentMu` / `state.edit.view` on the nested slice. This prevents the two stages from clobbering each other's state.
 
 ---
 
@@ -216,7 +212,7 @@ STAGES = {
 | `blocked` | no file (silent) | no file (silent); no preview → "Run step is locked until preview is loaded" | never |
 | `enter` | — | — | no edit data → status "Load a decomposition file to edit" |
 | `exit` | disarm artifact selection | — | clear the armed edit mode (add / add artifact / delete) |
-| `render` | channel grid + EMG/aux plots | MU explorer | edit plots, once data is loaded |
+| `render` | channel grid + EMG/aux plots | the run page (plan, live view or result) | edit plots, once data is loaded |
 
 `enter` and `exit` run only when the stage actually changes; re-selecting the current stage runs neither. `render` is what layout changes call: `scheduleLayoutRerender` draws only the active stage, since hidden stages are `display: none` and their canvases have no size, and every stage switch schedules a redraw.
 

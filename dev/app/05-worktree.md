@@ -24,8 +24,6 @@ All elements are registered in `dom.js` as `els.*` properties.
 | `uploadFormatError` | [U] | Format error message |
 | `fileName` | [U] | Display loaded filename |
 | `status` | [U] | Global status pill, top right of the header (hidden when empty) |
-| `progressText` | [U] | Progress message |
-| `progressBar` | [U] | Progress bar |
 | `stepImport` | [U] | Stepper: Import |
 | `stepQc` | [U] | Stepper: QC |
 | `stepRun` | [U] | Stepper: Decompose |
@@ -35,7 +33,7 @@ All elements are registered in `dom.js` as `els.*` properties.
 
 | Element ID | [U/A] | Purpose |
 |---|---|---|
-| `settingsToggleBtn` | [U] | Settings gear toggle |
+| `settingsToggleBtn` | [U] | Settings panel toggle (inside the panel, on the rail) |
 | `settingsOverlay` | [U] | Settings overlay backdrop |
 | `settingsPanel` | [U] | Settings panel container |
 | `bidsProject` | [U] | BIDS project input |
@@ -91,13 +89,22 @@ All elements are registered in `dom.js` as `els.*` properties.
 
 | Element ID | [U/A] | Purpose |
 |---|---|---|
-| `stageRun` | [U] | Run stage container |
-| `runPhase` | [U] | Pipeline phase KPI card |
+| `stageRun` | [U] | Run stage container (`data-mode` pre / live / result picks what shows) |
+| `runPlan` | [U] | Pre-run plan: grids, windows, iterations, the filters |
+| `runStartBtn` | [U] | "Start decomposition" button (pre mode) |
+| `runPhases` | [U] | Phase track: Load → Filter → Decompose → Post-process → Save |
+| `runCount` | [U] | Units kept so far, then the summary's final count |
+| `runCountLabel` | [U] | "motor unit(s) found" / "kept" |
+| `runCountGrids` | [U] | Per-grid counts (multi-grid runs) |
+| `runElapsed` | [U] | Elapsed clock ("Took …" once finished) |
+| `runEta` | [U] | Time-left estimate, projected from the search's pace |
+| `runDots` | [U] | One row per grid × window, one dot per iteration |
+| `runError` | [U] | Failure message (hidden unless the run failed) |
+| `runResultStats` | [U] | Result stats: found vs kept, mean silhouette |
+| `runSaveText` | [U] | The save's outcome (saving / saved path / failure) |
+| `runRetrySaveBtn` | [U] | Retry the save after a failure |
+| `runAgainBtn` | [U] | Run again with the current settings |
 | `cancelRunBtn` | [U] | Cancel the running decomposition (shown while it runs) |
-| `muGridSelect` | [U] | Grid dropdown (run explorer) |
-| `muSelect` | [U] | MU dropdown (run explorer) |
-| `muMeta` | [U] | Discharge time count text |
-| `muPulseCanvas` | [U] | Pulse train canvas (run explorer) |
 
 ### Edit Stage
 
@@ -195,6 +202,7 @@ All elements are registered in `dom.js` as `els.*` properties.
 |---|---|---|
 | `setStatus` | [A] | ui.js |
 | `updateWorkflowStepper` | [A] | ui.js |
+| `positionStepIndicator` | [A] | updateWorkflowStepper, layout.js (resize/orientation) |
 | `showWorkspace` | [A] | ui.js |
 | `updateStepAvailability` | [A] | ui.js |
 | `populateGridTabs` | [A] | ui.js |
@@ -222,8 +230,6 @@ All elements are registered in `dom.js` as `els.*` properties.
 |---|---|---|
 | `setStatus` | [A] | all stages |
 | `setEditStatus` | [A] | editing-service, edit-stage |
-| `setRunPhase` (private) | [A] | updateProgress |
-| `updateProgress` | [A] | run.js handleStreamMessage, qc.js |
 | `updateWorkflowStepper` | [A] | switchStage, import-stage |
 | `updateStepAvailability` | [A] | switchStage, initializeApp |
 | `setSettingsOpen` | [A] | switchStage, showWorkspace, setupLayoutEvents |
@@ -293,7 +299,7 @@ All elements are registered in `dom.js` as `els.*` properties.
 | `resetCurrentMuEdits` | [A] | edit-stage (reset button) |
 | `duplicateMu` | [A] | edit-stage (duplicate button) |
 | `saveEditedFile` | [A] | edit-stage |
-| `loadDecompositionForEdit` | [A] | edit-stage |
+| `loadDecompositionForEdit` | [A] | edit-stage; the run save (with `{ open: false }`: preload without leaving the run page) |
 | `restoreEditSession` | [A] | edit-stage ← initializeApp, after the backend answers |
 | `showEditSession` (private) | [A] | loadDecompositionForEdit, restoreEditSession |
 | `resumePosition` (private) | [A] | showEditSession |
@@ -307,7 +313,7 @@ All elements are registered in `dom.js` as `els.*` properties.
 
 | Function | [A/?] | Called By |
 |---|---|---|
-| `createViewFetcher` | [A] | edit-stage (`/series/pulse` for the edit canvas), run-stage (the run explorer): one request in flight, only the latest window waits |
+| `createViewFetcher` | [A] | edit-stage (`/series/pulse` for the edit canvas): one request in flight, only the latest window waits |
 
 ---
 
@@ -355,14 +361,14 @@ All elements are registered in `dom.js` as `els.*` properties.
 | Function | [A/?] | Called By |
 |---|---|---|
 | `createRunStageService` | [A] | createApp |
-| `getMuIndicesForGrid` | [A] | renderMuDropdowns |
-| `renderMuDropdowns` | [A] | renderMuExplorer |
-| `renderMuExplorer` | [A] | refreshVisuals, handleStreamMessage, setupRunEvents |
-| `autoSaveRunDecomposition` | [A] | handleStreamMessage (on done) |
+| `renderRunStage` | [A] | switchStage/render (lifecycle), runDecomposition, handleStreamMessage, autoSaveRunDecomposition, setupRunEvents (settings change) |
+| `renderRunClock` | [A] | runDecomposition's 1s interval |
+| `updateRunDots` | [A] | handleStreamMessage (one event's dots) |
+| `autoSaveRunDecomposition` | [A] | handleStreamMessage (on done), setupRunEvents (runRetrySaveBtn) |
 | `handleStreamMessage` | [A] | runDecomposition (stream loop) |
-| `runDecomposition` | [A] | setupRunEvents (startBtn click) |
+| `runDecomposition` | [A] | setupRunEvents (startBtn, runStartBtn, runAgainBtn) |
 | `updateStartAvailability` | [A] | handleRawFilePath, runDecomposition, setupRunEvents |
-| `buildParams` | [A] | runDecomposition |
+| `buildParams` | [A] | runDecomposition, renderRunStage (the plan) |
 | `setupRunEvents` | [A] | initializeApp |
 
 ---
@@ -425,8 +431,7 @@ All elements are registered in `dom.js` as `els.*` properties.
 | `runAutoQc` | [A] | signal/qc.requestAutoQc |
 | `decomposeStream` | [A] | run-stage.runDecomposition |
 | `cancelDecomposition` | [A] | run-stage.cancelDecomposition (cancelRunBtn) |
-| `fetchDecomposePreview` | [A] | run-stage.handleStreamMessage |
-| `fetchPulse` | [A] | edit-stage.ensureEditPulseView, run-stage explorer (through createViewFetcher) |
+| `fetchPulse` | [A] | edit-stage.ensureEditPulseView (through createViewFetcher) |
 | `openFileDialog` | [A] | import-stage.handleNativeDialogOpen (browser only, through platform.openFile) |
 | `closeSession` | [A] | initializeApp (pagehide) |
 | `editOpen` | [A] | editing-service.loadDecompositionForEdit |
@@ -454,8 +459,7 @@ All elements are registered in `dom.js` as `els.*` properties.
 | `toFiniteNumber` | [A] | normalizePreviewPayload |
 | `toSpikeArray` | [A] | normalizePreviewPayload (JSON discharge times → `Int32Array`) |
 | `toSpans` | [A] | normalizePreviewPayload, signal/qc.js (artifact regions) |
-| `totalSamplesFromDistimes` | [A] | normalizePreviewPayload, decomp/run.js |
-| `normalizePreviewPayload` | [A] | api.fetchDecomposePreview |
+| `normalizePreviewPayload` | [A] | decomp/run.js handleStreamMessage |
 
 ---
 
@@ -463,13 +467,11 @@ All elements are registered in `dom.js` as `els.*` properties.
 
 | Function | [A/?] | Called By |
 |---|---|---|
-| `hasMagic` | [A] | isFrame, decodeFrame |
+| `hasMagic` | [A] | decodeFrame |
 | `frameAligned`, `frameCount` | [A] | decodeFrame, encodeFrame |
-| `isFrame` | [A] | decodeDecomposePreviewPayload |
 | `decodeFrame` | [A] | every decoder below |
 | `encodeFrame` | [?] | tests only (builds the decoders' input) |
-| `csrRows` | [A] | decodeDecomposePreviewPayload, decodeEditSessionFrame |
-| `decodeDecomposePreviewPayload` | [A] | fetchDecomposePreview |
+| `csrRows` | [A] | decodeEditSessionFrame |
 | `decodeEditSessionFrame` | [A] | editOpen, editRecover, editOp, editSessionState |
 | `frameRowViews` (private) | [A] | decodeSeriesFrame, decodePulseFrame |
 | `decodeSeriesFrame` | [A] | fetchSeries |
@@ -477,12 +479,18 @@ All elements are registered in `dom.js` as `els.*` properties.
 
 ---
 
-## Module: `decomp/explorer.js`
+## Module: `decomp/live.js`
 
 | Function | [A/?] | Called By |
 |---|---|---|
-| `buildRunMuDropdownModel` | [A] | run-stage.renderMuDropdowns |
-| `buildRunMuExplorerModel` | [A] | run-stage.renderMuExplorer |
+| `createRunLive` | [A] | decomp/run.js runDecomposition |
+| `applyRunEvent` | [A] | handleStreamMessage (folds one stream event into `runLive`) |
+| `keptTotal` | [A] | view/run-live.js (the counter) |
+| `searchSecondsLeft` | [A] | view/run-live.js (the ETA) |
+| `formatClock`, `formatRemaining` | [A] | view/run-live.js (the clock) |
+| `buildRunSummary` | [A] | handleStreamMessage (the done event) |
+| `buildRunPlan` | [A] | run-stage.renderRunStage (the pre-run plan) |
+| `RUN_PHASES`, `DOT` | [A] | view/run-live.js (the phase track, the dots' codes) |
 
 ---
 
@@ -505,7 +513,7 @@ All elements are registered in `dom.js` as `els.*` properties.
 | `runDecomposition` | [A] | run-stage.runDecomposition |
 | `cancelDecomposition` | [A] | run-stage.cancelDecomposition |
 | `applyPreviewData` (private) | [A] | handleStreamMessage |
-| `hydrateBinaryDecomposePreview` (private) | [A] | handleStreamMessage |
+| `failRun` (private) | [A] | runDecomposition, handleStreamMessage |
 | `handleStreamMessage` | [A] | run-stage.handleStreamMessage |
 
 ---
@@ -559,6 +567,7 @@ All elements are registered in `dom.js` as `els.*` properties.
 | Function | [A/?] | Called By |
 |---|---|---|
 | `syncRois` | [A] | qc-stage.syncRois |
+| `pickRoiSlot` | [A] | qc-renderer (an ROI drag picks the window it replaces) |
 | `requestAutoQc` | [A] | qc-stage.runAutoQc |
 | `requestQcGridWindow` | [A] | qc-stage.requestQcGridWindow |
 | `requestPreview` | [A] | qc-stage.requestPreview |
@@ -576,11 +585,9 @@ All functions are state mutators (`set*` functions). Each is called by at least 
 - `setDiscardMaskChannel`, `setDiscardMasks`, `ensureDiscardMasks`
 - `setArtifactMode`, `setArtifactDraft`, `setArtifactRegions`, `addArtifactRegion`, `removeLastArtifactRegion`
 - `setParameters`, `setIsRunning`
-- `setMuPreviewData`, `setRunCurrentMuGrid`, `setRunCurrentMu`, `setRunView`
-- `setRunDownloadInFlight`, `setLastRunDownloadKey`
+- `setRunLive`, `setRunResultToken`, `setRunDownloadInFlight`, `setLastRunDownloadKey`
 - `setCurrentStage`, `setCurrentGrid`
 - `clearPreviewState`
-- Run explorer: `setRunPulseView`, `setRunResultToken`
 - Edit slice: `setEditMode`, `setEditCurrentMuGrid`, `setEditCurrentMu`, `setEditProject`, `setEditView`, `setEditFile`, `setEditFilename`, `setEditGridNames`, `setEditBookmark`, `setShowBookmark`, `setEditPulseSelection`, `setEditPulseDraftSelection`, `setEditDrSelection`, `setEditDrDraftSelection`, `clearEditPulseSelections`, `clearEditDrSelections`, `clearAllEditSelections`, `setEditPulseView`, `setEditSoftwareVersions`, `resetEditSlice`
 - Edit session mirror: `setEditSession` (a state frame: the whole session), `applyEditChange` (a change frame), `applyEditSave` (a session save), `keepEditMus` (keep MUs by index across every per-MU array)
 ---
@@ -592,8 +599,7 @@ All functions are state mutators (`set*` functions). Each is called by at least 
 | `getCurrentGrid` | [A] | qc.js, run.js, qc-renderer |
 | `roiStart` | [A] | qc-renderer, plots, qc.js |
 | `roiEnd` | [A] | qc-renderer, plots, qc.js |
-| `muIndicesForGrid` (private) | [A] | getRunMuIndicesForGrid, getEditMuIndicesForGrid |
-| `getRunMuIndicesForGrid` | [A] | run-stage.getMuIndicesForGrid |
+| `muIndicesForGrid` (private) | [A] | getEditMuIndicesForGrid |
 | `getEditMuIndicesForGrid` | [A] | edit-stage.getEditMuIndices |
 
 ---
@@ -640,12 +646,13 @@ All functions are state mutators (`set*` functions). Each is called by at least 
 
 ---
 
-## Module: `view/explorer.js` (run-stage explorer)
+## Module: `view/run-live.js` (the run page)
 
 | Function | [A/?] | Called By |
 |---|---|---|
-| `renderMuDropdowns` | [A] | run-stage.renderMuDropdowns |
-| `renderMuExplorer` | [A] | run-stage.renderMuExplorer |
+| `renderRunStage` | [A] | run-stage.renderRunStage (the plan, live view or result) |
+| `renderRunTime` | [A] | run-stage.renderRunClock (the 1s tick) |
+| `updateRunDots` | [A] | run-stage.updateRunDots (one event's dots) |
 
 ---
 
@@ -660,7 +667,7 @@ All functions are state mutators (`set*` functions). Each is called by at least 
 | `drawSelectionRect` (private) | [A] | drawTrace |
 | `drawAxes`, `drawTimeAxis` (private) | [A] | drawTrace |
 | `drawRoiRects` | [A] | drawGridOverlay, renderAuxiliaryChannels |
-| `drawTrace` | [A] | edit-canvas, explorer (a pulse window with its markers) |
+| `drawTrace` | [A] | edit-canvas (a pulse window with its markers) |
 | `traceRange` | [A] | drawTrace, operations.getPulseViewMeta |
 | `drawGridOverlay` | [A] | qc-renderer.refreshVisuals |
 | `drawMiniSeries` | [A] | qc-renderer.renderChannelQC |
@@ -684,7 +691,7 @@ All functions are state mutators (`set*` functions). Each is called by at least 
 
 | Function | [A/?] | Called By |
 |---|---|---|
-| `renderSelectPair` | [A] | edit-canvas.renderEditDropdownsView, explorer.renderMuDropdowns |
+| `renderSelectPair` | [A] | edit-canvas.renderEditDropdownsView |
 
 ---
 
@@ -704,7 +711,7 @@ All functions are state mutators (`set*` functions). Each is called by at least 
 | Stage | Buttons | Canvases | Form Fields | Dropdowns | Other |
 |---|---|---|---|---|---|
 | Import | 1 (browse) | 0 | 0 | 0 | 4 (loader, error, filename, global status) |
-| QC | 4 (start, auto QC, add/remove artifact) + N (grid tabs) + N (channel cells) | 2 (emg, aux) | 18 (BIDS) + 8 (decomp) + 3 (filters) | 1 (aux) | 4 (auto-info, phase, progress, artifact count) |
-| Run | 1 (cancel) | 1 (pulse) | 0 | 2 (grid, MU) | 3 (phase, progress, meta) |
+| QC | 4 (start, auto QC, add/remove artifact) + N (grid tabs) + N (channel cells) | 2 (emg, aux) | 18 (BIDS) + 8 (decomp) + 3 (filters) | 1 (aux) | 2 (auto-info, artifact count) |
+| Run | 4 (start, run again, retry save, cancel) | 0 | 0 | 0 | 11 (plan, phases, counter ×3, clock ×2, dots, error, result stats, save text) |
 | Edit | 13 (toolbar) | 3 (pulse, DR, timeline) | 1 (project) | 2 (grid, MU) | 1 (edit status) |
-| **Total** | **~20 + N** | **6** | **~30** | **6** | **~13** |
+| **Total** | **~22 + N** | **5** | **~30** | **3** | **~18** |

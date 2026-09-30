@@ -47,7 +47,7 @@ python/src/muedit/
 │   │   ├── __init__.py                       include_routers()
 │   │   ├── preview.py                        /preview-by-path, /qc/auto, /health
 │   │   ├── series.py                         /series/emg, /series/overview, /series/aux, /series/pulse
-│   │   ├── decompose.py                      /decompose_stream, /decompose/cancel, /decompose_preview/{token}
+│   │   ├── decompose.py                      /decompose_stream, /decompose/cancel
 │   │   ├── editing.py                        /edit/session/*, /edit/ops/{op}, /edit/save
 │   │   ├── dialog.py                         /dialog/open-file
 │   │   └── memory.py                         /session/close, /debug/memory

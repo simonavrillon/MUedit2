@@ -129,10 +129,10 @@ burst of noise sits inside the window you want, mark it as an artifact window
 with the **+** button above the chart and drag over it; those stretches are then
 kept out of the filter estimation instead of corrupting it.
 
-Open the sidebar with the hamburger button on the left to fill in what this
-recording is: the project it belongs to, the subject, session and task labels,
+Open the settings panel on the left to fill in what this recording is: the
+project it belongs to, the subject, session and task labels,
 and the muscle behind each grid. This is worth a minute of your time, because it
-is what makes your output findable and reusable later. The same sidebar holds
+is what makes your output findable and reusable later. The same panel holds
 the decomposition settings — number of iterations, analysis windows, duplicate
 threshold, peel-off, and the quality filters applied afterwards. The defaults
 are sensible starting points, so leave them alone until you have a reason not
@@ -140,8 +140,12 @@ to.
 
 ### Decomposing
 
-Press **Decompose Signal** and watch the progress bar. When it finishes, MUedit
-loads the result straight into the editor — there is no file to go and open.
+Press **Decompose Signal** and the run page follows the search as it happens:
+the pipeline's phases, a dot for every iteration, the units kept so far, and an
+estimate of the time left. When it finishes, the page reports what the search
+found, what post-processing removed, the mean silhouette and where the
+decomposition was saved. The result is already loaded into the editor, so the
+**Edit** step is ready the moment you want it — there is no file to go and open.
 
 ### Editing the motor units
 

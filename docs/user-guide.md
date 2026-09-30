@@ -61,12 +61,12 @@ Displays the rectified average across all active channels. Use this to identify 
 
 Shows force, torque, or other auxiliary signals recorded alongside the EMG. Use the dropdown to select individual channels or view all overlaid.
 
-**Defining an ROI:** click and drag on the Average EMG Activity chart or the Auxiliary Channels panel to draw a region of interest. The decomposition will run only on the selected time window.
+**Defining an ROI:** click and drag on the Average EMG Activity chart or the Auxiliary Channels panel to draw a region of interest. The decomposition will run only on the selected time window. With more than one analysis window, a drag over a window you have already drawn adjusts that window; otherwise it fills the first window not drawn yet; once every window is drawn, a drag moves the window starting nearest to it.
 
 
 ### Settings panel (left sidebar)
 
-Open the sidebar with the hamburger button (top-left). It contains three collapsible sections:
+Open the panel with the button on the rail on the left. It contains three collapsible sections:
 
 **Session Info**
 
@@ -106,7 +106,7 @@ automatically from the grid model name and do not need to be entered.
 | Analysis windows | Number of analysis windows (default 1) |
 | Duplicates thresh | Cross-correlation threshold for duplicate removal (0–1, default 0.3) |
 | Peeloff | Toggle peeloff; set window in ms (default 25 ms) |
-| Post-processing | Mode for applying MU filters after decomposition: **Windowed** (default — filters applied only over the decomposed windows), **Full trace** (apply over the entire EMG trace), or **Adaptive** (use adaptive online post-processing) |
+| Post-processing | Mode for applying MU filters after decomposition: **Windowed** (default — filters applied only over the decomposed windows), **Full trace** (filters applied batch by batch across the whole recording, without adaptation), or **Adaptive** (use adaptive online post-processing) |
 
 **Quality Filters** (applied after decomposition)
 
@@ -119,18 +119,22 @@ automatically from the grid model name and do not need to be entered.
 
 ## Step 3 — Decompose
 
-Click **Decompose Signal** to start. Progress is shown in real time:
+Click **Decompose Signal** to start. The run page first lists the plan your settings imply — the grids and their kept channels, the analysis windows, the iteration count and the filters — then follows the run as it happens:
 
-- **Pipeline Phase** — current processing step
-- **Progress bar** — percentage complete
+- **Phase track** — Load, Filter, Decompose, Post-process, Save
+- **Search** — one dot per iteration: kept, rejected, or too few spikes
+- **Unit counter** — motor units kept so far, per grid
+- **Clock** — elapsed time, and an estimate of the time left in the search
 
-Once decomposition finishes, the app automatically loads the result into **Edit mode** (Step 4) — you no longer need to open the saved `.npz` manually. From there you can browse motor units using the Grid and Motor Unit dropdowns, inspect each pulse train, and start correcting spikes right away.
+Once the run finishes, the page reports what the search found versus what post-processing kept, the mean silhouette, and where the decomposition was saved (with a **Retry save** button if the save failed). **Run again** restarts with the current settings; **Cancel** stops a run in progress.
+
+The result is preloaded into **Edit mode** (Step 4) — open it with the **Edit** step in the top bar; you no longer need to open the saved `.npz` manually. From there you can browse motor units using the Grid and Motor Unit dropdowns, inspect each pulse train, and start correcting spikes right away.
 
 ---
 
 ## Step 4 — Edit
 
-The Edit stage opens automatically after a decomposition (Step 3); you can also open a saved decomposition file (`.npz`, or a MATLAB MUedit `.mat`) to resume work. It gives you tools to review and correct individual motor unit spike trains.
+The Edit stage holds the result a decomposition (Step 3) preloaded, ready to open; you can also open a saved decomposition file (`.npz`, or a MATLAB MUedit `.mat`) to resume work. It gives you tools to review and correct individual motor unit spike trains.
 
 ### Layout
 
@@ -169,7 +173,7 @@ Use the **Grid** and **Motor Unit** dropdowns, or the keyboard shortcuts `<` (pr
 
 **Double-click** on the pulse train canvas to zoom back out to the full signal.
 
-**Navigation shortcuts** (same as Decompose stage):
+**Navigation shortcuts**:
 
 | Key | Action |
 |---|---|

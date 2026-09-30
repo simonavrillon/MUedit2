@@ -38,7 +38,6 @@ Use this to trace what the user can reach.
 | `decompose_router` | User-exposed | `include_routers()` |
 | `POST /decompose_stream` | User-exposed | HTTP |
 | `POST /decompose/cancel` | User-exposed | HTTP |
-| `GET /decompose_preview/{token}` | User-exposed | HTTP |
 
 ### `routes/editing.py`
 
@@ -99,10 +98,8 @@ Use this to trace what the user can reach.
 | `decomposition_event_stream(run, is_disconnected)` | App-internal | `POST /decompose_stream` route; cancels the run when the client goes away |
 | `cancel_decomposition(session)` | App-internal | `POST /decompose/cancel`, `POST /session/close` |
 | `stop_decompositions()` | App-internal | App lifespan shutdown |
-| `fetch_decompose_preview_binary(token)` | App-internal | `GET /decompose_preview/{token}` route |
 | `parse_stream_options(...)` | App-internal | Called by decompose_stream route |
 | `_Run` | App-internal | One run: its worker process and the supervisor thread relaying events |
-| `_encode_decompose_preview(meta, spikes)` | App-internal | Called by `_Run._done_event` |
 
 ### `services/decompose_worker.py`
 
@@ -207,8 +204,6 @@ Use this to trace what the user can reach.
 | `cache._hold_upload()` | App-internal | Called by decompose, preview (`/qc/auto`) and series services |
 | `cache._get_upload_signal()`, `cache._get_upload_source_path()`, `cache._get_signal_views()`, `cache._get_run_result()` | App-internal | Tests (the services use `_hold_upload` / `_get_run_result_entry`) |
 | `cache._store_signal_views()` | App-internal | Called by preview service |
-| `cache._store_decomp_preview_binary()` | App-internal | Called by decompose service |
-| `cache._pop_decomp_preview_binary()` | App-internal | Called by decompose service |
 | `cache._store_run_result()` | App-internal | Called by decompose service |
 | `cache._get_run_result_entry()` | App-internal | Called by series service (`/series/pulse`) and `save_edits` |
 | `cache._release_edit_sessions()`, `cache._store_edit_session()` | App-internal | Called by `open_edit_session` |

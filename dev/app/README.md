@@ -42,7 +42,7 @@ frontend/
     │   ├── state.js                     Global state object + createEditSlice (mirror of the edit session)
     │   ├── services/
     │   │   ├── navigation.js            Stepper, showWorkspace, keyboard nav, view math
-    │   │   ├── ui.js                    UI service (toggles, progress, status, layout)
+    │   │   ├── ui.js                    UI service (toggles, status, layout)
     │   │   ├── layout.js                Settings panel, resize observer
     │   │   ├── file-session.js          BIDS form fields, file type detection, save
     │   │   ├── editing-service.js        Edit session calls (open, recover, ops, save, restore)
@@ -52,11 +52,11 @@ frontend/
     │       ├── lifecycle.js             Stage registry: switchStage, enter/exit/render hooks
     │       ├── import-stage.js          File-open dialog, landing interactions
     │       ├── qc-stage.js              QC/preview: raw file loading, ROI, channel QC
-    │       ├── run-stage.js             Decomposition execution, MU explorer
+    │       ├── run-stage.js             Decomposition execution, the live run page
     │       ├── edit-stage.js            Spike editing, filter updates, save
     │       └── layout-stage.js          Section collapse, settings toggle events
     ├── decomp/
-    │   ├── explorer.js                  Run-stage MU dropdown/explorer model builders
+    │   ├── live.js                       The run as the run page shows it (phases, dots, summary, plan)
     │   ├── params.js                    Decompose parameter builder
     │   └── run.js                       Decomposition runner + stream handler
     ├── editing/
@@ -73,7 +73,7 @@ frontend/
     └── view/
         ├── bids-renderer.js             BIDS form rendering
         ├── edit-canvas.js               Edit-stage canvas rendering + interaction binding
-        ├── explorer.js                   Run-stage explorer rendering
+        ├── run-live.js                  Run page rendering (plan, live search dots, result)
         ├── plots.js                      Low-level canvas drawing primitives
         ├── qc-renderer.js               QC visual rendering (channel grid, aux, ROI)
         └── select-renderers.js          Paired grid/MU dropdown renderer

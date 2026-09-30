@@ -207,7 +207,8 @@ User reviews channels:
   - clicks "Automatic QC" (#qcAutoBtn) to auto-detect bad channels + artifacts
   - clicks qc-cell to toggle discard (corrects auto-detected masks)
   - arms artifact mode (+) and drags on emgCanvas to mark artifact windows
-  - drags on emgCanvas to select ROI
+  - drags on emgCanvas to set an ROI (pickRoiSlot: over a drawn window → adjust
+    it; else the first undrawn window; else the window starting nearest)
   - changes nwindows to split ROI count
   - fills BIDS form fields
   - configures decomposition parameters
@@ -231,31 +232,38 @@ User clicks "Decompose Signal" (#startBtn)
 
 ### Purpose
 
-The decomposition pipeline runs server-side, streaming progress events to the frontend. The user watches progress and can preview motor unit pulse trains as they become available.
+The decomposition pipeline runs server-side, streaming progress events to the frontend. The run page shows the plan the settings imply before a run, follows the search live while it runs, and reports the result when it finishes. The model behind the page lives in `decomp/live.js` (`RunLive`), its rendering in `view/run-live.js`.
 
 ### User-Exposed UI
 
+The `#stageRun` container carries `data-mode`: `pre` (no run yet), `live` (a run is going) or `result` — the mode picks what shows.
+
 | Element ID | Type | Action |
 |---|---|---|
-| `runPhase` | KPI card | Shows current pipeline phase (Idle/Preprocessing/Decomposing/Finalizing/Complete/Failed) |
-| `progressText` | Text | Progress message |
-| `progressBar` | Progress bar | Width fills from 0-100% |
-| `muGridSelect` | Select dropdown | Choose grid to view in MU explorer |
-| `muSelect` | Select dropdown | Choose motor unit within grid |
-| `muMeta` | Text | Shows discharge time count for selected MU |
-| `muPulseCanvas` | Canvas | Pulse train plot for selected MU |
+| `runPlan` | Definition list | The pre-run plan: grids (and kept channels), windows, iterations, the filters |
+| `runStartBtn` | Button | Start the decomposition |
+| `runPhases` | Phase track | Load → Filter → Decompose → Post-process → Save; the active dot bounces, a failed phase turns red |
+| `runCount`, `runCountLabel`, `runCountGrids` | Counter | Units kept so far (per grid), then the summary's final count |
+| `runElapsed`, `runEta` | Clock | Elapsed time, and the time left projected from the search's pace |
+| `runDots` | Dot grid | One row per grid × window, one dot per iteration: kept / rejected / too few spikes / skipped |
+| `runError` | Alert | The failure message, when a run fails |
+| `runResultStats` | Definition list | Found vs kept after post-processing, mean silhouette |
+| `runSaveText` | Text | The save's outcome ("Saving the decomposition…", "Saved to …", or the failure) |
+| `runRetrySaveBtn` | Button | Retry the save after a failure |
+| `runAgainBtn` | Button | Run again with the current settings |
+| `cancelRunBtn` | Button | Cancel the running decomposition (shown while it runs) |
 
-Keyboard: `↑`/`↓` zoom in/out, `←`/`→` scroll left/right (shared with edit stage).
+The QC stage's `#startBtn` ("Decompose Signal") starts the run too; the three start buttons share `updateStartAvailability`.
 
 ### Flow
 
 ```
-User clicks "Decompose Signal"
+User clicks "Decompose Signal" / "Start decomposition"
   -> runDecomposition()
      1. Guards: isRunning? file? -> early return
-     2. setIsRunning(state, true); updateStartAvailability()
-     3. switchStage("run")
-     4. setParameters(state, buildParams())
+     2. setIsRunning(state, true); setParameters(state, buildParams())
+     3. setRunLive(state, createRunLive(now)); setRunResultToken(state, "")
+     4. switchStage("run"); renderRunStage(); a 1s clock renders runElapsed/runEta
      5. Build FormData:
         - upload_token (required)
         - params (JSON)
@@ -269,43 +277,39 @@ User clicks "Decompose Signal"
         - on an upload_token error: POST /preview-by-path with state.file.path
           to mint a fresh token, then retry once (masks/ROIs are kept)
      7. Stream NDJSON reader loop:
-        - each line -> handleStreamMessage(msg)
-          - msg.pct?       -> updateProgress(pct, message, stage)
-          - msg.message?   -> updateProgress(undefined, message, stage)
-          - msg.preview?   -> applyPreviewData() [the run's discharge times and run_result_token]
-          - msg.summary?   -> progressText = "Grid 1: N MU | Grid 2: M MU | Total: X MU"
-          - msg.stage=="error" -> setStatus(error)
-          - msg.stage=="done"  -> autoSaveRunDecomposition()
-     8. finally: setIsRunning(state, false)
-
-[On done]:
-  -> autoSaveRunDecomposition()
-     -> persistNpzBySaveTarget()     POST /edit/save (the run stays on the server under run_result_token)
-     -> loadDecompositionForEditByPath(saved.path)  POST /edit/session/open
-     -> switchStage("edit")
+        - each line -> handleStreamMessage(msg), which folds it into state.runLive
+          - msg.stage=="error"      -> failRun(): live.status="failed", live.error
+          - msg.stage=="cancelled"  -> setRunLive(state, null): the page returns to the plan
+          - otherwise applyRunEvent(): the event's phase moves the track; decompose
+            events (grid, window, iter, outcomes) fill the row's dots and bump
+            keptByGrid, then updateRunDots() restyles just the changed dots
+          - msg.stage=="done"       -> setRunResultToken; applyPreviewData();
+                                        buildRunSummary(msg.summary); live.phase="save",
+                                        live.status="done"; autoSaveRunDecomposition()
+        - a stream that ends without done/error/cancelled fails the run
+          ("The decomposition stopped without a result")
+     8. finally: clear the clock; setIsRunning(state, false); renderRunStage()
 ```
 
-### Progress Phases
+### Progress Events
 
-| Phase | Trigger |
+The worker's progress callbacks carry where the run is, so the page never parses message text:
+
+| Event fields | Meaning |
 |---|---|
-| Idle | Initial / no progress |
-| Loading | Message contains "loading" |
-| Preprocessing | Message contains "preprocess" |
-| Decomposing | Message contains "grid" |
-| Finalizing | Message contains "finalizing" |
-| Complete | Stage = "done" |
-| Failed | Stage = "error" or message contains "error" |
+| `phase` | `load` \| `preprocess` \| `decompose` \| `postprocess` \| `export` (mapped to the `save` step) |
+| `grid`, `ngrid`, `window`, `nwindows`, `niter` | Where the search is; the first decompose event lays out one dot row per grid × window |
+| `iter`, `outcomes` | Iterations accounted for, and one code per iteration since the last event: `k` kept, `r` rejected, `f` too few spikes |
+| `window_done` | The window's basis ran out early; the row's remaining dots are marked skipped |
 
 ### API Calls During Run
 
 | Endpoint | When | Purpose |
 |---|---|---|
-| `POST /decompose_stream` | On "Decompose Signal" click | Main decomposition call (streaming NDJSON) |
-| `GET /decompose_preview/{token}` | On preview event (binary fast-path) | Fetch the run's discharge times in binary format |
-| `GET /series/pulse` | When the run explorer shows an MU | The current MU's pulse train over the window on screen |
+| `POST /decompose_stream` | On a start button click | Main decomposition call (streaming NDJSON) |
 | `POST /decompose/cancel` | On "Cancel" click | Stop the run; the stream ends with `cancelled` |
-| `POST /edit/save` | On auto-save after completion | Save decomposition result as .npz |
+| `POST /edit/save` | On auto-save after completion | Save the decomposition as .npz (the trains and discharge times stay on the server under `run_result_token`) |
+| `POST /edit/session/open` | After the save | Preload the saved file into the edit session without leaving the run page |
 
 ---
 

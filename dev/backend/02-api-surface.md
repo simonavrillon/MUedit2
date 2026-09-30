@@ -61,22 +61,24 @@ changes with every edit of the MU, so the client caches frames by it.
 |---|---|---|---|---|
 | POST | `/decompose_stream` | form fields: `upload_token` (required; 400 with `field: upload_token` when missing or expired), `params`, `duration`, `persist_output`, `roi_start: int`, `roi_end: int`, `rois` (JSON str), `discard_channels`, `bids_export: bool`, `project: str`, `bids_entities` (JSON str), `bids_metadata` (JSON str), `full_preview`, `artifact_regions` (JSON str) | `StreamingResponse` NDJSON (`application/x-ndjson`); 409 while another run is active | `start_decomposition()` + `decomposition_event_stream()` |
 | POST | `/decompose/cancel` | — (the session header names the run) | JSON: `{cancelled: bool}`; false when this session has no run | `cancel_decomposition(session)` |
-| GET | `/decompose_preview/{token}` | path param `token: str` | MUB1 frame (`x-muedit-format: mub1`); served once, then 404 | `fetch_decompose_preview_binary(token)` |
 
 The server runs one decomposition at a time, in a worker process started with `spawn`
 (`decompose_worker.child_main`). The worker opens the upload's memory-mapped files and writes the
 run's arrays into a run store the server created, so only file locations cross between the
-processes. Progress comes back over a pipe as NDJSON events. The stream ends with `done`, `error` (also when the worker process dies),
+processes. Progress comes back over a pipe as NDJSON events — each carries its `phase`
+(`load` \| `preprocess` \| `decompose` \| `postprocess` \| `export`), and the decompose search's
+events add their position (`grid`, `window`, `niter`) and one outcome letter per iteration since
+the last event (`k` kept, `r` rejected, `f` too few spikes), so the run page can draw the search
+without parsing message text. The stream ends with `done`, `error` (also when the worker process dies),
 or `cancelled`. A run is cancelled by `/decompose/cancel`, by the client disconnecting, by
 `/session/close` for its session, and at server shutdown; cancelling terminates the worker process.
 
-Header `x-muedit-binary` (default `"1"`) controls binary vs JSON preview encoding in stream mode:
-the MUB1 frame carries the discharge times as CSR, the JSON fallback as lists. Neither carries
-pulse trains. When the run has a full-length pulse matrix (`full_preview`), the `done` event's
-preview carries `run_result_token`: the server keeps the matrix and the discharge times (the
-session's latest run, until the session closes) for `/series/pulse` and the run save,
-which sends the token instead of the data. A save naming a token the server no longer holds, and
-no discharge times, is refused with 400 (`field: run_result_token`).
+The `done` event's preview carries no arrays: neither `pulse_trains_full` nor `distime_all` crosses
+to the client. When the run has a full-length pulse matrix (`full_preview`), the preview carries
+`run_result_token`: the server keeps the matrix and the discharge times (the session's latest run,
+until the session closes) for `/series/pulse` and the run save, which sends the token instead of the
+data. A save naming a token the server no longer holds, and no discharge times, is refused with 400
+(`field: run_result_token`).
 
 ### Editing Router (`routes/editing.py`)
 
@@ -289,7 +291,6 @@ replaces its previous one. `on_drop` releases what an entry holds outside the he
 | Cache | Per session | TTL | Holds | On drop |
 |---|---|---|---|---|
 | `_UPLOADS` | 1 | — | The opened recording (`SignalImport`, memory-mapped from its store) and its `SignalViews` | Closes the store |
-| `_DECOMP_PREVIEW_BLOBS` | 1 | 10 min | A run's preview frame; removed on first fetch | — |
 | `_RUN_RESULTS` | 1 | — | The last run's pulse trains (in the run store) and discharge times | Closes the store |
 | `_EDIT_SESSIONS` | 1 | — | The open `EditSession` | `EditSession.close()` (keeps its log only with unsaved edits) |
 
@@ -303,8 +304,6 @@ replaces its previous one. `on_drop` releases what an entry holds outside the he
 | `_get_upload_signal(token)` / `_get_upload_source_path(token)` | A read-only view of the signal / the file it came from |
 | `_hold_upload(token) -> HeldUpload \| None` | Signal, source path, store and views of an upload, the store held until `release()`; used by runs, `/qc/auto` and `/series/*` |
 | `_store_signal_views(token, views)` / `_get_signal_views(token)` | The QC stage's pyramids and overview of an upload |
-| `_store_decomp_preview_binary(payload, session) -> token` | Keep a preview frame |
-| `_pop_decomp_preview_binary(token)` | Remove and return it |
 | `_store_run_result(pulse_trains, session, store, spikes) -> token` | Keep a finished run, taking over its run store |
 | `_get_run_result_entry(token) -> RunResult \| None` | The run, its pulse trains read-only; `_get_run_result(token)` returns the trains only |
 | `_release_edit_sessions(session)` | Close the session's edit session before it opens the next file |

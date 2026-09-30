@@ -14,16 +14,15 @@ All HTTP endpoints used by the frontend, their payloads, and binary formats.
 | 5 | POST | `/qc/auto` | `api.runAutoQc(payload)` | `qcStage.runAutoQc` | 300s | Run automatic QC: detect bad channels + artifact windows |
 | 6 | POST | `/decompose_stream` | `api.decomposeStream(formData)` | `runStage.runDecomposition` | 15min | Main decomposition (streaming NDJSON response); 409 while another run is active |
 | 6b | POST | `/decompose/cancel` | `api.cancelDecomposition()` | `runStage.cancelDecomposition` (Cancel button) | 120s | Stop this tab's run; its stream ends with `cancelled` |
-| 7 | GET | `/decompose_preview/{token}` | `api.fetchDecomposePreview(token)` | `handleStreamMessage` (binary fast-path) | 120s | Fetch the run's discharge times in binary format |
-| 8 | GET | `/series/pulse` | `api.fetchPulse(params)` | the run explorer and the edit canvas, through `createViewFetcher` | 120s | One MU's pulse train over the window on screen, with its discharges there |
-| 9 | POST | `/edit/save` | `api.editSave(payload)` | `fileSession.persistNpzBySaveTarget` ← `autoSaveRunDecomposition` | 120s | Save a finished run (its pulse trains and discharge times stay on the server) |
-| 10 | POST | `/edit/session/open` | `api.editOpen(filepath)` | `loadDecompositionForEdit` | 120s | Open a decomposition in a server-side edit session |
-| 11 | POST | `/edit/session/recover` | `api.editRecover(token, apply)` | `loadDecompositionForEdit`, when the open reports `recoverable_edits` | 120s | Replay or drop the unsaved edits an earlier session left |
-| 11b | POST | `/edit/session/prepare-grid` | `api.editPrepareGrid(token, grid, project)` | `prepareEditGrid` ← `showEditSession` (the grid on screen) and the grid dropdown | 10min | Filter a grid's EMG ahead of its first Update Filter; nothing waits for the answer |
-| 12 | GET | `/edit/session` | `api.editSessionState(token)` | `restoreEditSession` (page reload) | 120s | The whole state of the session this page had open |
-| 13 | POST | `/edit/ops/{op}` | `api.editOp(op, payload)` | `requestEditOp` ← every edit action | 120s | Apply one edit; the frame says what changed |
-| 14 | POST | `/edit/session/save` | `api.editSessionSave(payload)` | `saveEditedFile` | 120s | Save the session's edits |
-| 15 | POST | `/session/close` | `api.closeSession()` | `initializeApp`'s `pagehide` handler | — | Free what the server holds for this tab and stop its run |
+| 7 | GET | `/series/pulse` | `api.fetchPulse(params)` | the edit canvas, through `createViewFetcher` | 120s | One MU's pulse train over the window on screen, with its discharges there |
+| 8 | POST | `/edit/save` | `api.editSave(payload)` | `fileSession.persistNpzBySaveTarget` ← `autoSaveRunDecomposition` | 120s | Save a finished run (its pulse trains and discharge times stay on the server) |
+| 9 | POST | `/edit/session/open` | `api.editOpen(filepath)` | `loadDecompositionForEdit` | 120s | Open a decomposition in a server-side edit session |
+| 10 | POST | `/edit/session/recover` | `api.editRecover(token, apply)` | `loadDecompositionForEdit`, when the open reports `recoverable_edits` | 120s | Replay or drop the unsaved edits an earlier session left |
+| 10b | POST | `/edit/session/prepare-grid` | `api.editPrepareGrid(token, grid, project)` | `prepareEditGrid` ← `showEditSession` (the grid on screen) and the grid dropdown | 10min | Filter a grid's EMG ahead of its first Update Filter; nothing waits for the answer |
+| 11 | GET | `/edit/session` | `api.editSessionState(token)` | `restoreEditSession` (page reload) | 120s | The whole state of the session this page had open |
+| 12 | POST | `/edit/ops/{op}` | `api.editOp(op, payload)` | `requestEditOp` ← every edit action | 120s | Apply one edit; the frame says what changed |
+| 13 | POST | `/edit/session/save` | `api.editSessionSave(payload)` | `saveEditedFile` | 120s | Save the session's edits |
+| 14 | POST | `/session/close` | `api.closeSession()` | `initializeApp`'s `pagehide` handler | — | Free what the server holds for this tab and stop its run |
 
 > **Origin.** The page and the API share one origin (the server serves `frontend/` at `/`), so `API_BASE` is `${location.origin}/api/v1` and there is no CORS. `closeSession()` posts `/session/close` with `fetch(..., { keepalive: true })` rather than a beacon, because a beacon cannot carry the session header.
 
@@ -43,7 +42,6 @@ export const routes = {
   previewByPath: "/preview-by-path",
   decomposeStream: "/decompose_stream",
   decomposeCancel: "/decompose/cancel",
-  decomposePreview: (token) => `/decompose_preview/${encodeURIComponent(token)}`,
   editSave: "/edit/save",
   editSessionOpen: "/edit/session/open",
   editSession: "/edit/session",
@@ -126,25 +124,22 @@ Request FormData:
   full_preview: "true"
 
 Response: NDJSON stream (one JSON object per line):
-  { pct: number, message: string, stage?: string }
-  { preview: {...}, binary_token?: string }
-  { summary: { per_grid: [...], parameters: {...} } }
-  { stage: "done" }
-  { stage: "error", message: string }
+  { pct: number, message: string, stage?: string,
+    phase?: "load" | "preprocess" | "decompose" | "postprocess" | "export",
+    grid?, ngrid?, window?, nwindows?, niter?,       // decompose search position
+    iter?, outcomes?, window_done? }                 // outcomes: one letter per
+                                                      //   iteration since the last
+                                                      //   event (k kept, r rejected,
+                                                      //   f too few spikes)
+  { stage: "done",                                    // the run's result, in one event
+    preview: { run_result_token, mu_grid_index, total_samples, rois, ... },
+    summary: { mu_count, grid_names, sil, parameters } }
+  { stage: "error", message: string, detail?: string }
   { stage: "cancelled", message: string }   (after /decompose/cancel, a disconnect or tab close)
 
-A second run while one is active gets HTTP 409 before any stream starts.
-```
-
-### GET /decompose_preview/{token}
-
-```
-Headers: Accept: application/octet-stream
-Response (MUB1 frame; the server serves it once):
-  meta:   the preview's JSON fields (fsamp, total_samples, grid_names, rois,
-          mu_grid_index, channel_means, coordinates, metadata, muscle)
-  arrays: spikes i4 + spike_offsets i8 (CSR discharge times → distime_all)
-Pulse trains stay on the server: /series/pulse with the run_result_token.
+The preview carries neither `pulse_trains_full` nor `distime_all`: both stay on
+the server under `run_result_token` (see `/edit/save`). A second run while one
+is active gets HTTP 409 before any stream starts.
 ```
 
 ### GET /series/pulse
@@ -279,7 +274,7 @@ Mode keys match `POSTPROCESS_MODES` in `decomp/types.py` and the CLI `--postproc
 
 All integers and floats are little-endian. When the magic prefix is absent, the buffer is parsed as JSON text.
 
-### MUB1 frame — `/series/*`, `/decompose_preview/{token}`, the edit session routes
+### MUB1 frame — `/series/*`, the edit session routes
 
 ```
 Offset      Size        Field
