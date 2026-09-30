@@ -16,13 +16,12 @@
 |---|---|---|
 | `muedit-api` | `muedit.cli:serve_api` | Start the server: the API, and the frontend at `/` |
 | `muedit-decompose` | `muedit.cli:run_decomposition_cli` | Run decomposition from the command line |
-| `muedit-desktop` | `muedit.desktop:main` | The same server in a native pywebview window (`desktop` extra) |
 
 ### Dependencies
 
 `numpy`, `scipy`, `xmltodict`, `pydantic`, `PyYAML`, `h5py`, `fastapi`, `starlette`, `uvicorn`, `python-multipart`, `pyedflib`, `platformdirs`
 
-Extras: `dev` (`build`, `twine`, `pytest`, `pytest-cov`, `httpx`, `ruff`, `mypy`, `pre-commit`, `types-PyYAML`), `desktop` (`pywebview`), `plot` (`matplotlib`, for the CLI's `--manual-roi` only), `notebook` (`jupyterlab`, `ipykernel`), `research` (`optuna`, `matplotlib`). All versions are pinned in `uv.lock`.
+Extras: `dev` (`build`, `twine`, `pytest`, `pytest-cov`, `httpx`, `ruff`, `mypy`, `pre-commit`, `types-PyYAML`), `plot` (`matplotlib`, for the CLI's `--manual-roi` only), `notebook` (`jupyterlab`, `ipykernel`), `research` (`optuna`, `matplotlib`). All versions are pinned in `uv.lock`.
 
 ---
 
@@ -32,6 +31,8 @@ Extras: `dev` (`build`, `twine`, `pytest`, `pytest-cov`, `httpx`, `ruff`, `mypy`
 
 ```
 cli.serve_api()
+  → app_log.log_to_file(<log dir>/muedit.log): rotated, 5 MB × 3; spawned
+    workers append to it through MUEDIT_LOG_FILE
   → app_factory.create_app(title="MUedit API", version="2.1.0", allowed_hosts)
       → FastAPI(...)
       → no CORS middleware: the page and the API share one origin, so no other
@@ -57,36 +58,6 @@ cli.serve_api()
       → port: MUEDIT_PORT or MUEDIT_BACKEND_PORT env (default 8000)
       → log_level: warning, access_log: off
 ```
-
-### Desktop app (`muedit-desktop`, `python -m muedit.desktop`)
-
-One process: the server on a thread, the window on the main thread (which macOS requires).
-
-```
-desktop.main()
-  → import webview (ImportError → exit NO_WINDOW = 3)
-  → single-instance lock: <cache dir>/desktop.lock (fcntl / msvcrt); a second
-    launch shows "MUedit is already running" and exits
-  → app_log.log_to_file(<log dir>/muedit.log): rotated, 5 MB × 3; spawned
-    workers append to it through MUEDIT_LOG_FILE
-  → _Server: socket bound to 127.0.0.1:0, token = secrets.token_urlsafe(32);
-    on its thread, imports the API (so the window is up before NumPy/SciPy),
-    create_app(allowed_hosts=["127.0.0.1"], token) + routers + frontend,
-    uvicorn.Server(...).run(sockets=[sock])
-  → webview.create_window(html="Starting MUedit…", js_api=DesktopApi(token))
-  → webview.start(_load_app): once uvicorn has started,
-    load_url("http://127.0.0.1:<port>/?desktop=1")
-      (no GUI toolkit → WebViewException → exit NO_WINDOW = 3)
-  → window closed → server.should_exit (the lifespan stops any run) → exit 0
-```
-
-`DesktopApi` is what the page reaches as `window.pywebview.api`: `token()`,
-`app_info()` (version, output folder, log file), `open_file()` (native dialog, same
-shape as `GET /dialog/open-file`) and `choose_output_folder()`. The token never
-appears in a URL: the page asks the bridge for it, so a reload keeps working.
-`TokenMiddleware` then refuses any `/api/*` request without `X-MUedit-Token`,
-except `/api/v1/health`; the page's own files need no token. The launchers treat
-exit code 3 as "use the browser" and start `muedit api` instead.
 
 ### CLI Decomposition (`muedit decompose`)
 
@@ -114,8 +85,8 @@ __all__ = [
 ]
 ```
 
-The names are imported on first use (module `__getattr__`), so `import muedit.desktop`
-or `muedit.paths` does not load SciPy.
+The names are imported on first use (module `__getattr__`), so `import muedit.paths`
+does not load SciPy.
 
 ### Sub-package `__all__`
 
@@ -239,7 +210,7 @@ Methods: `to_dict()`
 
 | Component | Responsibility |
 |---|---|
-| `app_factory.py` | Construct FastAPI app, Host and desktop-token checks, exception handlers; `mount_frontend()` |
+| `app_factory.py` | Construct FastAPI app, Host check, exception handlers; `mount_frontend()` |
 | `routes/__init__.py` | Register all routers on the app |
 | `routes/preview.py` | File preview, on-demand auto-QC, health check |
 | `routes/series.py` | Viewport envelopes of the upload's EMG, grid overview and aux channels, and of an MU's pulse train |
@@ -268,10 +239,8 @@ Methods: `to_dict()`
 | Component | Responsibility |
 |---|---|
 | `cli.py` | `muedit api` / `muedit decompose` entry points |
-| `desktop.py` | The desktop app: lock, server thread, window, `DesktopApi` bridge |
-| `paths.py` | Per-user cache, config and log folders (`platformdirs`), the checkout root, the frontend folder |
-| `settings.py` | The user's `settings.json` in the config folder (the output folder picked in the app) |
-| `app_log.py` | The desktop app's rotating log file, shared with its spawned workers |
+| `paths.py` | Per-user cache and log folders (`platformdirs`), the checkout root, the frontend folder |
+| `app_log.py` | The server's rotating log file, shared with its spawned workers |
 
 ### `decomp/` — Decomposition Engine
 
@@ -338,11 +307,10 @@ Methods: `to_dict()`
 
 | Constant | Source | Description |
 |---|---|---|
-| `DATA_ROOT` | `default_data_root()` at import; `set_data_root()` when the user picks a folder | Output folder; each project is a folder in it |
+| `DATA_ROOT` | `default_data_root()` at import | Output folder; each project is a folder in it |
 
-`default_data_root()` takes, in order: `MUEDIT_DATA_ROOT`; the `data_root` the desktop
-app saved in `settings.json`; `<repo>/data` when running from a checkout; `MUedit` in
-the Documents folder.
+`default_data_root()` takes, in order: `MUEDIT_DATA_ROOT`; `<repo>/data` when running
+from a checkout; `MUedit` in the Documents folder.
 
 ```python
 def resolve_bids_root(project: str | None) -> Path
@@ -364,15 +332,13 @@ save goes back into that dataset (`EditSession.bids_root`), wherever it lies.
 
 | Variable | Default | Used by |
 |---|---|---|
-| `MUEDIT_DATA_ROOT` | the saved folder, else `<repo>/data` | Output folder; overrides the one picked in the app |
-| `MUEDIT_HOST` | `127.0.0.1` | Server bind host (browser mode); `0.0.0.0` opens it to the network and drops the Host check |
-| `MUEDIT_PORT` | `8000` | Server bind port (browser mode) |
+| `MUEDIT_DATA_ROOT` | `<repo>/data` | Output folder |
+| `MUEDIT_HOST` | `127.0.0.1` | Server bind host; `0.0.0.0` opens it to the network and drops the Host check |
+| `MUEDIT_PORT` | `8000` | Server bind port |
 | `MUEDIT_BACKEND_PORT` | `8000` | Fallback port; the launchers copy it into `MUEDIT_PORT` |
-| `MUEDIT_BROWSER` | `0` | `1` makes the launchers skip the desktop window and use the browser |
-| `MUEDIT_OPEN_BROWSER` | `1` | Open the browser once the server answers (launchers, browser mode) |
-| `MUEDIT_DEBUG` | `0` | `1` opens the WebView's developer tools in the desktop app |
-| `MUEDIT_LOG_FILE` | set by the desktop app | The log file its spawned workers append to |
-| `MUEDIT_CACHE_DIR` | the per-user cache folder | Session stores, edit logs, the desktop lock |
+| `MUEDIT_OPEN_BROWSER` | `1` | Open the browser once the server answers (launchers) |
+| `MUEDIT_LOG_FILE` | set by `serve_api` | The log file its spawned workers append to |
+| `MUEDIT_CACHE_DIR` | the per-user cache folder | Session stores, edit logs |
 | `MUEDIT_CACHE_BUDGET_MB` | 10% of RAM, 256–1024 | Byte budget of the API caches |
 | `MUEDIT_DISK_RESERVE_MB` | `1024` | Free disk a session store leaves; arrays past it stay in RAM |
 | `MUEDIT_NO_UV` | `0` | `1` makes the launchers use the active `python` instead of `uv run` |

@@ -18,8 +18,6 @@ All elements are registered in `dom.js` as `els.*` properties.
 | Element ID | [U/A] | Purpose |
 |---|---|---|
 | `browseSignalBtn` | [U] | Button to open file dialog |
-| `outputFolderRow` | [U] | Output folder row (desktop app only) |
-| `outputFolderBtn` | [U] | Button to choose the output folder (desktop app only) |
 | `landing` | [U] | Landing page container |
 | `workspace` | [U] | Main workspace container |
 | `uploadLoader` | [U] | Upload spinner |
@@ -183,25 +181,11 @@ All elements are registered in `dom.js` as `els.*` properties.
 
 | Export | [A/?] | Used By |
 |---|---|---|
-| `apiFetch` | [A] | api/client.js; sends `X-MUedit-Session` and, in the desktop app, `X-MUedit-Token` |
+| `apiFetch` | [A] | api/client.js; sends `X-MUedit-Session` |
 | `apiJson` | [A] | api/client.js |
 | `SESSION_ID`, `SESSION_HEADER` | [A] | createApiClient (`closeSession`), apiFetch |
 | `waitForBackend` | [A] | initializeApp |
 | `parseApiError` | [A] | http.js (internal) |
-| `setAppToken` | [A] | platform.initPlatform |
-| `TOKEN_HEADER` | [A] | apiFetch |
-
----
-
-## Module: `app/platform.js`
-
-| Export | [A/?] | Used By |
-|---|---|---|
-| `IS_DESKTOP` | [A] | import-stage.setupOutputFolder, platform (internal) |
-| `initPlatform` | [A] | initializeApp |
-| `openFile` | [A] | import-stage.handleNativeDialogOpen |
-| `outputFolder` | [A] | import-stage.setupOutputFolder |
-| `chooseOutputFolder` | [A] | import-stage.setupOutputFolder (outputFolderBtn click) |
 
 ---
 
@@ -342,7 +326,6 @@ All elements are registered in `dom.js` as `els.*` properties.
 | `handleNativeDialogOpen` (private) | [A] | setupImportEvents (browseSignalBtn click) |
 | `displayNameForPath` | [A] | handleNativeDialogOpen |
 | `setupImportEvents` | [A] | initializeApp |
-| `setupOutputFolder` | [A] | initializeApp (desktop app only) |
 
 ---
 
@@ -720,7 +703,7 @@ All functions are state mutators (`set*` functions). Each is called by at least 
 
 | Stage | Buttons | Canvases | Form Fields | Dropdowns | Other |
 |---|---|---|---|---|---|
-| Import | 2 (browse, output folder) | 0 | 0 | 0 | 4 (loader, error, filename, global status) |
+| Import | 1 (browse) | 0 | 0 | 0 | 4 (loader, error, filename, global status) |
 | QC | 4 (start, auto QC, add/remove artifact) + N (grid tabs) + N (channel cells) | 2 (emg, aux) | 18 (BIDS) + 8 (decomp) + 3 (filters) | 1 (aux) | 4 (auto-info, phase, progress, artifact count) |
 | Run | 1 (cancel) | 1 (pulse) | 0 | 2 (grid, MU) | 3 (phase, progress, meta) |
 | Edit | 13 (toolbar) | 3 (pulse, DR, timeline) | 1 (project) | 2 (grid, MU) | 1 (edit status) |

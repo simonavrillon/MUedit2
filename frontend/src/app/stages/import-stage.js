@@ -1,10 +1,4 @@
 import { parseBidsEntitiesFromLabel } from "../../io/bids.js";
-import {
-  chooseOutputFolder,
-  IS_DESKTOP,
-  openFile,
-  outputFolder,
-} from "../platform.js";
 
 /** @typedef {import("../context.js").App} App */
 /** @typedef {import("../context.js").StageKey} StageKey */
@@ -43,7 +37,7 @@ async function handleNativeDialogOpen(app) {
 
   let result;
   try {
-    result = await openFile(() => api.openFileDialog());
+    result = await api.openFileDialog();
   } catch (err) {
     console.error("File dialog failed:", err);
     setStatus("Failed to open file dialog", "error");
@@ -77,34 +71,6 @@ async function handleNativeDialogOpen(app) {
     });
     if (!ok) await loadDecompositionForEditByPath(path);
   }
-}
-
-/**
- * Show the output folder in the session panel and let the user move it;
- * the desktop app only, as the browser app writes where the server is told to.
- *
- * @param {App} app
- */
-export async function setupOutputFolder(app) {
-  const { els, setStatus } = app;
-  if (!IS_DESKTOP || !els.outputFolderRow || !els.outputFolder) return;
-  const label = els.outputFolder;
-  /** @param {string} path */
-  const show = (path) => {
-    label.textContent = path;
-    label.title = path;
-  };
-  show(await outputFolder());
-  els.outputFolderRow.classList.remove("hidden");
-  els.outputFolderBtn?.addEventListener("click", async () => {
-    try {
-      const path = await chooseOutputFolder();
-      if (path) show(path);
-    } catch (err) {
-      console.error("Output folder dialog failed:", err);
-      setStatus("Failed to change the output folder", "error");
-    }
-  });
 }
 
 /** @param {App} app */

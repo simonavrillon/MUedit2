@@ -45,8 +45,7 @@ The user selects a signal file (raw EMG or saved decomposition). The app detects
 ```
 User clicks #browseSignalBtn
   -> importStage.handleNativeDialogOpen()
-     -> platform.openFile(() => api.openFileDialog())
-          desktop: the bridge's open_file(); browser: GET /dialog/open-file
+     -> api.openFileDialog()   GET /dialog/open-file
      -> detectLandingFileType(name)
         ├─ "raw"           -> qcStage.handleRawFilePath(path, name)
         │                      -> requestPreview({ filepath: path })  POST /preview-by-path

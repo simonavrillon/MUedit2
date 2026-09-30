@@ -15,6 +15,7 @@ import uvicorn
 
 from muedit.api.app_factory import create_app, mount_frontend
 from muedit.api.routes import include_routers
+from muedit.app_log import log_to_file
 from muedit.decomp.pipeline import run_decomposition
 from muedit.decomp.types import (
     DEFAULT_NBEXTCHAN,
@@ -25,7 +26,7 @@ from muedit.decomp.types import (
     ContrastFunc,
     DecompositionParameters,
 )
-from muedit.paths import frontend_dir, repo_root
+from muedit.paths import frontend_dir, log_dir, repo_root
 
 _DEFAULT_PARAMS = DecompositionParameters()
 
@@ -62,6 +63,7 @@ def serve_api() -> None:
     """Start the MUedit server: the API, and the frontend at ``/`` on the same origin."""
     # Decompositions run in spawned worker processes; a frozen (bundled) app must let them start.
     multiprocessing.freeze_support()
+    log_to_file(log_dir() / "muedit.log")
     # /preview-by-path reads any local path, so only this machine's frontend may call it.
     host = os.environ.get("MUEDIT_HOST", "127.0.0.1")
     port = int(os.environ.get("MUEDIT_PORT") or os.environ.get("MUEDIT_BACKEND_PORT", "8000"))

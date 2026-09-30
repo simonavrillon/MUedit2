@@ -22,11 +22,8 @@ initializeApp():
   4. app.updateWorkflowStepper("import") # highlight "Import" chip
   5. els.browseSignalBtn.disabled = true # block until backend responds
   6. app.setStatus("Connecting to backend...")   # #status pill, top-right of header
-  7. await initPlatform()                # desktop app only: wait for the pywebview
-                                         #   bridge, take the API token from it
-  8. await waitForBackend(api.healthUrl())
-     ├─ success → setupOutputFolder(app) (desktop only), enable browse button,
-     │            clear status, restore an open edit session
+  7. await waitForBackend(api.healthUrl())
+     ├─ success → enable browse button, clear status, restore an open edit session
      └─ failure → "Backend unreachable — please restart the app"
 ```
 

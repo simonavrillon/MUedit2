@@ -23,11 +23,6 @@ def cache_dir() -> Path:
     return Path(platformdirs.user_cache_dir(_APP, appauthor=False))
 
 
-def config_dir() -> Path:
-    """The platform's per-user settings folder for MUedit."""
-    return Path(platformdirs.user_config_dir(_APP, appauthor=False))
-
-
 def log_dir() -> Path:
     """The platform's per-user log folder for MUedit."""
     return Path(platformdirs.user_log_dir(_APP, appauthor=False))

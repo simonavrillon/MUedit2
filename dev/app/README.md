@@ -38,8 +38,7 @@ frontend/
     │   ├── create-app.js                Merges every service into one `app` context
     │   ├── context.js                   `App` typedef: the contract every service meets
     │   ├── dom.js                       Typed getElementById map (els)
-    │   ├── http.js                      apiFetch, apiJson, waitForBackend, app token header
-    │   ├── platform.js                  Desktop vs browser: pywebview bridge, token, dialogs
+    │   ├── http.js                      apiFetch, apiJson, waitForBackend, session header
     │   ├── state.js                     Global state object + createEditSlice (mirror of the edit session)
     │   ├── services/
     │   │   ├── navigation.js            Stepper, showWorkspace, keyboard nav, view math
@@ -51,12 +50,11 @@ frontend/
     │   │   └── error-service.js         Error handler
     │   └── stages/
     │       ├── lifecycle.js             Stage registry: switchStage, enter/exit/render hooks
-    │       ├── import-stage.js          File-open dialog, landing interactions, output folder
+    │       ├── import-stage.js          File-open dialog, landing interactions
     │       ├── qc-stage.js              QC/preview: raw file loading, ROI, channel QC
     │       ├── run-stage.js             Decomposition execution, MU explorer
     │       ├── edit-stage.js            Spike editing, filter updates, save
     │       └── layout-stage.js          Section collapse, settings toggle events
-    ├── globals.d.ts                     The pywebview bridge (DesktopBridge) for the type checker
     ├── decomp/
     │   ├── explorer.js                  Run-stage MU dropdown/explorer model builders
     │   ├── params.js                    Decompose parameter builder

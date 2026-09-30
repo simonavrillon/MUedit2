@@ -137,7 +137,7 @@ export function createApiClient({ apiFetch, apiJson, API_BASE, sessionId }) {
     /**
      * Frees what the backend holds for this tab. `keepalive` lets the request
      * outlive the page being unloaded; unlike a beacon, it can carry the
-     * desktop app's token header.
+     * session header.
      */
     closeSession() {
       const query = `session=${encodeURIComponent(sessionId)}`;

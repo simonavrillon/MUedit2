@@ -37,10 +37,8 @@ The backend serves four user-facing stages (mirroring the frontend):
 python/src/muedit/
 ├── __init__.py                              Top-level exports (imported on first use)
 ├── cli.py                                   CLI entry point (api serve, decompose)
-├── desktop.py                               Desktop app: server thread + pywebview window
-├── paths.py                                 Per-user cache/config/log folders, checkout, frontend
-├── settings.py                              settings.json (output folder picked in the app)
-├── app_log.py                               Desktop log file, shared with spawned workers
+├── paths.py                                 Per-user cache/log folders, checkout, frontend
+├── app_log.py                               Server log file, shared with spawned workers
 ├── models.py                                SignalImport, LoadedDecomposition, DecompositionExport
 │
 ├── api/

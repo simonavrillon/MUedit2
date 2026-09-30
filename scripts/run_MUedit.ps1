@@ -10,34 +10,17 @@ $BackendDir = Join-Path $RootDir 'python'
 # plain `python` keeps the script working inside an already-activated
 # environment (conda, venv) and when uv is not installed.
 if ((Get-Command uv -ErrorAction SilentlyContinue) -and ($env:MUEDIT_NO_UV -ne '1')) {
-    $PyExe       = 'uv'
-    $PyArgs      = @('run', '--project', $RootDir, 'python')
-    $DesktopArgs = @('run', '--project', $RootDir, '--extra', 'desktop', 'python')
+    $PyExe  = 'uv'
+    $PyArgs = @('run', '--project', $RootDir, 'python')
 } else {
-    $PyExe       = 'python'
-    $PyArgs      = @()
-    $DesktopArgs = @()
+    $PyExe  = 'python'
+    $PyArgs = @()
 }
 
 $env:PYTHONPATH          = "$BackendDir\src" + $(if ($env:PYTHONPATH) { ";$env:PYTHONPATH" } else { '' })
 $env:MUEDIT_HOST         = if ($env:MUEDIT_HOST) { $env:MUEDIT_HOST } else { '127.0.0.1' }
 $env:MUEDIT_PORT         = if ($env:MUEDIT_BACKEND_PORT) { $env:MUEDIT_BACKEND_PORT } else { '8000' }
 $env:MUEDIT_OPEN_BROWSER = if ($env:MUEDIT_OPEN_BROWSER) { $env:MUEDIT_OPEN_BROWSER } else { '1' }
-
-# The app's own window first; MUEDIT_BROWSER=1 skips it.  Exit code 3 means no
-# native window can open here (no pywebview, or no WebView2 runtime), and MUedit
-# opens in the browser instead.
-if ($env:MUEDIT_BROWSER -ne '1') {
-    Push-Location $BackendDir
-    try {
-        & $PyExe @DesktopArgs -m muedit.desktop
-        $status = $LASTEXITCODE
-    } finally {
-        Pop-Location
-    }
-    if ($status -ne 3) { exit $status }
-    Write-Host "No native window available; opening MUedit in the browser instead."
-}
 
 # One server: the API, and the page at / on the same origin.  The unary comma
 # keeps $PyArgs a single array argument instead of being unrolled into separate

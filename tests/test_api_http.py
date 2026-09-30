@@ -850,7 +850,7 @@ class TestEditSave:
         _err(client.post(f"{API}/edit/save", json={"distimes": [[1]], "total_samples": 0}), 400)
 
 
-# ── Origin, host and token restrictions (serve_api, desktop) ─────────────────
+# ── Origin and host restrictions (serve_api) ─────────────────────────────────
 
 
 def _served_app(monkeypatch: pytest.MonkeyPatch, **env: str) -> tuple[FastAPI, str]:
@@ -861,6 +861,7 @@ def _served_app(monkeypatch: pytest.MonkeyPatch, **env: str) -> tuple[FastAPI, s
     monkeypatch.setattr(
         cli.uvicorn, "run", lambda app, host, **_: served.update(app=app, host=host)
     )
+    monkeypatch.setattr(cli, "log_to_file", lambda _path: None)
     monkeypatch.delenv("MUEDIT_HOST", raising=False)
     for key, value in env.items():
         monkeypatch.setenv(key, value)

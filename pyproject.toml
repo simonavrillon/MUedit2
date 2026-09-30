@@ -61,16 +61,10 @@ research = [
   "optuna>=4.3",
   "matplotlib>=3.9",
 ]
-# The native window of ``muedit-desktop``.  On Linux, pywebview also needs PyGObject with
-# WebKitGTK from the system (or the Flatpak runtime).
-desktop = [
-  "pywebview>=5",
-]
 
 [project.scripts]
 muedit-api = "muedit.cli:serve_api"
 muedit-decompose = "muedit.cli:run_decomposition_cli"
-muedit-desktop = "muedit.desktop:main"
 
 [tool.setuptools]
 package-dir = {"" = "python/src"}
@@ -147,9 +141,4 @@ enable_error_code = ["possibly-undefined", "redundant-expr", "truthy-bool"]
 [[tool.mypy.overrides]]
 # Third-party packages without type information.
 module = ["scipy.*", "h5py.*", "pyedflib.*", "xmltodict.*", "matplotlib.*"]
-ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
-# Optional extras, absent from the CI environment (``--extra dev`` only).
-module = ["webview", "webview.*"]
 ignore_missing_imports = true

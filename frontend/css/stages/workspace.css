@@ -394,14 +394,6 @@
   font-size: var(--fs-md);
 }
 
-.file-display.output-folder {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-weight: var(--fw-regular);
-}
-
 .file-display.loading {
   color: var(--accent);
 }

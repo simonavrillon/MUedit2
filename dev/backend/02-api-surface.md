@@ -3,9 +3,7 @@
 All routers use prefix `/api/v1` (dialog uses `/api/v1/dialog`). All JSON responses are wrapped in the canonical v1 envelope: `{"data": <data>, "meta": {"api_version": "v1"}}`. Errors use `{"error": {"code": ..., "message": ..., "detail": ...}}`.
 
 The same server serves `frontend/` at `/` (after the routers), so the page and the API share one
-origin and no CORS headers are sent. In the desktop app, every `/api/*` request except `/health`
-must carry the app's token in `X-MUedit-Token`; without it the answer is 401 with code
-`unauthorized`. A `project` that is not a single folder name is refused with a 400 on the
+origin and no CORS headers are sent. A `project` that is not a single folder name is refused with a 400 on the
 `project` field (`/decompose_stream` with `bids_export`, `/edit/save`, `/edit/session/save`).
 
 Each browser tab sends its session id in `X-MUedit-Session` (`common.request_session`). A request
@@ -129,7 +127,6 @@ return `{saved, path, kept_indices, mu_uids, edit_history, bids_emg_paths?, bids
 | GET | `/open-file` | — | JSON: `{path: str|None, name: str|None}` | `_open_dialog_macos()` (AppleScript) or `_open_dialog_tkinter()` (subprocess) |
 
 Accepted extensions: `mat, otb+, otb4, npz, bdf, edf, rhd`. Returns 408 on timeout, 500 on failure.
-The desktop app opens files through the pywebview bridge instead (see `desktop.py`).
 
 ### Session Router (`routes/memory.py`)
 
@@ -138,7 +135,7 @@ The desktop app opens files through the pywebview bridge instead (see `desktop.p
 | POST | `/session/close` | query: `session` | 204; cancels the session's run and drops everything it holds | `cancel_decomposition()` + `cache.close_session()` |
 | GET | `/debug/memory` | — | JSON: process memory, `BUDGET.usage()` per cache and per session, the session stores on disk | — |
 
-The frontend sends `/session/close` as a `keepalive` fetch (which, unlike a beacon, carries the desktop token) when its page is hidden for good.
+The frontend sends `/session/close` as a `keepalive` fetch (which, unlike a beacon, carries the session header) when its page is hidden for good.
 
 ---
 

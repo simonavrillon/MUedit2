@@ -1,4 +1,4 @@
-"""The desktop app's log file, which its decomposition workers also write to."""
+"""The app's log file, which its decomposition workers also write to."""
 
 from __future__ import annotations
 

@@ -1,15 +1,6 @@
 /** @typedef {import("../app/context.js").JsonObject} JsonObject */
 
 export const SESSION_HEADER = "X-MUedit-Session";
-export const TOKEN_HEADER = "X-MUedit-Token";
-
-/** The desktop app's API token (`platform.js`); the browser app has none. */
-let appToken = "";
-
-/** @param {string} token */
-export function setAppToken(token) {
-  appToken = token;
-}
 
 /** One id per tab: the backend scopes what it caches to it and frees it when the tab closes. */
 export const SESSION_ID = newSessionId();
@@ -71,7 +62,6 @@ export async function apiFetch(url, options = {}, timeoutMs = 120000) {
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   const headers = new Headers(options.headers);
   headers.set(SESSION_HEADER, SESSION_ID);
-  if (appToken) headers.set(TOKEN_HEADER, appToken);
   try {
     const res = await fetch(url, {
       ...options,

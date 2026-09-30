@@ -259,7 +259,7 @@ earlier session left unsaved edits to it (the app crashed or was closed before s
 reports `recoverable_edits`. `loadDecompositionForEdit` asks "N unsaved edits to this file were
 left from an earlier session. Restore them?" and posts `/edit/session/recover` with the answer.
 
-A page reload (a WebView that crashed, not a restart of the app) keeps the session: its token is
+A page reload (not a restart of the server) keeps the session: its token is
 in `sessionStorage`, and `restoreEditSession` reopens it at startup.
 
 ---

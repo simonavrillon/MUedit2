@@ -173,10 +173,9 @@ Use this to trace what the user can reach.
 
 | Symbol | Category | Reachable via |
 |---|---|---|
-| `app_factory.create_app()` | App-internal | Called by `cli.serve_api`, `desktop._Server` |
-| `app_factory.mount_frontend()` | App-internal | Called by `cli.serve_api`, `desktop._Server` |
-| `app_factory.TokenMiddleware` | App-internal | Added by `create_app(token=...)` (desktop app) |
-| `routes.include_routers()` | App-internal | Called by `cli.serve_api`, `desktop._Server` |
+| `app_factory.create_app()` | App-internal | Called by `cli.serve_api` |
+| `app_factory.mount_frontend()` | App-internal | Called by `cli.serve_api` |
+| `routes.include_routers()` | App-internal | Called by `cli.serve_api` |
 | `contracts.success_payload()` | App-internal | Called by all route handlers |
 | `binary.pack_frame()` | App-internal | Called by the series, decompose and editing services |
 | `binary.unpack_frame()` | App-internal | Tests only (every frame goes from server to client) |
@@ -185,9 +184,8 @@ Use this to trace what the user can reach.
 | `errors.http_exception_handler` | App-internal | Registered on app |
 | `errors.validation_exception_handler` | App-internal | Registered on app |
 | `errors.unhandled_exception_handler` | App-internal | Registered on app |
-| `config.DATA_ROOT` | App-internal | Used by `resolve_bids_root`, `project_of`, `DesktopApi` |
+| `config.DATA_ROOT` | App-internal | Used by `resolve_bids_root`, `project_of` |
 | `config.default_data_root()` | App-internal | Sets `DATA_ROOT` at import |
-| `config.set_data_root()` | App-internal | Called by `DesktopApi.choose_output_folder` |
 | `config.resolve_bids_root()` | App-internal | Called through `common.bids_root_for()` and the edit session |
 | `config.project_of()` | App-internal | Called by preview and edit services |
 | `common.bids_root_for()` | App-internal | Called by the decompose route and the edit saves (400 on a bad project) |
@@ -385,25 +383,14 @@ Use this to trace what the user can reach.
 
 ---
 
-## `desktop.py`
+## `paths.py`, `app_log.py`
 
 | Symbol | Category | Reachable via |
 |---|---|---|
-| `main()` | User-exposed | `muedit-desktop`, `python -m muedit.desktop`, the launchers |
-| `DesktopApi` | User-exposed | `window.pywebview.api` in the page: `token`, `app_info`, `open_file`, `choose_output_folder` |
-| `acquire_instance_lock()` | App-internal | Called by `main` |
-| `_Server` | App-internal | Called by `main` |
-| `NO_WINDOW` | App-internal | Exit status the launchers read to fall back to the browser |
-
-## `paths.py`, `settings.py`, `app_log.py`
-
-| Symbol | Category | Reachable via |
-|---|---|---|
-| `paths.cache_dir()` | App-internal | Session stores, edit logs, the desktop lock (`MUEDIT_CACHE_DIR` overrides) |
-| `paths.config_dir()`, `paths.log_dir()` | App-internal | `settings.py`, `desktop.py` |
-| `paths.repo_root()`, `paths.frontend_dir()` | App-internal | `config.default_data_root`, `cli`, `desktop` |
-| `settings.load_settings()`, `settings.save_setting()` | App-internal | `config.default_data_root`, `DesktopApi.choose_output_folder` |
-| `app_log.log_to_file()` | App-internal | Called by `desktop.main` |
+| `paths.cache_dir()` | App-internal | Session stores, edit logs (`MUEDIT_CACHE_DIR` overrides) |
+| `paths.log_dir()` | App-internal | `cli.serve_api` |
+| `paths.repo_root()`, `paths.frontend_dir()` | App-internal | `config.default_data_root`, `cli` |
+| `app_log.log_to_file()` | App-internal | Called by `cli.serve_api` |
 | `app_log.log_to_inherited_file()` | App-internal | Called by `decompose_worker.child_main` |
 
 ## `cli.py`

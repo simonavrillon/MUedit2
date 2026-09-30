@@ -17,7 +17,7 @@ __all__ = [
     "run_decomposition",
 ]
 
-# Imported on first use, so a submodule such as ``muedit.desktop`` starts without SciPy.
+# Imported on first use, so ``import muedit`` alone does not load SciPy.
 _LAZY = {
     "DecompositionParameters": "muedit.decomp.types",
     "load_signal": "muedit.io.factory",

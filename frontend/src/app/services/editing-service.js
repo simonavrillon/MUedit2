@@ -38,8 +38,8 @@ import {
 /** @typedef {import("../state.js").Bookmark} Bookmark */
 /** @typedef {import("../../api/binary-payloads.js").EditSessionFrame} EditSessionFrame */
 
-// The open session's token survives a reload of the page (not of the app), so
-// a WebView that crashed can pick the session up again.
+// The open session's token survives a reload of the page (not of the server),
+// so a reloaded tab can pick the session up again.
 const SESSION_TOKEN_KEY = "muedit.editSession";
 
 /** @param {string} token */
@@ -535,8 +535,8 @@ export async function loadDecompositionForEdit(app, file, filepath) {
 }
 
 /**
- * Pick up the edit session this page had open before it was reloaded (a
- * WebView that crashed); nothing happens when there was none or it is gone.
+ * Pick up the edit session this page had open before it was reloaded;
+ * nothing happens when there was none or it is gone.
  *
  * @param {App} app
  */

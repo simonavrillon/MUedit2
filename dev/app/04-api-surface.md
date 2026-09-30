@@ -7,7 +7,7 @@ All HTTP endpoints used by the frontend, their payloads, and binary formats.
 | # | Method | Route | Client Method | Used By | Timeout | Purpose |
 |---|---|---|---|---|---|---|
 | 1 | GET | `/health` | `api.healthUrl()` | `initializeApp` → `waitForBackend` | 60s poll | Backend health check |
-| 2 | GET | `/dialog/open-file` | `api.openFileDialog()` | `importStage.handleNativeDialogOpen` (browser only) | 120s | Open native OS file dialog; the desktop app uses its bridge's `open_file()` instead |
+| 2 | GET | `/dialog/open-file` | `api.openFileDialog()` | `importStage.handleNativeDialogOpen` | 120s | Open native OS file dialog |
 | 3 | POST | `/preview-by-path` | `api.fetchPreviewByPath(path)` | `qcStage.requestPreview` (with filepath) | 120s | Fetch preview metadata for raw file by path |
 | 4 | GET | `/series/emg` | `api.fetchSeries("emg", params)` | `qcStage.requestQcGridWindow` | 120s | One min/max envelope per channel of a grid over the ROI (`QC_TRACE_BINS` bins) |
 | 4b | GET | `/series/overview`, `/series/aux` | `api.fetchSeries(kind, params)` | `qcStage.requestPreview` | 120s | Whole-recording envelopes of each grid's mean \|EMG\| and of the aux channels (`OVERVIEW_BINS` bins) |
@@ -25,7 +25,7 @@ All HTTP endpoints used by the frontend, their payloads, and binary formats.
 | 14 | POST | `/edit/session/save` | `api.editSessionSave(payload)` | `saveEditedFile` | 120s | Save the session's edits |
 | 15 | POST | `/session/close` | `api.closeSession()` | `initializeApp`'s `pagehide` handler | — | Free what the server holds for this tab and stop its run |
 
-> **Origin and token.** The page and the API share one origin (the server serves `frontend/` at `/`), so `API_BASE` is `${location.origin}/api/v1` and there is no CORS. In the desktop app (`?desktop=1`), `platform.initPlatform()` takes a token from the pywebview bridge and `apiFetch` sends it as `X-MUedit-Token` on every request; the server answers 401 (`unauthorized`) without it, except for `/health`. `closeSession()` posts `/session/close` with `fetch(..., { keepalive: true })` rather than a beacon, because a beacon cannot carry that header.
+> **Origin.** The page and the API share one origin (the server serves `frontend/` at `/`), so `API_BASE` is `${location.origin}/api/v1` and there is no CORS. `closeSession()` posts `/session/close` with `fetch(..., { keepalive: true })` rather than a beacon, because a beacon cannot carry the session header.
 
 > Files are only ever opened by path through the native dialog. `tests/test_api_http.py` fails if `routes.js` names a route the backend does not serve.
 

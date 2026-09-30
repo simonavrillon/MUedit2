@@ -3,10 +3,9 @@ import { createApiClient } from "../api/client.js";
 import { createApp } from "./create-app.js";
 import { els } from "./dom.js";
 import { apiFetch, apiJson, SESSION_ID, waitForBackend } from "./http.js";
-import { initPlatform } from "./platform.js";
 import { state } from "./state.js";
 import { setupEditEvents } from "./stages/edit-stage.js";
-import { setupImportEvents, setupOutputFolder } from "./stages/import-stage.js";
+import { setupImportEvents } from "./stages/import-stage.js";
 import { setupLayoutEvents } from "./stages/layout-stage.js";
 import { setupRunEvents } from "./stages/run-stage.js";
 
@@ -35,13 +34,10 @@ export async function initializeApp() {
   if (els.browseSignalBtn) els.browseSignalBtn.disabled = true;
   app.setStatus("Connecting to backend…", "muted");
 
-  const ready =
-    (await initPlatform()) && (await waitForBackend(app.api.healthUrl()));
-  if (ready) {
-    await setupOutputFolder(app);
+  if (await waitForBackend(app.api.healthUrl())) {
     if (els.browseSignalBtn) els.browseSignalBtn.disabled = false;
     app.setStatus("", "muted");
-    // A page reloaded after its WebView crashed picks up the open edit session.
+    // A reloaded page picks up the open edit session.
     await app.restoreEditSession();
   } else {
     app.setStatus("Backend unreachable — please restart the app", "error");

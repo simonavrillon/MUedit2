@@ -60,17 +60,11 @@ minutes the first time.
 
 Open the MUedit folder and double-click **MUedit** — `MUedit.command` on macOS,
 `MUedit.bat` on Windows. A terminal window appears and reports what it is doing,
-then MUedit opens in its own window. The first launch takes a little longer,
-while `uv` installs the window component. When you are finished, close the MUedit
-window: that quits the app.
-
-Where no native window can open (on Linux without WebKitGTK, or on Windows
-without the WebView2 runtime), MUedit opens in your browser instead, at
-<http://127.0.0.1:8000>. The app then runs in the terminal window: quit it
-there with `Ctrl+C`, or by closing that window. Closing the browser tab on its
-own does **not** quit MUedit, and nothing is lost if you close it by accident:
-reopen <http://127.0.0.1:8000> and carry on where you were. To use the browser
-even where the window works, launch with `MUEDIT_BROWSER=1`.
+then MUedit opens in your browser, at <http://127.0.0.1:8000>. The app runs in
+that terminal window: when you are finished, quit it there with `Ctrl+C`, or by
+closing the window. Closing the browser tab on its own does **not** quit MUedit,
+and nothing is lost if you close it by accident: reopen <http://127.0.0.1:8000>
+and carry on where you were.
 
 Two things to know the first time. On macOS, if you downloaded MUedit rather
 than cloning it, macOS will refuse to open the launcher from an unidentified
@@ -198,9 +192,8 @@ By default everything lands under `data/` inside the MUedit folder, in a
 subfolder named after the **Project** field you filled in. Type `study1` there
 and your results appear in `data/study1/`; leave it blank and they go to
 `data/muedit_out/`. The project is a folder name, not a path. To keep your data
-somewhere else entirely, click **Change…** next to **Output** in the Session
-Info panel of the MUedit window and pick a folder; MUedit remembers it. The
-`MUEDIT_DATA_ROOT` environment variable, set before launching, overrides both.
+somewhere else entirely, set the `MUEDIT_DATA_ROOT` environment variable to that
+folder before launching.
 
 A decomposition you open from a BIDS dataset elsewhere on your disk is saved
 back into that dataset, as long as you leave its **Project** field unchanged.
@@ -212,14 +205,13 @@ in and validate the result.
 
 ## When something goes wrong
 
-If you launch MUedit while it is already open, a small window tells you so:
-use the MUedit window you already have. In the browser version, if the browser
-never opens, go to <http://127.0.0.1:8000> manually. That version needs port
-8000 free; if the launcher complains that the port is already in use, the usual
-culprit is an earlier MUedit still running in another terminal window: close
-that window and relaunch. Otherwise, quit whatever other program holds the port.
+If the browser never opens, go to <http://127.0.0.1:8000> manually. MUedit
+needs port 8000 free; if the launcher complains that the port is already in use,
+the usual culprit is an earlier MUedit still running in another terminal window:
+close that window and relaunch. Otherwise, quit whatever other program holds the
+port.
 
-When something fails in the MUedit window, the details are in its log file:
+When something fails in MUedit, the details are in its log file:
 `~/Library/Logs/MUedit/muedit.log` on macOS, `%LOCALAPPDATA%\MUedit\Logs\muedit.log`
 on Windows, `~/.local/state/muedit/log/muedit.log` on Linux.
 

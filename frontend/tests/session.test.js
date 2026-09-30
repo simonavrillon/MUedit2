@@ -51,7 +51,7 @@ test("closeSession posts a keepalive request naming the session", async () => {
   assert.equal(sent[0].url, "http://api/v1/session/close?session=tab-1");
   assert.equal(sent[0].init?.method, "POST");
   assert.equal(sent[0].init?.keepalive, true);
-  // Unlike a beacon, it carries the headers, the desktop app's token among them.
+  // Unlike a beacon, it carries the headers.
   assert.equal(
     new Headers(sent[0].init?.headers).get(SESSION_HEADER),
     SESSION_ID,
