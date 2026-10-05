@@ -51,7 +51,7 @@ beforeEach(() => {
   Object.assign(app, {
     refreshVisuals: recorder(),
     scheduleRefreshVisuals: recorder(),
-    requestQcGridWindow: recorder(),
+    ensureQcTraces: recorder(),
     setStatus: recorder(),
   });
 });
@@ -73,7 +73,7 @@ describe("ROI drag on the overview", () => {
       { start: 250, end: 750 },
     ]);
     assert.equal(app.state.roiDraft, null);
-    assert.deepEqual(app.requestQcGridWindow.calls, [[0, 0, 1000]]);
+    assert.equal(app.ensureQcTraces.calls.length, 1);
     assert.deepEqual(app.setStatus.calls.at(-1), ["ROI updated (2 windows)"]);
   });
 
@@ -135,7 +135,7 @@ describe("ROI drag on the overview", () => {
     els.emgCanvas.dispatch("pointerup");
     assert.equal(app.state.roiDraft, null);
     assert.deepEqual(app.state.rois[0], { start: 0, end: 1000 });
-    assert.equal(app.requestQcGridWindow.calls.length, 0);
+    assert.equal(app.ensureQcTraces.calls.length, 0);
   });
 
   test("in artifact mode adds an artifact window and disarms", () => {
@@ -152,26 +152,26 @@ describe("ROI drag on the overview", () => {
   test("a drag under 4 px is a click and changes nothing", () => {
     dragOverview(50, 52);
     assert.deepEqual(app.state.rois[0], { start: 0, end: 1000 });
-    assert.equal(app.requestQcGridWindow.calls.length, 0);
+    assert.equal(app.ensureQcTraces.calls.length, 0);
   });
 
   test("a drag past the canvas edge is clamped", () => {
     dragOverview(-40, 400);
     assert.deepEqual(app.state.rois[0], { start: 0, end: 1000 });
-    assert.deepEqual(app.requestQcGridWindow.calls, [[0, 0, 1000]]);
+    assert.equal(app.ensureQcTraces.calls.length, 1);
   });
 
   test("binding twice does not double the handlers", () => {
     app.enableRoiSelection("emgCanvas");
     dragOverview(50, 150);
-    assert.equal(app.requestQcGridWindow.calls.length, 1);
+    assert.equal(app.ensureQcTraces.calls.length, 1);
   });
 
   test("without a loaded signal the canvas ignores drags", () => {
     app.state.seriesLength = null;
     dragOverview(50, 150);
     assert.equal(app.state.roiDraft, null);
-    assert.equal(app.requestQcGridWindow.calls.length, 0);
+    assert.equal(app.ensureQcTraces.calls.length, 0);
   });
 });
 
@@ -234,7 +234,7 @@ describe("channel grid", () => {
   const cellsOf = () => els.qcSection.children[0].children[0];
 
   test("lays channels out at their electrode positions", async () => {
-    await app.renderChannelQC(true);
+    await app.renderChannelQC();
     const cells = cellsOf();
     assert.equal(
       cells.style.gridTemplateColumns,
@@ -254,7 +254,7 @@ describe("channel grid", () => {
   });
 
   test("discarded channels are marked and drawn amber", async () => {
-    await app.renderChannelQC(true);
+    await app.renderChannelQC();
     const [kept, discarded] = cellsOf().children;
     assert.ok(discarded.classList.contains("off"));
     assert.ok(!kept.classList.contains("off"));
@@ -265,7 +265,7 @@ describe("channel grid", () => {
   });
 
   test("clicking a channel toggles it, its cell and its trace only", async () => {
-    await app.renderChannelQC(true);
+    await app.renderChannelQC();
     const cells = cellsOf();
     const [first, second] = cells.children;
     first.dispatch("click");
@@ -283,11 +283,11 @@ describe("channel grid", () => {
   });
 
   test("a redraw keeps the cells and follows the masks", async () => {
-    await app.renderChannelQC(true);
+    await app.renderChannelQC();
     const cells = cellsOf();
     const first = cells.children[0];
     app.state.discardMasks = [[1, 0, 0, 0]];
-    await app.renderChannelQC(true);
+    await app.renderChannelQC();
     assert.equal(cellsOf(), cells);
     assert.equal(cellsOf().children[0], first);
     assert.ok(first.classList.contains("off"));
@@ -295,11 +295,11 @@ describe("channel grid", () => {
   });
 
   test("new channel data lays the grid out again", async () => {
-    await app.renderChannelQC(true);
+    await app.renderChannelQC();
     const cells = cellsOf();
     app.state.channelMeans = [[1, 2]];
     app.state.discardMasks = [[0, 0]];
-    await app.renderChannelQC(true);
+    await app.renderChannelQC();
     assert.notEqual(cellsOf(), cells);
     assert.equal(cellsOf().children.length, 2);
   });
@@ -311,7 +311,7 @@ describe("channel grid", () => {
         [0, 1],
       ],
     ];
-    await app.renderChannelQC(true);
+    await app.renderChannelQC();
     assert.deepEqual(
       cellsOf().children.map((c) => [c.style.gridRow, c.style.gridColumn]),
       [
@@ -323,15 +323,15 @@ describe("channel grid", () => {
     );
   });
 
-  test("missing traces are fetched for the first analysis window", async () => {
+  test("a render asks for the grid's traces", async () => {
     app.state.channelTraces = [];
-    await app.renderChannelQC(true);
-    assert.deepEqual(app.requestQcGridWindow.calls, [[0, 0, 1000]]);
+    await app.renderChannelQC();
+    assert.equal(app.ensureQcTraces.calls.length, 1);
   });
 
   test("a grid index past the data falls back to the first grid", async () => {
     app.state.currentGrid = 5;
-    await app.renderChannelQC(true);
+    await app.renderChannelQC();
     assert.equal(app.state.currentGrid, 0);
     assert.equal(cellsOf().children.length, 4);
   });
@@ -423,5 +423,24 @@ describe("automatic QC", () => {
       { start: 400, end: 450 },
     ]);
     assert.deepEqual(app.state.discardMasks, [[0, 1]]);
+  });
+
+  test("keeps the traces it has and redraws them with the new marks", async () => {
+    const traces = [
+      [
+        { min: [0], max: [1] },
+        { min: [0], max: [1] },
+      ],
+    ];
+    Object.assign(app.state, {
+      uploadToken: "tok",
+      channelMeans: [[1, 1]],
+      channelTraces: traces,
+    });
+    app.api.runAutoQc = async () => ({ bad_channels_per_grid: [[0, 1]] });
+    app.renderChannelQC = recorder();
+    assert.equal(await requestAutoQc(app), true);
+    assert.equal(app.state.channelTraces, traces);
+    assert.equal(app.renderChannelQC.calls.length, 1);
   });
 });

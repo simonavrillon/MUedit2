@@ -16,6 +16,7 @@ import {
   buildSessionInfoFromDecomposition,
   listifyMuscles,
   parseBidsEntitiesFromLabel,
+  safeBidsToken,
 } from "../../io/bids.js";
 import {
   setEditProject,
@@ -56,93 +57,62 @@ export function createFileSessionService(app) {
     els.uploadLoader.classList.toggle("hidden", !active);
   }
 
-  // Raw BIDS entity inputs (subject/task/session/run) used to compose the
-  // entity label. Returned untransformed so the caller owns label assembly.
-  function getBidsEntityInputs() {
+  /**
+   * The session form as a run and a save both send it. The entity labels are
+   * cleaned as BIDS allows them, so the raw EMG a run exports and the
+   * decomposition saved next to it are named alike.
+   */
+  function readSessionForm() {
+    const text = (/** @type {{ value: string } | null} */ field) =>
+      String(field?.value || "").trim();
+    const age = text(els.bidsParticipantAge);
+    const sex = text(els.bidsParticipantSex);
+    const handedness = text(els.bidsParticipantHandedness);
     return {
-      subject: els.bidsSubject?.value,
-      task: els.bidsTask?.value,
-      session: els.bidsSession?.value,
-      run: els.bidsRun?.value,
-      acquisition: els.bidsAcquisition?.value,
+      subject: safeBidsToken(els.bidsSubject?.value),
+      task: safeBidsToken(els.bidsTask?.value),
+      session: safeBidsToken(els.bidsSession?.value),
+      run: safeBidsToken(els.bidsRun?.value),
+      acquisition: safeBidsToken(els.bidsAcquisition?.value),
+      muscles: getBidsMuscleNames(),
+      participantMeta:
+        age || sex || handedness
+          ? {
+              age: age || "n/a",
+              sex: sex || "n/a",
+              handedness: handedness || "n/a",
+            }
+          : null,
+      powerlineFreq: Number(text(els.bidsPowerlineFreq)) || 50,
+      manufacturer: text(els.bidsManufacturer),
+      deviceModel: text(els.bidsDeviceModel),
+      placementScheme: text(els.bidsPlacementScheme) || "ChannelSpecific",
+      placementDescription: text(els.bidsPlacementDescription),
     };
   }
 
-  // Gather the participant + hardware BIDS form fields into the snake_case
-  // shape the /edit/save endpoint expects, ready to spread into the request
-  // body. Keeps all save-form DOM reads here rather than in the orchestrator.
-  function getBidsSaveFields() {
-    const age = String(els.bidsParticipantAge?.value || "").trim();
-    const sex = String(els.bidsParticipantSex?.value || "").trim();
-    const handedness = String(
-      els.bidsParticipantHandedness?.value || "",
-    ).trim();
-    const participantMeta =
-      age || sex || handedness
-        ? {
-            age: age || "n/a",
-            sex: sex || "n/a",
-            handedness: handedness || "n/a",
-          }
-        : null;
-
-    return {
-      project: getBidsProject(),
-      participant_meta: participantMeta,
-      powerline_freq: Number(els.bidsPowerlineFreq?.value || 50),
-      manufacturer: String(els.bidsManufacturer?.value || "").trim() || null,
-      manufacturers_model_name:
-        String(els.bidsDeviceModel?.value || "").trim() || null,
-      placement_scheme: String(
-        els.bidsPlacementScheme?.value || "ChannelSpecific",
-      ),
-      placement_scheme_description:
-        String(els.bidsPlacementDescription?.value || "").trim() || null,
-    };
-  }
-
-  // Gather all BIDS entity fields from the DOM into the snake_case shape the
-  // decompose endpoint expects. Centralizes DOM reads for the run payload.
+  // The decompose endpoint's `bids_entities`: the fields that are filled in.
   /** @type {FileSessionService["collectBidsEntities"]} */
   function collectBidsEntities() {
-    const entities = {};
-    const subject = String(els.bidsSubject?.value || "").trim();
-    const task = String(els.bidsTask?.value || "").trim();
-    const session = String(els.bidsSession?.value || "").trim();
-    const run = String(els.bidsRun?.value || "").trim();
-    if (subject) entities.subject = subject;
-    if (task) entities.task = task;
-    if (session) entities.session = session;
-    if (run) entities.run = run;
-    const muscleNames = getBidsMuscleNames();
-    if (muscleNames.length) entities.target_muscle = muscleNames;
-    const powerlineFreq = Number(els.bidsPowerlineFreq?.value || 50);
-    if (powerlineFreq) entities.powerline_freq = powerlineFreq;
-    const manufacturer = String(els.bidsManufacturer?.value || "").trim();
-    if (manufacturer) entities.manufacturer = manufacturer;
-    const deviceModel = String(els.bidsDeviceModel?.value || "").trim();
-    if (deviceModel) entities.manufacturers_model_name = deviceModel;
-    const placementScheme = String(els.bidsPlacementScheme?.value || "").trim();
-    if (placementScheme) entities.placement_scheme = placementScheme;
-    const placementDesc = String(
-      els.bidsPlacementDescription?.value || "",
-    ).trim();
-    if (placementDesc) entities.placement_scheme_description = placementDesc;
-
-    const age = String(els.bidsParticipantAge?.value || "").trim();
-    const sex = String(els.bidsParticipantSex?.value || "").trim();
-    const handedness = String(
-      els.bidsParticipantHandedness?.value || "",
-    ).trim();
-    if (age || sex || handedness) {
-      entities.participant_meta = {
-        age: age || "n/a",
-        sex: sex || "n/a",
-        handedness: handedness || "n/a",
-      };
-    }
-
-    return entities;
+    const form = readSessionForm();
+    /** @type {Record<string, unknown>} */
+    const fields = {
+      subject: form.subject,
+      task: form.task,
+      session: form.session,
+      run: form.run,
+      acquisition: form.acquisition,
+      target_muscle: form.muscles.length ? form.muscles : null,
+      powerline_freq: form.powerlineFreq,
+      manufacturer: form.manufacturer,
+      manufacturers_model_name: form.deviceModel,
+      placement_scheme: form.placementScheme,
+      placement_scheme_description: form.placementDescription,
+      participant_meta: form.participantMeta,
+    };
+    return Object.fromEntries(
+      Object.entries(fields).filter(([, value]) => value),
+    );
   }
 
   /** @type {FileSessionService["setBidsEntitiesInput"]} */
@@ -224,16 +194,26 @@ export function createFileSessionService(app) {
   // the participant and hardware fields every save carries.
   /** @type {FileSessionService["withBidsSaveFields"]} */
   function withBidsSaveFields(payload) {
-    const { subject, task, session, run, acquisition } = getBidsEntityInputs();
+    const form = readSessionForm();
     const entityLabel =
       buildEntityLabelFromSession({
-        subject,
-        task,
-        session,
-        run,
-        acq: acquisition,
+        subject: form.subject,
+        task: form.task,
+        session: form.session,
+        run: form.run,
+        acq: form.acquisition,
       }) || payload.entity_label;
-    return { ...payload, entity_label: entityLabel, ...getBidsSaveFields() };
+    return {
+      ...payload,
+      entity_label: entityLabel,
+      project: getBidsProject(),
+      participant_meta: form.participantMeta,
+      powerline_freq: form.powerlineFreq,
+      manufacturer: form.manufacturer || null,
+      manufacturers_model_name: form.deviceModel || null,
+      placement_scheme: form.placementScheme,
+      placement_scheme_description: form.placementDescription || null,
+    };
   }
 
   /** @type {FileSessionService["persistNpzBySaveTarget"]} */
@@ -244,8 +224,7 @@ export function createFileSessionService(app) {
         file_label: payload.file_label || fallbackName || "decomposition.npz",
       }),
     );
-    app.setStatus("Saved", "success");
-    return { mode: "saved", path: data.path || "" };
+    return { path: data.path || "" };
   }
 
   return {

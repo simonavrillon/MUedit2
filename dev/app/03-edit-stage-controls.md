@@ -44,6 +44,10 @@ edit is one `POST /edit/ops/{op}`, and the page applies the change the server re
 
 ### Button Reference Table
 
+The buttons and their keys come from one list, `EDIT_COMMANDS` in `app/stages/edit-stage.js`:
+a click and the key run the same command. A command with `edit` talks to the server and its
+button shows busy; one with `run` only changes the page.
+
 | Button ID | Label | Handler | API Call | Description |
 |---|---|---|---|---|
 | `editFlagBtn` | Flag MU | `flagMuForDeletion()` | `op: flag` | Toggles the deletion flag of the current MU. A flagged MU is drawn as a flat line and is dropped on save. |
@@ -53,7 +57,7 @@ edit is one `POST /edit/ops/{op}`, and the page applies the change the server re
 | `editAddBtn` | Add Spike | `setEditMode("add")` | — | Enters "add" mode. The user then drags a box on the pulse canvas to add spikes. |
 | `editAddArtifactBtn` | Add Artifact | `setEditMode("add_artifact")` | — | Enters "add_artifact" mode. The user drags a box on the pulse canvas to mark artifacts. |
 | `editDeleteSpikeBtn` | Delete Spike/Artifact | `setEditMode("delete_spikes")` | — | Enters "delete_spikes" mode. The user drags a box on the pulse canvas to delete the spikes and artifacts in it. |
-| `editUpdateBtn` | Update Filter | `updateMuFilter()` | `op: update-filter` | Refits the current MU's filter on the EMG in view. Sends the peel-off and lock-spike toggles and the project. 120s timeout. |
+| `editUpdateBtn` | Update Filter | `requestFilterUpdate()` | `op: update-filter` | Refits the current MU's filter on the EMG in view. Sends the peel-off and lock-spike toggles and the project. 120s timeout. |
 | `editPeelOffToggle` | Peel-off: Off/On | `applyLabeledToggle(...)` | — | Sets `use_peeloff`, read by `requestFilterUpdate`. |
 | `editLockSpikesToggle` | Lock: Off/On | `applyLabeledToggle(...)` | — | Sets `lock_spikes`, read by `requestFilterUpdate`. |
 | `editUndoBtn` | Undo | `undoEdit()` | `op: undo` | Takes back the last edit, whichever MU it touched (up to 100 levels). Disabled while `state.edit.canUndo` is false. |
@@ -135,18 +139,20 @@ Dropdown auto-fallback: if the current grid has no MUs, `buildEditDropdownModel`
 ## Keyboard Shortcuts
 
 All shortcuts fire only when `state.currentStage === "edit"` and focus is not in an `INPUT`, `TEXTAREA`, or `SELECT`.
+The letter keys and Space run the `EDIT_COMMANDS` entry of the same button; the rest are
+`handleKeyboardNavigation` (`app/services/navigation.js`).
 
-| Key | Action | Function Called |
+| Key | Action | Button it stands for |
 |---|---|---|
-| `a` | Enter add-spikes mode | `setEditMode("add", "Drag a box on pulse train to add spikes")` |
-| `d` | Enter delete-spikes mode | `setEditMode("delete_spikes", "Drag a box on pulse train to delete spikes")` |
-| `x` | Enter add-artifact mode | `setEditMode("add_artifact", "Drag a box on pulse train to mark an artifact")` |
-| `r` | Remove outliers | `runEditAction(editOutliersBtn, removeOutliers)` |
-| `Space` | Update filter | `runEditAction(editUpdateBtn, updateMuFilter)` |
-| `p` | Toggle peel-off | `applyLabeledToggle(editPeelOffToggle, ...)` |
-| `l` | Toggle lock spikes | `applyLabeledToggle(editLockSpikesToggle, ...)` |
-| `<` | Previous MU | `goToMu("prev", "edit")` |
-| `>` | Next MU | `goToMu("next", "edit")` |
+| `a` | Enter add-spikes mode | `editAddBtn` |
+| `d` | Enter delete-spikes mode | `editDeleteSpikeBtn` |
+| `x` | Enter add-artifact mode | `editAddArtifactBtn` |
+| `r` | Remove outliers | `editOutliersBtn` |
+| `Space` | Update filter | `editUpdateBtn` |
+| `p` | Toggle peel-off | `editPeelOffToggle` |
+| `l` | Toggle lock spikes | `editLockSpikesToggle` |
+| `<` | Previous MU | `goToMu("prev")` |
+| `>` | Next MU | `goToMu("next")` |
 | `←` | Scroll left | `adjustView(view, total, "scroll_left")` |
 | `→` | Scroll right | `adjustView(view, total, "scroll_right")` |
 | `↑` | Zoom in | `adjustView(view, total, "zoom_in")` |
@@ -172,6 +178,8 @@ All shortcuts fire only when `state.currentStage === "edit"` and focus is not in
 
 Every action goes through `requestEditOp(app, op, args)`: it posts `/edit/ops/{op}` with the
 session token, applies the change frame (`applyEditChange`) and refreshes the mode buttons.
+Each runs inside `editAction`: the status says it is under way, the page is redrawn once
+it is done and the status says how it went; a failure is reported and changes nothing.
 
 | Function | `op` | Arguments sent | Then |
 |---|---|---|---|

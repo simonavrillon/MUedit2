@@ -41,12 +41,15 @@ import { createViewFetcher } from "../services/view-fetcher.js";
 import { errorMessage } from "../services/error-service.js";
 import {
   applyLabeledToggle,
+  isToggleOn,
   runEditAction,
   setEditActionBusy,
 } from "../../view/controls.js";
 
 /** @typedef {import("../context.js").App} App */
 /** @typedef {import("../context.js").EditStage} EditStage */
+/** @typedef {import("../context.js").Els} Els */
+/** @typedef {{ [K in keyof Els]: Els[K] extends HTMLButtonElement | null ? K : never }[keyof Els]} ButtonId */
 
 /**
  * @param {App} app
@@ -210,15 +213,106 @@ export function createEditStageService(app) {
   };
 }
 
+/** @typedef {{ shortSel: string, fullSel: string, prefix: string }} ToggleLabels */
+
+/** @type {ToggleLabels} */
+const PEEL_OFF = {
+  shortSel: ".peeloff-short",
+  fullSel: ".peeloff-full",
+  prefix: "Peel-off",
+};
+/** @type {ToggleLabels} */
+const LOCK_SPIKES = {
+  shortSel: ".lockspikes-short",
+  fullSel: ".lockspikes-full",
+  prefix: "Lock",
+};
+
+/**
+ * @param {HTMLButtonElement | null} btn
+ * @param {ToggleLabels} labels
+ */
+function flipToggle(btn, labels) {
+  if (btn) applyLabeledToggle(btn, !isToggleOn(btn), labels);
+}
+
+/**
+ * The edit toolbar: each command's button and, for some, its key. An `edit`
+ * talks to the server and its button shows busy until it is done; a `run`
+ * only changes the page.
+ *
+ * @typedef {object} EditCommand
+ * @property {ButtonId} button
+ * @property {string} [key] `KeyboardEvent.key`, lower case.
+ * @property {(app: App) => Promise<unknown>} [edit]
+ * @property {(app: App) => void} [run]
+ */
+
+/** @type {EditCommand[]} */
+export const EDIT_COMMANDS = [
+  {
+    button: "editAddBtn",
+    key: "a",
+    run: (app) =>
+      app.setEditMode("add", "Drag a box on pulse train to add spikes"),
+  },
+  {
+    button: "editDeleteSpikeBtn",
+    key: "d",
+    run: (app) =>
+      app.setEditMode(
+        "delete_spikes",
+        "Drag a box on pulse train to delete spikes",
+      ),
+  },
+  {
+    button: "editAddArtifactBtn",
+    key: "x",
+    run: (app) =>
+      app.setEditMode(
+        "add_artifact",
+        "Drag a box on pulse train to mark an artifact",
+      ),
+  },
+  { button: "editOutliersBtn", key: "r", edit: removeOutliers },
+  { button: "editUpdateBtn", key: " ", edit: requestFilterUpdate },
+  {
+    button: "editPeelOffToggle",
+    key: "p",
+    run: (app) => flipToggle(app.els.editPeelOffToggle, PEEL_OFF),
+  },
+  {
+    button: "editLockSpikesToggle",
+    key: "l",
+    run: (app) => flipToggle(app.els.editLockSpikesToggle, LOCK_SPIKES),
+  },
+  { button: "editSaveBtn", edit: saveEditedFile },
+  { button: "editResetBtn", edit: resetCurrentMuEdits },
+  { button: "editFlagBtn", edit: flagMuForDeletion },
+  { button: "editDuplicateBtn", edit: duplicateMu },
+  { button: "editDeduplicateBtn", edit: removeDuplicateMus },
+  { button: "editUndoBtn", edit: undoEdit },
+];
+
+/**
+ * @param {App} app
+ * @param {EditCommand} command
+ */
+function runCommand(app, command) {
+  const { edit, run } = command;
+  if (edit) void runEditAction(app.els[command.button], () => edit(app));
+  else run?.(app);
+}
+
+/** @param {KeyboardEvent} e */
+function typingInAField(e) {
+  const target = /** @type {HTMLElement | null} */ (e.target);
+  return ["INPUT", "TEXTAREA", "SELECT"].includes(target?.tagName ?? "");
+}
+
 /** @param {App} app */
 export function setupEditEvents(app) {
-  const {
-    els,
-    state,
-    renderEditExplorer,
-    setEditMode,
-    refreshEditModeButtons,
-  } = app;
+  const { els, state, renderEditExplorer, refreshEditModeButtons } = app;
 
   bindEditCanvas(app);
   bindEditDrCanvas(app);
@@ -239,72 +333,13 @@ export function setupEditEvents(app) {
     els.editMuSelect.blur();
   });
 
-  els.editSaveBtn?.addEventListener("click", () => {
-    void runEditAction(els.editSaveBtn, () => saveEditedFile(app));
-  });
-  els.editResetBtn?.addEventListener("click", () => {
-    void runEditAction(els.editResetBtn, () => resetCurrentMuEdits(app));
-  });
-  els.editUpdateBtn?.addEventListener("click", () => {
-    void runEditAction(els.editUpdateBtn, () => requestFilterUpdate(app));
-  });
-  if (els.editPeelOffToggle) {
-    const peelOffConfig = {
-      shortSel: ".peeloff-short",
-      fullSel: ".peeloff-full",
-      prefix: "Peel-off",
-    };
-    applyLabeledToggle(els.editPeelOffToggle, false, peelOffConfig);
-    els.editPeelOffToggle.addEventListener("click", () => {
-      applyLabeledToggle(
-        els.editPeelOffToggle,
-        els.editPeelOffToggle.dataset.state !== "on",
-        peelOffConfig,
-      );
-    });
-  }
-  if (els.editLockSpikesToggle) {
-    const lockSpikesConfig = {
-      shortSel: ".lockspikes-short",
-      fullSel: ".lockspikes-full",
-      prefix: "Lock",
-    };
-    applyLabeledToggle(els.editLockSpikesToggle, false, lockSpikesConfig);
-    els.editLockSpikesToggle.addEventListener("click", () => {
-      applyLabeledToggle(
-        els.editLockSpikesToggle,
-        els.editLockSpikesToggle.dataset.state !== "on",
-        lockSpikesConfig,
-      );
-    });
-  }
-  els.editOutliersBtn?.addEventListener("click", () => {
-    void runEditAction(els.editOutliersBtn, () => removeOutliers(app));
-  });
-  els.editFlagBtn?.addEventListener("click", () => {
-    void runEditAction(els.editFlagBtn, () => flagMuForDeletion(app));
-  });
-  els.editDuplicateBtn?.addEventListener("click", () => {
-    void runEditAction(els.editDuplicateBtn, () => duplicateMu(app));
-  });
-  els.editDeduplicateBtn?.addEventListener("click", () => {
-    void runEditAction(els.editDeduplicateBtn, () => removeDuplicateMus(app));
-  });
-  els.editUndoBtn?.addEventListener("click", () => {
-    void runEditAction(els.editUndoBtn, () => undoEdit(app));
-  });
-  els.editAddBtn?.addEventListener("click", () => {
-    setEditMode("add", "Drag a box on pulse train to add spikes");
-  });
-  els.editAddArtifactBtn?.addEventListener("click", () => {
-    setEditMode(
-      "add_artifact",
-      "Drag a box on pulse train to mark an artifact",
+  applyLabeledToggle(els.editPeelOffToggle, false, PEEL_OFF);
+  applyLabeledToggle(els.editLockSpikesToggle, false, LOCK_SPIKES);
+  for (const command of EDIT_COMMANDS) {
+    els[command.button]?.addEventListener("click", () =>
+      runCommand(app, command),
     );
-  });
-  els.editDeleteSpikeBtn?.addEventListener("click", () => {
-    setEditMode("delete_spikes", "Drag a box on pulse train to delete spikes");
-  });
+  }
 
   els.bidsProject?.addEventListener("input", () => {
     setEditProject(state, els.bidsProject.value);
@@ -317,5 +352,15 @@ export function setupEditEvents(app) {
   });
 
   refreshEditModeButtons();
-  window.addEventListener("keydown", (e) => handleKeyboardNavigation(app, e));
+  window.addEventListener("keydown", (e) => {
+    if (state.currentStage !== "edit" || typingInAField(e)) return;
+    const key = e.key.toLowerCase();
+    const command = EDIT_COMMANDS.find((c) => c.key === key);
+    if (command) {
+      runCommand(app, command);
+      e.preventDefault();
+      return;
+    }
+    handleKeyboardNavigation(app, e);
+  });
 }

@@ -9,7 +9,7 @@ All HTTP endpoints used by the frontend, their payloads, and binary formats.
 | 1 | GET | `/health` | `api.healthUrl()` | `initializeApp` → `waitForBackend` | 60s poll | Backend health check |
 | 2 | GET | `/dialog/open-file` | `api.openFileDialog()` | `importStage.handleNativeDialogOpen` | 120s | Open native OS file dialog |
 | 3 | POST | `/preview-by-path` | `api.fetchPreviewByPath(path)` | `qcStage.requestPreview` (with filepath) | 120s | Fetch preview metadata for raw file by path |
-| 4 | GET | `/series/emg` | `api.fetchSeries("emg", params)` | `qcStage.requestQcGridWindow` | 120s | One min/max envelope per channel of a grid over the ROI (`QC_TRACE_BINS` bins) |
+| 4 | GET | `/series/emg` | `api.fetchSeries("emg", params)` | `qcStage.ensureQcTraces` | 120s | One min/max envelope per channel of a grid over the ROI (`QC_TRACE_BINS` bins) |
 | 4b | GET | `/series/overview`, `/series/aux` | `api.fetchSeries(kind, params)` | `qcStage.requestPreview` | 120s | Whole-recording envelopes of each grid's mean \|EMG\| and of the aux channels (`OVERVIEW_BINS` bins) |
 | 5 | POST | `/qc/auto` | `api.runAutoQc(payload)` | `qcStage.runAutoQc` | 300s | Run automatic QC: detect bad channels + artifact windows |
 | 6 | POST | `/decompose_stream` | `api.decomposeStream(formData)` | `runStage.runDecomposition` | 15min | Main decomposition (streaming NDJSON response); 409 while another run is active |

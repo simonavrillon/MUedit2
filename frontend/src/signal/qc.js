@@ -13,8 +13,6 @@ import {
   setGridSeries,
   setMetadata,
   setMuscle,
-  setQcWindowLoading,
-  setQcWindowLoadingForGrid,
   setRois,
   setSeriesLength,
   setUploadToken,
@@ -23,6 +21,7 @@ import { getCurrentGrid, roiStart, roiEnd } from "../state/selectors.js";
 import { nextFrame } from "../view/plots.js";
 import { handleError } from "../app/services/error-service.js";
 import { normalizePreviewPayload, toSpans } from "../api/payloads.js";
+import { createViewFetcher } from "../app/services/view-fetcher.js";
 import { OVERVIEW_BINS, QC_TRACE_BINS } from "../config.js";
 
 /** @typedef {import("../app/context.js").App} App */
@@ -103,7 +102,6 @@ export async function requestAutoQc(app) {
     }
     setArtifactRegions(state, toSpans(data?.artifact_regions));
     setArtifactMode(state, false);
-    setChannelTraces(state, []);
 
     const nBad = (state.discardMasks || []).reduce(
       (sum, grid) =>
@@ -112,7 +110,8 @@ export async function requestAutoQc(app) {
     );
     const nArtifact = state.artifactRegions.length;
 
-    await renderChannelQC(false);
+    // The channels' traces stand; only which ones are discarded changed.
+    renderChannelQC();
     refreshVisuals();
     setStatus(
       `Automatic QC: ${nBad} bad channel(s), ${nArtifact} artifact window(s)`,
@@ -128,37 +127,56 @@ export async function requestAutoQc(app) {
 }
 
 /**
+ * Keeps each grid's channel traces on the window the grid should show: its
+ * channels over the first analysis window. Asking again is cheap; a grid whose
+ * traces already cover that window sends nothing, and traces that arrive
+ * after the window moved on are dropped.
+ *
  * @param {App} app
- * @param {number} gridIdx
- * @param {number} [start]
- * @param {number | null} [end]
+ * @returns {() => void} Ask for the current grid's traces.
  */
-export async function requestQcGridWindow(app, gridIdx, start, end) {
-  const { state, api, renderChannelQC, setStatus } = app;
-  const s = Number.isFinite(start) ? start : 0;
-  const e = Number.isFinite(end) ? end : state.seriesLength;
+export function createQcTraces(app) {
+  /** @type {Map<number, string>} The window each grid last asked for. */
+  const wanted = new Map();
+  /** @type {Map<number, string>} The window each grid's traces cover. */
+  const shown = new Map();
+  const fetcher = createViewFetcher(
+    async (
+      /** @type {{ key: string, grid: number, token: string, start: number, end: number }} */ p,
+    ) => ({
+      p,
+      view: await app.api.fetchSeries("emg", {
+        upload_token: p.token,
+        grid: p.grid,
+        start: p.start,
+        end: p.end,
+        bins: QC_TRACE_BINS,
+      }),
+    }),
+    ({ p, view }) => {
+      if (wanted.get(p.grid) !== p.key) return;
+      setChannelTraceForGrid(app.state, p.grid, view.rows);
+      shown.set(p.grid, p.key);
+      const { currentGrid, currentStage } = app.state;
+      if (p.grid === currentGrid && currentStage === "qc")
+        app.renderChannelQC();
+    },
+    (err) => handleError(err, app.setStatus, "QC window update failed"),
+  );
 
-  if (!state.uploadToken || !Number.isFinite(gridIdx) || gridIdx < 0) return;
-  if (state.qcWindowLoading?.[gridIdx]) return;
-  setQcWindowLoadingForGrid(state, gridIdx, true);
-
-  try {
-    const { rows } = await api.fetchSeries("emg", {
-      upload_token: state.uploadToken,
-      grid: gridIdx,
-      start: s,
-      end: e ?? 0,
-      bins: QC_TRACE_BINS,
-    });
-    setChannelTraceForGrid(state, gridIdx, rows);
-    if (gridIdx === state.currentGrid) {
-      renderChannelQC();
-    }
-  } catch (err) {
-    handleError(err, setStatus, "QC window update failed");
-  } finally {
-    setQcWindowLoadingForGrid(state, gridIdx, false);
-  }
+  return function ensureQcTraces() {
+    const { state } = app;
+    const token = state.uploadToken;
+    if (!token) return;
+    const grid = getCurrentGrid(state);
+    const roi = state.rois[0];
+    const start = roiStart(roi);
+    const end = roiEnd(roi, state.seriesLength ?? 0);
+    const key = `${token}:${grid}:${start}:${end}`;
+    wanted.set(grid, key);
+    if (shown.get(grid) === key && state.channelTraces[grid]?.length) return;
+    fetcher.want(key, { key, grid, token, start, end });
+  };
 }
 
 /**
@@ -174,15 +192,12 @@ export async function requestPreview(app, options = {}) {
     setUploadLoading,
     populateAuxSelector,
     populateGridTabs,
-    requestQcGridWindow,
     enableRoiSelection,
     renderBidsAutoInfo,
     renderBidsMuscleFields,
     setStatus,
     showWorkspace,
     switchStage,
-    refreshVisuals,
-    renderChannelQC,
     applyPreviewMetadata,
   } = app;
 
@@ -206,7 +221,6 @@ export async function requestPreview(app, options = {}) {
     setChannelMeans(state, data.channel_means);
     setCoordinates(state, data.coordinates);
     setChannelTraces(state, []);
-    setQcWindowLoading(state, {});
     setMetadata(state, data.metadata);
     setMuscle(state, data.muscle);
     setAuxData(state, aux.rows, data.auxiliary_names);
@@ -224,12 +238,6 @@ export async function requestPreview(app, options = {}) {
     setRois(state, rois);
     setArtifactRegions(state, []);
     setArtifactMode(state, false);
-    const roiPreview = state.rois?.[0];
-    await requestQcGridWindow(
-      getCurrentGrid(state),
-      roiStart(roiPreview),
-      roiEnd(roiPreview, state.seriesLength),
-    );
     enableRoiSelection("emgCanvas");
     enableRoiSelection("auxCanvas");
     // Raw preview resets edit slice first; ensure BIDS rows render in QC context
@@ -240,9 +248,8 @@ export async function requestPreview(app, options = {}) {
 
     setStatus("Preview ready", "success");
     showWorkspace({ keepLandingVisible: true });
+    // Entering QC draws its page at the next frame; the landing goes once it has.
     await nextFrame();
-    refreshVisuals();
-    await renderChannelQC(true);
     els.landing?.classList.add("hidden");
     return true;
   } catch (err) {

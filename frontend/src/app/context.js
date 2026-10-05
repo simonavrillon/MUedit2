@@ -71,7 +71,7 @@
  * @property {(file: FileRef | null, data?: JsonObject) => void} applySessionInfoFromDecomposition
  * @property {() => void} renderBidsAutoInfo
  * @property {() => void} renderBidsMuscleFields
- * @property {(payload: JsonObject, fallbackName?: string) => Promise<{ mode: string, path: string }>} persistNpzBySaveTarget
+ * @property {(payload: JsonObject, fallbackName?: string) => Promise<{ path: string }>} persistNpzBySaveTarget
  * @property {(payload: JsonObject) => JsonObject} withBidsSaveFields
  * @property {(active: boolean) => void} setUploadLoading
  */
@@ -80,9 +80,9 @@
  * @typedef {object} QcStage
  * @property {() => void} populateAuxSelector
  * @property {() => void} renderAuxiliaryChannels
- * @property {(gridIdx: number, start?: number, end?: number | null) => Promise<void>} requestQcGridWindow
+ * @property {() => void} ensureQcTraces Fetch the current grid's channel traces over the first window, unless they are shown or on their way.
  * @property {(path: string, name: string, options?: { silentPreviewFailure?: boolean }) => Promise<boolean>} handleRawFilePath
- * @property {(waitForMiniPlots?: boolean) => Promise<void> | void} renderChannelQC
+ * @property {() => void} renderChannelQC
  * @property {(canvasId: RoiCanvasId) => void} enableRoiSelection
  * @property {() => void} refreshVisuals
  * @property {() => void} scheduleRefreshVisuals Redraw the QC plots at the next frame, once however often asked.

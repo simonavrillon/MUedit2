@@ -16,14 +16,12 @@ import {
   setSeriesLength,
   setUploadToken,
 } from "../state/actions.js";
-import { getCurrentGrid, roiStart, roiEnd } from "../state/selectors.js";
 import { normalizePreviewPayload } from "../api/payloads.js";
 import { getSuggestedNpzName } from "../io/bids.js";
-import { drawGridOverlay } from "../view/plots.js";
-import { traceColors } from "../config.js";
 import { errorMessage, handleError } from "../app/services/error-service.js";
 import { applyRunEvent, buildRunSummary, createRunLive } from "./live.js";
 import { renderRunTime, updateRunDots } from "../view/run-live.js";
+import { readNdjson } from "../api/ndjson.js";
 
 /** @typedef {import("../app/context.js").App} App */
 /** @typedef {import("../app/context.js").JsonObject} JsonObject */
@@ -186,33 +184,17 @@ export async function runDecomposition(app) {
       throw new Error("No response body");
     }
 
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-
     let malformedEvents = 0;
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        try {
-          handleStreamMessage(JSON.parse(line));
-        } catch (e) {
-          console.warn("Dropped malformed stream event", e);
-          malformedEvents += 1;
-        }
-      }
-    }
-    if (buffer.trim()) {
+    /** @param {unknown} err */
+    const dropEvent = (err) => {
+      console.warn("Dropped malformed stream event", err);
+      malformedEvents += 1;
+    };
+    for await (const msg of readNdjson(response.body, dropEvent)) {
       try {
-        handleStreamMessage(JSON.parse(buffer));
-      } catch (e) {
-        console.warn("Dropped malformed final stream event", e);
-        malformedEvents += 1;
+        handleStreamMessage(msg);
+      } catch (err) {
+        dropEvent(err);
       }
     }
     if (malformedEvents > 0) {
@@ -271,14 +253,12 @@ function applyPreviewData(app, preview) {
   const {
     state,
     els,
-    renderChannelQC,
-    requestQcGridWindow,
-    showWorkspace,
     renderBidsAutoInfo,
     renderBidsMuscleFields,
     populateAuxSelector,
-    renderAuxiliaryChannels,
-    enableRoiSelection,
+    populateGridTabs,
+    ensureQcTraces,
+    scheduleLayoutRerender,
   } = app;
 
   // The overview and aux traces stay the upload's envelopes (/series/*); the
@@ -317,26 +297,13 @@ function applyPreviewData(app, preview) {
     setMuscle(state, muscle);
   }
   populateAuxSelector();
-  renderAuxiliaryChannels();
-  enableRoiSelection("auxCanvas");
   ensureDiscardMasks(state);
-  renderChannelQC();
-  const roiStream = state.rois?.[0];
-  requestQcGridWindow(
-    getCurrentGrid(state),
-    roiStart(roiStream),
-    roiEnd(roiStream, state.seriesLength),
-  );
-  drawGridOverlay(
-    els.emgCanvas,
-    state.gridSeries,
-    traceColors(),
-    state.rois,
-    state.seriesLength,
-  );
-  showWorkspace();
+  populateGridTabs();
   renderBidsAutoInfo();
   renderBidsMuscleFields();
+  // The QC plots are drawn when their page is shown; their traces load now.
+  ensureQcTraces();
+  scheduleLayoutRerender();
 }
 
 /**

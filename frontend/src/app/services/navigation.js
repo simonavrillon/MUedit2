@@ -3,9 +3,8 @@ import {
   setEditView,
   setShowBookmark,
 } from "../../state/actions.js";
-import { applyLabeledToggle, runEditAction } from "../../view/controls.js";
 import { getEditMuIndicesForGrid } from "../../state/selectors.js";
-import { removeOutliers, requestFilterUpdate } from "./editing-service.js";
+import { clampView } from "../../editing/operations.js";
 
 /** @typedef {import("../context.js").App} App */
 /** @typedef {import("../context.js").Els} Els */
@@ -132,37 +131,6 @@ export function populateGridTabs(app) {
 }
 
 /**
- * @param {State} state
- * @param {StageKey} stage
- * @returns {{ view: Span | null, total: number }}
- */
-function getViewForStage(state, stage) {
-  if (stage === "edit") {
-    const total = state.edit.distimes?.length
-      ? state.edit.totalSamples || 0
-      : 0;
-    if (!state.edit.view && total) {
-      setEditView(state, { start: 0, end: total });
-    }
-    return { view: state.edit.view, total };
-  }
-  return { view: null, total: 0 };
-}
-
-/**
- * @param {App} app
- * @param {StageKey} stage
- * @param {Span | null} view
- */
-function setViewForStage(app, stage, view) {
-  const { state } = app;
-  if (stage === "edit") {
-    setEditView(state, view);
-    app.renderEditExplorer();
-  }
-}
-
-/**
  * @param {Span | null} view
  * @param {number} total
  * @param {ViewAction} action
@@ -195,136 +163,59 @@ function adjustView(view, total, action) {
     nextEnd = Math.round(center + nextSpan / 2);
   }
 
-  if (nextStart < 0) {
-    nextEnd -= nextStart;
-    nextStart = 0;
-  }
-  if (nextEnd > total) {
-    const overflow = nextEnd - total;
-    nextStart = Math.max(0, nextStart - overflow);
-    nextEnd = total;
-  }
-  if (nextEnd <= nextStart) {
-    nextEnd = Math.min(total, nextStart + 1);
-  }
-  return { start: nextStart, end: nextEnd };
+  const next = clampView(nextStart, nextEnd - nextStart, total);
+  if (next.end <= next.start) next.end = Math.min(total, next.start + 1);
+  return next;
 }
 
 /**
  * @param {App} app
  * @param {"prev" | "next"} direction
- * @param {StageKey} stage
  */
-function goToMu(app, direction, stage) {
+function goToMu(app, direction) {
   const { state } = app;
-  if (stage === "edit") {
-    const gridIdx = state.edit.currentMuGrid || 0;
-    const mus = getEditMuIndicesForGrid(app.state, gridIdx);
-    if (!mus.length) return;
-    const current = state.edit.currentMu ?? mus[0];
-    const idx = mus.indexOf(current);
-    const offset = direction === "prev" ? -1 : 1;
-    const next = mus[(idx + offset + mus.length) % mus.length];
-    setEditCurrentMu(state, next, { resetView: true });
-    app.renderEditExplorer();
-  }
+  const mus = getEditMuIndicesForGrid(state, state.edit.currentMuGrid || 0);
+  if (!mus.length) return;
+  const idx = mus.indexOf(state.edit.currentMu ?? mus[0]);
+  const offset = direction === "prev" ? -1 : 1;
+  setEditCurrentMu(state, mus[(idx + offset + mus.length) % mus.length], {
+    resetView: true,
+  });
+  app.renderEditExplorer();
 }
 
 /**
+ * The edit page's view keys: arrows zoom and scroll, `<` and `>` step
+ * through the grid's MUs.
+ *
  * @param {App} app
  * @param {KeyboardEvent} e
  */
 export function handleKeyboardNavigation(app, e) {
-  const { state, els, setEditMode } = app;
-
-  const active = document.activeElement;
-  if (active && ["INPUT", "TEXTAREA", "SELECT"].includes(active.tagName))
+  const { state } = app;
+  if (e.key === "<" || e.key === ">") {
+    goToMu(app, e.key === "<" ? "prev" : "next");
+    e.preventDefault();
     return;
-  const stage = state.currentStage;
-  if (stage !== "edit") return;
-
-  /** @type {ViewAction | null} */
-  let action = null;
-  if (stage === "edit") {
-    const key = e.key.toLowerCase();
-    if (key === "a") {
-      setEditMode("add", "Drag a box on pulse train to add spikes");
-      e.preventDefault();
-      return;
-    } else if (key === "r") {
-      void runEditAction(els.editOutliersBtn, () => removeOutliers(app));
-      e.preventDefault();
-      return;
-    } else if (key === " ") {
-      void runEditAction(els.editUpdateBtn, () => requestFilterUpdate(app));
-      e.preventDefault();
-      return;
-    } else if (key === "d") {
-      setEditMode(
-        "delete_spikes",
-        "Drag a box on pulse train to delete spikes",
-      );
-      e.preventDefault();
-      return;
-    } else if (key === "x") {
-      setEditMode(
-        "add_artifact",
-        "Drag a box on pulse train to mark an artifact",
-      );
-      e.preventDefault();
-      return;
-    } else if (e.key === "<") {
-      goToMu(app, "prev", "edit");
-      e.preventDefault();
-      return;
-    } else if (e.key === ">") {
-      goToMu(app, "next", "edit");
-      e.preventDefault();
-      return;
-    } else if (key === "p") {
-      if (els.editPeelOffToggle) {
-        applyLabeledToggle(
-          els.editPeelOffToggle,
-          els.editPeelOffToggle.dataset.state !== "on",
-          {
-            shortSel: ".peeloff-short",
-            fullSel: ".peeloff-full",
-            prefix: "Peel-off",
-          },
-        );
-      }
-      e.preventDefault();
-      return;
-    } else if (key === "l") {
-      if (els.editLockSpikesToggle) {
-        applyLabeledToggle(
-          els.editLockSpikesToggle,
-          els.editLockSpikesToggle.dataset.state !== "on",
-          {
-            shortSel: ".lockspikes-short",
-            fullSel: ".lockspikes-full",
-            prefix: "Lock",
-          },
-        );
-      }
-      e.preventDefault();
-      return;
-    }
   }
 
-  if (e.key === "ArrowUp") action = "zoom_in";
-  if (e.key === "ArrowDown") action = "zoom_out";
-  if (e.key === "ArrowLeft") action = "scroll_left";
-  if (e.key === "ArrowRight") action = "scroll_right";
+  /** @type {Record<string, ViewAction>} */
+  const actions = {
+    ArrowUp: "zoom_in",
+    ArrowDown: "zoom_out",
+    ArrowLeft: "scroll_left",
+    ArrowRight: "scroll_right",
+  };
+  const action = actions[e.key];
   if (!action) return;
+  if (action === "zoom_out") setShowBookmark(state, true);
 
-  if (stage === "edit" && action === "zoom_out") {
-    setShowBookmark(state, true);
-  }
-
-  const { view, total } = getViewForStage(state, stage);
-  if (!view || !total) return;
-  const next = adjustView(view, total, action);
-  setViewForStage(app, stage, next);
+  const total = state.edit.distimes?.length ? state.edit.totalSamples || 0 : 0;
+  if (!total) return;
+  if (!state.edit.view) setEditView(state, { start: 0, end: total });
+  const view = state.edit.view;
+  if (!view) return;
+  setEditView(state, adjustView(view, total, action));
+  app.renderEditExplorer();
   e.preventDefault();
 }

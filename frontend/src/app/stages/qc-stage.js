@@ -1,7 +1,7 @@
 import {
   syncRois,
   requestAutoQc,
-  requestQcGridWindow as requestQcGridWindowFeature,
+  createQcTraces,
   requestPreview,
 } from "../../signal/qc.js";
 import {
@@ -21,7 +21,6 @@ import {
   setArtifactMode,
   setCurrentGrid,
 } from "../../state/actions.js";
-import { roiEnd, roiStart } from "../../state/selectors.js";
 import { oncePerFrame } from "../../view/plots.js";
 
 /** @typedef {import("../context.js").App} App */
@@ -44,14 +43,8 @@ export function createQcStageService(app) {
     renderAuxiliaryChannelsFeature(els, state);
   }
 
-  /** @type {QcStage["requestQcGridWindow"]} */
-  async function requestQcGridWindow(
-    gridIdx,
-    start = 0,
-    end = state.seriesLength,
-  ) {
-    return requestQcGridWindowFeature(app, gridIdx, start, end);
-  }
+  /** @type {QcStage["ensureQcTraces"]} */
+  const ensureQcTraces = createQcTraces(app);
 
   /** @type {QcStage["handleRawFilePath"]} */
   async function handleRawFilePath(path, name, options = {}) {
@@ -72,8 +65,8 @@ export function createQcStageService(app) {
   }
 
   /** @type {QcStage["renderChannelQC"]} */
-  function renderChannelQC(waitForMiniPlots = false) {
-    return renderChannelQCController(app, waitForMiniPlots);
+  function renderChannelQC() {
+    renderChannelQCController(app);
   }
 
   /** @type {QcStage["enableRoiSelection"]} */
@@ -98,18 +91,12 @@ export function createQcStageService(app) {
     });
     renderChannelQC();
     renderAuxiliaryChannels();
-    const roi = state.rois?.[0];
-    requestQcGridWindow(
-      state.currentGrid,
-      roiStart(roi),
-      roiEnd(roi, state.seriesLength),
-    );
   }
 
   return {
     populateAuxSelector,
     renderAuxiliaryChannels,
-    requestQcGridWindow,
+    ensureQcTraces,
     handleRawFilePath,
     renderChannelQC,
     enableRoiSelection,

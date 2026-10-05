@@ -22,7 +22,7 @@ import { inferGridCount } from "./grid.js";
  * @param {string} [fallback]
  * @returns {string}
  */
-function safeBidsToken(value, fallback = "") {
+export function safeBidsToken(value, fallback = "") {
   const token = String(value || "")
     .trim()
     .replace(/[^A-Za-z0-9]+/g, "");

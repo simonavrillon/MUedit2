@@ -216,3 +216,24 @@ export function deleteDrInSelection(app, sel) {
     yMin: (1 - yLowPx / height) * (fastest || 1),
   });
 }
+
+/**
+ * Place a `span`-wide view at `start`, shifted to stay inside [0, total].
+ * @param {number} start
+ * @param {number} span
+ * @param {number} total
+ * @returns {Span}
+ */
+export function clampView(start, span, total) {
+  let s = start;
+  let e = s + span;
+  if (s < 0) {
+    e -= s;
+    s = 0;
+  }
+  if (e > total) {
+    s = Math.max(0, s - (e - total));
+    e = total;
+  }
+  return { start: s, end: e };
+}

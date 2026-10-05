@@ -119,6 +119,8 @@ export function fakeElement(tag = "div") {
     setAttribute(name, value) {
       el.attributes[name] = String(value);
     },
+    querySelector: () => null,
+    blur() {},
     capturedPointer: null,
     setPointerCapture(id) {
       el.capturedPointer = id;
@@ -156,7 +158,6 @@ export function fakeCanvas({
 }
 
 const windowListeners = {};
-const elementsById = {};
 
 /**
  * Install `window` and `document` globals. Call before importing any source
@@ -183,21 +184,22 @@ export function installDom() {
   });
   globalThis.document = {
     documentElement: fakeElement("html"),
-    getElementById: (id) => elementsById[id] ?? null,
+    getElementById: () => null,
     createElement: (tag) =>
       tag === "canvas" ? fakeCanvas({ width: 0, height: 0 }) : fakeElement(tag),
   };
 }
 
-/** Forget window listeners and registered ids between tests. */
+/** Forget window listeners between tests. */
 export function resetDom() {
   for (const key of Object.keys(windowListeners)) delete windowListeners[key];
-  for (const key of Object.keys(elementsById)) delete elementsById[key];
 }
 
-/** Make `document.getElementById(id)` return `el`. */
-export function registerElement(id, el) {
-  elementsById[id] = el;
+/** Send `init` as a `type` event to the window's listeners. */
+export function dispatchWindow(type, init = {}) {
+  for (const fn of windowListeners[type] || []) {
+    fn({ preventDefault() {}, ...init });
+  }
 }
 
 export function recorder() {

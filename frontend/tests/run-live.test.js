@@ -175,12 +175,12 @@ describe("run stream handling", () => {
     const app = createApp({ state, els: {}, api: {} });
     Object.assign(app, {
       setStatus: recorder(),
-      showWorkspace: recorder(),
       renderChannelQC: recorder(),
-      requestQcGridWindow: recorder(),
+      refreshVisuals: recorder(),
+      ensureQcTraces: recorder(),
       populateAuxSelector: recorder(),
-      renderAuxiliaryChannels: recorder(),
-      enableRoiSelection: recorder(),
+      populateGridTabs: recorder(),
+      scheduleLayoutRerender: recorder(),
       renderBidsAutoInfo: recorder(),
       renderBidsMuscleFields: recorder(),
       autoSaveRunDecomposition: recorder(),
@@ -208,6 +208,11 @@ describe("run stream handling", () => {
     assert.equal(run.summary.muCount, 2);
     assert.equal(app.state.runResultToken, "run-1");
     assert.equal(app.autoSaveRunDecomposition.calls.length, 1);
+    // The run page is on screen: the QC plots wait for theirs, their traces load.
+    assert.equal(app.renderChannelQC.calls.length, 0);
+    assert.equal(app.refreshVisuals.calls.length, 0);
+    assert.equal(app.ensureQcTraces.calls.length, 1);
+    assert.equal(app.scheduleLayoutRerender.calls.length, 1);
   });
 
   test("an error marks the run failed with its detail", () => {
@@ -228,7 +233,7 @@ describe("run stream handling", () => {
       getBidsMuscleNames: () => ["ta"],
       persistNpzBySaveTarget: async (payload) => {
         payloads.push(payload);
-        return { mode: "saved", path: "/out/x.npz" };
+        return { path: "/out/x.npz" };
       },
       loadDecompositionForEditByPath: recorder(),
     });

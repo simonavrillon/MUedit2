@@ -7,7 +7,6 @@ import {
   installDom,
   ops,
   pathPoints,
-  registerElement,
   resetDom,
   texts,
 } from "./fake-dom.js";
@@ -142,13 +141,9 @@ describe("drawTrace", () => {
     assert.equal(assigned, 0);
   });
 
-  test("a canvas can be given by id, and a missing one is ignored", () => {
-    const canvas = fakeCanvas();
-    registerElement("pulse", canvas);
-    plots.drawTrace("pulse", samples([0, 1]), { start: 0, end: 2 });
-    assert.ok(pathPoints(canvas.ctx).length);
+  test("a missing canvas is ignored", () => {
     assert.doesNotThrow(() =>
-      plots.drawTrace("nowhere", samples([0, 1]), { start: 0, end: 2 }),
+      plots.drawTrace(null, samples([0, 1]), { start: 0, end: 2 }),
     );
   });
 

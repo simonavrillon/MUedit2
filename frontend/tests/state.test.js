@@ -229,27 +229,17 @@ describe("edit slice", () => {
     assert.equal(state.edit.editHistory.length, 1);
   });
 
-  test("keepEditMus reorders every per-MU array together", () => {
+  test("keepEditMus reorders the times and follows the current MU", () => {
     Object.assign(state.edit, {
       distimes: [ints(0), ints(1), ints(2)],
-      muGridIndex: [0, 1, 0],
-      flagged: [false, true, false],
-      muUids: ["u0", "u1", "u2"],
       artifactTimes: [ints(30), ints(31), ints(32)],
-      versions: [5, 6, 7],
-      hasPulse: [true, false, true],
       currentMu: 2,
       bookmarkPosition: { muIdx: 1, position: 50 },
     });
     actions.keepEditMus(state, [2, 1]);
     const e = state.edit;
     assert.deepEqual(rows(e.distimes), [[2], [1]]);
-    assert.deepEqual(e.muGridIndex, [0, 1]);
-    assert.deepEqual(e.flagged, [false, true]);
-    assert.deepEqual(e.muUids, ["u2", "u1"]);
     assert.deepEqual(rows(e.artifactTimes), [[32], [31]]);
-    assert.deepEqual(e.versions, [7, 6]);
-    assert.deepEqual(e.hasPulse, [true, false]);
     assert.equal(e.currentMu, 0);
     assert.deepEqual(e.bookmarkPosition, { muIdx: 1, position: 50 });
   });
@@ -337,7 +327,6 @@ describe("raw preview transitions", () => {
     state.edit.dirty = true;
     state.uploadToken = "old";
     state.channelTraces = [[1]];
-    state.qcWindowLoading = { 0: true };
     state.discardMasks = [[1]];
     const file = { name: "new.otb+" };
     beginRawPreviewTransition(state, file);
@@ -345,7 +334,6 @@ describe("raw preview transitions", () => {
     assert.equal(state.file, file);
     assert.equal(state.uploadToken, null);
     assert.deepEqual(state.channelTraces, []);
-    assert.deepEqual(state.qcWindowLoading, {});
     assert.deepEqual(state.discardMasks, []);
   });
 

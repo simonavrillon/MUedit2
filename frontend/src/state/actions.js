@@ -103,7 +103,7 @@ export function setEditView(state, view) {
  * @param {FileRef | null} file
  */
 export function setFile(state, file) {
-  state.file = file || null;
+  state.file = file;
 }
 
 /**
@@ -111,7 +111,7 @@ export function setFile(state, file) {
  * @param {string | null} token
  */
 export function setUploadToken(state, token) {
-  state.uploadToken = token || null;
+  state.uploadToken = token;
 }
 
 /**
@@ -188,23 +188,6 @@ export function setChannelTraces(state, traces) {
  */
 export function setChannelTraceForGrid(state, gridIdx, trace) {
   state.channelTraces[gridIdx] = trace;
-}
-
-/**
- * @param {State} state
- * @param {Record<number, boolean>} loadingMap
- */
-export function setQcWindowLoading(state, loadingMap) {
-  state.qcWindowLoading = loadingMap;
-}
-
-/**
- * @param {State} state
- * @param {number} gridIdx
- * @param {boolean} isLoading
- */
-export function setQcWindowLoadingForGrid(state, gridIdx, isLoading) {
-  state.qcWindowLoading[gridIdx] = isLoading;
 }
 
 /**
@@ -305,7 +288,7 @@ export function setEditGridNames(state, gridNames) {
  * @param {Bookmark | null} position
  */
 export function setEditBookmark(state, position) {
-  state.edit.bookmarkPosition = position || null;
+  state.edit.bookmarkPosition = position;
 }
 
 /**
@@ -313,7 +296,7 @@ export function setEditBookmark(state, position) {
  * @param {boolean} show
  */
 export function setShowBookmark(state, show) {
-  state.edit.showBookmark = !!show;
+  state.edit.showBookmark = show;
 }
 
 /**
@@ -321,7 +304,7 @@ export function setShowBookmark(state, show) {
  * @param {Selection | null} selection
  */
 export function setEditPulseSelection(state, selection) {
-  state.edit.selectionPulse = selection || null;
+  state.edit.selectionPulse = selection;
 }
 
 /**
@@ -329,7 +312,7 @@ export function setEditPulseSelection(state, selection) {
  * @param {Selection | null} selection
  */
 export function setEditPulseDraftSelection(state, selection) {
-  state.edit.draftSelectionPulse = selection || null;
+  state.edit.draftSelectionPulse = selection;
 }
 
 /**
@@ -337,7 +320,7 @@ export function setEditPulseDraftSelection(state, selection) {
  * @param {Selection | null} selection
  */
 export function setEditDrSelection(state, selection) {
-  state.edit.selectionDr = selection || null;
+  state.edit.selectionDr = selection;
 }
 
 /**
@@ -345,7 +328,7 @@ export function setEditDrSelection(state, selection) {
  * @param {Selection | null} selection
  */
 export function setEditDrDraftSelection(state, selection) {
-  state.edit.draftSelectionDr = selection || null;
+  state.edit.draftSelectionDr = selection;
 }
 
 /**
@@ -360,7 +343,7 @@ export function resetEditSlice(state) {
  * @param {boolean} inFlight
  */
 export function setRunDownloadInFlight(state, inFlight) {
-  state.runDownloadInFlight = !!inFlight;
+  state.runDownloadInFlight = inFlight;
 }
 
 /**
@@ -368,7 +351,7 @@ export function setRunDownloadInFlight(state, inFlight) {
  * @param {string} key
  */
 export function setLastRunDownloadKey(state, key) {
-  state.lastRunDownloadKey = String(key || "");
+  state.lastRunDownloadKey = key;
 }
 
 /**
@@ -384,7 +367,7 @@ export function setRunResultToken(state, token) {
  * @param {boolean} isRunning
  */
 export function setIsRunning(state, isRunning) {
-  state.isRunning = !!isRunning;
+  state.isRunning = isRunning;
 }
 
 /**
@@ -401,7 +384,7 @@ export function setFsamp(state, fsamp) {
  * @param {Span | null} draft
  */
 export function setRoiDraft(state, draft) {
-  state.roiDraft = draft || null;
+  state.roiDraft = draft;
 }
 
 /**
@@ -422,7 +405,7 @@ export function setRoiForIndex(state, idx, roi) {
  * @param {boolean} on
  */
 export function setArtifactMode(state, on) {
-  state.artifactMode = !!on;
+  state.artifactMode = on;
 }
 
 /**
@@ -430,7 +413,7 @@ export function setArtifactMode(state, on) {
  * @param {Span | null} draft
  */
 export function setArtifactDraft(state, draft) {
-  state.artifactDraft = draft || null;
+  state.artifactDraft = draft;
 }
 
 /**
@@ -480,26 +463,19 @@ export function setDiscardMaskChannel(state, gridIdx, chIdx, value) {
 }
 
 /**
- * Keep only the MUs at `keptIdx`, in that order, across every per-MU array.
+ * Keep only the MUs at `keptIdx`, in that order: their discharge and artifact
+ * times, and the current MU and bookmark moved to their new places. The other
+ * per-MU fields come in full with the change that removed MUs.
  *
  * @param {State} state
  * @param {number[]} keptIdx
  */
 export function keepEditMus(state, keptIdx) {
   const e = state.edit;
-  /**
-   * @template T
-   * @param {T[] | null | undefined} arr
-   * @param {(i: number) => T} fallback
-   */
-  const pick = (arr, fallback) => keptIdx.map((i) => arr?.[i] ?? fallback(i));
-  e.distimes = pick(e.distimes, () => new Int32Array(0));
-  e.artifactTimes = pick(e.artifactTimes, () => new Int32Array(0));
-  e.muGridIndex = pick(e.muGridIndex, () => 0);
-  e.flagged = pick(e.flagged, () => false);
-  e.muUids = pick(e.muUids, (i) => `mu${i}`);
-  e.versions = pick(e.versions, () => 0);
-  e.hasPulse = pick(e.hasPulse, () => false);
+  /** @param {Int32Array[]} times */
+  const pick = (times) => keptIdx.map((i) => times[i] ?? new Int32Array(0));
+  e.distimes = pick(e.distimes);
+  e.artifactTimes = pick(e.artifactTimes);
   e.currentMu = Math.max(0, keptIdx.indexOf(e.currentMu ?? 0));
   const bookmarkIdx = e.bookmarkPosition
     ? keptIdx.indexOf(e.bookmarkPosition.muIdx)
@@ -603,7 +579,7 @@ export function applyEditSave(state, saved) {
  * @param {PulseView | null} view
  */
 export function setEditPulseView(state, view) {
-  state.edit.pulseView = view || null;
+  state.edit.pulseView = view;
 }
 
 /**

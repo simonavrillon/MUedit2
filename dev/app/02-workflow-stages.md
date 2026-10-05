@@ -67,7 +67,6 @@ beginRawPreviewTransition(state, file):
   - setFile(state, file)
   - setUploadToken(state, null)
   - setChannelTraces(state, [])
-  - setQcWindowLoading(state, {})
   - state.discardMasks = []
 
 [after preview API succeeds]:
@@ -96,7 +95,7 @@ The user reviews channel quality, discards bad channels, selects regions of inte
 |---|---|---|
 | `qcGridTabs` | Dynamic buttons | Click to switch active grid (one button per grid) |
 
-Each tab click calls `setCurrentGrid(state, idx)` then `renderChannelQC()` and `requestQcGridWindow()`.
+Each tab click calls `setCurrentGrid(state, idx)` then `renderChannelQC()`, which asks `ensureQcTraces()` for that grid's traces over the first window. Traces that arrive after the window moved on (a new ROI drag, another file) are dropped, so the grid never shows an older window's traces.
 
 #### Channel Quality Grid
 
@@ -197,11 +196,12 @@ Artifact windows are visually shaded on the EMG overview. They are OR'd into the
 
 ```
 [Preview loaded from Stage 1]
-  -> renderChannelQC()           builds channel grid with mini-plots
-  -> drawGridOverlay()           renders EMG overview on emgCanvas
-  -> renderAuxiliaryChannels()   renders aux traces
   -> renderBidsAutoInfo()        shows auto-detected metadata
   -> renderBidsMuscleFields()    creates muscle name inputs
+  -> switchStage("qc")           draws the page once, at the next frame:
+       renderChannelQC()         channel grid with mini-plots (asks ensureQcTraces)
+       refreshVisuals()          EMG overview and aux traces, with the windows
+  -> the landing page hides after that frame; the grid's traces fill in as they arrive
 
 User reviews channels:
   - clicks "Automatic QC" (#qcAutoBtn) to auto-detect bad channels + artifacts
@@ -283,7 +283,9 @@ User clicks "Decompose Signal" / "Start decomposition"
           - otherwise applyRunEvent(): the event's phase moves the track; decompose
             events (grid, window, iter, outcomes) fill the row's dots and bump
             keptByGrid, then updateRunDots() restyles just the changed dots
-          - msg.stage=="done"       -> setRunResultToken; applyPreviewData();
+          - msg.stage=="done"       -> setRunResultToken; applyPreviewData() (state only:
+                                        the QC plots are drawn when their page is
+                                        shown; their traces are fetched now);
                                         buildRunSummary(msg.summary); live.phase="save",
                                         live.status="done"; autoSaveRunDecomposition()
         - a stream that ends without done/error/cancelled fails the run

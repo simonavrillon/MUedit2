@@ -83,7 +83,6 @@
  * @property {number[][][]} coordinates Per grid, per channel: [row, col].
  * @property {number[][]} discardMasks Per grid, per channel: 1 = discarded.
  * @property {ChannelTrace[][]} channelTraces Per grid, per channel.
- * @property {Record<number, boolean>} qcWindowLoading
  * @property {JsonObject} metadata
  * @property {string[]} muscle
  * @property {StageKey} currentStage
@@ -155,7 +154,6 @@ export const state = {
   coordinates: [],
   discardMasks: [],
   channelTraces: [],
-  qcWindowLoading: {},
   metadata: {},
   muscle: [],
   currentStage: "qc",

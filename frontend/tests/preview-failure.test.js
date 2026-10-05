@@ -34,7 +34,6 @@ function loadedState() {
     channelTraces: [[0.5]],
     seriesLength: 3,
     discardMasks: [[0, 1]],
-    qcWindowLoading: { 0: true },
   });
   return state;
 }
@@ -85,7 +84,6 @@ describe("raw preview failure", () => {
     assert.deepEqual(state.channelTraces, []);
     assert.equal(state.seriesLength, null);
     assert.deepEqual(state.discardMasks, []);
-    assert.deepEqual(state.qcWindowLoading, {});
   });
 
   test("silent failure skips the status message", async () => {

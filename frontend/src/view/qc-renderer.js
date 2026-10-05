@@ -3,20 +3,18 @@ import {
   drawGridOverlay,
   drawMiniSeries,
   drawRoiRects,
-  nextFrame,
   prepareCanvas,
   strokeSeries,
 } from "./plots.js";
 import { seriesPoints, seriesRange } from "../signal/series.js";
 import { gridDimensionsFor } from "../io/grid.js";
 import { pickRoiSlot, syncRois } from "../signal/qc.js";
-import { getCurrentGrid, roiStart, roiEnd } from "../state/selectors.js";
+import { getCurrentGrid } from "../state/selectors.js";
 import {
   addArtifactRegion,
   ensureDiscardMasks,
   setArtifactDraft,
   setArtifactMode,
-  setChannelTraces,
   setCurrentGrid,
   setDiscardMaskChannel,
   setRoiDraft,
@@ -95,7 +93,7 @@ export function refreshVisuals(app) {
  * @param {RoiCanvasId} canvasId
  */
 export function enableRoiSelection(app, canvasId) {
-  const { state, els, refreshVisuals, requestQcGridWindow, setStatus } = app;
+  const { state, els, refreshVisuals, setStatus } = app;
   const canvas = els[canvasId];
   if (!canvas || canvas.dataset.roiBound === "1") return;
   canvas.dataset.roiBound = "1";
@@ -130,13 +128,8 @@ export function enableRoiSelection(app, canvasId) {
       span,
     );
     setRoiDraft(state, null);
-    setChannelTraces(state, []);
     refreshVisuals();
-    requestQcGridWindow(
-      state.currentGrid,
-      state.rois[0]?.start || 0,
-      state.rois[0]?.end || state.seriesLength,
-    );
+    app.ensureQcTraces();
     setStatus(
       `ROI updated (${state.rois.length} window${state.rois.length > 1 ? "s" : ""})`,
     );
@@ -282,14 +275,11 @@ function buildChannelGrid(app, section, gridIdx, means, coords) {
  * data, and each redraw only marks the discarded ones and redraws the traces.
  *
  * @param {App} app
- * @param {boolean} [waitForMiniPlots]
- * @returns {Promise<void> | undefined}
  */
-export function renderChannelQC(app, waitForMiniPlots = false) {
-  const { state, els, requestQcGridWindow } = app;
+export function renderChannelQC(app) {
+  const { state, els } = app;
   const section = els.qcSection;
-  const nothing = () => (waitForMiniPlots ? Promise.resolve() : undefined);
-  if (!section) return nothing();
+  if (!section) return;
   ensureDiscardMasks(state);
   let gridIdx = getCurrentGrid(state);
   if (!state.channelMeans[gridIdx] && state.channelMeans.length) {
@@ -300,7 +290,7 @@ export function renderChannelQC(app, waitForMiniPlots = false) {
   if (!means?.length) {
     section.innerHTML = "";
     builtGrids.delete(section);
-    return nothing();
+    return;
   }
   const coords = state.coordinates[gridIdx];
   let built = builtGrids.get(section);
@@ -316,33 +306,15 @@ export function renderChannelQC(app, waitForMiniPlots = false) {
 
   const mask = state.discardMasks[gridIdx] || [];
   const traces = state.channelTraces[gridIdx] || [];
-  if (!traces.length) {
-    const roi = state.rois[0];
-    requestQcGridWindow(
-      gridIdx,
-      roiStart(roi),
-      roiEnd(roi, state.seriesLength),
-    );
-  }
+  app.ensureQcTraces();
   const { cells } = built;
   cells.forEach(({ cell }, chIdx) => {
     cell.classList.toggle("off", mask[chIdx] === 1);
   });
-  const drawMinis = () => {
-    cells.forEach(({ mini }, chIdx) => {
-      drawMiniSeries(mini, traces[chIdx], mask[chIdx] === 1);
-    });
-  };
-  if (waitForMiniPlots) {
-    return nextFrame().then(() => {
-      drawMinis();
-      return nextFrame();
-    });
-  }
-  // New cells get their size at the next layout; kept ones have it now.
-  if (fresh) setTimeout(drawMinis, 0);
-  else drawMinis();
-  return undefined;
+  // Reading a new cell's size lays it out, so its trace is drawn to fit.
+  cells.forEach(({ mini }, chIdx) => {
+    drawMiniSeries(mini, traces[chIdx], mask[chIdx] === 1);
+  });
 }
 
 /**

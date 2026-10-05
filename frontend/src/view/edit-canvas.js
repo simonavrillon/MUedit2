@@ -18,7 +18,11 @@ import {
   setEditView,
   setShowBookmark,
 } from "../state/actions.js";
-import { dischargeRates, fastestRateInView } from "../editing/operations.js";
+import {
+  clampView,
+  dischargeRates,
+  fastestRateInView,
+} from "../editing/operations.js";
 import { renderSelectPair } from "./select-renderers.js";
 
 /** @typedef {import("../app/context.js").App} App */
@@ -26,7 +30,6 @@ import { renderSelectPair } from "./select-renderers.js";
 /** @typedef {import("../app/context.js").Span} Span */
 /** @typedef {import("../state/state.js").State} State */
 /** @typedef {import("../editing/operations.js").EditDropdownModel} EditDropdownModel */
-/** @typedef {typeof getCanvasPlotMetrics} PlotMetricsFn */
 
 const TIMELINE_PAD_L = 38;
 const TIMELINE_PAD_R = 8;
@@ -52,34 +55,12 @@ function pxToViewSample(canvas, px, view) {
 }
 
 /**
- * Place a `span`-wide view at `start`, shifted to stay inside [0, total].
- * @param {number} start
- * @param {number} span
- * @param {number} total
- * @returns {Span}
- */
-function clampView(start, span, total) {
-  let s = start;
-  let e = s + span;
-  if (s < 0) {
-    e -= s;
-    s = 0;
-  }
-  if (e > total) {
-    s = Math.max(0, s - (e - total));
-    e = total;
-  }
-  return { start: s, end: e };
-}
-
-/**
  * @param {HTMLCanvasElement} canvas
  * @param {State} state
  * @param {number} muIdx
  * @param {Span | null} view
- * @param {PlotMetricsFn} getCanvasPlotMetrics
  */
-function renderBookmark(canvas, state, muIdx, view, getCanvasPlotMetrics) {
+function renderBookmark(canvas, state, muIdx, view) {
   const bookmark = state.edit.bookmarkPosition;
   if (!view || !bookmark || bookmark.muIdx !== muIdx) return;
   if (!state.edit.showBookmark) return;
@@ -112,9 +93,8 @@ function renderBookmark(canvas, state, muIdx, view, getCanvasPlotMetrics) {
 /**
  * @param {number} py
  * @param {HTMLCanvasElement} canvas
- * @param {PlotMetricsFn} getCanvasPlotMetrics
  */
-function clampY(py, canvas, getCanvasPlotMetrics) {
+function clampY(py, canvas) {
   const metrics = getCanvasPlotMetrics(canvas, true);
   const clamped = Math.max(
     metrics.padding.top,
@@ -125,10 +105,9 @@ function clampY(py, canvas, getCanvasPlotMetrics) {
 
 /**
  * @param {HTMLCanvasElement} canvas
- * @param {PlotMetricsFn} getCanvasPlotMetrics
  * @param {(px: number) => number} pxToSample
  */
-function createDragState(canvas, getCanvasPlotMetrics, pxToSample) {
+function createDragState(canvas, pxToSample) {
   let dragging = false;
   let startPx = 0;
   let endPx = 0;
@@ -165,8 +144,8 @@ function createDragState(canvas, getCanvasPlotMetrics, pxToSample) {
       return {
         start: Math.max(0, startSample),
         end: Math.max(startSample + 1, endSample),
-        yMin: clampY(Math.min(startPy, endPy), canvas, getCanvasPlotMetrics),
-        yMax: clampY(Math.max(startPy, endPy), canvas, getCanvasPlotMetrics),
+        yMin: clampY(Math.min(startPy, endPy), canvas),
+        yMax: clampY(Math.max(startPy, endPy), canvas),
       };
     },
     get dragging() {
@@ -285,13 +264,7 @@ export function renderEditExplorer(app) {
     drawTrace(canvasEl, null, view, { noDataText: hasData ? "" : "No data" });
   }
   if (canvasEl) {
-    renderBookmark(
-      canvasEl,
-      state,
-      muIdx,
-      state.edit.view,
-      getCanvasPlotMetrics,
-    );
+    renderBookmark(canvasEl, state, muIdx, state.edit.view);
   }
   renderInstantaneousDr(app);
   app.ensureEditPulseView();
@@ -322,7 +295,7 @@ function cachedDischargeRates(spikes, fsamp, total) {
 export function renderInstantaneousDr(app) {
   const { state, els } = app;
 
-  const canvas = els?.editDrCanvas || "editDrCanvas";
+  const canvas = els.editDrCanvas;
   const muIdx = state.edit.currentMu ?? 0;
   const spikes = state.edit.distimes?.[muIdx] || [];
   const total = state.edit.totalSamples || 0;
@@ -372,7 +345,7 @@ export function bindEditCanvas(app) {
       state.edit.view || { start: 0, end: state.edit.totalSamples || 0 },
     );
 
-  const drag = createDragState(canvas, getCanvasPlotMetrics, pxToSample);
+  const drag = createDragState(canvas, pxToSample);
 
   canvas.addEventListener("pointerdown", (e) => {
     if (!hasMu()) return;
@@ -424,7 +397,7 @@ export function bindEditCanvas(app) {
       return;
     }
     if (state.edit.mode === "add_artifact") {
-      addArtifactInSelection?.(sel);
+      addArtifactInSelection(sel);
       setEditMode(null);
       setEditPulseDraftSelection(state, null);
       return;
@@ -608,7 +581,7 @@ export function bindEditDrCanvas(app) {
       state.edit.view || { start: 0, end: state.edit.totalSamples || 0 },
     );
 
-  const drag = createDragState(canvas, getCanvasPlotMetrics, pxToSample);
+  const drag = createDragState(canvas, pxToSample);
 
   canvas.addEventListener("pointerdown", (e) => {
     drag.begin(e);

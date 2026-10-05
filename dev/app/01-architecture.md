@@ -122,7 +122,6 @@ To add a service method, first check it belongs in the context (see above). Then
   gridNames: [], gridSeries: [],
   channelMeans: [], coordinates: [],
   discardMasks: [], channelTraces: [],
-  qcWindowLoading: {},
   metadata: {}, muscle: [],
   currentStage: "qc", currentGrid: 0,
   fsamp, auxSeries: [], auxNames: [],

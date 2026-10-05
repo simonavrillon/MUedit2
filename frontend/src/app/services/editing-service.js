@@ -7,6 +7,7 @@
  * coupling. State mutations go exclusively through `state/actions.js`.
  */
 import { handleError } from "./error-service.js";
+import { isToggleOn } from "../../view/controls.js";
 import { inferGridCount, normalizeGridNames } from "../../io/grid.js";
 import { getSuggestedNpzName } from "../../io/bids.js";
 import {
@@ -33,6 +34,7 @@ import {
 /** @typedef {import("../context.js").JsonObject} JsonObject */
 /** @typedef {import("../context.js").RoiAction} RoiAction */
 /** @typedef {import("../context.js").RoiEditRequest} RoiEditRequest */
+/** @typedef {import("../context.js").Tone} Tone */
 /** @typedef {import("../../state/state.js").State} State */
 /** @typedef {import("../../state/state.js").FileRef} FileRef */
 /** @typedef {import("../../state/state.js").Bookmark} Bookmark */
@@ -96,36 +98,55 @@ export async function requestEditOp(app, op, args = {}) {
 }
 
 /**
+ * One edit the user asked for: say it is under way, run it, redraw, and say
+ * how it went (`[text, tone]`, or nothing to leave the status be). A failure
+ * is reported as `failed` and changes nothing.
+ *
+ * @param {App} app
+ * @param {{ pending?: string, failed: string, run: () => Promise<[string, Tone] | void> }} edit
+ */
+async function editAction(app, { pending, failed, run }) {
+  try {
+    if (pending) app.setEditStatus(pending, "muted");
+    const outcome = await run();
+    app.renderEditExplorer();
+    if (outcome) app.setEditStatus(...outcome);
+  } catch (err) {
+    handleError(err, app.setEditStatus, failed);
+  }
+}
+
+/**
  * @param {App} app
  * @param {RoiAction} action
  * @param {RoiEditRequest} payload
  */
 export async function requestRoiEdit(app, action, payload) {
-  const { state, setEditStatus, setEditMode, renderEditExplorer } = app;
-  try {
-    setEditStatus("Applying ROI...", "muted");
-    await requestEditOp(app, action, {
-      mu: payload.muIdx,
-      x_start: payload.xStart,
-      x_end: payload.xEnd,
-      y_min: payload.yMin,
-      y_max: payload.yMax,
-    });
-    const bookmarkPos = Math.round(
-      (payload.xStart + (payload.xEnd ?? payload.xStart)) / 2,
-    );
-    setEditBookmarkAndHide(state, payload.muIdx, bookmarkPos);
-    if (action === "delete-dr") {
-      clearEditDrSelections(state);
-    } else {
-      clearEditPulseSelections(state);
-    }
-    setEditMode(null);
-    renderEditExplorer();
-    setEditStatus("ROI applied", "success");
-  } catch (err) {
-    handleError(err, setEditStatus, "ROI failed");
-  }
+  const { state } = app;
+  return editAction(app, {
+    pending: "Applying ROI...",
+    failed: "ROI failed",
+    async run() {
+      await requestEditOp(app, action, {
+        mu: payload.muIdx,
+        x_start: payload.xStart,
+        x_end: payload.xEnd,
+        y_min: payload.yMin,
+        y_max: payload.yMax,
+      });
+      const bookmarkPos = Math.round(
+        (payload.xStart + (payload.xEnd ?? payload.xStart)) / 2,
+      );
+      setEditBookmarkAndHide(state, payload.muIdx, bookmarkPos);
+      if (action === "delete-dr") {
+        clearEditDrSelections(state);
+      } else {
+        clearEditPulseSelections(state);
+      }
+      app.setEditMode(null);
+      return ["ROI applied", "success"];
+    },
+  });
 }
 
 /**
@@ -148,7 +169,7 @@ export function prepareEditGrid(app, grid) {
 
 /** @param {App} app */
 export async function requestFilterUpdate(app) {
-  const { state, els, setEditStatus, renderEditExplorer } = app;
+  const { state, els, setEditStatus } = app;
   if (!state.edit.distimes?.length) return;
   const muIdx = state.edit.currentMu ?? 0;
   const total = state.edit.totalSamples || 0;
@@ -159,154 +180,145 @@ export async function requestFilterUpdate(app) {
   const view = state.edit.view || { start: 0, end: total };
   const start = Math.max(0, view.start ?? 0);
   const end = Math.min(total, view.end ?? total);
-  try {
-    setEditStatus("Updating filter from BIDS EMG...", "muted");
-    await requestEditOp(app, "update-filter", {
-      mu: muIdx,
-      view_start: start,
-      view_end: end,
-      use_peeloff: els.editPeelOffToggle?.dataset.state === "on",
-      lock_spikes: els.editLockSpikesToggle?.dataset.state === "on",
-      project: state.edit.project || "",
-    });
-    setEditBookmarkAndHide(state, muIdx, Math.round((start + end) / 2));
-    renderEditExplorer();
-    setEditStatus("MU filter updated", "success");
-  } catch (err) {
-    handleError(err, setEditStatus, "Filter update failed");
-  }
+  return editAction(app, {
+    pending: "Updating filter from BIDS EMG...",
+    failed: "Filter update failed",
+    async run() {
+      await requestEditOp(app, "update-filter", {
+        mu: muIdx,
+        view_start: start,
+        view_end: end,
+        use_peeloff: isToggleOn(els.editPeelOffToggle),
+        lock_spikes: isToggleOn(els.editLockSpikesToggle),
+        project: state.edit.project || "",
+      });
+      setEditBookmarkAndHide(state, muIdx, Math.round((start + end) / 2));
+      return ["MU filter updated", "success"];
+    },
+  });
 }
 
 /** @param {App} app */
 export async function removeOutliers(app) {
-  const { state, setEditStatus, renderEditExplorer } = app;
+  const { state, setEditStatus } = app;
   const muIdx = state.edit.currentMu ?? 0;
   if ((state.edit.distimes?.[muIdx]?.length ?? 0) < 3) {
     setEditStatus("Not enough spikes for outlier removal", "muted");
     return;
   }
-  try {
-    setEditStatus("Removing outliers...", "muted");
-    const meta = await requestEditOp(app, "remove-outliers", { mu: muIdx });
-    const after = state.edit.distimes[muIdx];
-    const centerPos = after.length
-      ? Math.round((after[0] + after[after.length - 1]) / 2)
-      : Math.round((state.edit.totalSamples || 0) / 2);
-    setEditBookmarkAndHide(state, muIdx, centerPos);
-    renderEditExplorer();
-    if ((meta.removed_count || 0) > 0) {
-      setEditStatus("Outliers removed", "success");
-    } else {
-      setEditStatus("No outliers detected", "muted");
-    }
-  } catch (err) {
-    handleError(err, setEditStatus, "Outlier removal failed");
-  }
+  return editAction(app, {
+    pending: "Removing outliers...",
+    failed: "Outlier removal failed",
+    async run() {
+      const meta = await requestEditOp(app, "remove-outliers", { mu: muIdx });
+      const after = state.edit.distimes[muIdx];
+      const centerPos = after.length
+        ? Math.round((after[0] + after[after.length - 1]) / 2)
+        : Math.round((state.edit.totalSamples || 0) / 2);
+      setEditBookmarkAndHide(state, muIdx, centerPos);
+      return (Number(meta.removed_count) || 0) > 0
+        ? ["Outliers removed", "success"]
+        : ["No outliers detected", "muted"];
+    },
+  });
 }
 
 /** @param {App} app */
 export async function removeDuplicateMus(app) {
-  const { state, setEditStatus, renderEditExplorer } = app;
+  const { state, setEditStatus } = app;
   if ((state.edit.distimes?.length ?? 0) < 2) {
     setEditStatus("Need at least 2 MUs to deduplicate", "muted");
     return;
   }
-  try {
-    setEditStatus("Removing duplicates...", "muted");
-    const meta = await requestEditOp(app, "remove-duplicates");
-    const removedCount = Number(meta.removed_count) || 0;
-    if (!removedCount) {
-      setEditStatus("No duplicates found", "muted");
-      return;
-    }
-    setShowBookmark(state, false);
-    renderEditExplorer();
-    setEditStatus(
-      `${removedCount} duplicate${removedCount !== 1 ? "s" : ""} removed`,
-      "success",
-    );
-  } catch (err) {
-    handleError(err, setEditStatus, "Deduplication failed");
-  }
+  return editAction(app, {
+    pending: "Removing duplicates...",
+    failed: "Deduplication failed",
+    async run() {
+      const meta = await requestEditOp(app, "remove-duplicates");
+      const removed = Number(meta.removed_count) || 0;
+      if (!removed) return ["No duplicates found", "muted"];
+      setShowBookmark(state, false);
+      return [
+        `${removed} duplicate${removed !== 1 ? "s" : ""} removed`,
+        "success",
+      ];
+    },
+  });
 }
 
 /** @param {App} app */
 export async function flagMuForDeletion(app) {
-  const { state, setEditStatus, renderEditExplorer } = app;
+  const { state, setEditStatus } = app;
   const muIdx = state.edit.currentMu ?? 0;
   if (!state.edit.distimes?.length) {
     setEditStatus("No MU loaded", "muted");
     return;
   }
-  const targetFlag = !state.edit.flagged?.[muIdx];
-  try {
-    setEditStatus(
-      targetFlag ? "Flagging MU for deletion..." : "Unflagging MU...",
-      "muted",
-    );
-    await requestEditOp(app, "flag", { mu: muIdx, flag: targetFlag });
-    setShowBookmark(state, false);
-    renderEditExplorer();
-    setEditStatus(
-      targetFlag ? "MU flagged for deletion" : "MU unflagged",
-      "success",
-    );
-  } catch (err) {
-    handleError(err, setEditStatus, "Flagging failed");
-  }
+  const flag = !state.edit.flagged?.[muIdx];
+  return editAction(app, {
+    pending: flag ? "Flagging MU for deletion..." : "Unflagging MU...",
+    failed: "Flagging failed",
+    async run() {
+      await requestEditOp(app, "flag", { mu: muIdx, flag });
+      setShowBookmark(state, false);
+      return [flag ? "MU flagged for deletion" : "MU unflagged", "success"];
+    },
+  });
 }
 
 /** @param {App} app */
 export async function undoEdit(app) {
-  const { state, setEditStatus, renderEditExplorer } = app;
+  const { state, setEditStatus } = app;
   if (!state.edit.canUndo) {
     setEditStatus("Nothing to undo", "muted");
     return;
   }
-  try {
-    await requestEditOp(app, "undo");
-    clearAllEditSelections(state);
-    renderEditExplorer();
-    setEditStatus("Undo applied", "success");
-  } catch (err) {
-    handleError(err, setEditStatus, "Undo failed");
-  }
+  return editAction(app, {
+    failed: "Undo failed",
+    async run() {
+      await requestEditOp(app, "undo");
+      clearAllEditSelections(state);
+      return ["Undo applied", "success"];
+    },
+  });
 }
 
 /** @param {App} app */
 export async function resetCurrentMuEdits(app) {
-  const { state, setEditStatus, renderEditExplorer } = app;
+  const { state } = app;
   if (!state.edit.distimes?.length) return;
-  try {
-    await requestEditOp(app, "reset", { mu: state.edit.currentMu ?? 0 });
-    clearAllEditSelections(state);
-    renderEditExplorer();
-  } catch (err) {
-    handleError(err, setEditStatus, "Reset failed");
-  }
+  return editAction(app, {
+    failed: "Reset failed",
+    async run() {
+      await requestEditOp(app, "reset", { mu: state.edit.currentMu ?? 0 });
+      clearAllEditSelections(state);
+    },
+  });
 }
 
 /** @param {App} app */
 export async function duplicateMu(app) {
-  const { state, setEditStatus, renderEditExplorer } = app;
+  const { state, setEditStatus } = app;
   if (!state.edit.distimes?.length) {
     setEditStatus("No MU loaded", "muted");
     return;
   }
-  try {
-    const meta = await requestEditOp(app, "duplicate", {
-      mu: state.edit.currentMu ?? 0,
-    });
-    const newIdx = Number(meta.changed?.[0] ?? state.edit.distimes.length - 1);
-    setEditCurrentMuGrid(state, state.edit.muGridIndex[newIdx] ?? 0, {
-      resetView: false,
-    });
-    setEditCurrentMu(state, newIdx, { resetView: false });
-    renderEditExplorer();
-    setEditStatus(`MU duplicated — now editing MU ${newIdx + 1}`, "success");
-  } catch (err) {
-    handleError(err, setEditStatus, "Duplicate failed");
-  }
+  return editAction(app, {
+    failed: "Duplicate failed",
+    async run() {
+      const meta = await requestEditOp(app, "duplicate", {
+        mu: state.edit.currentMu ?? 0,
+      });
+      const newIdx = Number(
+        meta.changed?.[0] ?? state.edit.distimes.length - 1,
+      );
+      setEditCurrentMuGrid(state, state.edit.muGridIndex[newIdx] ?? 0, {
+        resetView: false,
+      });
+      setEditCurrentMu(state, newIdx, { resetView: false });
+      return [`MU duplicated — now editing MU ${newIdx + 1}`, "success"];
+    },
+  });
 }
 
 /** @param {string} filename */
@@ -378,9 +390,7 @@ export async function saveEditedFile(app) {
  */
 function resumePosition(state) {
   const total = state.edit.totalSamples || 0;
-  const lastEntry = [...(state.edit.editHistory || [])]
-    .reverse()
-    .find((e) => e.mu_uid);
+  const lastEntry = state.edit.editHistory.findLast((e) => e.mu_uid);
   let targetMu = 0;
   let targetView = { start: 0, end: total };
   /** @type {Bookmark | null} */

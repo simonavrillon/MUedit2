@@ -206,11 +206,9 @@ All elements are registered in `dom.js` as `els.*` properties.
 | `showWorkspace` | [A] | ui.js |
 | `updateStepAvailability` | [A] | ui.js |
 | `populateGridTabs` | [A] | ui.js |
-| `getViewForStage` | [A] | handleKeyboardNavigation |
-| `setViewForStage` | [A] | handleKeyboardNavigation |
-| `adjustView` | [A] | handleKeyboardNavigation |
-| `goToMu` | [A] | handleKeyboardNavigation (`<` / `>`) |
-| `handleKeyboardNavigation` | [A] | setupEditEvents (window keydown) |
+| `adjustView` (private) | [A] | handleKeyboardNavigation (arrows) |
+| `goToMu` (private) | [A] | handleKeyboardNavigation (`<` / `>`) |
+| `handleKeyboardNavigation` | [A] | setupEditEvents (window keydown, keys no command takes) |
 
 ---
 
@@ -255,11 +253,10 @@ All elements are registered in `dom.js` as `els.*` properties.
 
 | Function | [A/?] | Called By |
 |---|---|---|
-| `getBidsProject` | [A] | runDecomposition (FormData), getBidsSaveFields |
-| `getBidsMuscleNames` | [A] | autoSaveRunDecomposition, saveEditedFile, collectBidsEntities |
+| `getBidsProject` | [A] | runDecomposition (FormData), withBidsSaveFields |
+| `getBidsMuscleNames` | [A] | autoSaveRunDecomposition, saveEditedFile, readSessionForm |
 | `setUploadLoading` | [A] | import-stage, qc.js requestPreview, loadDecompositionForEdit |
-| `getBidsEntityInputs` (private) | [A] | withBidsSaveFields |
-| `getBidsSaveFields` (private) | [A] | withBidsSaveFields |
+| `readSessionForm` (private) | [A] | collectBidsEntities, withBidsSaveFields (one reading of the form, labels cleaned as in BIDS, so a run's export and its save agree) |
 | `withBidsSaveFields` | [A] | persistNpzBySaveTarget, saveEditedFile |
 | `collectBidsEntities` | [A] | runDecomposition (FormData) |
 | `setBidsEntitiesInput` | [A] | import-stage (BDF/EDF entity label) |
@@ -276,15 +273,16 @@ All elements are registered in `dom.js` as `els.*` properties.
 | Function | [A/?] | Called By |
 |---|---|---|
 | `requestEditOp` | [A] | every action below: `POST /edit/ops/{op}` + `applyEditChange` |
+| `editAction` (private) | [A] | every action below: status, redraw, outcome, failure |
 | `requestRoiEdit` | [A] | operations.js (addSpikes, addArtifact, deleteSpikes, deleteDr) |
-| `requestFilterUpdate` | [A] | setupEditEvents (update button), keyboard nav (Space) |
-| `removeOutliers` | [A] | setupEditEvents, keyboard nav (R) |
-| `removeDuplicateMus` | [A] | edit-stage |
-| `flagMuForDeletion` | [A] | edit-stage |
-| `undoEdit` | [A] | edit-stage (undo button) |
-| `resetCurrentMuEdits` | [A] | edit-stage (reset button) |
-| `duplicateMu` | [A] | edit-stage (duplicate button) |
-| `saveEditedFile` | [A] | edit-stage |
+| `requestFilterUpdate` | [A] | EDIT_COMMANDS (update button, Space) |
+| `removeOutliers` | [A] | EDIT_COMMANDS (outliers button, R) |
+| `removeDuplicateMus` | [A] | EDIT_COMMANDS |
+| `flagMuForDeletion` | [A] | EDIT_COMMANDS |
+| `undoEdit` | [A] | EDIT_COMMANDS (undo button) |
+| `resetCurrentMuEdits` | [A] | EDIT_COMMANDS (reset button) |
+| `duplicateMu` | [A] | EDIT_COMMANDS (duplicate button) |
+| `saveEditedFile` | [A] | EDIT_COMMANDS (save button) |
 | `loadDecompositionForEdit` | [A] | edit-stage loadDecompositionForEditByPath |
 | `restoreEditSession` | [A] | initializeApp, after the backend answers |
 | `showEditSession` (private) | [A] | loadDecompositionForEdit, restoreEditSession |
@@ -329,11 +327,11 @@ All elements are registered in `dom.js` as `els.*` properties.
 |---|---|---|
 | `createQcStageService` | [A] | createApp |
 | `populateAuxSelector` | [A] | requestPreview, applyPreviewData |
-| `renderAuxiliaryChannels` | [A] | refreshVisuals, setupQcEvents (aux selector), applyPreviewData |
-| `requestQcGridWindow` | [A] | renderChannelQC, enableRoiSelection, handleStreamMessage |
+| `renderAuxiliaryChannels` | [A] | refreshVisuals, setupQcEvents (aux selector) |
+| `ensureQcTraces` | [A] | renderChannelQC, enableRoiSelection (ROI commit) |
 | `handleRawFilePath` | [A] | import-stage (handleNativeDialogOpen) |
-| `renderChannelQC` | [A] | QC stage render, requestPreview, handleStreamMessage |
-| `enableRoiSelection` | [A] | requestPreview, applyPreviewData, setupQcEvents |
+| `renderChannelQC` | [A] | QC stage render, setSelectedGrid, requestAutoQc, ensureQcTraces (traces arrived, QC on screen) |
+| `enableRoiSelection` | [A] | requestPreview, setupQcEvents |
 | `refreshVisuals` | [A] | QC stage render, ROI drags, auto-QC |
 | `scheduleRefreshVisuals` | [A] | ROI and artifact drags (once per frame) |
 | `setSelectedGrid` | [A] | populateGridTabs (grid tab click) |
@@ -363,7 +361,7 @@ All elements are registered in `dom.js` as `els.*` properties.
 |---|---|---|
 | `createEditStageService` | [A] | createApp |
 | `refreshEditModeButtons` | [A] | setEditMode, requestEditOp, saveEditedFile, resetEditState |
-| `setEditMode` | [A] | edit toolbar, keyboard nav (a/d/x), Edit stage exit |
+| `setEditMode` | [A] | EDIT_COMMANDS (mode buttons, a/d/x), Edit stage exit |
 | `getPulsePlotHeight`, `getDrPlotHeight` | [A] | operations.js (drawn box → values) |
 | `ensureEditPulseView` | [A] | edit-canvas.renderEditExplorer: fetch the window on screen when it changed |
 | `resetEditState` | [A] | loadDecompositionForEdit (on error) |
@@ -374,7 +372,8 @@ All elements are registered in `dom.js` as `els.*` properties.
 | `addSpikesInSelection`, `addArtifactInSelection`, `deleteSpikesInSelection` | [A] | bindEditCanvas (pointerup in the armed mode) |
 | `deleteDrInSelection` | [A] | bindEditDrCanvas (pointerup) |
 | `loadDecompositionForEditByPath` | [A] | import-stage, autoSaveRunDecomposition (preloads the saved run with `{ open: false }`) |
-| `setupEditEvents` | [A] | initializeApp: canvas bindings, toolbar buttons (editing-service actions), keyboard |
+| `EDIT_COMMANDS` | [A] | setupEditEvents: each toolbar button and its key run the same command |
+| `setupEditEvents` | [A] | initializeApp: canvas bindings, EDIT_COMMANDS on clicks and keys, then view keys |
 
 ---
 
@@ -393,7 +392,7 @@ All elements are registered in `dom.js` as `els.*` properties.
 | `createApiClient` | [A] | initializeApp |
 | `postJson` (internal) | [A] | runAutoQc, fetchPreviewByPath, cancelDecomposition, editSessionSave, editSave |
 | `postForSession` (internal) | [A] | editOpen, editRecover, editOp (decodes the MUB1 session frame) |
-| `fetchSeries` | [A] | qc-stage.requestQcGridWindow (`emg`), qc-stage.requestPreview (`overview`, `aux`) |
+| `fetchSeries` | [A] | qc.createQcTraces (`emg`), qc-stage.requestPreview (`overview`, `aux`) |
 | `fetchPreviewByPath` | [A] | qc-stage.requestPreview, decomp/run.js (token re-mint on expiry) |
 | `runAutoQc` | [A] | signal/qc.requestAutoQc |
 | `decomposeStream` | [A] | run-stage.runDecomposition |
@@ -416,6 +415,14 @@ All elements are registered in `dom.js` as `els.*` properties.
 | Export | [A] | Used By |
 |---|---|---|
 | `routes` | [A] | api/client.js |
+
+---
+
+## Module: `api/ndjson.js`
+
+| Export | [A] | Used By |
+|---|---|---|
+| `readNdjson` | [A] | runDecomposition (the run's progress stream, line by line; malformed lines skipped and counted) |
 
 ---
 
@@ -499,6 +506,7 @@ All elements are registered in `dom.js` as `els.*` properties.
 | `addArtifactInSelection` | [A] | edit-stage.addArtifactInSelection |
 | `deleteSpikesInSelection` | [A] | edit-stage.deleteSpikesInSelection |
 | `deleteDrInSelection` | [A] | edit-stage.deleteDrInSelection |
+| `clampView` | [A] | edit-canvas timeline drag and click, navigation.adjustView |
 
 ---
 
@@ -536,7 +544,7 @@ All elements are registered in `dom.js` as `els.*` properties.
 | `syncRois` | [A] | setupQcEvents (nwindows change), qc-renderer (ROI drag) |
 | `pickRoiSlot` | [A] | qc-renderer (an ROI drag picks the window it replaces) |
 | `requestAutoQc` | [A] | setupQcEvents (qcAutoBtn click) |
-| `requestQcGridWindow` | [A] | qc-stage.requestQcGridWindow |
+| `createQcTraces` | [A] | qc-stage (`ensureQcTraces`: latest window wins, per grid) |
 | `requestPreview` | [A] | qc-stage.handleRawFilePath |
 
 ---
@@ -556,7 +564,6 @@ All functions are state mutators (`set*` functions). Each is called by at least 
 
 - `setFile`, `setUploadToken`, `setSeriesLength`, `setRois`, `setRoiForIndex`, `setRoiDraft`
 - `setGridSeries`, `setGridNames`, `setChannelMeans`, `setCoordinates`, `setChannelTraces`, `setChannelTraceForGrid`
-- `setQcWindowLoading`, `setQcWindowLoadingForGrid`
 - `setMetadata`, `setMuscle`, `setFsamp`, `setAuxData`
 - `setDiscardMaskChannel`, `setDiscardMasks`, `ensureDiscardMasks`
 - `setArtifactMode`, `setArtifactDraft`, `setArtifactRegions`, `addArtifactRegion`, `removeLastArtifactRegion`
@@ -606,7 +613,7 @@ All functions are state mutators (`set*` functions). Each is called by at least 
 
 | Function | [A/?] | Called By |
 |---|---|---|
-| `pxToViewSample`, `clampView` (private) | [A] | the canvas and timeline bindings |
+| `pxToViewSample` (private) | [A] | the canvas bindings |
 | `renderBookmark` (private) | [A] | renderEditExplorer |
 | `clampY` (private) | [A] | bindEditCanvas, bindEditDrCanvas |
 | `createDragState` (private) | [A] | bindEditCanvas, bindEditDrCanvas |
@@ -639,14 +646,13 @@ All functions are state mutators (`set*` functions). Each is called by at least 
 | `nextFrame` | [A] | qc.js requestPreview, qc-renderer renderChannelQC |
 | `oncePerFrame` | [A] | the `schedule…` methods of ui, qc-stage, run-stage and edit-stage |
 | `prepareCanvas` | [A] | the draw functions, qc-renderer, edit-canvas (device-pixel sizing) |
-| `resolveCanvas` (private) | [A] | prepareCanvas |
 | `getAxisPadding` (private) | [A] | getCanvasPlotMetrics |
 | `getCanvasPlotMetrics` | [A] | drawTrace, edit-canvas, edit-stage |
 | `drawSelectionRect` (private) | [A] | drawTrace |
 | `drawAxes`, `drawTimeAxis` (private) | [A] | drawTrace |
 | `drawRoiRects` | [A] | drawGridOverlay, renderAuxiliaryChannels |
 | `drawTrace` | [A] | edit-canvas (a pulse window with its markers) |
-| `drawGridOverlay` | [A] | qc-renderer.refreshVisuals, run.js applyPreviewData |
+| `drawGridOverlay` | [A] | qc-renderer.refreshVisuals |
 | `drawMiniSeries` | [A] | qc-renderer.renderChannelQC |
 | `strokeSeries` | [A] | drawGridOverlay, drawMiniSeries, renderAuxiliaryChannels |
 

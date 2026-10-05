@@ -18,7 +18,7 @@ import {
 /** @typedef {import("../signal/series.js").TraceWindow} TraceWindow */
 /** @typedef {{ left: number, right: number, top: number, bottom: number }} Padding */
 /** @typedef {Span & { yMin?: number, yMax?: number, kind?: string }} Overlay */
-/** @typedef {HTMLCanvasElement | string | null | undefined} CanvasRef */
+/** @typedef {HTMLCanvasElement | null | undefined} CanvasRef */
 
 /**
  * Points drawn at sample `positions`, `values` high.
@@ -77,25 +77,13 @@ export function strokeSeries(ctx, row, x0, width, toY) {
 }
 
 /**
- * @param {CanvasRef} canvas
- * @returns {HTMLCanvasElement | null}
- */
-function resolveCanvas(canvas) {
-  if (typeof canvas !== "string") return canvas ?? null;
-  return /** @type {HTMLCanvasElement | null} */ (
-    document.getElementById(canvas)
-  );
-}
-
-/**
  * Size a canvas's backing store to its layout box at the screen's pixel
  * density, and clear it. Drawing is then in CSS pixels, `width` x `height`.
  *
- * @param {CanvasRef} canvas
+ * @param {CanvasRef} canvasEl
  * @param {{ width?: number, height?: number }} [fallback] The size while the canvas has no layout box.
  */
-export function prepareCanvas(canvas, fallback = {}) {
-  const canvasEl = resolveCanvas(canvas);
+export function prepareCanvas(canvasEl, fallback = {}) {
   const ctx = canvasEl?.getContext("2d");
   if (!canvasEl || !ctx) return null;
   const width = canvasEl.clientWidth || fallback.width || 1;
