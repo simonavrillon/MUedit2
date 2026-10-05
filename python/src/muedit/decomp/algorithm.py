@@ -328,22 +328,38 @@ def subtract_mu_waveforms(
     spikes: IntArray,
     fsamp: float,
     win: float,
-) -> None:
-    """Subtract the averaged MU waveform from ``x`` at every spike, in place."""
+) -> list[tuple[int, int]]:
+    """Subtract the averaged MU waveform from ``x`` at every spike, in place.
+
+    Returns the ``[start, stop)`` column runs that changed, merged and ascending.
+    """
     window_l = int(np.round(win * fsamp))
     n_cols = x.shape[1]
 
     spikes = np.asarray(spikes, dtype=int)
     valid_spikes = spikes[(spikes >= window_l) & (spikes < n_cols - window_l)]
     if valid_spikes.size == 0:
-        return
+        return []
 
-    offsets = np.arange(-window_l, window_l + 1, dtype=int)
-    idx = valid_spikes[:, None] + offsets[None, :]  # (n_spikes, window_size)
-    waveforms = x[:, idx].mean(axis=1, dtype=np.float64)  # (n_rows, window_size)
+    # Summed window by window: no (rows, spikes, window) copy of x.
+    waveforms = np.zeros((x.shape[0], 2 * window_l + 1))
+    for s in valid_spikes:
+        waveforms += x[:, s - window_l : s + window_l + 1]
+    waveforms /= valid_spikes.size
 
     for s in valid_spikes:
         x[:, s - window_l : s + window_l + 1] -= waveforms
+    return _merged_windows(np.sort(valid_spikes), window_l)
+
+
+def _merged_windows(centers: IntArray, half: int) -> list[tuple[int, int]]:
+    """The union of ``[c - half, c + half + 1)`` over the sorted ``centers``, as disjoint runs."""
+    starts, stops = centers - half, centers + half + 1
+    first = np.flatnonzero(np.r_[True, starts[1:] > np.maximum.accumulate(stops)[:-1]])
+    return [
+        (int(s), int(e))
+        for s, e in zip(starts[first], np.maximum.reduceat(stops, first), strict=True)
+    ]
 
 
 def _dewhitened_filters(
@@ -488,9 +504,11 @@ def batch_process_filters(
             start = coordinates[nwin * 2]
             w_win = whitened_windows(nwin) if callable(whitened_windows) else whitened_windows[nwin]
             segment_len = w_win.shape[1]
-            for j in range(filters.shape[1]):
+            # Every filter of the window in one product: the window is read once, not per MU.
+            projections = zeroed_matmul(filters.T.astype(w_win.dtype), w_win)
+            for j, projection in enumerate(projections):
                 pt = np.zeros(ltime)
-                pt[start : start + segment_len] = vec_mat(filters[:, j], w_win)[: ltime - start]
+                pt[start : start + segment_len] = projection[: ltime - start]
                 pt = signed_square(pt)
                 spikes_by_row[first_row[nwin] + j] = _detect_row(pt, fsamp, mask_by_grid[g])
                 pulse_t[first_row[nwin] + j] = pt

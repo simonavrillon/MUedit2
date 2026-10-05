@@ -196,9 +196,12 @@ def decompose_step(
                     _, _, sil_val = compute_silhouette(x, w_final, prep.fsamp)
                     sil_scores[j] = sil_val
                     if params.peel_off_enabled and sil_val >= params.sil_thr:
-                        subtract_mu_waveforms(x, spikes_final, prep.fsamp, params.peel_off_win)
+                        changed = subtract_mu_waveforms(
+                            x, spikes_final, prep.fsamp, params.peel_off_win
+                        )
                         if energy is not None:
-                            energy = column_energy(x)
+                            for lo, hi in changed:
+                                energy[lo:hi] = column_energy(x[:, lo:hi])
                     kept = sil_val >= params.sil_thr and (
                         not params.covfilter or cov_final <= params.cov_thr
                     )
