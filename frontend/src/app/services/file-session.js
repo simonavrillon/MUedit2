@@ -50,32 +50,6 @@ export function createFileSessionService(app) {
       .filter(Boolean);
   }
 
-  /** @type {FileSessionService["clearUploadFormatError"]} */
-  function clearUploadFormatError() {
-    if (!els.uploadFormatError) return;
-    els.uploadFormatError.textContent = "";
-    els.uploadFormatError.classList.add("hidden");
-  }
-
-  /** @type {FileSessionService["showUnsupportedUploadFormatError"]} */
-  function showUnsupportedUploadFormatError() {
-    if (!els.uploadFormatError) return;
-    els.uploadFormatError.textContent =
-      "Accepted: raw (.mat, .otb+, .otb4, .bdf, .edf, .rhd) or decomposition (.npz, .mat)";
-    els.uploadFormatError.classList.remove("hidden");
-  }
-
-  /** @type {FileSessionService["detectLandingFileType"]} */
-  function detectLandingFileType(file) {
-    const name = (file?.name || "").toLowerCase();
-    if (name.endsWith(".otb+") || name.endsWith(".otb4")) return "raw";
-    if (name.endsWith(".bdf") || name.endsWith(".edf")) return "raw";
-    if (name.endsWith(".rhd")) return "raw";
-    if (name.endsWith(".npz")) return "decomposition";
-    if (name.endsWith(".mat")) return "ambiguous_mat";
-    return "unsupported";
-  }
-
   /** @type {FileSessionService["setUploadLoading"]} */
   function setUploadLoading(active) {
     if (!els.uploadLoader) return;
@@ -84,7 +58,6 @@ export function createFileSessionService(app) {
 
   // Raw BIDS entity inputs (subject/task/session/run) used to compose the
   // entity label. Returned untransformed so the caller owns label assembly.
-  /** @type {FileSessionService["getBidsEntityInputs"]} */
   function getBidsEntityInputs() {
     return {
       subject: els.bidsSubject?.value,
@@ -98,7 +71,6 @@ export function createFileSessionService(app) {
   // Gather the participant + hardware BIDS form fields into the snake_case
   // shape the /edit/save endpoint expects, ready to spread into the request
   // body. Keeps all save-form DOM reads here rather than in the orchestrator.
-  /** @type {FileSessionService["getBidsSaveFields"]} */
   function getBidsSaveFields() {
     const age = String(els.bidsParticipantAge?.value || "").trim();
     const sex = String(els.bidsParticipantSex?.value || "").trim();
@@ -279,8 +251,6 @@ export function createFileSessionService(app) {
   return {
     getBidsProject,
     getBidsMuscleNames,
-    getBidsEntityInputs,
-    getBidsSaveFields,
     collectBidsEntities,
     setBidsEntitiesInput,
     applyPreviewMetadata,
@@ -289,9 +259,6 @@ export function createFileSessionService(app) {
     renderBidsMuscleFields,
     persistNpzBySaveTarget,
     withBidsSaveFields,
-    clearUploadFormatError,
-    showUnsupportedUploadFormatError,
-    detectLandingFileType,
     setUploadLoading,
   };
 }

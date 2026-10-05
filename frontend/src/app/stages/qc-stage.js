@@ -1,8 +1,8 @@
 import {
-  syncRois as syncRoisController,
-  requestAutoQc as requestAutoQcFeature,
+  syncRois,
+  requestAutoQc,
   requestQcGridWindow as requestQcGridWindowFeature,
-  requestPreview as requestPreviewFeature,
+  requestPreview,
 } from "../../signal/qc.js";
 import {
   populateAuxSelector as populateAuxSelectorFeature,
@@ -53,11 +53,6 @@ export function createQcStageService(app) {
     return requestQcGridWindowFeature(app, gridIdx, start, end);
   }
 
-  /** @type {QcStage["requestPreview"]} */
-  async function requestPreview(options = {}) {
-    return requestPreviewFeature(app, options);
-  }
-
   /** @type {QcStage["handleRawFilePath"]} */
   async function handleRawFilePath(path, name, options = {}) {
     const syntheticFile = { name, path };
@@ -65,7 +60,7 @@ export function createQcStageService(app) {
     resetBidsEntityDefaults(els, name);
     app.setStatus("File ready");
     app.updateStartAvailability();
-    const ok = await requestPreview({
+    const ok = await requestPreview(app, {
       silentFailure: options.silentPreviewFailure ?? false,
       filepath: path,
     });
@@ -94,41 +89,6 @@ export function createQcStageService(app) {
   /** @type {QcStage["scheduleRefreshVisuals"]} */
   const scheduleRefreshVisuals = oncePerFrame(() => app.refreshVisuals());
 
-  /** @type {QcStage["syncRois"]} */
-  function syncRois(nwin) {
-    syncRoisController(state, nwin);
-  }
-
-  /** @type {QcStage["runAutoQc"]} */
-  function runAutoQc() {
-    return requestAutoQcFeature(app);
-  }
-
-  /** Arm (or cancel) artifact selection for the next drag on the EMG plot. */
-  /** @type {QcStage["toggleArtifactMode"]} */
-  function toggleArtifactMode() {
-    setArtifactMode(state, !state.artifactMode);
-    refreshVisuals();
-    app.setStatus(
-      state.artifactMode
-        ? "Drag on the EMG plot to mark an artifact window"
-        : "Artifact selection cancelled",
-    );
-  }
-
-  /** @type {QcStage["removeLastArtifact"]} */
-  function removeLastArtifact() {
-    const removed = removeLastArtifactRegion(state);
-    setArtifactMode(state, false);
-    refreshVisuals();
-    const n = state.artifactRegions.length;
-    app.setStatus(
-      removed
-        ? `Artifact window removed (${n} left)`
-        : "No artifact windows to remove",
-    );
-  }
-
   /** @type {QcStage["setSelectedGrid"]} */
   function setSelectedGrid(idx) {
     setCurrentGrid(state, idx);
@@ -150,16 +110,65 @@ export function createQcStageService(app) {
     populateAuxSelector,
     renderAuxiliaryChannels,
     requestQcGridWindow,
-    requestPreview,
     handleRawFilePath,
     renderChannelQC,
     enableRoiSelection,
     refreshVisuals,
     scheduleRefreshVisuals,
-    syncRois,
-    runAutoQc,
-    toggleArtifactMode,
-    removeLastArtifact,
     setSelectedGrid,
   };
+}
+
+/**
+ * Arm (or cancel) artifact selection for the next drag on the EMG plot.
+ *
+ * @param {App} app
+ */
+function toggleArtifactMode(app) {
+  const { state } = app;
+  setArtifactMode(state, !state.artifactMode);
+  app.refreshVisuals();
+  app.setStatus(
+    state.artifactMode
+      ? "Drag on the EMG plot to mark an artifact window"
+      : "Artifact selection cancelled",
+  );
+}
+
+/** @param {App} app */
+function removeLastArtifact(app) {
+  const { state } = app;
+  const removed = removeLastArtifactRegion(state);
+  setArtifactMode(state, false);
+  app.refreshVisuals();
+  const n = state.artifactRegions.length;
+  app.setStatus(
+    removed
+      ? `Artifact window removed (${n} left)`
+      : "No artifact windows to remove",
+  );
+}
+
+/** @param {App} app */
+export function setupQcEvents(app) {
+  const { els, state } = app;
+
+  els.qcAutoBtn?.addEventListener("click", () => void requestAutoQc(app));
+  els.artifactAddBtn?.addEventListener("click", () => toggleArtifactMode(app));
+  els.artifactRemoveBtn?.addEventListener("click", () =>
+    removeLastArtifact(app),
+  );
+  app.refreshVisuals();
+  app.enableRoiSelection("emgCanvas");
+
+  els.nwindows?.addEventListener("change", () => {
+    syncRois(state, Number(els.nwindows.value) || 1);
+    app.refreshVisuals();
+    els.nwindows.blur();
+  });
+
+  els.auxSelector?.addEventListener("change", () => {
+    app.renderAuxiliaryChannels();
+    els.auxSelector.blur();
+  });
 }

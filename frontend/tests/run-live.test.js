@@ -9,7 +9,7 @@ installDom();
 
 const live = await import("../src/decomp/live.js");
 const { DOT, applyRunEvent, createRunLive } = live;
-const { state: initialState } = await import("../src/app/state.js");
+const { state: initialState } = await import("../src/state/state.js");
 const { createApp } = await import("../src/app/create-app.js");
 
 const shape = { phase: "decompose", ngrid: 2, nwindows: 1, niter: 6 };

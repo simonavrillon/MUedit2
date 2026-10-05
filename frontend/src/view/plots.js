@@ -5,22 +5,20 @@
  * Pure rendering — no application state is read or mutated here.
  */
 import { COLORS } from "../config.js";
+import {
+  isEnvelope,
+  isValues,
+  seriesPoints,
+  seriesRange,
+  traceRange,
+} from "../signal/series.js";
 
 /** @typedef {import("../app/context.js").Span} Span */
-/** @typedef {import("../app/state.js").ChannelTrace} ChannelTrace */
+/** @typedef {import("../state/state.js").ChannelTrace} ChannelTrace */
+/** @typedef {import("../signal/series.js").TraceWindow} TraceWindow */
 /** @typedef {{ left: number, right: number, top: number, bottom: number }} Padding */
 /** @typedef {Span & { yMin?: number, yMax?: number, kind?: string }} Overlay */
 /** @typedef {HTMLCanvasElement | string | null | undefined} CanvasRef */
-
-/**
- * A window of a series as it was fetched: `row` holds the samples of
- * `[start, end)`, or their min/max per bin; null draws markers only.
- *
- * @typedef {object} TraceWindow
- * @property {ChannelTrace | null} row
- * @property {number} start
- * @property {number} end
- */
 
 /**
  * Points drawn at sample `positions`, `values` high.
@@ -44,67 +42,6 @@ import { COLORS } from "../config.js";
  * @property {number | null} [fsamp]
  * @property {string} [noDataText]
  */
-
-/**
- * @param {unknown} x
- * @returns {x is ArrayLike<number>}
- */
-function isValues(x) {
-  return (
-    Array.isArray(x) || (ArrayBuffer.isView(x) && !(x instanceof DataView))
-  );
-}
-
-/**
- * @param {unknown} row
- * @returns {row is import("../api/binary-payloads.js").Envelope}
- */
-function isEnvelope(row) {
-  if (!row || typeof row !== "object" || isValues(row)) return false;
-  const env = /** @type {{ min?: unknown, max?: unknown }} */ (row);
-  return isValues(env.min) && isValues(env.max);
-}
-
-/**
- * Points in a viewport row: its bins, or its samples (0 when it is neither).
- *
- * @param {ChannelTrace | null | undefined} row
- */
-export function seriesPoints(row) {
-  if (isEnvelope(row)) return row.min.length;
-  return isValues(row) ? row.length : 0;
-}
-
-/**
- * Smallest and largest finite value over viewport rows.
- *
- * @param {(ChannelTrace | null | undefined)[]} rows
- */
-export function seriesRange(rows) {
-  let min = Infinity;
-  let max = -Infinity;
-  for (const row of rows) {
-    /** @type {ArrayLike<number>} */
-    let lows;
-    /** @type {ArrayLike<number>} */
-    let highs;
-    if (isEnvelope(row)) {
-      lows = row.min;
-      highs = row.max;
-    } else if (isValues(row)) {
-      lows = highs = row;
-    } else {
-      continue;
-    }
-    for (let i = 0; i < lows.length; i++) {
-      if (lows[i] < min) min = lows[i];
-    }
-    for (let i = 0; i < highs.length; i++) {
-      if (highs[i] > max) max = highs[i];
-    }
-  }
-  return { min, max };
-}
 
 /**
  * Stroke one viewport row across `width` pixels from `x0`: a line through the
@@ -283,18 +220,6 @@ export function drawRoiRects(ctx, selections, totalSamples, width, height) {
     ctx.lineWidth = 1;
     ctx.strokeRect(Math.min(startX, endX), 0, Math.abs(endX - startX), height);
   });
-}
-
-/**
- * Smallest and largest value of a trace window, `{0, 0}` when it has none.
- *
- * @param {TraceWindow | null | undefined} trace
- */
-export function traceRange(trace) {
-  const { min, max } = seriesRange(trace?.row ? [trace.row] : []);
-  return Number.isFinite(min) && Number.isFinite(max)
-    ? { min, max }
-    : { min: 0, max: 0 };
 }
 
 /**

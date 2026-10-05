@@ -33,9 +33,9 @@ import {
 /** @typedef {import("../context.js").JsonObject} JsonObject */
 /** @typedef {import("../context.js").RoiAction} RoiAction */
 /** @typedef {import("../context.js").RoiEditRequest} RoiEditRequest */
-/** @typedef {import("../state.js").State} State */
-/** @typedef {import("../state.js").FileRef} FileRef */
-/** @typedef {import("../state.js").Bookmark} Bookmark */
+/** @typedef {import("../../state/state.js").State} State */
+/** @typedef {import("../../state/state.js").FileRef} FileRef */
+/** @typedef {import("../../state/state.js").Bookmark} Bookmark */
 /** @typedef {import("../../api/binary-payloads.js").EditSessionFrame} EditSessionFrame */
 
 // The open session's token survives a reload of the page (not of the server),

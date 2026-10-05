@@ -26,7 +26,7 @@ import { normalizePreviewPayload, toSpans } from "../api/payloads.js";
 import { OVERVIEW_BINS, QC_TRACE_BINS } from "../config.js";
 
 /** @typedef {import("../app/context.js").App} App */
-/** @typedef {import("../app/state.js").State} State */
+/** @typedef {import("../state/state.js").State} State */
 
 /**
  * The analysis window a new drag should replace. A drag over a drawn window

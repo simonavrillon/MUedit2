@@ -16,9 +16,10 @@ globalThis.window = {
 // The code under test logs expected failures; keep the test output readable.
 console.error = () => {};
 
-const { state: initialState } = await import("../src/app/state.js");
+const { state: initialState } = await import("../src/state/state.js");
 const { createApp } = await import("../src/app/create-app.js");
 const { createRunLive } = await import("../src/decomp/live.js");
+const { cancelDecomposition } = await import("../src/decomp/run.js");
 
 function recorder() {
   const calls = [];
@@ -51,7 +52,7 @@ describe("decomposition cancel", () => {
       els,
     );
     app.state.isRunning = true;
-    await app.cancelDecomposition();
+    await cancelDecomposition(app);
     assert.equal(cancels, 1);
     assert.equal(els.cancelRun.disabled, true);
   });
@@ -63,7 +64,7 @@ describe("decomposition cancel", () => {
         cancels += 1;
       },
     });
-    await app.cancelDecomposition();
+    await cancelDecomposition(app);
     assert.equal(cancels, 0);
   });
 
@@ -78,7 +79,7 @@ describe("decomposition cancel", () => {
       els,
     );
     app.state.isRunning = true;
-    await app.cancelDecomposition();
+    await cancelDecomposition(app);
     assert.equal(els.cancelRun.disabled, false);
     assert.equal(app.setStatus.calls.at(-1)[1], "error");
   });

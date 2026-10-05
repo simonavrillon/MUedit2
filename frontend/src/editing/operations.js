@@ -1,8 +1,8 @@
 import { resetEditSlice } from "../state/actions.js";
-import { traceRange } from "../view/plots.js";
+import { traceRange } from "../signal/series.js";
 
-/** @typedef {import("../app/state.js").State} State */
-/** @typedef {import("../app/state.js").Selection} Selection */
+/** @typedef {import("../state/state.js").State} State */
+/** @typedef {import("../state/state.js").Selection} Selection */
 /** @typedef {import("../app/context.js").Span} Span */
 /** @typedef {ReturnType<typeof buildEditDropdownModel>} EditDropdownModel */
 /** @typedef {NonNullable<ReturnType<typeof getPulseViewMeta>>} PulseViewMeta */
@@ -127,7 +127,7 @@ export function fastestRateInView({ positions, rates }, view) {
  * @param {Selection} sel
  */
 function pulseBox(app, sel) {
-  const meta = app.getPulseViewMeta();
+  const meta = getPulseViewMeta(app.state);
   if (!meta) return null;
   const { s, e } = meta;
   const start = Math.max(s, Math.min(e, sel.start));

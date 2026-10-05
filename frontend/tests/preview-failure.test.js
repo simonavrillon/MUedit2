@@ -16,8 +16,9 @@ globalThis.window = {
 // The code under test logs expected failures; keep the test output readable.
 console.error = () => {};
 
-const { state: initialState } = await import("../src/app/state.js");
+const { state: initialState } = await import("../src/state/state.js");
 const { createApp } = await import("../src/app/create-app.js");
+const { runDecomposition } = await import("../src/decomp/run.js");
 
 const pristine = structuredClone(initialState);
 
@@ -125,7 +126,7 @@ describe("decomposition upload-token recovery", () => {
     state.rois = [{ start: 0, end: 3 }];
     const app = testApp(state, api);
 
-    await app.runDecomposition();
+    await runDecomposition(app);
 
     assert.deepEqual(previewPaths, ["/data/old.otb+"]);
     assert.deepEqual(sentTokens, ["old-token", "fresh-token"]);
@@ -153,7 +154,7 @@ describe("decomposition upload-token recovery", () => {
     };
     const app = testApp(state, api);
 
-    await app.runDecomposition();
+    await runDecomposition(app);
 
     assert.equal(previewCalls, 0);
     assert.deepEqual(app.setStatus.calls.at(-1), [
@@ -177,7 +178,7 @@ describe("decomposition upload-token recovery", () => {
     };
     const app = testApp(state, api);
 
-    await app.runDecomposition();
+    await runDecomposition(app);
 
     assert.equal(streamCalls, 1);
     assert.deepEqual(app.setStatus.calls.at(-1), [

@@ -1,11 +1,16 @@
+import {
+  ensureSettingsToggleIcon,
+  initLayoutResizePolicy,
+  toggleSettingsOpen,
+} from "../services/layout.js";
+
 /** @typedef {import("../context.js").App} App */
 
 /** @param {App} app */
 export function setupLayoutEvents(app) {
-  const { els, toggleSettingsOpen, setSettingsOpen, initLayoutResizePolicy } =
-    app;
+  const { els, setSettingsOpen } = app;
 
-  app.ensureSettingsToggleIcon();
+  ensureSettingsToggleIcon(els);
 
   /** @type {NodeListOf<HTMLElement> | HTMLElement[]} */
   const sectionHeaders =
@@ -34,7 +39,9 @@ export function setupLayoutEvents(app) {
     });
   });
 
-  els.settingsToggleBtn?.addEventListener("click", () => toggleSettingsOpen());
+  els.settingsToggleBtn?.addEventListener("click", () =>
+    toggleSettingsOpen(app),
+  );
   els.settingsOverlay?.addEventListener("click", () => setSettingsOpen(false));
 
   window.addEventListener("keydown", (e) => {
@@ -46,5 +53,5 @@ export function setupLayoutEvents(app) {
     }
   });
 
-  initLayoutResizePolicy();
+  initLayoutResizePolicy(app);
 }

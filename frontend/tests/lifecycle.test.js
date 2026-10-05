@@ -15,7 +15,7 @@ globalThis.window = {
   requestAnimationFrame: () => 0,
 };
 
-const { state: initialState } = await import("../src/app/state.js");
+const { state: initialState } = await import("../src/state/state.js");
 const { createApp } = await import("../src/app/create-app.js");
 const { renderActiveStage } = await import("../src/app/stages/lifecycle.js");
 
@@ -165,7 +165,7 @@ describe("createApp", () => {
       "setStatus",
       "persistNpzBySaveTarget",
       "handleRawFilePath",
-      "runDecomposition",
+      "renderRunStage",
       "loadDecompositionForEditByPath",
     ]) {
       assert.equal(typeof app[name], "function", name);

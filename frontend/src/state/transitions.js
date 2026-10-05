@@ -9,8 +9,8 @@ import {
   setUploadToken,
 } from "./actions.js";
 
-/** @typedef {import("../app/state.js").State} State */
-/** @typedef {import("../app/state.js").FileRef} FileRef */
+/** @typedef {import("./state.js").State} State */
+/** @typedef {import("./state.js").FileRef} FileRef */
 
 /**
  * Keeps raw file selection state updates consistent across all entry points.

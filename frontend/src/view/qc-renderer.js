@@ -5,12 +5,11 @@ import {
   drawRoiRects,
   nextFrame,
   prepareCanvas,
-  seriesPoints,
-  seriesRange,
   strokeSeries,
 } from "./plots.js";
+import { seriesPoints, seriesRange } from "../signal/series.js";
 import { gridDimensionsFor } from "../io/grid.js";
-import { pickRoiSlot } from "../signal/qc.js";
+import { pickRoiSlot, syncRois } from "../signal/qc.js";
 import { getCurrentGrid, roiStart, roiEnd } from "../state/selectors.js";
 import {
   addArtifactRegion,
@@ -27,7 +26,7 @@ import {
 /** @typedef {import("../app/context.js").App} App */
 /** @typedef {import("../app/context.js").Els} Els */
 /** @typedef {import("../app/context.js").RoiCanvasId} RoiCanvasId */
-/** @typedef {import("../app/state.js").State} State */
+/** @typedef {import("../state/state.js").State} State */
 /** @typedef {import("./plots.js").Overlay} Overlay */
 
 /**
@@ -96,14 +95,7 @@ export function refreshVisuals(app) {
  * @param {RoiCanvasId} canvasId
  */
 export function enableRoiSelection(app, canvasId) {
-  const {
-    state,
-    els,
-    syncRois,
-    refreshVisuals,
-    requestQcGridWindow,
-    setStatus,
-  } = app;
+  const { state, els, refreshVisuals, requestQcGridWindow, setStatus } = app;
   const canvas = els[canvasId];
   if (!canvas || canvas.dataset.roiBound === "1") return;
   canvas.dataset.roiBound = "1";
@@ -127,7 +119,7 @@ export function enableRoiSelection(app, canvasId) {
     if (!state.seriesLength) return;
     const { startSample, endSample } = toSamples(startX, endX);
     const nwin = Number(els.nwindows?.value) || 1;
-    syncRois(nwin);
+    syncRois(state, nwin);
     const span = {
       start: startSample,
       end: Math.max(startSample + 1, endSample),

@@ -1,7 +1,7 @@
 import { POSTPROCESS_MODES, DEFAULT_POSTPROCESS_MODE } from "./params.js";
 
 /** @typedef {import("../app/context.js").JsonObject} JsonObject */
-/** @typedef {import("../app/state.js").State} State */
+/** @typedef {import("../state/state.js").State} State */
 
 /** @typedef {"load" | "preprocess" | "decompose" | "postprocess" | "save"} RunPhase */
 /** @typedef {"running" | "done" | "failed"} RunStatus */

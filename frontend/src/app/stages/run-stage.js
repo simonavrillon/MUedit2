@@ -1,21 +1,23 @@
 import {
   autoSaveRunDecomposition as autoSaveRunDecompositionFeature,
-  cancelDecomposition as cancelDecompositionFeature,
-  runDecomposition as runDecompositionFeature,
+  cancelDecomposition,
+  runDecomposition,
   handleStreamMessage as handleStreamMessageFeature,
 } from "../../decomp/run.js";
 import { buildRunPlan } from "../../decomp/live.js";
-import {
-  renderRunStage as renderRunStageView,
-  renderRunTime,
-  updateRunDots as updateRunDotsView,
-} from "../../view/run-live.js";
+import { renderRunStage as renderRunStageView } from "../../view/run-live.js";
 import {
   DEFAULT_POSTPROCESS_MODE,
   POSTPROCESS_MODES,
   buildDecomposeParams,
 } from "../../decomp/params.js";
 import { oncePerFrame } from "../../view/plots.js";
+import {
+  isToggleOn,
+  setupLockedOnToggle,
+  setupToggle,
+  toggleConditional,
+} from "../../view/controls.js";
 
 /** @typedef {import("../context.js").App} App */
 /** @typedef {import("../context.js").RunStage} RunStage */
@@ -44,9 +46,9 @@ export function createRunStageService(app) {
     return buildDecomposeParams({
       niter: Number(els.niter?.value) || 150,
       nwindows: Number(els.nwindows?.value) || 1,
-      peelOn: app.isToggleOn(els.peelOffToggle),
+      peelOn: isToggleOn(els.peelOffToggle),
       postprocessMode: els.postprocessMode?.value || "windowed",
-      covOn: app.isToggleOn(els.covToggle),
+      covOn: isToggleOn(els.covToggle),
       peelWindow: Number(els.peelOffWindow?.value) || 25,
       covVal: Number(els.covValue?.value) || 0.5,
       silVal: Number(els.silValue?.value) || 0.9,
@@ -73,13 +75,8 @@ export function createRunStageService(app) {
   return {
     renderRunStage,
     scheduleRunRender: oncePerFrame(() => app.renderRunStage()),
-    renderRunClock: () => renderRunTime(els, state.runLive, Date.now()),
-    updateRunDots: (change) =>
-      state.runLive && updateRunDotsView(els, state.runLive, change),
     autoSaveRunDecomposition: () => autoSaveRunDecompositionFeature(app),
     handleStreamMessage: (msg) => handleStreamMessageFeature(app, msg),
-    runDecomposition: () => runDecompositionFeature(app),
-    cancelDecomposition: () => cancelDecompositionFeature(app),
     updateStartAvailability,
     buildParams,
   };
@@ -87,46 +84,16 @@ export function createRunStageService(app) {
 
 /** @param {App} app */
 export function setupRunEvents(app) {
-  const {
-    els,
-    state,
-    runDecomposition,
-    cancelDecomposition,
-    enableRoiSelection,
-    syncRois,
-    refreshVisuals,
-    setupToggle,
-    setupLockedOnToggle,
-    toggleConditional,
-    updateStartAvailability,
-    renderAuxiliaryChannels,
-    runAutoQc,
-    toggleArtifactMode,
-    removeLastArtifact,
-  } = app;
+  const { els, state } = app;
 
-  els.start?.addEventListener("click", runDecomposition);
-  els.runStartBtn?.addEventListener("click", runDecomposition);
-  els.runAgainBtn?.addEventListener("click", runDecomposition);
-  els.cancelRun?.addEventListener("click", cancelDecomposition);
+  const run = () => void runDecomposition(app);
+  els.start?.addEventListener("click", run);
+  els.runStartBtn?.addEventListener("click", run);
+  els.runAgainBtn?.addEventListener("click", run);
+  els.cancelRun?.addEventListener("click", () => void cancelDecomposition(app));
   els.runRetrySaveBtn?.addEventListener("click", () => {
     void app.autoSaveRunDecomposition();
   });
-  els.qcAutoBtn?.addEventListener("click", runAutoQc);
-  els.artifactAddBtn?.addEventListener("click", toggleArtifactMode);
-  els.artifactRemoveBtn?.addEventListener("click", removeLastArtifact);
-  refreshVisuals();
-
-  enableRoiSelection("emgCanvas");
-
-  if (els.nwindows) {
-    els.nwindows.addEventListener("change", () => {
-      const nwin = Number(els.nwindows.value) || 1;
-      syncRois(nwin);
-      refreshVisuals();
-      els.nwindows.blur();
-    });
-  }
 
   setupToggle(els.peelOffToggle, (on) =>
     toggleConditional("peelOffSettings", on),
@@ -147,7 +114,7 @@ export function setupRunEvents(app) {
   setupLockedOnToggle(els.silToggle, (on) =>
     toggleConditional("silSettings", on),
   );
-  updateStartAvailability();
+  app.updateStartAvailability();
 
   // Keep the plan shown before a run in step with the settings panel.
   const refreshPlan = () => {
@@ -155,9 +122,4 @@ export function setupRunEvents(app) {
   };
   els.settingsPanel?.addEventListener("change", refreshPlan);
   els.settingsPanel?.addEventListener("click", refreshPlan);
-
-  els.auxSelector?.addEventListener("change", () => {
-    renderAuxiliaryChannels();
-    els.auxSelector.blur();
-  });
 }

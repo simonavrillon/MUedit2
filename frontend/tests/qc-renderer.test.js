@@ -16,8 +16,9 @@ import {
 
 installDom();
 const { COLORS, traceColors } = await import("../src/config.js");
-const { state: initialState } = await import("../src/app/state.js");
+const { state: initialState } = await import("../src/state/state.js");
 const { createApp } = await import("../src/app/create-app.js");
+const { requestAutoQc } = await import("../src/signal/qc.js");
 const { buildSelections, renderArtifactControls } =
   await import("../src/view/qc-renderer.js");
 
@@ -416,7 +417,7 @@ describe("automatic QC", () => {
       ],
     });
     app.setStatus = recorder();
-    assert.equal(await app.runAutoQc(), true);
+    assert.equal(await requestAutoQc(app), true);
     assert.deepEqual(app.state.artifactRegions, [
       { start: 100, end: 200 },
       { start: 400, end: 450 },

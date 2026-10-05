@@ -24,7 +24,7 @@ import { renderSelectPair } from "./select-renderers.js";
 /** @typedef {import("../app/context.js").App} App */
 /** @typedef {import("../app/context.js").Els} Els */
 /** @typedef {import("../app/context.js").Span} Span */
-/** @typedef {import("../app/state.js").State} State */
+/** @typedef {import("../state/state.js").State} State */
 /** @typedef {import("../editing/operations.js").EditDropdownModel} EditDropdownModel */
 /** @typedef {typeof getCanvasPlotMetrics} PlotMetricsFn */
 
@@ -208,7 +208,7 @@ export function renderEditDropdownsView(els, model) {
  * The current MU's window as drawn: a flagged MU shows as a flat line at 0,
  * with its discharges on it.
  *
- * @param {import("../app/state.js").PulseView} shown
+ * @param {import("../state/state.js").PulseView} shown
  * @param {boolean} flagged
  */
 function displayedPulse(shown, flagged) {
@@ -236,7 +236,7 @@ function displayedPulse(shown, flagged) {
 
 /** @param {App} app */
 export function renderEditExplorer(app) {
-  const { els, state, renderEditDropdowns, renderInstantaneousDr } = app;
+  const { els, state, renderEditDropdowns } = app;
 
   renderEditDropdowns();
   const muIdx = state.edit.currentMu ?? 0;
@@ -293,7 +293,7 @@ export function renderEditExplorer(app) {
       getCanvasPlotMetrics,
     );
   }
-  renderInstantaneousDr();
+  renderInstantaneousDr(app);
   app.ensureEditPulseView();
 }
 

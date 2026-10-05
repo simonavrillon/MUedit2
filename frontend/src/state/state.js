@@ -1,6 +1,6 @@
-/** @typedef {import("./context.js").Span} Span */
-/** @typedef {import("./context.js").StageKey} StageKey */
-/** @typedef {import("./context.js").JsonObject} JsonObject */
+/** @typedef {import("../app/context.js").Span} Span */
+/** @typedef {import("../app/context.js").StageKey} StageKey */
+/** @typedef {import("../app/context.js").JsonObject} JsonObject */
 
 /** @typedef {{ name?: string, path?: string }} FileRef */
 /** @typedef {Span & { yMin?: number, yMax?: number }} Selection */

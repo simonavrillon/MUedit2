@@ -15,7 +15,7 @@ import {
 
 installDom();
 const { COLORS } = await import("../src/config.js");
-const { state: initialState } = await import("../src/app/state.js");
+const { state: initialState } = await import("../src/state/state.js");
 const { createApp } = await import("../src/app/create-app.js");
 const {
   bindEditCanvas,

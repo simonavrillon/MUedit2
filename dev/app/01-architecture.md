@@ -15,7 +15,8 @@ index.html
 initializeApp():
   1. app = createApp({ state, els, api })  # one context, every service merged in
   2. setupImportEvents(app)              # browse button, stepper clicks
-     setupRunEvents(app)                 # start button, toggles, MU dropdowns
+     setupQcEvents(app)                  # auto-QC, artifact buttons, ROI drag
+     setupRunEvents(app)                 # start/cancel, run settings toggles
      setupEditEvents(app)                # edit toolbar, canvas bindings, keyboard
      setupLayoutEvents(app)              # settings icon, section collapse, overlay, ESC
   3. app.updateStepAvailability()        # disable run/edit steps if no file
@@ -31,11 +32,11 @@ initializeApp():
 
 ## The Application Context
 
-Every service and feature function receives one object, `app`, typed as `App` in `app/context.js`:
+Feature functions receive one object, `app`, typed as `App` in `app/context.js`. It holds the three singletons and the services one module calls in another:
 
 ```
 App = Core                # state, els, api — the three singletons
-    & UiService           # status, stepper, settings panel, toggles, switchStage
+    & UiService           # status, stepper, settings panel, switchStage, redraws
     & FileSessionService  # file-type detection, upload indicator, BIDS form fields, save
     & QcStage             # preview, channel grid, ROI/artifact selection, auto-QC
     & RunStage            # decomposition run, stream handling, the live run page
@@ -55,11 +56,16 @@ Each factory receives the same `app` it is being merged into. The QC, run and ed
 
 - **A factory reads only `state`, `els` and `api` while it is being constructed.** Everything else is reached as `app.x()` (or destructured from `app`) inside a function body, so it is looked up at call time, after every service has been merged.
 
-There are no forwarders, thunks or per-stage `ctx` bags: a feature function such as `removeOutliers(app)` in `editing-service.js` destructures the members it uses straight from `app`.
+A feature function such as `removeOutliers(app)` in `editing-service.js` destructures the members it uses straight from `app`.
 
-### What is not in the context
+### What belongs in the context
 
-Pure helpers are imported where they are used rather than injected: plot drawing (`view/plots.js`), BIDS naming (`io/bids.js`), state actions and selectors (`state/`), parameter building (`decomp/params.js`), and `COLORS`. A module only needs `app` for state, the DOM, the API, or another service.
+A member goes on `app` when another module calls it and goes through `app` to reach it: the QC renderer redrawing the aux channels, the run page preloading the edit stage, the import stage opening a raw file. Tests replace those members with recorders, which is what keeps each stage testable on its own. The `schedule…` methods are there too, because each holds its own once-per-frame state.
+
+Everything else is imported where it is used:
+
+- **A stage's own actions.** `setupEditEvents` wires the toolbar to `undoEdit(app)`, `saveEditedFile(app)` and the rest from `editing-service.js`; `setupRunEvents` wires start and cancel to `runDecomposition(app)` and `cancelDecomposition(app)`; `setupQcEvents` wires auto-QC and the artifact buttons. None of these is reached through `app`.
+- **Pure helpers:** plot drawing (`view/plots.js`), series math (`signal/series.js`), toggles and busy buttons (`view/controls.js`), BIDS naming (`io/bids.js`), state actions and selectors (`state/`), parameter building (`decomp/params.js`), and `COLORS`.
 
 ### Type checking
 
@@ -70,10 +76,10 @@ The annotations follow five rules:
 - **Intended types.** A parameter is typed as what callers should pass. When the function guards against missing or malformed input, write `T | null | undefined` and keep the guard: `@param {Span[] | null | undefined} rois`.
 - **`unknown` only for values that really can be anything:** caught errors (`errorMessage(err)`) and the helpers that validate raw input (`toFiniteNumber`, the payload normalisers in `api/payloads.js`).
 - **Untyped backend JSON is `JsonObject`** (`Record<string, any>`, defined in `context.js`). A payload with guaranteed fields gets a named type that intersects `JsonObject` with them, like `PreviewPayload`. Wire formats are converted where they enter: the backend sends regions (ROIs, artifact windows) as `[start, end]` pairs, and `toSpans` in `api/payloads.js` turns them into `Span` objects, so state and views never see a pair.
-- **Shared shapes have names**, declared next to the code that owns them: state shapes in `state.js` (`Selection`, `EditHistoryEntry`, `Bookmark`), cross-module contracts in `context.js` (`RoiEditRequest`, `WorkflowStep`), and view models beside their builders (`EditDropdownModel = ReturnType<typeof buildEditDropdownModel>`). Single-use parameter bags stay inline.
+- **Shared shapes have names**, declared next to the code that owns them: state shapes in `state/state.js` (`Selection`, `EditHistoryEntry`, `Bookmark`), cross-module contracts in `context.js` (`RoiEditRequest`, `WorkflowStep`), and view models beside their builders (`EditDropdownModel = ReturnType<typeof buildEditDropdownModel>`). Single-use parameter bags stay inline.
 - **Service and stage methods take their types from `context.js`:** `/** @type {EditStage["duplicateMu"]} */`. Only private helpers inside a factory carry their own `@param`s.
 
-To add a service method: add its signature to the matching typedef in `context.js`, then implement it in the factory under `/** @type {Typedef["name"]} */` and add it to the factory's return object.
+To add a service method, first check it belongs in the context (see above). Then add its signature to the matching typedef in `context.js`, implement it in the factory under `/** @type {Typedef["name"]} */` and add it to the factory's return object.
 
 ### Wiring Topology
 
@@ -98,14 +104,14 @@ To add a service method: add its signature to the matching typedef in `context.j
         │    ui · fileSession · qcStage · runStage · editStage  │
         └──────────────────────────┬───────────────────────────┘
                                    v
-        setupImportEvents · setupRunEvents · setupEditEvents · setupLayoutEvents
+        setupImportEvents · setupQcEvents · setupRunEvents · setupEditEvents · setupLayoutEvents
 ```
 
 ---
 
 ## State Model
 
-### Global state (`state.js`)
+### Global state (`state/state.js`)
 
 ```javascript
 {
@@ -235,7 +241,8 @@ The import and layout stages have no service: `setupImportEvents` and `setupLayo
 | Setup | File | Listeners |
 |---|---|---|
 | `setupImportEvents` | import-stage.js | browseSignalBtn click, stepper chip clicks |
-| `setupRunEvents` | run-stage.js | start click, auto-QC and artifact buttons, nwindows change, toggles, dropdowns |
+| `setupQcEvents` | qc-stage.js | auto-QC and artifact buttons, ROI drag on the overview, nwindows change, aux selector |
+| `setupRunEvents` | run-stage.js | start, cancel and retry buttons, run settings toggles, the plan |
 | `setupEditEvents` | edit-stage.js | all edit toolbar buttons, canvas bindings, keyboard |
 | `setupLayoutEvents` | layout-stage.js | settings icon, section collapse, settings toggle, ESC |
 

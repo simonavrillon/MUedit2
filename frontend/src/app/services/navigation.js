@@ -3,6 +3,9 @@ import {
   setEditView,
   setShowBookmark,
 } from "../../state/actions.js";
+import { applyLabeledToggle, runEditAction } from "../../view/controls.js";
+import { getEditMuIndicesForGrid } from "../../state/selectors.js";
+import { removeOutliers, requestFilterUpdate } from "./editing-service.js";
 
 /** @typedef {import("../context.js").App} App */
 /** @typedef {import("../context.js").Els} Els */
@@ -10,7 +13,7 @@ import {
 /** @typedef {import("../context.js").StageKey} StageKey */
 /** @typedef {import("../context.js").Tone} Tone */
 /** @typedef {import("../context.js").WorkflowStep} WorkflowStep */
-/** @typedef {import("../state.js").State} State */
+/** @typedef {import("../../state/state.js").State} State */
 /** @typedef {"zoom_in" | "zoom_out" | "scroll_left" | "scroll_right"} ViewAction */
 
 /**
@@ -216,7 +219,7 @@ function goToMu(app, direction, stage) {
   const { state } = app;
   if (stage === "edit") {
     const gridIdx = state.edit.currentMuGrid || 0;
-    const mus = app.getEditMuIndices(gridIdx);
+    const mus = getEditMuIndicesForGrid(app.state, gridIdx);
     if (!mus.length) return;
     const current = state.edit.currentMu ?? mus[0];
     const idx = mus.indexOf(current);
@@ -232,15 +235,7 @@ function goToMu(app, direction, stage) {
  * @param {KeyboardEvent} e
  */
 export function handleKeyboardNavigation(app, e) {
-  const {
-    state,
-    els,
-    setEditMode,
-    runEditAction,
-    removeOutliers,
-    updateMuFilter,
-    applyLabeledToggle,
-  } = app;
+  const { state, els, setEditMode } = app;
 
   const active = document.activeElement;
   if (active && ["INPUT", "TEXTAREA", "SELECT"].includes(active.tagName))
@@ -257,11 +252,11 @@ export function handleKeyboardNavigation(app, e) {
       e.preventDefault();
       return;
     } else if (key === "r") {
-      void runEditAction(els.editOutliersBtn, () => removeOutliers());
+      void runEditAction(els.editOutliersBtn, () => removeOutliers(app));
       e.preventDefault();
       return;
     } else if (key === " ") {
-      void runEditAction(els.editUpdateBtn, updateMuFilter);
+      void runEditAction(els.editUpdateBtn, () => requestFilterUpdate(app));
       e.preventDefault();
       return;
     } else if (key === "d") {

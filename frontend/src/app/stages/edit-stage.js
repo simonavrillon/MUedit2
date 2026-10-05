@@ -1,5 +1,4 @@
 import {
-  getPulseViewMeta as getPulseViewMetaFeature,
   resetEditState as resetEditStateFeature,
   addSpikesInSelection as addSpikesInSelectionFeature,
   addArtifactInSelection as addArtifactInSelectionFeature,
@@ -9,25 +8,23 @@ import {
 } from "../../editing/operations.js";
 import {
   renderEditExplorer as renderEditExplorerFeature,
-  renderInstantaneousDr as renderInstantaneousDrFeature,
   renderEditTimeline as renderEditTimelineFeature,
   renderEditDropdownsView,
-  bindEditCanvas as bindEditCanvasFeature,
-  bindEditDrCanvas as bindEditDrCanvasFeature,
-  bindEditTimeline as bindEditTimelineFeature,
+  bindEditCanvas,
+  bindEditDrCanvas,
+  bindEditTimeline,
 } from "../../view/edit-canvas.js";
 import {
-  saveEditedFile as saveEditedFileFeature,
-  loadDecompositionForEdit as loadDecompositionForEditFeature,
+  saveEditedFile,
+  loadDecompositionForEdit,
   requestRoiEdit as requestRoiEditFeature,
-  requestFilterUpdate as requestFilterUpdateFeature,
-  removeOutliers as removeOutliersFeature,
-  flagMuForDeletion as flagMuForDeletionFeature,
-  removeDuplicateMus as removeDuplicateMusFeature,
-  resetCurrentMuEdits as resetCurrentMuEditsFeature,
-  duplicateMu as duplicateMuFeature,
-  undoEdit as undoEditFeature,
-  restoreEditSession as restoreEditSessionFeature,
+  requestFilterUpdate,
+  removeOutliers,
+  flagMuForDeletion,
+  removeDuplicateMus,
+  resetCurrentMuEdits,
+  duplicateMu,
+  undoEdit,
   prepareEditGrid,
 } from "../services/editing-service.js";
 import {
@@ -42,6 +39,11 @@ import { getCanvasPlotMetrics, oncePerFrame } from "../../view/plots.js";
 import { handleKeyboardNavigation } from "../services/navigation.js";
 import { createViewFetcher } from "../services/view-fetcher.js";
 import { errorMessage } from "../services/error-service.js";
+import {
+  applyLabeledToggle,
+  runEditAction,
+  setEditActionBusy,
+} from "../../view/controls.js";
 
 /** @typedef {import("../context.js").App} App */
 /** @typedef {import("../context.js").EditStage} EditStage */
@@ -55,12 +57,12 @@ export function createEditStageService(app) {
 
   /** @type {EditStage["refreshEditModeButtons"]} */
   function refreshEditModeButtons() {
-    app.setEditActionBusy(els.editAddBtn, state.edit.mode === "add");
-    app.setEditActionBusy(
+    setEditActionBusy(els.editAddBtn, state.edit.mode === "add");
+    setEditActionBusy(
       els.editAddArtifactBtn,
       state.edit.mode === "add_artifact",
     );
-    app.setEditActionBusy(
+    setEditActionBusy(
       els.editDeleteSpikeBtn,
       state.edit.mode === "delete_spikes",
     );
@@ -86,11 +88,6 @@ export function createEditStageService(app) {
     return getCanvasPlotMetrics(canvas, true).plotWidth || 1;
   }
 
-  /** @type {EditStage["getPulseViewMeta"]} */
-  function getPulseViewMeta() {
-    return getPulseViewMetaFeature(state);
-  }
-
   /** @type {EditStage["resetEditState"]} */
   function resetEditState() {
     resetEditStateFeature(app);
@@ -98,17 +95,14 @@ export function createEditStageService(app) {
     if (els.bidsProject) els.bidsProject.value = "";
   }
 
-  /** @type {EditStage["getEditMuIndices"]} */
-  function getEditMuIndices(gridIdx) {
-    return getEditMuIndicesForGrid(state, gridIdx);
-  }
-
   /** What the dropdowns last showed; a redraw that changes none of it leaves them be. */
   let shownDropdowns = "";
 
   /** @type {EditStage["renderEditDropdowns"]} */
   function renderEditDropdowns() {
-    const model = buildEditDropdownModel(state, getEditMuIndices);
+    const model = buildEditDropdownModel(state, (grid) =>
+      getEditMuIndicesForGrid(state, grid),
+    );
     if (model.needsGridSwitch) {
       setEditCurrentMuGrid(state, model.targetGrid, { resetView: false });
     }
@@ -124,11 +118,6 @@ export function createEditStageService(app) {
     if (shown === shownDropdowns) return;
     shownDropdowns = shown;
     renderEditDropdownsView(els, model);
-  }
-
-  /** @type {EditStage["renderInstantaneousDr"]} */
-  function renderInstantaneousDr() {
-    renderInstantaneousDrFeature(app);
   }
 
   /** @type {EditStage["renderEditExplorer"]} */
@@ -182,15 +171,9 @@ export function createEditStageService(app) {
     });
   }
 
-  /** @type {EditStage["undoEdit"]} */
-  const undoEdit = () => undoEditFeature(app);
-  /** @type {EditStage["restoreEditSession"]} */
-  const restoreEditSession = () => restoreEditSessionFeature(app);
   /** @type {EditStage["requestRoiEdit"]} */
   const requestRoiEdit = (action, payload) =>
     requestRoiEditFeature(app, action, payload);
-  /** @type {EditStage["updateMuFilter"]} */
-  const updateMuFilter = () => requestFilterUpdateFeature(app);
   /** @type {EditStage["addSpikesInSelection"]} */
   const addSpikesInSelection = (sel) => addSpikesInSelectionFeature(app, sel);
   /** @type {EditStage["addArtifactInSelection"]} */
@@ -201,66 +184,29 @@ export function createEditStageService(app) {
     deleteSpikesInSelectionFeature(app, sel);
   /** @type {EditStage["deleteDrInSelection"]} */
   const deleteDrInSelection = (sel) => deleteDrInSelectionFeature(app, sel);
-  /** @type {EditStage["removeOutliers"]} */
-  const removeOutliers = () => removeOutliersFeature(app);
-  /** @type {EditStage["flagMuForDeletion"]} */
-  const flagMuForDeletion = () => flagMuForDeletionFeature(app);
-  /** @type {EditStage["resetCurrentMuEdits"]} */
-  const resetCurrentMuEdits = () => resetCurrentMuEditsFeature(app);
-  /** @type {EditStage["removeDuplicateMus"]} */
-  const removeDuplicateMus = () => removeDuplicateMusFeature(app);
-  /** @type {EditStage["duplicateMu"]} */
-  const duplicateMu = () => duplicateMuFeature(app);
-  /** @type {EditStage["bindEditCanvas"]} */
-  const bindEditCanvas = () => bindEditCanvasFeature(app);
-  /** @type {EditStage["bindEditDrCanvas"]} */
-  const bindEditDrCanvas = () => bindEditDrCanvasFeature(app);
-  /** @type {EditStage["bindEditTimeline"]} */
-  const bindEditTimeline = () => bindEditTimelineFeature(app);
-  /** @type {EditStage["saveEditedFile"]} */
-  const saveEditedFile = () => saveEditedFileFeature(app);
-  /** @type {EditStage["loadDecompositionForEdit"]} */
-  const loadDecompositionForEdit = (file, absolutePath, options) =>
-    loadDecompositionForEditFeature(app, file, absolutePath, options);
 
   /** @type {EditStage["loadDecompositionForEditByPath"]} */
   function loadDecompositionForEditByPath(path, options) {
     const name = path.split("/").pop()?.split("\\").pop() || path;
-    return loadDecompositionForEdit({ name }, path, options);
+    return loadDecompositionForEdit(app, { name }, path, options);
   }
 
   return {
-    getEditMuIndices,
-    getPulseViewMeta,
     getPulsePlotHeight: () => plotHeight(els.editPulseCanvas),
     getDrPlotHeight: () => plotHeight(els.editDrCanvas),
     resetEditState,
     refreshEditModeButtons,
     setEditMode,
     renderEditDropdowns,
-    undoEdit,
     renderEditExplorer,
     scheduleEditRender,
     ensureEditPulseView,
-    restoreEditSession,
-    renderInstantaneousDr,
-    bindEditCanvas,
-    bindEditDrCanvas,
-    bindEditTimeline,
     requestRoiEdit,
-    updateMuFilter,
     addSpikesInSelection,
     addArtifactInSelection,
     deleteSpikesInSelection,
     deleteDrInSelection,
-    removeOutliers,
-    flagMuForDeletion,
-    resetCurrentMuEdits,
-    saveEditedFile,
-    loadDecompositionForEdit,
     loadDecompositionForEditByPath,
-    duplicateMu,
-    removeDuplicateMus,
   };
 }
 
@@ -269,27 +215,14 @@ export function setupEditEvents(app) {
   const {
     els,
     state,
-    bindEditCanvas,
-    bindEditDrCanvas,
-    bindEditTimeline,
     renderEditExplorer,
-    runEditAction,
-    saveEditedFile,
-    resetCurrentMuEdits,
-    updateMuFilter,
-    removeOutliers,
-    flagMuForDeletion,
-    duplicateMu,
-    removeDuplicateMus,
-    undoEdit,
     setEditMode,
     refreshEditModeButtons,
-    applyLabeledToggle,
   } = app;
 
-  bindEditCanvas();
-  bindEditDrCanvas();
-  bindEditTimeline();
+  bindEditCanvas(app);
+  bindEditDrCanvas(app);
+  bindEditTimeline(app);
 
   els.editMuGridSelect?.addEventListener("change", () => {
     const idx = Number(els.editMuGridSelect.value) || 0;
@@ -307,13 +240,13 @@ export function setupEditEvents(app) {
   });
 
   els.editSaveBtn?.addEventListener("click", () => {
-    void runEditAction(els.editSaveBtn, saveEditedFile);
+    void runEditAction(els.editSaveBtn, () => saveEditedFile(app));
   });
   els.editResetBtn?.addEventListener("click", () => {
-    void runEditAction(els.editResetBtn, () => resetCurrentMuEdits());
+    void runEditAction(els.editResetBtn, () => resetCurrentMuEdits(app));
   });
   els.editUpdateBtn?.addEventListener("click", () => {
-    void runEditAction(els.editUpdateBtn, updateMuFilter);
+    void runEditAction(els.editUpdateBtn, () => requestFilterUpdate(app));
   });
   if (els.editPeelOffToggle) {
     const peelOffConfig = {
@@ -346,19 +279,19 @@ export function setupEditEvents(app) {
     });
   }
   els.editOutliersBtn?.addEventListener("click", () => {
-    void runEditAction(els.editOutliersBtn, () => removeOutliers());
+    void runEditAction(els.editOutliersBtn, () => removeOutliers(app));
   });
   els.editFlagBtn?.addEventListener("click", () => {
-    void runEditAction(els.editFlagBtn, () => flagMuForDeletion());
+    void runEditAction(els.editFlagBtn, () => flagMuForDeletion(app));
   });
   els.editDuplicateBtn?.addEventListener("click", () => {
-    void runEditAction(els.editDuplicateBtn, () => duplicateMu());
+    void runEditAction(els.editDuplicateBtn, () => duplicateMu(app));
   });
   els.editDeduplicateBtn?.addEventListener("click", () => {
-    void runEditAction(els.editDeduplicateBtn, () => removeDuplicateMus());
+    void runEditAction(els.editDeduplicateBtn, () => removeDuplicateMus(app));
   });
   els.editUndoBtn?.addEventListener("click", () => {
-    void runEditAction(els.editUndoBtn, () => undoEdit());
+    void runEditAction(els.editUndoBtn, () => undoEdit(app));
   });
   els.editAddBtn?.addEventListener("click", () => {
     setEditMode("add", "Drag a box on pulse train to add spikes");

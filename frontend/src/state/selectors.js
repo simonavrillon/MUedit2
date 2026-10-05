@@ -1,4 +1,4 @@
-/** @typedef {import("../app/state.js").State} State */
+/** @typedef {import("./state.js").State} State */
 /** @typedef {import("../app/context.js").Span} Span */
 
 /**

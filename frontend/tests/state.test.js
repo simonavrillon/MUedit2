@@ -12,7 +12,7 @@ globalThis.window = {
   },
 };
 
-const { state: initialState } = await import("../src/app/state.js");
+const { state: initialState } = await import("../src/state/state.js");
 const actions = await import("../src/state/actions.js");
 const selectors = await import("../src/state/selectors.js");
 const { beginRawPreviewTransition, rollbackRawPreviewTransition } =

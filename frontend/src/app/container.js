@@ -3,10 +3,12 @@ import { createApiClient } from "../api/client.js";
 import { createApp } from "./create-app.js";
 import { els } from "./dom.js";
 import { apiFetch, apiJson, SESSION_ID, waitForBackend } from "./http.js";
-import { state } from "./state.js";
+import { state } from "../state/state.js";
 import { setupEditEvents } from "./stages/edit-stage.js";
+import { restoreEditSession } from "./services/editing-service.js";
 import { setupImportEvents } from "./stages/import-stage.js";
 import { setupLayoutEvents } from "./stages/layout-stage.js";
+import { setupQcEvents } from "./stages/qc-stage.js";
 import { setupRunEvents } from "./stages/run-stage.js";
 
 export async function initializeApp() {
@@ -25,6 +27,7 @@ export async function initializeApp() {
     if (!event.persisted) app.api.closeSession();
   });
   setupImportEvents(app);
+  setupQcEvents(app);
   setupRunEvents(app);
   setupEditEvents(app);
   setupLayoutEvents(app);
@@ -38,7 +41,7 @@ export async function initializeApp() {
     if (els.browseSignalBtn) els.browseSignalBtn.disabled = false;
     app.setStatus("", "muted");
     // A reloaded page picks up the open edit session.
-    await app.restoreEditSession();
+    await restoreEditSession(app);
   } else {
     app.setStatus("Backend unreachable — please restart the app", "error");
   }

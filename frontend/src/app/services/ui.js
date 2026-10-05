@@ -5,12 +5,7 @@ import {
   updateStepAvailability as updateStepAvailabilityController,
   updateWorkflowStepper as updateWorkflowStepperController,
 } from "./navigation.js";
-import {
-  ensureSettingsToggleIcon as ensureSettingsToggleIconController,
-  initLayoutResizePolicy as initLayoutResizePolicyController,
-  setSettingsOpen as setSettingsOpenController,
-  toggleSettingsOpen as toggleSettingsOpenController,
-} from "./layout.js";
+import { setSettingsOpen as setSettingsOpenController } from "./layout.js";
 import {
   renderActiveStage,
   switchStage as switchStageController,
@@ -47,15 +42,8 @@ export function createUiService(app) {
 
   /** @type {UiService["scheduleLayoutRerender"]} */
   const scheduleLayoutRerender = oncePerFrame(() => renderActiveStage(app));
-  /** @type {UiService["initLayoutResizePolicy"]} */
-  const initLayoutResizePolicy = () => initLayoutResizePolicyController(app);
   /** @type {UiService["setSettingsOpen"]} */
   const setSettingsOpen = (open) => setSettingsOpenController(app, open);
-  /** @type {UiService["toggleSettingsOpen"]} */
-  const toggleSettingsOpen = () => toggleSettingsOpenController(app);
-  /** @type {UiService["ensureSettingsToggleIcon"]} */
-  const ensureSettingsToggleIcon = () =>
-    ensureSettingsToggleIconController(els);
   /** @type {UiService["switchStage"]} */
   const switchStage = (target) => switchStageController(app, target);
   /** @type {UiService["populateGridTabs"]} */
@@ -63,127 +51,15 @@ export function createUiService(app) {
   /** @type {UiService["showWorkspace"]} */
   const showWorkspace = (options = {}) => showWorkspaceController(app, options);
 
-  /**
-   * @param {HTMLElement | null | undefined} btn
-   * @param {boolean} on
-   */
-  function applyToggle(btn, on) {
-    if (!btn) return;
-    const label =
-      btn.dataset.label || (btn.textContent || "").split(":")[0] || "Toggle";
-    btn.dataset.state = on ? "on" : "off";
-    btn.setAttribute("aria-pressed", on ? "true" : "false");
-    btn.classList.toggle("on", on);
-    btn.textContent = `${label}: ${on ? "On" : "Off"}`;
-  }
-
-  /** @type {UiService["applyLabeledToggle"]} */
-  function applyLabeledToggle(btn, on, { shortSel, fullSel, prefix }) {
-    if (!btn) return;
-    btn.dataset.state = on ? "on" : "off";
-    btn.setAttribute("aria-pressed", on ? "true" : "false");
-    btn.classList.toggle("on", on);
-    const label = on ? "On" : "Off";
-    const shortEl = btn.querySelector(shortSel);
-    const fullEl = btn.querySelector(fullSel);
-    if (shortEl) shortEl.textContent = label;
-    if (fullEl) fullEl.textContent = `${prefix}: ${label}`;
-  }
-
-  /** @type {UiService["isToggleOn"]} */
-  function isToggleOn(btn) {
-    return btn?.dataset.state === "on";
-  }
-
-  /** @type {UiService["toggleConditional"]} */
-  function toggleConditional(id, show) {
-    const el = document.getElementById(id);
-    if (el) {
-      el.classList.toggle("hidden", !show);
-    }
-  }
-
-  /** @type {UiService["setupToggle"]} */
-  function setupToggle(btn, onChange) {
-    if (!btn) return;
-    btn.setAttribute("tabindex", "0");
-    applyToggle(btn, isToggleOn(btn));
-    if (onChange) {
-      onChange(isToggleOn(btn));
-    }
-    btn.addEventListener("click", () => {
-      const next = !isToggleOn(btn);
-      applyToggle(btn, next);
-      if (onChange) onChange(next);
-    });
-    btn.addEventListener("keydown", (e) => {
-      if (e.key === " " || e.key === "Enter") {
-        e.preventDefault();
-        btn.click();
-      }
-    });
-  }
-
-  /** @type {UiService["setupLockedOnToggle"]} */
-  function setupLockedOnToggle(btn, onChange) {
-    if (!btn) return;
-    btn.setAttribute("tabindex", "0");
-    btn.setAttribute("aria-disabled", "true");
-    btn.title = "This filter is always enabled";
-    applyToggle(btn, true);
-    if (onChange) onChange(true);
-    btn.addEventListener("click", (e) => {
-      e.preventDefault();
-      applyToggle(btn, true);
-    });
-    btn.addEventListener("keydown", (e) => {
-      if (e.key === " " || e.key === "Enter") {
-        e.preventDefault();
-        applyToggle(btn, true);
-      }
-    });
-  }
-
-  /** @type {UiService["setEditActionBusy"]} */
-  function setEditActionBusy(button, busy) {
-    if (!button) return;
-    button.classList.toggle("is-running", !!busy);
-    button.setAttribute("aria-busy", busy ? "true" : "false");
-  }
-
-  /** @type {UiService["runEditAction"]} */
-  async function runEditAction(button, fn) {
-    if (!button) return fn();
-    if (button.dataset.busy === "1") return undefined;
-    button.dataset.busy = "1";
-    setEditActionBusy(button, true);
-    try {
-      return await fn();
-    } finally {
-      delete button.dataset.busy;
-      setEditActionBusy(button, false);
-    }
-  }
-
   return {
     setStatus,
     setEditStatus,
     updateWorkflowStepper,
     updateStepAvailability,
     setSettingsOpen,
-    toggleSettingsOpen,
-    ensureSettingsToggleIcon,
-    initLayoutResizePolicy,
     scheduleLayoutRerender,
     switchStage,
     showWorkspace,
     populateGridTabs,
-    setupToggle,
-    setupLockedOnToggle,
-    toggleConditional,
-    isToggleOn,
-    applyLabeledToggle,
-    runEditAction,
-    setEditActionBusy,
   };
 }

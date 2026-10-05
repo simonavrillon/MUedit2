@@ -1,14 +1,14 @@
-import { createEditSlice } from "../app/state.js";
+import { createEditSlice } from "./state.js";
 
-/** @typedef {import("../app/state.js").State} State */
-/** @typedef {import("../app/state.js").FileRef} FileRef */
-/** @typedef {import("../app/state.js").ChannelTrace} ChannelTrace */
-/** @typedef {import("../app/state.js").Selection} Selection */
-/** @typedef {import("../app/state.js").EditMode} EditMode */
-/** @typedef {import("../app/state.js").PulseView} PulseView */
+/** @typedef {import("./state.js").State} State */
+/** @typedef {import("./state.js").FileRef} FileRef */
+/** @typedef {import("./state.js").ChannelTrace} ChannelTrace */
+/** @typedef {import("./state.js").Selection} Selection */
+/** @typedef {import("./state.js").EditMode} EditMode */
+/** @typedef {import("./state.js").PulseView} PulseView */
 /** @typedef {import("../api/binary-payloads.js").EditSessionFrame} EditSessionFrame */
-/** @typedef {import("../app/state.js").Bookmark} Bookmark */
-/** @typedef {import("../app/state.js").EditHistoryEntry} EditHistoryEntry */
+/** @typedef {import("./state.js").Bookmark} Bookmark */
+/** @typedef {import("./state.js").EditHistoryEntry} EditHistoryEntry */
 /** @typedef {import("../app/context.js").Span} Span */
 /** @typedef {import("../app/context.js").StageKey} StageKey */
 /** @typedef {import("../app/context.js").JsonObject} JsonObject */

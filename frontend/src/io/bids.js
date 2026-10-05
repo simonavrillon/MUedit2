@@ -1,7 +1,7 @@
 import { inferGridCount } from "./grid.js";
 
-/** @typedef {import("../app/state.js").State} State */
-/** @typedef {import("../app/state.js").FileRef} FileRef */
+/** @typedef {import("../state/state.js").State} State */
+/** @typedef {import("../state/state.js").FileRef} FileRef */
 /** @typedef {import("../app/context.js").JsonObject} JsonObject */
 
 /** @typedef {ReturnType<typeof buildBidsAutoInfoModel>} BidsAutoInfoModel */

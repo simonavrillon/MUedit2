@@ -14,8 +14,16 @@ globalThis.window = {
   },
 };
 
-const { state: initialState } = await import("../src/app/state.js");
+const { state: initialState } = await import("../src/state/state.js");
 const { createApp } = await import("../src/app/create-app.js");
+const {
+  undoEdit,
+  duplicateMu,
+  removeDuplicateMus,
+  flagMuForDeletion,
+  resetCurrentMuEdits,
+  saveEditedFile,
+} = await import("../src/app/services/editing-service.js");
 const ops = await import("../src/editing/operations.js");
 
 const pristine = structuredClone(initialState);
@@ -390,7 +398,7 @@ describe("edits on the server", () => {
         [[1, 4, 6]],
       ),
     });
-    await app.undoEdit();
+    await undoEdit(app);
     assert.deepEqual(rows(state.edit.distimes), [
       [2, 5, 8],
       [1, 4, 6],
@@ -409,7 +417,7 @@ describe("edits on the server", () => {
 
   test("nothing to undo says so and asks nothing", async () => {
     app.api = fakeApi({});
-    await app.undoEdit();
+    await undoEdit(app);
     assert.deepEqual(app.setEditStatus.calls, [["Nothing to undo", "muted"]]);
     assert.equal(app.api.calls.length, 0);
   });
@@ -427,7 +435,7 @@ describe("edits on the server", () => {
         [[1, 4]],
       ),
     });
-    await app.duplicateMu();
+    await duplicateMu(app);
     assert.deepEqual(app.api.calls[0], ["duplicate", { token: "tok", mu: 1 }]);
     assert.equal(state.edit.distimes.length, 3);
     assert.equal(state.edit.currentMu, 2);
@@ -450,7 +458,7 @@ describe("edits on the server", () => {
         mu_uids: ["g0_mu1", "g0_mu2"],
       }),
     });
-    await app.removeDuplicateMus();
+    await removeDuplicateMus(app);
     assert.deepEqual(rows(state.edit.distimes), [
       [1, 4],
       [2, 5, 9],
@@ -468,7 +476,7 @@ describe("edits on the server", () => {
     app.api = fakeApi({
       "remove-duplicates": changeFrame({ removed_count: 0, dirty: false }),
     });
-    await app.removeDuplicateMus();
+    await removeDuplicateMus(app);
     assert.deepEqual(app.setEditStatus.calls.at(-1), [
       "No duplicates found",
       "muted",
@@ -479,7 +487,7 @@ describe("edits on the server", () => {
     app.api = fakeApi({
       flag: changeFrame({ changed: [0], flagged: [true, false] }, [[2, 5, 8]]),
     });
-    await app.flagMuForDeletion();
+    await flagMuForDeletion(app);
     assert.deepEqual(app.api.calls[0], [
       "flag",
       { token: "tok", mu: 0, flag: true },
@@ -489,7 +497,7 @@ describe("edits on the server", () => {
 
   test("a failed edit reports it and leaves the state alone", async () => {
     app.api = fakeApi({ reset: new Error("HTTP 400: mu_index out of range") });
-    await app.resetCurrentMuEdits();
+    await resetCurrentMuEdits(app);
     assert.deepEqual(rows(state.edit.distimes), [
       [2, 5, 8],
       [1, 4],
@@ -522,7 +530,7 @@ describe("saveEditedFile", () => {
   test("sends only the session token and the form's fields", async () => {
     state.edit.filename = "sub-01_task-x_decomp.npz";
     const payloads = stubSave({});
-    await app.saveEditedFile();
+    await saveEditedFile(app);
     assert.deepEqual(payloads[0], {
       token: "tok",
       muscle: ["TA"],
@@ -551,7 +559,7 @@ describe("saveEditedFile", () => {
       has_pulse: [true],
       edit_history: [saveEntry],
     });
-    await app.saveEditedFile();
+    await saveEditedFile(app);
     assert.deepEqual(state.edit.muUids, ["g0_mu1"]);
     assert.deepEqual(rows(state.edit.distimes), [[1, 4]]);
     assert.deepEqual(state.edit.flagged, [false]);

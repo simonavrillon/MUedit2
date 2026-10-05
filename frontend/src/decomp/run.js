@@ -23,6 +23,7 @@ import { drawGridOverlay } from "../view/plots.js";
 import { traceColors } from "../config.js";
 import { errorMessage, handleError } from "../app/services/error-service.js";
 import { applyRunEvent, buildRunSummary, createRunLive } from "./live.js";
+import { renderRunTime, updateRunDots } from "../view/run-live.js";
 
 /** @typedef {import("../app/context.js").App} App */
 /** @typedef {import("../app/context.js").JsonObject} JsonObject */
@@ -106,7 +107,6 @@ export async function runDecomposition(app) {
     setStatus,
     handleStreamMessage,
     renderRunStage,
-    renderRunClock,
   } = app;
 
   if (state.isRunning) {
@@ -127,7 +127,10 @@ export async function runDecomposition(app) {
   switchStage("run");
   renderRunStage();
   setStatus("Running decomposition...", "muted");
-  const clock = globalThis.setInterval(renderRunClock, CLOCK_TICK_MS);
+  const clock = globalThis.setInterval(
+    () => renderRunTime(app.els, state.runLive, Date.now()),
+    CLOCK_TICK_MS,
+  );
 
   const buildRunFormData = () => {
     const formData = new FormData();
@@ -346,7 +349,6 @@ export function handleStreamMessage(app, msg) {
     setStatus,
     renderRunStage,
     scheduleRunRender,
-    updateRunDots,
     autoSaveRunDecomposition,
     updateStepAvailability,
   } = app;
@@ -373,7 +375,7 @@ export function handleStreamMessage(app, msg) {
   // Progress events can arrive faster than frames: the dots they change are
   // restyled now, and the rest of the page once per frame.
   const change = applyRunEvent(live, msg, Date.now());
-  if (change) updateRunDots(change);
+  if (change) updateRunDots(app.els, live, change);
 
   if (msg.stage !== "done") {
     if (change || msg.phase) scheduleRunRender();

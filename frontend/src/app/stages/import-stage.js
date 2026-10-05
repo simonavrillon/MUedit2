@@ -1,7 +1,40 @@
 import { parseBidsEntitiesFromLabel } from "../../io/bids.js";
 
 /** @typedef {import("../context.js").App} App */
+/** @typedef {import("../context.js").Els} Els */
 /** @typedef {import("../context.js").StageKey} StageKey */
+/** @typedef {import("../context.js").FileRef} FileRef */
+
+/** @param {Els} els */
+function clearUploadFormatError(els) {
+  if (!els.uploadFormatError) return;
+  els.uploadFormatError.textContent = "";
+  els.uploadFormatError.classList.add("hidden");
+}
+
+/** @param {Els} els */
+function showUnsupportedUploadFormatError(els) {
+  if (!els.uploadFormatError) return;
+  els.uploadFormatError.textContent =
+    "Accepted: raw (.mat, .otb+, .otb4, .bdf, .edf, .rhd) or decomposition (.npz, .mat)";
+  els.uploadFormatError.classList.remove("hidden");
+}
+
+/**
+ * What a picked file is, from its name: a `.mat` can be either.
+ *
+ * @param {FileRef} file
+ * @returns {"raw" | "decomposition" | "ambiguous_mat" | "unsupported"}
+ */
+function detectLandingFileType(file) {
+  const name = (file?.name || "").toLowerCase();
+  if (name.endsWith(".otb+") || name.endsWith(".otb4")) return "raw";
+  if (name.endsWith(".bdf") || name.endsWith(".edf")) return "raw";
+  if (name.endsWith(".rhd")) return "raw";
+  if (name.endsWith(".npz")) return "decomposition";
+  if (name.endsWith(".mat")) return "ambiguous_mat";
+  return "unsupported";
+}
 
 /**
  * @param {string} fullPath
@@ -22,17 +55,15 @@ function displayNameForPath(fullPath, name) {
 async function handleNativeDialogOpen(app) {
   const {
     api,
+    els,
     setStatus,
-    clearUploadFormatError,
     setUploadLoading,
-    showUnsupportedUploadFormatError,
-    detectLandingFileType,
     handleRawFilePath,
     loadDecompositionForEditByPath,
     setBidsEntitiesInput,
   } = app;
 
-  clearUploadFormatError();
+  clearUploadFormatError(els);
   setUploadLoading(false);
 
   let result;
@@ -51,7 +82,7 @@ async function handleNativeDialogOpen(app) {
   const kind = detectLandingFileType({ name });
 
   if (kind === "unsupported") {
-    showUnsupportedUploadFormatError();
+    showUnsupportedUploadFormatError(els);
     return;
   }
   if (kind === "raw") {
