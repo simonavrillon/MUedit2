@@ -3,6 +3,7 @@ pulse trains and discharge times of a run or an edit session."""
 
 from __future__ import annotations
 
+from functools import partial
 from typing import Any, Literal
 
 import numpy as np
@@ -19,7 +20,7 @@ from muedit.api.cache import (
 from muedit.io.store import ArrayStore
 from muedit.models import FloatArray, IntArray, SignalImport
 from muedit.signal.downsample import PREVIEW_MOVING_AVG_MS, moving_average_ms
-from muedit.signal.filters import FILTER_BLOCK_ROWS, bandpass_inplace
+from muedit.signal.filters import FILTER_BLOCK_ROWS, bandpass_inplace, map_rows
 from muedit.signal.pyramid import MinMaxPyramid, Reader, SeriesView, envelope, view
 
 SeriesKind = Literal["emg", "overview", "aux"]
@@ -43,11 +44,11 @@ def grid_emg_type(emg_types: list[int], grid: int) -> int:
     return emg_types[grid] if grid < len(emg_types) else 1
 
 
-def bandpassed_rows(signal: SignalImport, lo: int, hi: int, emg_type: int) -> FloatArray:
-    """Rows ``[lo, hi)`` of the EMG bandpassed in float64, as float32."""
-    block = np.array(signal.data[lo:hi], np.float64)
-    bandpass_inplace(block, signal.fsamp, emg_type)
-    return block.astype(np.float32)
+def bandpassed_row(signal: SignalImport, row: int, emg_type: int) -> FloatArray:
+    """Row ``row`` of the EMG bandpassed in float64, as float32."""
+    samples = np.array(signal.data[row : row + 1], np.float64)
+    bandpass_inplace(samples, signal.fsamp, emg_type)
+    return samples[0].astype(np.float32)
 
 
 def build_signal_views(
@@ -56,7 +57,7 @@ def build_signal_views(
     """Bandpass the grid channels once and keep what the QC stage draws, in ``store``.
 
     Also returns each grid's per-channel mean ``|EMG|``. Nothing full-length stays on the
-    heap: the EMG pyramid is filled a few rows at a time.
+    heap: the EMG pyramid is filled a row at a time, while the next rows are filtered.
     """
     n_rows, n_samples = signal.data.shape
     rows_of = grid_rows(grid_counts, n_rows)
@@ -69,16 +70,13 @@ def build_signal_views(
     for grid, (first, stop) in enumerate(rows_of):
         means = np.zeros(stop - first)
         abs_sums[:] = 0.0
-        for lo in range(first, stop, FILTER_BLOCK_ROWS):
-            block = bandpassed_rows(
-                signal, lo, min(lo + FILTER_BLOCK_ROWS, stop), grid_emg_type(emg_types, grid)
-            )
-            emg.write(lo, block)
-            for r in range(block.shape[0]):
-                np.abs(block[r], out=row)
-                means[lo - first + r] = row.mean()
-                abs_sums += row
-            del block  # not alive while the next block is filtered
+        filter_row = partial(bandpassed_row, signal, emg_type=grid_emg_type(emg_types, grid))
+        for r, samples in enumerate(map_rows(filter_row, range(first, stop), n_samples), first):
+            emg.write(r, samples[None])
+            np.abs(samples, out=row)
+            means[r - first] = row.mean()
+            abs_sums += row
+            del samples  # not alive while the next rows are filtered
         overview[grid] = moving_average_ms(
             abs_sums / max(1, stop - first), signal.fsamp, PREVIEW_MOVING_AVG_MS
         )

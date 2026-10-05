@@ -70,7 +70,7 @@ BUDGETS_MB: dict[str, float] = {
     "preview": 0.65 * RAW_MB,
     "series": 2.0,
     "qc_auto": 3.2 * RAW_MB,
-    "preprocess": 0.39 * RAW_MB,
+    "preprocess": 0.75 * RAW_MB,  # with the filter threads' rows (FILTER_WORK_BYTES)
     "decompose": 0.89 * EXT_WINDOW_MB,
     "post_windowed": 0.84 * EXT_WINDOW_MB,
     "save": 0.29 * RAW_MB,

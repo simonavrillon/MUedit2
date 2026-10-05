@@ -33,7 +33,7 @@ from muedit.editing.operations import (
 from muedit.io.npz import RowSource
 from muedit.io.store import SessionStore, copy_into
 from muedit.models import EditSignalContext, FloatArray, IntArray, resident_nbytes
-from muedit.signal.filters import FILTER_BLOCK_ROWS, emg_filter_inplace
+from muedit.signal.filters import emg_filter_inplace, for_each_row
 from muedit.signal.grid import format_hdemg_signal
 
 logger = logging.getLogger(__name__)
@@ -593,13 +593,16 @@ class EditSession:
         return emg_types[grid] if grid < len(emg_types) else 1
 
     def _filter_rows(self, rows: FloatArray, out: FloatArray, fsamp: float, emg_type: int) -> None:
-        """``rows`` notched and bandpassed into float32 ``out``, a few channels at a time."""
-        for lo in range(0, rows.shape[0], FILTER_BLOCK_ROWS):
+        """``rows`` notched and bandpassed into float32 ``out``, a few channels at once."""
+
+        def filter_row(row: int) -> None:
             if self._closed:
                 raise EditError("Edit session closed")
-            block = out[lo : lo + FILTER_BLOCK_ROWS]
-            block[...] = rows[lo : lo + FILTER_BLOCK_ROWS]
-            emg_filter_inplace(block, fsamp, emg_type)
+            channel = out[row : row + 1]
+            channel[...] = rows[row : row + 1]
+            emg_filter_inplace(channel, fsamp, emg_type)
+
+        for_each_row(filter_row, range(rows.shape[0]), rows.shape[1])
 
     def flag(self, mu: int, flag: bool | None = None) -> Change:
         """Flag the MU for removal on save, or clear the flag."""

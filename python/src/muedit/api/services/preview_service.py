@@ -26,7 +26,7 @@ from muedit.api.services.bids_helpers import (
     read_bids_sidecar_meta,
 )
 from muedit.api.services.series_service import (
-    bandpassed_rows,
+    bandpassed_row,
     build_signal_views,
     grid_emg_type,
     grid_rows,
@@ -35,7 +35,7 @@ from muedit.io.factory import get_loader, load_signal
 from muedit.io.store import ArrayStore, RamStore, SessionStore
 from muedit.models import FloatArray, SignalImport
 from muedit.signal.artifact_mask import mask_to_intervals
-from muedit.signal.filters import FILTER_BLOCK_ROWS
+from muedit.signal.filters import for_each_row
 from muedit.signal.grid import format_hdemg_signal
 from muedit.signal.qc_pipeline import run_auto_qc
 
@@ -121,13 +121,16 @@ def _mask_to_regions(mask: np.ndarray | None) -> list[list[int]]:
 def _bandpassed_grids(
     signal: SignalImport, grid_counts: list[int], emg_types: list[int], store: ArrayStore
 ) -> FloatArray:
-    """The grid channels bandpassed into one float32 array of ``store``, a few rows at a time."""
-    n_rows = sum(grid_counts)
-    out = store.allocate("qc-auto", (n_rows, signal.data.shape[1]), np.float32)
+    """The grid channels bandpassed into one float32 array of ``store``, a few rows at once."""
+    n_rows, n_samples = sum(grid_counts), signal.data.shape[1]
+    out = store.allocate("qc-auto", (n_rows, n_samples), np.float32)
     for grid, (first, stop) in enumerate(grid_rows(grid_counts, n_rows)):
-        for lo in range(first, stop, FILTER_BLOCK_ROWS):
-            hi = min(lo + FILTER_BLOCK_ROWS, stop)
-            out[lo:hi] = bandpassed_rows(signal, lo, hi, grid_emg_type(emg_types, grid))
+        emg_type = grid_emg_type(emg_types, grid)
+
+        def filter_row(row: int, emg_type: int = emg_type) -> None:
+            out[row] = bandpassed_row(signal, row, emg_type)
+
+        for_each_row(filter_row, range(first, stop), n_samples)
     return store.seal(out)
 
 
