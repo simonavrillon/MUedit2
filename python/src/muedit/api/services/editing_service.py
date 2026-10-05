@@ -283,8 +283,10 @@ def open_edit_session(filepath: str, session: str = DEFAULT_SESSION) -> Response
         store.close()
         raise
     token = _store_edit_session(edit, session)
+    # Before edit.lock: the budget lock is never taken under it (a dropped session closes under it).
+    live_logs = _live_edit_logs()
     with edit.lock:
-        edit.recovery = find_recoverable(filepath, _live_edit_logs())
+        edit.recovery = find_recoverable(filepath, live_logs)
         edit.log = EditLog.create(filepath, token)
         return _state_response(edit, token)
 

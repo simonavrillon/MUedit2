@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 import time
 from dataclasses import dataclass
 
@@ -178,3 +179,57 @@ class TestOnDrop:
         token = cache.pin(Blob(10), "a")
         cache.discard(token)
         assert token not in cache.slots
+
+    @pytest.mark.parametrize(
+        "leave",
+        ["evict", "per_session", "release_session", "close_session", "sweep", "clear", "discard"],
+    )
+    def test_runs_after_the_budget_lock_is_released(self, budget: MemoryBudget, leave: str) -> None:
+        # A release can wait on a lock a request holds while that request asks the budget.
+        def lock_is_free() -> bool:
+            free: list[bool] = []
+
+            def probe() -> None:
+                acquired = budget.lock.acquire(timeout=1)
+                if acquired:
+                    budget.lock.release()
+                free.append(acquired)
+
+            thread = threading.Thread(target=probe)
+            thread.start()
+            thread.join()
+            return free[0]
+
+        seen: list[bool] = []
+        cache: BudgetedLRU[Blob] = BudgetedLRU(
+            "c", budget, per_session=1, on_drop=lambda _: seen.append(lock_is_free())
+        )
+        token = cache.pin(Blob(600), "a")
+        if leave == "evict":
+            cache.pin(Blob(600), "b")
+        elif leave == "per_session":
+            cache.pin(Blob(10), "a")
+        elif leave == "release_session":
+            cache.release_session("a")
+        elif leave == "close_session":
+            budget.close_session("a")
+        elif leave == "sweep":
+            budget.touch("b")
+            budget.clock.now += memory.SESSION_IDLE_SEC  # type: ignore[attr-defined]
+            budget.sweep()
+        elif leave == "clear":
+            budget.clear()
+        else:
+            cache.discard(token)
+        assert seen == [True]
+
+    def test_runs_when_the_hold_that_dropped_it_raises(self, budget: MemoryBudget) -> None:
+        dropped: list[Blob] = []
+        cache: BudgetedLRU[Blob] = BudgetedLRU("c", budget, on_drop=dropped.append)
+        blob = Blob(10)
+        cache.pin(blob, "a")
+        with pytest.raises(RuntimeError), budget.locked():
+            cache.release_session("a")
+            assert dropped == []  # not while the outer hold lasts
+            raise RuntimeError
+        assert dropped == [blob]

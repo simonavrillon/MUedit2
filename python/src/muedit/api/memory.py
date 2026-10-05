@@ -10,7 +10,7 @@ import sys
 import threading
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import Any, Generic, Protocol, TypeVar
 
@@ -187,10 +187,33 @@ class MemoryBudget:
         self._tick = 0
         self._sweeper: threading.Thread | None = None
         self._stop_sweeper = threading.Event()
+        self._depth = 0  # nested holds of ``lock`` by the thread that owns it
+        self._dropped: list[tuple[BudgetedLRU[Any], str, Any]] = []
+
+    @contextlib.contextmanager
+    def locked(self) -> Iterator[None]:
+        """Hold ``lock``; entries dropped meanwhile are released once the outermost hold ends.
+
+        A release can wait on a lock a request holds while that request asks the budget, so
+        it never runs under ``lock``.
+        """
+        dropped: list[tuple[BudgetedLRU[Any], str, Any]] = []
+        try:
+            with self.lock:
+                self._depth += 1
+                try:
+                    yield
+                finally:
+                    self._depth -= 1
+                    if self._depth == 0:
+                        dropped, self._dropped = self._dropped, []
+        finally:
+            for cache, token, value in dropped:
+                cache.release(token, value)
 
     def register(self, cache: BudgetedLRU[Any]) -> None:
         """Count ``cache`` against this budget."""
-        with self.lock:
+        with self.locked():
             if cache.name in self.caches:
                 raise ValueError(f"Cache {cache.name!r} is already registered")
             self.caches[cache.name] = cache
@@ -203,18 +226,18 @@ class MemoryBudget:
     @property
     def used_bytes(self) -> int:
         """Bytes held by every registered cache."""
-        with self.lock:
+        with self.locked():
             return sum(cache.nbytes for cache in self.caches.values())
 
     def touch(self, session: str) -> None:
         """Record a request from ``session``, which becomes the active session."""
-        with self.lock:
+        with self.locked():
             self.sessions[session] = self.clock()
             self.active_session = session
 
     def make_room(self, nbytes: int, keep: str | None = None) -> None:
         """Evict other sessions' entries, least recently used first, until ``nbytes`` more fit."""
-        with self.lock:
+        with self.locked():
             used = self.used_bytes
             while used + nbytes > self.limit_bytes:
                 victims = [
@@ -239,7 +262,7 @@ class MemoryBudget:
 
     def close_session(self, session: str) -> None:
         """Drop every entry ``session`` holds, in all caches."""
-        with self.lock:
+        with self.locked():
             for cache in self.caches.values():
                 cache.release_session(session)
             self.sessions.pop(session, None)
@@ -248,7 +271,7 @@ class MemoryBudget:
 
     def sweep(self) -> None:
         """Drop expired entries and close idle sessions other than the active one."""
-        with self.lock:
+        with self.locked():
             now = self.clock()
             for cache in self.caches.values():
                 cache.drop_expired(now)
@@ -263,7 +286,7 @@ class MemoryBudget:
 
     def start_sweeper(self, interval_sec: float = SWEEP_INTERVAL_SEC) -> None:
         """Run ``sweep`` every ``interval_sec`` on a daemon thread until ``stop_sweeper``."""
-        with self.lock:
+        with self.locked():
             if self._sweeper is not None and self._sweeper.is_alive():
                 return
             self._stop_sweeper.clear()
@@ -292,7 +315,7 @@ class MemoryBudget:
 
     def clear(self) -> None:
         """Drop every entry and forget every session."""
-        with self.lock:
+        with self.locked():
             for cache in self.caches.values():
                 for token in list(cache.slots):
                     cache.drop(token)
@@ -301,7 +324,7 @@ class MemoryBudget:
 
     def usage(self) -> dict[str, Any]:
         """Budget, per-cache and per-session totals, for the debug endpoint."""
-        with self.lock:
+        with self.locked():
             now = self.clock()
             slots = [slot for cache in self.caches.values() for slot in cache.slots.values()]
             return {
@@ -351,19 +374,28 @@ class BudgetedLRU(Generic[V]):
         return sum(slot.nbytes for slot in self.slots.values())
 
     def drop(self, token: str) -> _Slot[V]:
-        """Remove the entry for ``token`` and release it; ``pop`` instead hands it to the caller."""
-        slot = self.slots.pop(token)
-        if self.on_drop is not None:
-            try:
-                self.on_drop(slot.value)
-            except Exception:
-                logger.exception("Releasing %s entry %s failed", self.name, token)
+        """Remove the entry for ``token`` and release it; ``pop`` instead hands it to the caller.
+
+        The release runs once the budget's outermost hold of its lock ends.
+        """
+        with self.budget.locked():
+            slot = self.slots.pop(token)
+            self.budget._dropped.append((self, token, slot.value))
         return slot
+
+    def release(self, token: str, value: V) -> None:
+        """Release what a dropped entry holds outside the heap; a failure is only logged."""
+        if self.on_drop is None:
+            return
+        try:
+            self.on_drop(value)
+        except Exception:
+            logger.exception("Releasing %s entry %s failed", self.name, token)
 
     def pin(self, value: V, session: str = DEFAULT_SESSION) -> str:
         """Store session data that is never evicted while ``session`` is active, and return its token."""
         nbytes = int(value.nbytes)
-        with self.budget.lock:
+        with self.budget.locked():
             self.budget.touch(session)
             if self.per_session is not None:
                 own = [t for t, slot in self.slots.items() if slot.session == session]
@@ -393,7 +425,7 @@ class BudgetedLRU(Generic[V]):
 
     def get(self, token: str | None) -> V | None:
         """The value for ``token``, marked as just used, or None."""
-        with self.budget.lock:
+        with self.budget.locked():
             slot = self._live_slot(token)
             if slot is None:
                 return None
@@ -404,7 +436,7 @@ class BudgetedLRU(Generic[V]):
 
     def move(self, token: str | None, session: str) -> V | None:
         """The value for ``token``, now held by ``session`` (whose other entries here make room)."""
-        with self.budget.lock:
+        with self.budget.locked():
             slot = self._live_slot(token)
             if slot is None or token is None:
                 return None
@@ -419,7 +451,7 @@ class BudgetedLRU(Generic[V]):
 
     def pop(self, token: str | None) -> V | None:
         """Remove and return the value for ``token``, or None."""
-        with self.budget.lock:
+        with self.budget.locked():
             slot = self._live_slot(token)
             if slot is None or token is None:
                 return None
@@ -428,13 +460,13 @@ class BudgetedLRU(Generic[V]):
 
     def discard(self, token: str | None) -> None:
         """Remove the entry for ``token`` if there is one."""
-        with self.budget.lock:
+        with self.budget.locked():
             if token and token in self.slots:
                 self.drop(token)
 
     def resize(self, token: str) -> None:
         """Recount the entry for ``token`` after its value grew, evicting others to fit."""
-        with self.budget.lock:
+        with self.budget.locked():
             slot = self.slots.get(token)
             if slot is None:
                 return
@@ -444,13 +476,13 @@ class BudgetedLRU(Generic[V]):
 
     def release_session(self, session: str) -> None:
         """Drop the entries ``session`` holds in this cache."""
-        with self.budget.lock:
+        with self.budget.locked():
             for token in [t for t, slot in self.slots.items() if slot.session == session]:
                 self.drop(token)
 
     def drop_expired(self, now: float) -> None:
         """Remove the entries whose time to live has passed."""
-        with self.budget.lock:
+        with self.budget.locked():
             expired = [
                 token
                 for token, slot in self.slots.items()

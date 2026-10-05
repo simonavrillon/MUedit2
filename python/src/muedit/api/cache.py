@@ -164,7 +164,7 @@ def _hold_upload(token: str | None) -> HeldUpload | None:
 
     Dropping the upload meanwhile (a new file, an eviction) closes the store only after.
     """
-    with BUDGET.lock:
+    with BUDGET.locked():
         entry = _UPLOADS.get(token)
         if entry is None:
             return None
@@ -229,6 +229,6 @@ def _resize_edit_session(token: str) -> None:
 
 def _live_edit_logs() -> set[Path]:
     """The edit logs open sessions are writing."""
-    with BUDGET.lock:
+    with BUDGET.locked():
         entries = [slot.value.session for slot in _EDIT_SESSIONS.slots.values()]
     return {edit.log.path for edit in entries if edit.log is not None}
