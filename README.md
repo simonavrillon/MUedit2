@@ -11,11 +11,10 @@ It runs as a small app in your browser. Nothing is uploaded anywhere: the
 interface is a local web page, the computation happens on your own machine, and
 your recordings and results stay in the folders you choose.
 
-MUedit is a research tool, actively used and actively maintained. It works, and
-we keep extending it as our own projects need it to do more. The adaptive
-decomposition option is newer than the rest and still being tuned, so treat it
-as experimental. If something is awkward or missing, we would rather hear about
-it than not.
+MUedit is a research tool, actively used and actively maintained. We keep
+extending it as our own projects need it. The adaptive decomposition option is
+still being tuned, so treat it as experimental. If something is awkward or
+missing, we would rather hear about it than not.
 
 ## Before your first run
 
@@ -130,29 +129,29 @@ with the **+** button above the chart and drag over it; those stretches are then
 kept out of the filter estimation instead of corrupting it.
 
 Open the settings panel on the left to fill in what this recording is: the
-project it belongs to, the subject, session and task labels,
-and the muscle behind each grid. This is worth a minute of your time, because it
-is what makes your output findable and reusable later. The same panel holds
-the decomposition settings — number of iterations, analysis windows, duplicate
-threshold, peel-off, and the quality filters applied afterwards. The defaults
-are sensible starting points, so leave them alone until you have a reason not
-to.
+project it belongs to, the subject, session and task labels, and the muscle
+behind each grid, plus a few participant and hardware details. A decomposition
+will not start until those fields are filled in. It is worth a minute of your
+time anyway, because it is what makes your output findable and reusable later.
+The same panel holds the decomposition settings — number of iterations, analysis
+windows, duplicate threshold, peel-off, and the quality filters applied
+afterwards. The defaults are sensible starting points, so leave them alone until
+you have a reason not to.
 
 ### Decomposing
 
 Press **Decompose Signal** and the run page follows the search as it happens:
 the pipeline's phases, a dot for every iteration, the units kept so far, and an
-estimate of the time left. When it finishes, the page reports what the search
-found, what post-processing removed, the mean silhouette and where the
-decomposition was saved. The result is already loaded into the editor, so the
-**Edit** step is ready the moment you want it — there is no file to go and open.
+estimate of the time left. When it finishes, the result is already loaded into
+the editor, so the **Edit** step is ready the moment you want it — there is no
+file to go and open.
 
 ### Editing the motor units
 
-This is where most of your time goes.
-Decomposition is never perfect: it misses discharges, invents a few, and
-occasionally splits one unit into two or merges two into one. The editor puts
-each motor unit in front of you so you can fix that.
+This is where most of your time goes. Decomposition is never perfect: it
+misses discharges, adds a few, and occasionally splits one unit into two or
+merges two into one. The editor puts each motor unit in front of you so you can
+fix that.
 
 Step through the units with the **Grid** and **Motor Unit** dropdowns, or with
 `<` and `>`. For each one you get its firing rate over time on top and its pulse
@@ -193,11 +192,10 @@ Each save also writes the discharges as a standard BIDS events table, one row
 per spike, regenerated from your current edits.
 
 By default everything lands under `data/` inside the MUedit folder, in a
-subfolder named after the **Project** field you filled in. Type `study1` there
-and your results appear in `data/study1/`; leave it blank and they go to
-`data/muedit_out/`. The project is a folder name, not a path. To keep your data
-somewhere else entirely, set the `MUEDIT_DATA_ROOT` environment variable to that
-folder before launching.
+subfolder named after the **Project** field you filled in: type `study1` there
+and your results appear in `data/study1/`. The project is a folder name, not a
+path. To keep your data somewhere else entirely, set the `MUEDIT_DATA_ROOT`
+environment variable to that folder before launching.
 
 A decomposition you open from a BIDS dataset elsewhere on your disk is saved
 back into that dataset, as long as you leave its **Project** field unchanged.
@@ -229,8 +227,7 @@ since you opened it.
 If a file will not load at all, check the extension is one of those listed above,
 and for BIDS recordings check that the `_channels.tsv` sidecar really is sitting
 next to the `.bdf` or `.edf`. If saving or a filter update fails, it is almost
-always the **Project** field left empty, or the original EMG file no longer being
-where it was when you opened it.
+always the original EMG file no longer being where it was when you opened it.
 
 ## Learning more
 
