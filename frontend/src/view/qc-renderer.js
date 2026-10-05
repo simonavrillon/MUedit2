@@ -1,4 +1,4 @@
-import { COLORS, traceColors } from "../config.js";
+import { COLORS, canvasFont, traceColors } from "../config.js";
 import {
   drawGridOverlay,
   drawMiniSeries,
@@ -341,7 +341,7 @@ export function renderAuxiliaryChannels(els, state) {
 
   if (!state.auxSeries || !state.auxSeries.length) {
     ctx.fillStyle = COLORS.muted;
-    ctx.font = "12px sans-serif";
+    ctx.font = canvasFont();
     ctx.fillText("No auxiliary data", 12, 24);
     return;
   }
@@ -372,7 +372,7 @@ export function renderAuxiliaryChannels(els, state) {
     );
 
     ctx.fillStyle = ctx.strokeStyle;
-    ctx.font = "10px sans-serif";
+    ctx.font = canvasFont();
     const name = state.auxNames[idx] || `Aux ${idx + 1}`;
     ctx.fillText(name, 5, 12 + labelCount * 12);
     labelCount++;

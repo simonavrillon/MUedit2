@@ -568,7 +568,6 @@ class TestDecomposeStream:
             "fsamp",
             "grid_names",
             "mu_count",
-            "sil",
             "discard_channels",
             "parameters",
         } <= set(summary)

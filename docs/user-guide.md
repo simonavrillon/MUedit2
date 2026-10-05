@@ -74,7 +74,7 @@ Open the panel with the button on the rail on the left. It contains three collap
 |---|---|
 | File | Loaded filename (read-only) |
 | Fs (Hz) | Sampling frequency (read-only, from file) |
-| Project | Project name — output is saved under `<output>/<project>/` (your BIDS dataset root). A folder name, not a path. Leave empty to use `<output>/muedit_out/` |
+| Project | Project name — output is saved under `<output>/<project>/` (your BIDS dataset root). A folder name, not a path |
 | Subject | BIDS subject label — alphanumeric (e.g. `01`, `S06`, `pilot01`) |
 | Session | BIDS session label — alphanumeric (e.g. `1`, `pre`, `post`) |
 | Acquisition | BIDS `acq` label, for sequential recordings of the same task (e.g. one grid/finger recorded at a time). Optional, alphanumeric |
@@ -82,13 +82,19 @@ Open the panel with the button on the rail on the left. It contains three collap
 | Task | Task label (e.g. `trapezoid`) |
 | Muscle | Muscle name(s) per grid |
 
-The panel also exposes optional **participant** (age, sex, handedness) and
+The panel also holds **participant** (age, sex, handedness) and
 **acquisition/hardware** metadata (manufacturer, device model, powerline
 frequency, placement scheme). These are written to the BIDS
 `participants.tsv` and `_emg.json` sidecars on save, and pre-filled from those
 files (or from auto-detected loader metadata) when you reopen a recording.
 Electrode details (type, material, inter-electrode distance) are derived
 automatically from the grid model name and do not need to be entered.
+
+A decomposition will not start until Project, Subject, Session, Task, every
+Muscle, Age, Sex, Handedness, Manufacturer and Device model are filled in.
+Starting with any of them empty opens the panel on the first missing field's
+section and marks the empty fields in red; each mark clears as you fill its
+field. Acquisition and Run stay optional.
 
 > **Fill in any missing metadata before saving.** Not every recording format
 > carries all of this information, so some fields may be blank when you open a
@@ -126,7 +132,7 @@ Click **Decompose Signal** to start. The run page first lists the plan your sett
 - **Unit counter** — motor units kept so far, per grid
 - **Clock** — elapsed time, and an estimate of the time left in the search
 
-Once the run finishes, the page reports what the search found versus what post-processing kept, the mean silhouette, and where the decomposition was saved (with a **Retry save** button if the save failed). **Run again** restarts with the current settings; **Cancel** stops a run in progress.
+Once the run finishes, the counter shows the motor units post-processing kept, and the status at the top right says where the decomposition was saved. If the save fails, the page shows why, with a **Retry save** button. **Run again** restarts with the current settings; **Cancel** stops a run in progress.
 
 The result is preloaded into **Edit mode** (Step 4) — open it with the **Edit** step in the top bar; you no longer need to open the saved `.npz` manually. From there you can browse motor units using the Grid and Motor Unit dropdowns, inspect each pulse train, and start correcting spikes right away.
 

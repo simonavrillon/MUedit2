@@ -7,7 +7,7 @@
  * around them. Selection gestures update draft/committed selection state via
  * the action helpers; the container re-renders in response.
  */
-import { COLORS } from "../config.js";
+import { COLORS, canvasFont } from "../config.js";
 import {
   drawTrace,
   getCanvasPlotMetrics,
@@ -85,7 +85,7 @@ function renderBookmark(canvas, state, muIdx, view) {
   ctx.stroke();
 
   ctx.fillStyle = COLORS.bookmark;
-  ctx.font = "12px sans-serif";
+  ctx.font = canvasFont();
   ctx.textAlign = "center";
   ctx.fillText("You stopped here", x, metrics.padding.top + 15);
   ctx.textAlign = "start";

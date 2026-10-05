@@ -53,7 +53,6 @@ const PHASE_OF_EVENT = {
  * @property {number} muCount Units kept after post-processing.
  * @property {number[]} perGrid
  * @property {number[]} muGridIndex
- * @property {number | null} meanSil
  */
 
 /**
@@ -269,13 +268,7 @@ export function buildRunSummary(summary, preview) {
     const g = muGridIndex[mu] ?? 0;
     perGrid[g < ngrid ? g : 0] += 1;
   }
-  const sil = (Array.isArray(summary.sil) ? summary.sil : [])
-    .map(Number)
-    .filter(Number.isFinite);
-  const meanSil = sil.length
-    ? sil.reduce((a, b) => a + b, 0) / sil.length
-    : null;
-  return { muCount, perGrid, muGridIndex, meanSil };
+  return { muCount, perGrid, muGridIndex };
 }
 
 /**

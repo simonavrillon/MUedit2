@@ -300,7 +300,7 @@
 }
 
 .settings-panel .section-header {
-  font-size: var(--fs-xs);
+  font-size: var(--fs-sm);
   font-weight: var(--fw-regular);
   letter-spacing: 0.08em;
   margin-bottom: 0;
@@ -343,6 +343,15 @@
   font-weight: var(--fw-light);
 }
 
+.settings-panel .form-row [aria-invalid="true"] {
+  border-color: var(--danger);
+  background-color: var(--danger-bg);
+}
+
+.settings-panel .form-row:has([aria-invalid="true"]) label {
+  color: var(--danger-text);
+}
+
 .settings-panel .form-row select {
   background-position: calc(100% - 13px) center;
   background-size: 10px 5px;
@@ -367,7 +376,7 @@
 .settings-panel .auto-info-box {
   margin-top: 8px;
   padding: 8px;
-  font-size: var(--fs-xs);
+  font-size: var(--fs-sm);
 }
 
 .panel-section {

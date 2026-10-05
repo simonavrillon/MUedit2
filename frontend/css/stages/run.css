@@ -31,11 +31,14 @@
 .stage-run {
   gap: 18px;
   overflow: auto;
+  /* Matches the settings rail's side, so centred content lines up with the stepper. */
+  padding-right: 38px;
 }
 
 .stage-run[data-mode="pre"] .run-live,
 .stage-run:not([data-mode="pre"]) .run-pre,
-.stage-run[data-mode="live"] .run-result {
+.stage-run[data-mode="live"] .run-result,
+.stage-run[data-mode="live"] .run-again-btn {
   display: none;
 }
 
@@ -79,8 +82,13 @@
 }
 
 .cancel-run-btn {
+  align-self: center;
   width: auto;
   padding: 4px 14px;
+}
+
+.run-again-btn {
+  align-self: center;
 }
 
 /* Phase track: the loader's dots, one per pipeline phase. */
@@ -93,6 +101,7 @@
   /* Room for the active dot's 8px bounce: the scrolling stage clips above its top. */
   padding: 8px 0 0;
   list-style: none;
+  justify-content: center;
   font-size: var(--fs-sm);
   color: var(--muted);
 }
@@ -160,21 +169,22 @@
 
 .run-head {
   display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 12px 28px;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
 }
 
 .run-count {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
+  justify-content: center;
   gap: 4px 10px;
 }
 
 .run-count-value {
   display: inline-block;
-  font-size: 40px;
+  font-size: var(--fs-xl);
   line-height: 1;
   font-weight: var(--fw-bold);
   color: var(--mu-3);
@@ -191,10 +201,16 @@
 }
 
 .run-count-grids {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
   flex-basis: 100%;
+  gap: 4px 18px;
   font-size: var(--fs-sm);
-  color: var(--muted);
-  white-space: pre-wrap;
+}
+
+.run-count-grids span {
+  color: var(--grid-color);
 }
 
 .run-count-grids:empty {
@@ -204,12 +220,12 @@
 .run-time {
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 2px;
-  margin-left: auto;
   font-size: var(--fs-sm);
   color: var(--muted);
   font-variant-numeric: tabular-nums;
-  text-align: right;
+  text-align: center;
 }
 
 .run-error {
@@ -234,10 +250,6 @@
   gap: 12px;
 }
 
-.run-result-stats:empty {
-  display: none;
-}
-
 .run-save-text {
   margin: 0;
   font-size: var(--fs-sm);
@@ -257,24 +269,13 @@
 
 /* Search: one dot per iteration */
 
-.run-search-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 4px 16px;
-  margin-bottom: 12px;
-}
-
-.run-search-head .chart-title {
-  margin-bottom: 0;
-}
-
 .run-legend {
   display: flex;
   flex-wrap: wrap;
+  justify-content: center;
   gap: 4px 14px;
-  font-size: var(--fs-xs);
+  margin-bottom: 12px;
+  font-size: var(--fs-sm);
   color: var(--muted);
 }
 

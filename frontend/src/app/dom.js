@@ -38,7 +38,6 @@ export const els = {
   runElapsed: element("runElapsed"),
   runEta: element("runEta"),
   runError: element("runError"),
-  runResultStats: element("runResultStats"),
   runSaveText: element("runSaveText"),
   runRetrySaveBtn: button("runRetrySaveBtn"),
   runAgainBtn: button("runAgainBtn"),

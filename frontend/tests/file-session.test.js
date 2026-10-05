@@ -83,3 +83,89 @@ describe("project field", () => {
     assert.equal(state.edit.project, "");
   });
 });
+
+describe("required session fields", () => {
+  /** A field that keeps its attributes, inside one panel section. */
+  function field(value, section) {
+    const attrs = new Map();
+    return {
+      value,
+      focused: false,
+      setAttribute: (name, v) => attrs.set(name, v),
+      removeAttribute: (name) => attrs.delete(name),
+      getAttribute: (name) => attrs.get(name) ?? null,
+      closest: () => section,
+      focus() {
+        this.focused = true;
+      },
+    };
+  }
+
+  function sessionPanel() {
+    const header = field("", null);
+    const classes = new Set(["panel-section", "collapsed"]);
+    return {
+      header,
+      classes,
+      classList: { remove: (c) => classes.delete(c) },
+      querySelector: () => header,
+    };
+  }
+
+  function formWith(values) {
+    const section = sessionPanel();
+    /** @type {Record<string, any>} */
+    const els = {};
+    for (const [id, value] of Object.entries(values)) {
+      els[id] = field(value, section);
+    }
+    const muscle = field(values.muscle ?? "", section);
+    els.bidsMuscleContainer = { querySelectorAll: () => [muscle] };
+    const opened = [];
+    const session = createFileSessionService(
+      /** @type {any} */ ({
+        els,
+        state: {},
+        api: {},
+        setSettingsOpen: (open) => opened.push(open),
+      }),
+    );
+    return { session, els, muscle, section, opened };
+  }
+
+  const filled = {
+    bidsProject: "study1",
+    bidsSubject: "1",
+    bidsSession: "1",
+    bidsTask: "trapezoid",
+    bidsParticipantAge: "31",
+    bidsParticipantSex: "F",
+    bidsParticipantHandedness: "right",
+    bidsManufacturer: "OT Bioelettronica",
+    bidsDeviceModel: "Quattrocento",
+    muscle: "TA",
+  };
+
+  test("a filled form passes and leaves the panel alone", () => {
+    const { session, opened, section } = formWith(filled);
+    assert.equal(session.checkSessionForm(), true);
+    assert.deepEqual(opened, []);
+    assert.ok(section.classes.has("collapsed"));
+  });
+
+  test("empty fields are marked and the panel opens on the first", () => {
+    const { session, els, muscle, section, opened } = formWith({
+      ...filled,
+      bidsProject: " ",
+      muscle: "",
+    });
+    assert.equal(session.checkSessionForm(), false);
+    assert.equal(els.bidsProject.getAttribute("aria-invalid"), "true");
+    assert.equal(muscle.getAttribute("aria-invalid"), "true");
+    assert.equal(els.bidsSubject.getAttribute("aria-invalid"), null);
+    assert.deepEqual(opened, [true]);
+    assert.equal(section.classes.has("collapsed"), false);
+    assert.equal(section.header.getAttribute("aria-expanded"), "true");
+    assert.ok(els.bidsProject.focused);
+  });
+});

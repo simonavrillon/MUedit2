@@ -114,23 +114,21 @@ describe("searchSecondsLeft", () => {
 });
 
 describe("buildRunSummary", () => {
-  test("counts units per grid and averages their silhouette", () => {
+  test("counts units per grid", () => {
     const summary = live.buildRunSummary(
-      { mu_count: 3, grid_names: ["A", "B"], sil: [0.9, 0.95, 1] },
+      { mu_count: 3, grid_names: ["A", "B"] },
       { mu_grid_index: [0, 1, 1] },
     );
     assert.deepEqual(summary.perGrid, [1, 2]);
     assert.deepEqual(summary.muGridIndex, [0, 1, 1]);
-    assert.ok(Math.abs(summary.meanSil - 0.95) < 1e-12);
   });
 
-  test("no units and no scores", () => {
+  test("no units", () => {
     const summary = live.buildRunSummary(
       { mu_count: 0, grid_names: ["A"] },
       null,
     );
     assert.deepEqual(summary.perGrid, [0]);
-    assert.equal(summary.meanSil, null);
   });
 });
 
@@ -272,7 +270,6 @@ describe("run stream handling", () => {
       muCount: 2,
       perGrid: [2],
       muGridIndex: [0, 0],
-      meanSil: 0.9,
     };
     await autoSaveRunDecomposition(app);
     assert.equal(payloads[0].run_result_token, "run-1");

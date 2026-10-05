@@ -8,12 +8,11 @@
   --border: #3a3a3a;
   --radius: 8px;
   --radius-sm: 6px;
-  --font: "IBM Plex Sans", "Segoe UI", sans-serif;
-  --fs-xs: 11px;
+  --font: "Open Sans", sans-serif;
   --fs-sm: 12px;
   --fs-md: 14px;
   --fs-lg: 20px;
-  --fs-xl: 18px;
+  --fs-xl: 40px;
   --fw-light: 300;
   --fw-regular: 400;
   --fw-medium: 500;

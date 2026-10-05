@@ -68,7 +68,7 @@
 
 .artifact-controls-label {
   color: var(--muted);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-sm);
   text-transform: uppercase;
   letter-spacing: 0.06em;
   margin-right: 2px;
@@ -107,7 +107,7 @@
 
 .artifact-count {
   color: var(--muted);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-sm);
   font-variant-numeric: tabular-nums;
 }
 

@@ -102,6 +102,7 @@ export async function runDecomposition(app) {
     setStatus,
     handleStreamMessage,
     renderRunStage,
+    checkSessionForm,
   } = app;
 
   if (state.isRunning) {
@@ -110,6 +111,10 @@ export async function runDecomposition(app) {
   }
   if (!state.file) {
     setStatus("Select an EMG data file first", "error");
+    return;
+  }
+  if (!checkSessionForm()) {
+    setStatus("Fill in the session info marked in red", "error");
     return;
   }
 

@@ -10,10 +10,18 @@ body {
 body {
   margin: 0;
   font-family: var(--font);
+  font-size: var(--fs-md);
   background: var(--bg);
   color: var(--text);
   font-weight: var(--fw-regular);
   overflow-x: hidden;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
 }
 
 .glass {

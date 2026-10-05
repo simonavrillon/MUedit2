@@ -4,7 +4,7 @@
  * the padding/scale box; the draw helpers map data coordinates into that box.
  * Pure rendering — no application state is read or mutated here.
  */
-import { COLORS } from "../config.js";
+import { COLORS, canvasFont } from "../config.js";
 import {
   isEnvelope,
   isValues,
@@ -246,7 +246,7 @@ export function drawTrace(canvas, trace, view, options = {}) {
     const noDataText = options.noDataText ?? "No data";
     if (noDataText) {
       ctx.fillStyle = COLORS.muted;
-      ctx.font = "12px sans-serif";
+      ctx.font = canvasFont();
       ctx.fillText(noDataText, 12, 24);
     }
     return;
@@ -369,7 +369,7 @@ function drawAxes(
   if (hideYAxis) return;
 
   ctx.fillStyle = COLORS.muted;
-  ctx.font = "10px sans-serif";
+  ctx.font = canvasFont();
   const yTicks = 3;
   for (let i = 0; i <= yTicks; i++) {
     const t = i / yTicks;
@@ -433,7 +433,7 @@ function drawTimeAxis(ctx, padding, plotWidth, plotHeight, view, fsamp) {
   const tEnd = view.end / fsamp;
   const first = Math.ceil(tStart / step) * step;
   ctx.fillStyle = COLORS.muted;
-  ctx.font = "10px sans-serif";
+  ctx.font = canvasFont();
   for (let t = first; t <= tEnd; t += step) {
     const x = toX(t * fsamp);
     ctx.strokeStyle = COLORS.gridLineDim;
@@ -475,7 +475,7 @@ export function drawGridOverlay(
   const validSeries = (seriesList || []).filter((s) => seriesPoints(s) > 0);
   if (!validSeries.length) {
     ctx.fillStyle = COLORS.muted;
-    ctx.font = "12px sans-serif";
+    ctx.font = canvasFont();
     ctx.fillText("No data", 12, 24);
     return;
   }
@@ -483,7 +483,7 @@ export function drawGridOverlay(
   const { min: globalMin, max: globalMax } = seriesRange(validSeries);
   if (!Number.isFinite(globalMin) || !Number.isFinite(globalMax)) {
     ctx.fillStyle = COLORS.muted;
-    ctx.font = "12px sans-serif";
+    ctx.font = canvasFont();
     ctx.fillText("No numeric data", 12, 24);
     return;
   }

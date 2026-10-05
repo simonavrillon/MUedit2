@@ -5,7 +5,7 @@ export const API_BASE = `${window.location.origin}/api/v1`;
 const tokenCache = new Map();
 
 /**
- * A colour custom property of `:root`, as css/tokens.css defines it.
+ * A custom property of `:root`, as css/tokens.css defines it.
  *
  * @param {string} name
  */
@@ -15,7 +15,8 @@ function cssToken(name) {
     value = getComputedStyle(document.documentElement)
       .getPropertyValue(name)
       .trim();
-    tokenCache.set(name, value);
+    // Empty until tokens.css applies: a draw that early must not fix it for good.
+    if (value) tokenCache.set(name, value);
   }
   return value;
 }
@@ -57,6 +58,11 @@ for (const [key, name] of Object.entries(COLOR_TOKENS)) {
     get: () => cssToken(name),
     enumerable: true,
   });
+}
+
+/** Canvas text: the page's font at its small size. */
+export function canvasFont() {
+  return `${cssToken("--fs-sm")} ${cssToken("--font")}`;
 }
 
 const TRACE_COLOR_COUNT = 7;

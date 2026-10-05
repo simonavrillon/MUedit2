@@ -116,6 +116,8 @@
 .edit-toolbar-row .pill-toggle span,
 .edit-toolbar-row .start-btn span {
   display: inline-block;
+  /* Tall enough for descenders: the expanding labels clip to their own box. */
+  line-height: 1.4;
 }
 
 .edit-toolbar-row .icon-expand-btn {

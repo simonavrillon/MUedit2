@@ -266,7 +266,6 @@ def summarize_result(result: dict[str, Any], save_path: str, persisted: bool) ->
         "grid_names": result.get("grid_names", []),
         "mu_count": mu_count,
         "pulse_length": pulse_len,
-        "sil": result.get("sil", []),
         "discard_channels": result.get("discard_channels"),
         "save_path": save_path if persisted else None,
         "parameters": result.get("parameters"),

@@ -38,11 +38,30 @@ function renderPairs(list, items) {
   );
 }
 
-/** @param {number[]} counts */
-function gridCountsText(counts) {
-  if (counts.length < 2) return "";
-  // By number: grids of one recording often share a model name.
-  return counts.map((n, g) => `Grid ${g + 1}: ${n}`).join("   ");
+/** @param {number} grid */
+function gridColor(grid) {
+  return `var(--mu-${(grid % GRID_COLOR_COUNT) + 1})`;
+}
+
+/**
+ * Each grid's count in its dots' colour; none for a single grid.
+ *
+ * @param {HTMLElement} host
+ * @param {number[]} counts
+ */
+function renderGridCounts(host, counts) {
+  const key = counts.length < 2 ? "" : counts.join(",");
+  if (host.dataset.counts === key) return;
+  host.dataset.counts = key;
+  host.replaceChildren(
+    ...(key ? counts : []).map((n, g) => {
+      const span = document.createElement("span");
+      span.style.setProperty("--grid-color", gridColor(g));
+      // By number: grids of one recording often share a model name.
+      span.textContent = `Grid ${g + 1}: ${n}`;
+      return span;
+    }),
+  );
 }
 
 /**
@@ -70,10 +89,7 @@ function buildDots(els, live, gridNames) {
       // A grid's first row, after another grid's: spaced off to group each grid's windows.
       line.className =
         row.window === 0 && row.grid > 0 ? "run-row is-grid-start" : "run-row";
-      line.style.setProperty(
-        "--grid-color",
-        `var(--mu-${(row.grid % GRID_COLOR_COUNT) + 1})`,
-      );
+      line.style.setProperty("--grid-color", gridColor(row.grid));
       const label = document.createElement("span");
       label.className = "run-row-label";
       const grid = `Grid ${row.grid + 1}`;
@@ -178,7 +194,8 @@ function renderCount(els, live) {
       : `motor unit${value === 1 ? "" : "s"} found`;
   }
   if (els.runCountGrids) {
-    els.runCountGrids.textContent = gridCountsText(
+    renderGridCounts(
+      els.runCountGrids,
       summary ? summary.perGrid : live.keptByGrid,
     );
   }
@@ -190,30 +207,9 @@ function renderCount(els, live) {
  */
 function renderResult(els, live) {
   const summary = live.summary;
-  /** @type {PlanItem[]} */
-  const stats = [];
-  if (summary) {
-    const found = keptTotal(live);
-    if (found > summary.muCount) {
-      stats.push({ label: "Found in the search", value: String(found) });
-      stats.push({
-        label: "Removed in post-processing",
-        value: String(found - summary.muCount),
-      });
-    }
-    if (summary.meanSil !== null) {
-      stats.push({
-        label: "Mean silhouette",
-        value: summary.meanSil.toFixed(3),
-      });
-    }
-  }
-  renderPairs(els.runResultStats, stats);
-
   let saveText = "";
   if (live.status === "done") {
     if (live.saving) saveText = "Saving the decomposition…";
-    else if (live.savedPath) saveText = `Saved to ${live.savedPath}`;
     else if (live.saveError) saveText = `Save failed: ${live.saveError}`;
     else if (!summary?.muCount) saveText = "No motor units to save.";
   }

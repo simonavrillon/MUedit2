@@ -199,6 +199,46 @@ export function createFileSessionService(app) {
     renderBidsMuscleFieldsView(els, buildBidsMuscleRowsModel(state));
   }
 
+  /** The session fields a run cannot start without; Acquisition and Run are optional. */
+  function requiredSessionFields() {
+    const muscles = /** @type {HTMLInputElement[]} */ (
+      Array.from(
+        els.bidsMuscleContainer?.querySelectorAll(".bids-muscle-input") || [],
+      )
+    );
+    return [
+      els.bidsProject,
+      els.bidsSubject,
+      els.bidsSession,
+      els.bidsTask,
+      ...muscles,
+      els.bidsParticipantAge,
+      els.bidsParticipantSex,
+      els.bidsParticipantHandedness,
+      els.bidsManufacturer,
+      els.bidsDeviceModel,
+    ].filter((field) => !!field);
+  }
+
+  /** @type {FileSessionService["checkSessionForm"]} */
+  function checkSessionForm() {
+    const fields = requiredSessionFields();
+    const missing = fields.filter((field) => !field.value.trim());
+    for (const field of fields) {
+      if (missing.includes(field)) field.setAttribute("aria-invalid", "true");
+      else field.removeAttribute("aria-invalid");
+    }
+    if (!missing.length) return true;
+    app.setSettingsOpen(true);
+    const section = missing[0].closest(".panel-section");
+    section?.classList.remove("collapsed");
+    section
+      ?.querySelector(".section-header")
+      ?.setAttribute("aria-expanded", "true");
+    missing[0].focus();
+    return false;
+  }
+
   // The BIDS entity label from the session form, else the payload's, and
   // the participant and hardware fields every save carries.
   /** @type {FileSessionService["withBidsSaveFields"]} */
@@ -242,6 +282,7 @@ export function createFileSessionService(app) {
     resetSessionForm,
     getBidsMuscleNames,
     collectBidsEntities,
+    checkSessionForm,
     setBidsEntitiesInput,
     applyPreviewMetadata,
     applySessionInfoFromDecomposition,

@@ -122,4 +122,14 @@ export function setupRunEvents(app) {
   };
   els.settingsPanel?.addEventListener("change", refreshPlan);
   els.settingsPanel?.addEventListener("click", refreshPlan);
+
+  // A session field marked missing clears once it is filled.
+  const clearFilled = (/** @type {Event} */ e) => {
+    const field = /** @type {HTMLInputElement} */ (e.target);
+    if (field.getAttribute?.("aria-invalid") && field.value.trim()) {
+      field.removeAttribute("aria-invalid");
+    }
+  };
+  els.settingsPanel?.addEventListener("input", clearFilled);
+  els.settingsPanel?.addEventListener("change", clearFilled);
 }

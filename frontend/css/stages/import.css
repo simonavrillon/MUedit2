@@ -1,7 +1,7 @@
 /* ── BIDS session panel subsections ── */
 
 .form-subsection-label {
-  font-size: 10px;
+  font-size: var(--fs-sm);
   font-weight: var(--fw-medium);
   letter-spacing: 0.08em;
   text-transform: uppercase;
