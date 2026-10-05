@@ -4,7 +4,7 @@
 
 /** @typedef {{ name?: string, path?: string }} FileRef */
 /** @typedef {Span & { yMin?: number, yMax?: number }} Selection */
-/** @typedef {"add" | "add_artifact" | "delete_spikes" | "delete_dr"} EditMode */
+/** @typedef {"add" | "add_artifact" | "delete_spikes"} EditMode */
 /** @typedef {{ muIdx: number, position: number }} Bookmark Where the user last edited an MU. */
 /** @typedef {import("../api/binary-payloads.js").SeriesRow} ChannelTrace One row of a viewport: its samples, or their min/max per bin. */
 /** @typedef {import("../api/binary-payloads.js").PulseView} PulseView */
@@ -42,7 +42,6 @@
  * @property {Int32Array[]} distimes
  * @property {Int32Array[]} artifactTimes
  * @property {number[]} versions Per MU; changes whenever the server edits it.
- * @property {boolean[]} hasPulse Per MU; false when the file has only discharge times.
  * @property {string[]} gridNames
  * @property {number[]} muGridIndex
  * @property {number | null} fsamp
@@ -51,15 +50,13 @@
  * @property {number} currentMu
  * @property {Span | null} view
  * @property {Selection | null} selectionPulse
- * @property {Selection | null} selectionDr
  * @property {Selection | null} draftSelectionPulse
- * @property {Selection | null} draftSelectionDr
  * @property {EditMode | null} mode
  * @property {boolean} dirty
  * @property {boolean} canUndo
+ * @property {boolean} busy An edit or a save is on its way to the server.
  * @property {JsonObject | null} parameters
  * @property {boolean[]} flagged
- * @property {string} bidsRoot
  * @property {string} project
  * @property {PulseView | null} pulseView
  * @property {string[]} muUids
@@ -112,7 +109,6 @@ export function createEditSlice() {
     distimes: [],
     artifactTimes: [],
     versions: [],
-    hasPulse: [],
     gridNames: [],
     muGridIndex: [],
     fsamp: null,
@@ -121,15 +117,13 @@ export function createEditSlice() {
     currentMu: 0,
     view: null,
     selectionPulse: null,
-    selectionDr: null,
     draftSelectionPulse: null,
-    draftSelectionDr: null,
     mode: null,
     dirty: false,
     canUndo: false,
+    busy: false,
     parameters: null,
     flagged: [],
-    bidsRoot: "",
     project: "",
     pulseView: null,
     muUids: [],

@@ -67,3 +67,19 @@ describe("session form", () => {
     assert.equal("manufacturers_model_name" in run, false);
   });
 });
+
+describe("project field", () => {
+  test("setting it sets the edit session's project too, even to empty", () => {
+    const els = { bidsProject: { value: "old" } };
+    const state = { edit: { project: "old" } };
+    const session = createFileSessionService(
+      /** @type {any} */ ({ els, state, api: {} }),
+    );
+    session.setBidsProject("study-1");
+    assert.equal(els.bidsProject.value, "study-1");
+    assert.equal(state.edit.project, "study-1");
+    session.setBidsProject("");
+    assert.equal(els.bidsProject.value, "");
+    assert.equal(state.edit.project, "");
+  });
+});

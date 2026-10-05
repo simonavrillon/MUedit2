@@ -68,6 +68,19 @@ const activePanels = () =>
   );
 
 describe("switchStage", () => {
+  test("a finished message goes with the page it was about", () => {
+    els.status = { dataset: { tone: "success" } };
+    app.switchStage("run");
+    assert.deepEqual(app.setStatus.calls.at(-1), ["", "muted"]);
+
+    app.setStatus.calls.length = 0;
+    els.status.dataset.tone = "error";
+    app.switchStage("qc");
+    els.status.dataset.tone = "muted";
+    app.switchStage("run");
+    assert.deepEqual(app.setStatus.calls, []);
+  });
+
   test("activates exactly the target panel", () => {
     app.switchStage("run");
     assert.equal(app.state.currentStage, "run");
@@ -132,6 +145,37 @@ describe("switchStage", () => {
     app.switchStage("edit");
     assert.equal(app.state.edit.mode, "add");
     assert.deepEqual(app.setStatus.calls, []);
+  });
+});
+
+describe("showWorkspace", () => {
+  test("switches to the target once, and hides the landing after it draws", () => {
+    const frames = [];
+    globalThis.window.requestAnimationFrame = (fn) => frames.push(fn);
+    try {
+      els.workspace = fakeElement();
+      els.workspace.classList.add("hidden");
+      els.landing = fakeElement();
+      const switched = [];
+      const switchStage = app.switchStage;
+      app.switchStage = (target) => {
+        switched.push(target);
+        switchStage(target);
+      };
+      app.renderRunStage = recorder();
+      app.showWorkspace("run");
+      assert.deepEqual(switched, ["run"]);
+      assert.ok(!els.workspace.classList.contains("hidden"));
+      assert.ok(!els.landing.classList.contains("hidden"));
+      // The page's redraw runs first in the frame, then the landing goes.
+      frames.shift()();
+      assert.equal(app.renderRunStage.calls.length, 1);
+      assert.ok(!els.landing.classList.contains("hidden"));
+      frames.shift()();
+      assert.ok(els.landing.classList.contains("hidden"));
+    } finally {
+      globalThis.window.requestAnimationFrame = () => 0;
+    }
   });
 });
 

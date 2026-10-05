@@ -260,7 +260,6 @@ Action types and their fields. Every entry also carries a `type` and an ISO-8601
 |---|---|---|
 | `add_spikes` | `mu_uid`, `spikes_added`?, `spikes_removed`? | Spikes added over a region of interest; `spikes_removed` captures any net removals. |
 | `delete_spikes` | `mu_uid`, `spikes_removed`? | Spikes removed over a region of interest. |
-| `delete_dr` | `mu_uid`, `spikes_added`?, `spikes_removed`? | Discharge-rate-based edit. |
 | `add_artifact` | `mu_uid`, `artifacts_added`? | Artifact times added (separate channel from spikes). |
 | `delete_artifact` | `mu_uid`, `artifacts_removed`? | Artifact times removed. |
 | `update_filter` | `mu_uid`, `view_start`, `view_end`, `use_peeloff`, `lock_spikes`, `spikes_added`?, `spikes_removed`? | Filter re-estimation over `[view_start, view_end)`; `spikes_*` capture the net change. |

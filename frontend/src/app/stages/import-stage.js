@@ -20,20 +20,32 @@ function showUnsupportedUploadFormatError(els) {
   els.uploadFormatError.classList.remove("hidden");
 }
 
+/** @typedef {"raw" | "decomposition" | "ambiguous_mat" | "unsupported"} FileKind */
+
+/** @type {Record<string, FileKind>} */
+const KIND_BY_EXTENSION = {
+  "otb+": "raw",
+  otb4: "raw",
+  bdf: "raw",
+  edf: "raw",
+  rhd: "raw",
+  npz: "decomposition",
+  // A .mat can be either; it is tried as a recording first.
+  mat: "ambiguous_mat",
+};
+
+/** BIDS EMG files, whose names carry their entities. */
+const BIDS_EMG_FILE = /\.(bdf|edf)$/i;
+
 /**
- * What a picked file is, from its name: a `.mat` can be either.
+ * What a picked file is, from its name.
  *
  * @param {FileRef} file
- * @returns {"raw" | "decomposition" | "ambiguous_mat" | "unsupported"}
+ * @returns {FileKind}
  */
 function detectLandingFileType(file) {
-  const name = (file?.name || "").toLowerCase();
-  if (name.endsWith(".otb+") || name.endsWith(".otb4")) return "raw";
-  if (name.endsWith(".bdf") || name.endsWith(".edf")) return "raw";
-  if (name.endsWith(".rhd")) return "raw";
-  if (name.endsWith(".npz")) return "decomposition";
-  if (name.endsWith(".mat")) return "ambiguous_mat";
-  return "unsupported";
+  const extension = (file?.name || "").toLowerCase().split(".").pop() ?? "";
+  return KIND_BY_EXTENSION[extension] ?? "unsupported";
 }
 
 /**
@@ -49,6 +61,42 @@ function displayNameForPath(fullPath, name) {
     .filter(Boolean);
   const folder = parts[parts.length - 2];
   return folder ? `${folder}.rhd` : name;
+}
+
+/**
+ * Whether to open `name` when the decomposition being edited has unsaved
+ * edits; it is asked only then. The edits stay in the session's log, and
+ * are offered back when that decomposition is opened again.
+ *
+ * @param {App} app
+ * @param {string} name
+ */
+function confirmLeavingUnsavedEdits(app, name) {
+  if (!app.state.edit.dirty) return true;
+  const ask = globalThis.window?.confirm;
+  return (
+    typeof ask === "function" &&
+    ask(
+      `The decomposition you are editing has unsaved edits. Open ${name} anyway? ` +
+        "The edits will be offered back when you open that decomposition again.",
+    )
+  );
+}
+
+/**
+ * Ask for a file and open it. One open at a time: the backend holds one
+ * upload per tab, and a second preview would drop the first while it loads.
+ *
+ * @param {App} app
+ */
+async function openPickedFile(app) {
+  const button = app.els.browseSignalBtn;
+  if (button) button.disabled = true;
+  try {
+    await handleNativeDialogOpen(app);
+  } finally {
+    if (button) button.disabled = false;
+  }
 }
 
 /** @param {App} app */
@@ -85,10 +133,10 @@ async function handleNativeDialogOpen(app) {
     showUnsupportedUploadFormatError(els);
     return;
   }
+  if (!confirmLeavingUnsavedEdits(app, name)) return;
   if (kind === "raw") {
-    await handleRawFilePath(path, name);
-    const lname = name.toLowerCase();
-    if (lname.endsWith(".bdf") || lname.endsWith(".edf")) {
+    const ok = await handleRawFilePath(path, name);
+    if (ok && BIDS_EMG_FILE.test(name)) {
       const entityLabel = name
         .replace(/_emg\.[^.]+$/i, "")
         .replace(/\.[^.]+$/, "");
@@ -106,18 +154,11 @@ async function handleNativeDialogOpen(app) {
 
 /** @param {App} app */
 export function setupImportEvents(app) {
-  const {
-    els,
-    state,
-    setStatus,
-    showWorkspace,
-    switchStage,
-    updateWorkflowStepper,
-  } = app;
+  const { els, state, setStatus, showWorkspace, updateWorkflowStepper } = app;
 
   if (els.browseSignalBtn) {
     els.browseSignalBtn.addEventListener("click", () => {
-      void handleNativeDialogOpen(app);
+      void openPickedFile(app);
     });
   }
 
@@ -129,8 +170,7 @@ export function setupImportEvents(app) {
       updateWorkflowStepper("import");
       return;
     }
-    showWorkspace();
-    switchStage(target);
+    showWorkspace(target);
   };
 
   els.stepQc?.addEventListener("click", () => {

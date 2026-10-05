@@ -13,6 +13,14 @@ import {
 /** @typedef {import("../app/context.js").JsonObject} JsonObject */
 /** @typedef {"emg" | "overview" | "aux"} SeriesKind */
 
+/** Automatic QC filters every channel of the recording. */
+const AUTO_QC_TIMEOUT_MS = 300000;
+/**
+ * Filtering one grid for the edit stage takes a while on long recordings; a
+ * filter update waits for it, and so does a request queued behind that update.
+ */
+const GRID_FILTER_TIMEOUT_MS = 600000;
+
 const SERIES_ROUTES = {
   emg: routes.seriesEmg,
   overview: routes.seriesOverview,
@@ -45,7 +53,7 @@ export function createApiClient({ apiFetch, apiJson, API_BASE, sessionId }) {
    * @param {JsonObject} body
    * @param {number} [timeoutMs]
    */
-  async function postForSession(url, body, timeoutMs = 120000) {
+  async function postForSession(url, body, timeoutMs) {
     const res = await apiFetch(
       url,
       {
@@ -67,6 +75,28 @@ export function createApiClient({ apiFetch, apiJson, API_BASE, sessionId }) {
     return query;
   }
 
+  /**
+   * GET a binary frame and decode it.
+   *
+   * @template T
+   * @param {string} route
+   * @param {Record<string, unknown>} params
+   * @param {(buffer: ArrayBuffer) => T} decode
+   * @param {number} [timeoutMs]
+   * @returns {Promise<T>}
+   */
+  async function getFrame(route, params, decode, timeoutMs) {
+    const res = await apiFetch(
+      `${API_BASE}${route}?${queryOf(params)}`,
+      {
+        method: "GET",
+        headers: { Accept: "application/octet-stream" },
+      },
+      timeoutMs,
+    );
+    return decode(await res.arrayBuffer());
+  }
+
   return {
     /**
      * A viewport of the upload's EMG (one grid), grid overview or auxiliary
@@ -77,27 +107,26 @@ export function createApiClient({ apiFetch, apiJson, API_BASE, sessionId }) {
      * @param {{ upload_token: string, grid?: number, start?: number, end?: number, bins: number }} params
      * @returns {Promise<import("./binary-payloads.js").SeriesView>}
      */
-    async fetchSeries(kind, params) {
-      const res = await apiFetch(
-        `${API_BASE}${SERIES_ROUTES[kind]}?${queryOf(params)}`,
-        { method: "GET", headers: { Accept: "application/octet-stream" } },
-        120000,
-      );
-      return decodeSeriesFrame(await res.arrayBuffer());
+    fetchSeries(kind, params) {
+      return getFrame(SERIES_ROUTES[kind], params, decodeSeriesFrame);
     },
 
     /**
      * @param {JsonObject} payload
      */
     runAutoQc(payload) {
-      return postJson(`${API_BASE}${routes.qcAuto}`, payload, 300000);
+      return postJson(
+        `${API_BASE}${routes.qcAuto}`,
+        payload,
+        AUTO_QC_TIMEOUT_MS,
+      );
     },
 
     /**
      * @param {string} path
      */
     fetchPreviewByPath(path) {
-      return postJson(`${API_BASE}${routes.previewByPath}`, { path }, 120000);
+      return postJson(`${API_BASE}${routes.previewByPath}`, { path });
     },
 
     /**
@@ -147,13 +176,8 @@ export function createApiClient({ apiFetch, apiJson, API_BASE, sessionId }) {
      * @param {{ token: string, mu: number, start?: number, end?: number, bins: number }} params
      * @returns {Promise<import("./binary-payloads.js").PulseView>}
      */
-    async fetchPulse(params) {
-      const res = await apiFetch(
-        `${API_BASE}${routes.seriesPulse}?${queryOf(params)}`,
-        { method: "GET", headers: { Accept: "application/octet-stream" } },
-        120000,
-      );
-      return decodePulseFrame(await res.arrayBuffer());
+    fetchPulse(params) {
+      return getFrame(routes.seriesPulse, params, decodePulseFrame);
     },
 
     /**
@@ -169,18 +193,19 @@ export function createApiClient({ apiFetch, apiJson, API_BASE, sessionId }) {
     },
 
     /**
-     * The whole state of an edit session this page opened before a reload.
+     * The whole state of an edit session, once the edit it may be running is
+     * done: for a page reloaded while the session was open, or one that gave
+     * up waiting on an edit.
      *
      * @param {string} token
      */
-    async editSessionState(token) {
-      const query = queryOf({ token });
-      const res = await apiFetch(
-        `${API_BASE}${routes.editSession}?${query}`,
-        { method: "GET", headers: { Accept: "application/octet-stream" } },
-        120000,
+    editSessionState(token) {
+      return getFrame(
+        routes.editSession,
+        { token },
+        decodeEditSessionFrame,
+        GRID_FILTER_TIMEOUT_MS,
       );
-      return decodeEditSessionFrame(await res.arrayBuffer());
     },
 
     /**
@@ -208,7 +233,7 @@ export function createApiClient({ apiFetch, apiJson, API_BASE, sessionId }) {
       return postJson(
         `${API_BASE}${routes.editSessionPrepareGrid}`,
         { token, grid, project },
-        600000,
+        GRID_FILTER_TIMEOUT_MS,
       );
     },
 
@@ -219,7 +244,11 @@ export function createApiClient({ apiFetch, apiJson, API_BASE, sessionId }) {
      * @param {JsonObject} payload `token` plus the operation's arguments
      */
     editOp(op, payload) {
-      return postForSession(`${API_BASE}${routes.editOp(op)}`, payload);
+      return postForSession(
+        `${API_BASE}${routes.editOp(op)}`,
+        payload,
+        op === "update-filter" ? GRID_FILTER_TIMEOUT_MS : undefined,
+      );
     },
 
     /**
@@ -228,7 +257,7 @@ export function createApiClient({ apiFetch, apiJson, API_BASE, sessionId }) {
      * @param {JsonObject} payload
      */
     editSessionSave(payload) {
-      return postJson(`${API_BASE}${routes.editSessionSave}`, payload, 120000);
+      return postJson(`${API_BASE}${routes.editSessionSave}`, payload);
     },
 
     /**
@@ -238,7 +267,7 @@ export function createApiClient({ apiFetch, apiJson, API_BASE, sessionId }) {
      * @param {JsonObject} payload
      */
     editSave(payload) {
-      return postJson(`${API_BASE}${routes.editSave}`, payload, 120000);
+      return postJson(`${API_BASE}${routes.editSave}`, payload);
     },
 
     healthUrl() {

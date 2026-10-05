@@ -57,3 +57,29 @@ test("closeSession posts a keepalive request naming the session", async () => {
     SESSION_ID,
   );
 });
+
+test("an error response keeps the envelope's code and field", async () => {
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    new Response(
+      JSON.stringify({
+        error: {
+          code: "http_400",
+          message: "Request failed",
+          detail: { field: "upload_token", reason: "Token expired" },
+        },
+      }),
+      { status: 400 },
+    );
+  try {
+    await assert.rejects(apiFetch("http://api/x"), {
+      name: "ApiError",
+      message: "Request failed: upload_token Token expired",
+      status: 400,
+      code: "http_400",
+      field: "upload_token",
+    });
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});

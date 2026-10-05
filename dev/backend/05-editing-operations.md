@@ -52,7 +52,6 @@ entry of the given type.
 | `add-spikes` | `mu, x_start, x_end, y_min` | spikes | `add_spikes` | `add_spikes_in_roi()` |
 | `add-artifact` | `mu, x_start, x_end, y_min` | artifacts | `add_artifact` | `add_artifact_in_roi()` |
 | `delete-spikes` | `mu, x_start, x_end, y_min, y_max` | spikes + artifacts | `delete_spikes`, `delete_artifact` | `delete_spikes_in_roi()` + `delete_artifacts_in_roi()` |
-| `delete-dr` | `mu, x_start, x_end, y_min` (Hz) | spikes | `delete_dr` | `delete_high_discharge_rate_spikes_in_roi()` |
 | `remove-outliers` | `mu` | spikes | `remove_outliers` | `remove_discharge_rate_outliers()` |
 | `flag` | `mu, flag` | flag | `flag_mu` | — |
 | `reset` | `mu` | spikes, artifacts, flag, train back to the file's | `reset_mu` | — |
@@ -82,7 +81,8 @@ class EditSession:
 | `flagged`, `mu_grid_index`, `mu_uids` | Per-MU fields |
 | `rows` | Each MU's pulse train as `(key, row)` into `arrays`, or `None`: the file has none, and a binary train is drawn from the discharge times |
 | `owned` | Whether the MU's row is a copy only it uses (and may be written in place) |
-| `original_spikes`, `original_rows` | The file's state: `dirty` compares against it, `reset` returns to it |
+| `original_spikes`, `original_rows` | The file's state: `reset` returns to it |
+| `unsaved` | Edits applied since the file was opened or saved, less the undos, counted as the log counts them; `dirty` is `unsaved > 0`, so a flag or an artifact mark counts as well as changed discharge times |
 | `versions` | Bumped by every edit of the MU; `/series/pulse` frames are cached by it |
 | `history` | The edit history, saved with the file |
 | `undo_stack` | Up to `MAX_UNDO` (100) steps |
@@ -278,6 +278,8 @@ def delete_high_discharge_rate_spikes_in_roi(
 ```
 For each consecutive spike pair whose midpoint falls in the ROI and whose discharge rate (`fsamp / ISI`) exceeds `y_min`, deletes the lower-amplitude spike of the pair. Returns the pruned spike list.
 
+Library API only: no edit-session operation runs it (the app has no gesture for it).
+
 `PulseValues` is anything indexable by sample: the session passes `_PulseLookup`, which reads
 single samples of the stored train instead of loading it.
 
@@ -339,17 +341,17 @@ def open_edit_session(filepath: str, session: str = DEFAULT_SESSION) -> Response
 ```
 
 1. Refuse anything but an existing `.npz` or `.mat` (400 on `path`)
-2. Close the tab's previous edit session (`_release_edit_sessions`)
-3. `load_decomposition(filepath, store, binary_trains=False)` reads the file once into a new edit
+2. `load_decomposition(filepath, store, binary_trains=False)` reads the file once into a new edit
    `SessionStore`: the `LoadedDecomposition` and its `EditSignalContext`
-4. `_file_extras` enriches it from the files around it. BIDS `channels.tsv` sets grid names,
+3. `_file_extras` enriches it from the files around it. BIDS `channels.tsv` sets grid names,
    muscles and fsamp; the participant and hardware sidecars go into the session's `meta`. The
    `.json` edit log saved next to the file sets `mu_uids`, the history and the artifact times.
-5. The pulse trains go to the session as float32 outside the heap (mapped from the file, or copied
+4. The pulse trains go to the session as float32 outside the heap (mapped from the file, or copied
    into the store); a file without them gets trains drawn from the discharge times
-6. The session is cached for the tab (`_store_edit_session`), offered the unsaved edits an
+5. The session is cached for the tab (`_store_edit_session`), in place of the tab's previous one,
+   which closes only now: a file that fails to open leaves it open. It is offered the unsaved edits an
    earlier session left for this file (`find_recoverable`), and given its own `EditLog`
-7. The response is the MUB1 state frame (see [02-api-surface.md](02-api-surface.md#editing-router-routeseditingpy))
+6. The response is the MUB1 state frame (see [02-api-surface.md](02-api-surface.md#editing-router-routeseditingpy))
 
 ---
 

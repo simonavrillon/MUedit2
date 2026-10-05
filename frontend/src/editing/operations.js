@@ -102,6 +102,29 @@ export function dischargeRates(spikes, fsamp, totalSamples) {
 }
 
 /**
+ * Discharge rates by MU's discharge times. An edit replaces an MU's array, so
+ * an entry outlives no change to it; redraws while panning reuse it.
+ *
+ * @type {WeakMap<ArrayLike<number>, { fsamp: number | null, total: number, rates: ReturnType<typeof dischargeRates> }>}
+ */
+const ratesCache = new WeakMap();
+
+/**
+ * `dischargeRates`, computed once per MU's discharge times.
+ *
+ * @param {ArrayLike<number>} spikes
+ * @param {number | null} fsamp
+ * @param {number} total
+ */
+export function cachedDischargeRates(spikes, fsamp, total) {
+  const hit = ratesCache.get(spikes);
+  if (hit && hit.fsamp === fsamp && hit.total === total) return hit.rates;
+  const rates = dischargeRates(spikes, fsamp, total);
+  ratesCache.set(spikes, { fsamp, total, rates });
+  return rates;
+}
+
+/**
  * The fastest rate whose midpoint is in `view`: the top of the rate plot.
  *
  * @param {{ positions: number[], rates: number[] }} dr
@@ -188,32 +211,6 @@ export function deleteSpikesInSelection(app, sel) {
     xEnd: box.end,
     yMin: box.low,
     yMax: box.top,
-  });
-}
-
-/**
- * @param {App} app
- * @param {Selection} sel
- */
-export function deleteDrInSelection(app, sel) {
-  const { state, getDrPlotHeight, requestRoiEdit } = app;
-
-  const muIdx = state.edit.currentMu ?? 0;
-  const spikes = state.edit.distimes?.[muIdx] || [];
-  if (spikes.length < 2) return;
-  const height = getDrPlotHeight();
-  const yLowPx = Math.max(sel.yMin ?? 0, sel.yMax ?? height);
-  const total = state.edit.totalSamples || 0;
-  // Same scale the rate plot draws: 0 Hz at the bottom, the fastest rate in view on top.
-  const fastest = fastestRateInView(
-    dischargeRates(spikes, state.edit.fsamp, total),
-    state.edit.view || { start: 0, end: total },
-  );
-  requestRoiEdit("delete-dr", {
-    muIdx,
-    xStart: Math.min(sel.start, sel.end),
-    xEnd: Math.max(sel.start, sel.end),
-    yMin: (1 - yLowPx / height) * (fastest || 1),
   });
 }
 

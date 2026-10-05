@@ -200,6 +200,8 @@ describe("run stream handling", () => {
         mu_grid_index: [0, 0],
         total_samples: 10,
         rois: [],
+        muscle: [],
+        channel_means: [[1, 2]],
       },
     });
     const run = app.state.runLive;
@@ -208,11 +210,33 @@ describe("run stream handling", () => {
     assert.equal(run.summary.muCount, 2);
     assert.equal(app.state.runResultToken, "run-1");
     assert.equal(app.autoSaveRunDecomposition.calls.length, 1);
-    // The run page is on screen: the QC plots wait for theirs, their traces load.
-    assert.equal(app.renderChannelQC.calls.length, 0);
-    assert.equal(app.refreshVisuals.calls.length, 0);
-    assert.equal(app.ensureQcTraces.calls.length, 1);
-    assert.equal(app.scheduleLayoutRerender.calls.length, 1);
+  });
+
+  test("the done event leaves the recording and the session form as they are", () => {
+    const app = testApp();
+    Object.assign(app.state, {
+      muscle: ["tibialis anterior"],
+      channelMeans: [[3, 4]],
+      rois: [{ start: 2, end: 8 }],
+    });
+    const channelMeans = app.state.channelMeans;
+    app.handleStreamMessage({
+      stage: "done",
+      pct: 100,
+      summary: { mu_count: 1, grid_names: ["A"], sil: [0.9] },
+      preview: {
+        run_result_token: "run-1",
+        mu_grid_index: [0],
+        muscle: [],
+        channel_means: [[1, 2]],
+        rois: [[0, 10]],
+      },
+    });
+    assert.deepEqual(app.state.muscle, ["tibialis anterior"]);
+    assert.equal(app.state.channelMeans, channelMeans);
+    assert.deepEqual(app.state.rois, [{ start: 2, end: 8 }]);
+    assert.equal(app.renderBidsMuscleFields.calls.length, 0);
+    assert.equal(app.ensureQcTraces.calls.length, 0);
   });
 
   test("an error marks the run failed with its detail", () => {

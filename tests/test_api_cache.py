@@ -146,9 +146,8 @@ def _views(store: RamStore | SessionStore, n_samples: int = 2000) -> cache.Signa
 
 class TestSignalViews:
     def test_round_trip(self, clock: FakeClock) -> None:
-        token = _store()
         views = _views(RamStore())
-        cache._store_signal_views(token, views)
+        token = cache._store_upload_signal(_signal(), views=views)
         assert cache._get_signal_views(token) is views
         assert views.grid_rows == [(0, 4), (4, 6)]
         assert views.overview.shape == (2, 2000)
@@ -164,12 +163,12 @@ class TestSignalViews:
         assert cache._get_signal_views(_store()) is None
 
     def test_heap_views_count_against_the_budget(self, clock: FakeClock) -> None:
-        token = _store()
-        before = cache.BUDGET.used_bytes
+        signal = _signal()
         views = _views(RamStore())
-        cache._store_signal_views(token, views)
+        before = cache.BUDGET.used_bytes
+        cache._store_upload_signal(signal, views=views)
         assert views.nbytes > 0
-        assert cache.BUDGET.used_bytes == before + views.nbytes
+        assert cache.BUDGET.used_bytes == before + signal.nbytes + views.nbytes
 
 
 # ── run result kept for the run save ─────────────────────────────────────────
@@ -236,11 +235,6 @@ class TestEditSessions:
         assert not first_edit.store.path.exists()
         got = cache._get_edit_session(second)
         assert got is not None and got.spikes[0].tolist() == [2, 12]
-
-    def test_release_before_the_next_open(self, clock: FakeClock) -> None:
-        token = cache._store_edit_session(_edit(), "tab-a")
-        cache._release_edit_sessions("tab-a")
-        assert cache._get_edit_session(token) is None
 
     def test_a_reloaded_tab_takes_the_session_over(self, clock: FakeClock) -> None:
         token = cache._store_edit_session(_edit(), "tab-old")
@@ -354,9 +348,11 @@ class TestSessionStores:
         assert st.path.exists()
 
     def test_memory_mapped_views_cost_no_budget(self, clock: FakeClock) -> None:
-        token, st = _stored_upload()
+        st = SessionStore.create("upload")
         views = _views(st)
-        cache._store_signal_views(token, views)
+        data = st.allocate("emg", (4, 100), np.float32)
+        signal = SignalImport(data=st.seal(data), fsamp=2000.0, gridname=["GR08MM1305"])
+        cache._store_upload_signal(signal, store=st, views=views)
         assert views.nbytes == 0
         assert cache.BUDGET.used_bytes == 0
 

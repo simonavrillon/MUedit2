@@ -8,20 +8,16 @@ import {
   populateAuxSelector as populateAuxSelectorFeature,
   renderAuxiliaryChannels as renderAuxiliaryChannelsFeature,
   refreshVisuals as refreshVisualsController,
-  enableRoiSelection as enableRoiSelectionController,
-  renderChannelQC as renderChannelQCController,
+  enableRoiSelection,
+  drawChannelQC,
 } from "../../view/qc-renderer.js";
-import {
-  beginRawPreviewTransition,
-  rollbackRawPreviewTransition,
-} from "../../state/transitions.js";
-import { resetBidsEntityDefaults } from "../../view/bids-renderer.js";
 import {
   removeLastArtifactRegion,
   setArtifactMode,
   setCurrentGrid,
 } from "../../state/actions.js";
 import { oncePerFrame } from "../../view/plots.js";
+import { getCurrentGrid } from "../../state/selectors.js";
 
 /** @typedef {import("../context.js").App} App */
 /** @typedef {import("../context.js").QcStage} QcStage */
@@ -48,30 +44,21 @@ export function createQcStageService(app) {
 
   /** @type {QcStage["handleRawFilePath"]} */
   async function handleRawFilePath(path, name, options = {}) {
-    const syntheticFile = { name, path };
-    beginRawPreviewTransition(state, syntheticFile);
-    resetBidsEntityDefaults(els, name);
-    app.setStatus("File ready");
-    app.updateStartAvailability();
     const ok = await requestPreview(app, {
       silentFailure: options.silentPreviewFailure ?? false,
-      filepath: path,
+      file: { name, path },
     });
-    if (!ok) {
-      rollbackRawPreviewTransition(state);
-      app.updateStartAvailability();
-    }
+    if (ok) app.updateStartAvailability();
     return ok;
   }
 
   /** @type {QcStage["renderChannelQC"]} */
   function renderChannelQC() {
-    renderChannelQCController(app);
-  }
-
-  /** @type {QcStage["enableRoiSelection"]} */
-  function enableRoiSelection(canvasId) {
-    return enableRoiSelectionController(app, canvasId);
+    // A grid the channel data does not reach shows the first one.
+    if (!state.channelMeans[getCurrentGrid(state)] && state.channelMeans.length)
+      setCurrentGrid(state, 0);
+    drawChannelQC(app);
+    app.ensureQcTraces();
   }
 
   /** @type {QcStage["refreshVisuals"]} */
@@ -90,7 +77,6 @@ export function createQcStageService(app) {
       tab.classList.toggle("active", i === state.currentGrid);
     });
     renderChannelQC();
-    renderAuxiliaryChannels();
   }
 
   return {
@@ -99,7 +85,6 @@ export function createQcStageService(app) {
     ensureQcTraces,
     handleRawFilePath,
     renderChannelQC,
-    enableRoiSelection,
     refreshVisuals,
     scheduleRefreshVisuals,
     setSelectedGrid,
@@ -146,7 +131,8 @@ export function setupQcEvents(app) {
     removeLastArtifact(app),
   );
   app.refreshVisuals();
-  app.enableRoiSelection("emgCanvas");
+  enableRoiSelection(app, "emgCanvas");
+  enableRoiSelection(app, "auxCanvas");
 
   els.nwindows?.addEventListener("change", () => {
     syncRois(state, Number(els.nwindows.value) || 1);

@@ -57,7 +57,7 @@ button shows busy; one with `run` only changes the page.
 | `editAddBtn` | Add Spike | `setEditMode("add")` | — | Enters "add" mode. The user then drags a box on the pulse canvas to add spikes. |
 | `editAddArtifactBtn` | Add Artifact | `setEditMode("add_artifact")` | — | Enters "add_artifact" mode. The user drags a box on the pulse canvas to mark artifacts. |
 | `editDeleteSpikeBtn` | Delete Spike/Artifact | `setEditMode("delete_spikes")` | — | Enters "delete_spikes" mode. The user drags a box on the pulse canvas to delete the spikes and artifacts in it. |
-| `editUpdateBtn` | Update Filter | `requestFilterUpdate()` | `op: update-filter` | Refits the current MU's filter on the EMG in view. Sends the peel-off and lock-spike toggles and the project. 120s timeout. |
+| `editUpdateBtn` | Update Filter | `requestFilterUpdate()` | `op: update-filter` | Refits the current MU's filter on the EMG in view. Sends the peel-off and lock-spike toggles and the project. 10min timeout: it waits for the grid's filtering. |
 | `editPeelOffToggle` | Peel-off: Off/On | `applyLabeledToggle(...)` | — | Sets `use_peeloff`, read by `requestFilterUpdate`. |
 | `editLockSpikesToggle` | Lock: Off/On | `applyLabeledToggle(...)` | — | Sets `lock_spikes`, read by `requestFilterUpdate`. |
 | `editUndoBtn` | Undo | `undoEdit()` | `op: undo` | Takes back the last edit, whichever MU it touched (up to 100 levels). Disabled while `state.edit.canUndo` is false. |
@@ -71,6 +71,12 @@ All mutating edit actions are wrapped by `runEditAction(button, fn)` which:
 - Sets `is-running` CSS class + `aria-busy` on the button
 - Disables the button visually during the async operation
 
+Edits go to the server one at a time. While one runs (`state.edit.busy`, set by
+`editAction` in `editing-service.js`), any other edit, from a button, a key or a box drawn on a
+canvas, and the save are refused with "Wait for the current edit to finish": a box drawn
+meanwhile was drawn on the pulse train the running edit is about to change. A change the
+server answers after another decomposition was opened is not applied.
+
 ---
 
 ## Canvas Interactions
@@ -82,7 +88,10 @@ All mutating edit actions are wrapped by `runEditAction(button, fn)` which:
 | Mouse drag (in "add" mode) | Selects a region; on release, calls `addSpikesInSelection(sel)` → `op: add-spikes` |
 | Mouse drag (in "add_artifact" mode) | Selects a region; on release, calls `addArtifactInSelection(sel)` → `op: add-artifact` |
 | Mouse drag (in "delete_spikes" mode) | Selects a region; on release, calls `deleteSpikesInSelection(sel)` → `op: delete-spikes` |
+| Mouse drag (no mode) | Keeps the box as the selection |
 | Double-click | Resets view to the whole recording and shows the bookmark |
+
+However a gesture ends (a box, a click, a refused edit), the box being drawn is cleared and the plot redrawn at the next frame.
 
 The canvas draws `state.edit.pulseView`, the window `ensureEditPulseView` fetched: one min/max
 pair per pixel column, or the samples when zoomed in far enough. It is refetched when the MU,
@@ -99,14 +108,11 @@ Renders:
 
 ### Discharge Rate Canvas (`#editDrCanvas`)
 
-| Interaction | Action |
-|---|---|
-| Mouse drag (always available) | Selects a DR range; on release, calls `deleteDrInSelection(sel)` → `op: delete-dr` |
+Draw only; it takes no pointer gestures.
 
 Renders:
 - Instantaneous discharge rate (`dischargeRates`: one point per interval, at its midpoint), 0 Hz at the bottom and the fastest rate in view (`fastestRateInView`) at the top
 - DR markers at midpoints between consecutive spikes
-- Selection rectangles (draft + committed)
 - "No data" message if flagged or no spikes
 
 ### Timeline Canvas (`#editTimelineCanvas`)
@@ -138,7 +144,7 @@ Dropdown auto-fallback: if the current grid has no MUs, `buildEditDropdownModel`
 
 ## Keyboard Shortcuts
 
-All shortcuts fire only when `state.currentStage === "edit"` and focus is not in an `INPUT`, `TEXTAREA`, or `SELECT`.
+All shortcuts fire only when `state.currentStage === "edit"`, the workspace is shown (the landing page hides it without leaving the stage), and focus is not in an `INPUT`, `TEXTAREA`, or `SELECT`.
 The letter keys and Space run the `EDIT_COMMANDS` entry of the same button; the rest are
 `handleKeyboardNavigation` (`app/services/navigation.js`).
 
@@ -172,7 +178,6 @@ The letter keys and Space run the `EDIT_COMMANDS` entry of the same button; the 
 | `addSpikesInSelection` | `(app, sel)` | Maps the drawn box to samples and a pulse value (`pulseBox`), calls `requestRoiEdit("add-spikes", …)` |
 | `addArtifactInSelection` | `(app, sel)` | Same, with `requestRoiEdit("add-artifact", …)` |
 | `deleteSpikesInSelection` | `(app, sel)` | Same, with the box's value range: `requestRoiEdit("delete-spikes", …)` |
-| `deleteDrInSelection` | `(app, sel)` | Maps the rate-canvas box to a rate threshold on the plot's own scale; calls `requestRoiEdit("delete-dr", …)` |
 
 ## Edit Actions (`app/services/editing-service.js`)
 
@@ -183,7 +188,7 @@ it is done and the status says how it went; a failure is reported and changes no
 
 | Function | `op` | Arguments sent | Then |
 |---|---|---|---|
-| `requestRoiEdit(app, action, payload)` | `add-spikes`, `add-artifact`, `delete-spikes`, `delete-dr` | `mu, x_start, x_end, y_min, y_max` | Bookmark at the box's centre, clear the selections, leave the mode |
+| `requestRoiEdit(app, action, payload)` | `add-spikes`, `add-artifact`, `delete-spikes` | `mu, x_start, x_end, y_min, y_max` | Bookmark at the box's centre, clear the selections, leave the mode |
 | `requestFilterUpdate(app)` | `update-filter` | `mu, view_start, view_end, use_peeloff, lock_spikes, project` | Bookmark at the view's centre |
 | `removeOutliers(app)` | `remove-outliers` | `mu` | "Outliers removed" or "No outliers detected" (`removed_count`) |
 | `removeDuplicateMus(app)` | `remove-duplicates` | — | "N duplicates removed" |
@@ -207,7 +212,7 @@ it is done and the status says how it went; a failure is reported and changes no
       -> applyEditChange(state, frame):
            keepEditMus(kept_indices)            [when MUs were removed or reordered]
            distimes/artifactTimes of the `changed` MUs
-           flagged, muUids, muGridIndex, versions, hasPulse, dirty, canUndo
+           flagged, muUids, muGridIndex, versions, dirty, canUndo
            editHistory cut at history_start, `history` appended
       -> refreshEditModeButtons()               [Undo follows canUndo]
 3. setEditBookmark({muIdx, position}) + setShowBookmark(false)
@@ -253,7 +258,7 @@ it is done and the status says how it went; a failure is reported and changes no
 
 ### Entry Types
 
-`add_spikes`, `delete_spikes`, `delete_dr`, `add_artifact`, `delete_artifact`, `update_filter`, `remove_outliers`, `remove_duplicates`, `flag_mu`, `duplicate_mu`, `reset_mu`; the backend appends `remove_flagged` and `remove_duplicates` with `on_save: true` when saving drops MUs
+`add_spikes`, `delete_spikes`, `add_artifact`, `delete_artifact`, `update_filter`, `remove_outliers`, `remove_duplicates`, `flag_mu`, `duplicate_mu`, `reset_mu`; the backend appends `remove_flagged` and `remove_duplicates` with `on_save: true` when saving drops MUs
 
 History is **persisted with the saved file** (the `.json` edit log next to the `.npz`).
 
@@ -298,7 +303,7 @@ User clicks Save (#editSaveBtn)
            the per-MU fields (dirty is false again)
            editHistory = saved.edit_history      [with the remove_flagged/remove_duplicates entries]
         3. refreshEditModeButtons()               [the undo stack starts over]
-        4. renderEditExplorer()                   [only if the save dropped or reordered MUs]
+        4. renderEditExplorer()
         5. setEditStatus("Edited decomposition saved to {path}", "success")
         6. (on error: handleError(err, setEditStatus, "Save failed"))
 ```

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -21,8 +20,6 @@ from muedit.models import (
     resident_nbytes,
 )
 from muedit.signal.pyramid import MinMaxPyramid
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -122,14 +119,17 @@ def _store_upload_signal(
     source_path: str | None = None,
     session: str = DEFAULT_SESSION,
     store: SessionStore | None = None,
+    views: SignalViews | None = None,
 ) -> str:
-    """Keep ``signal`` (and the file it came from) and return a token.
+    """Keep ``signal`` (and the file it came from), with the QC stage's ``views``; return a token.
 
-    With ``store``, the entry takes over the store ``signal`` was loaded into and
-    deletes it when dropped; otherwise it keeps a copy of ``signal``.
+    With ``store``, the entry takes over the store ``signal`` and ``views`` were built in and
+    deletes it when dropped; otherwise it keeps a copy of ``signal``. The upload is kept
+    whole: a store is only ever deleted once nothing is still being written into it.
     """
     kept = signal if store is not None else signal.clone()
-    return _UPLOADS.pin(_UploadEntry(signal=kept, source_path=source_path, store=store), session)
+    entry = _UploadEntry(signal=kept, source_path=source_path, views=views, store=store)
+    return _UPLOADS.pin(entry, session)
 
 
 def _get_upload_source_path(token: str | None) -> str | None:
@@ -173,17 +173,6 @@ def _hold_upload(token: str | None) -> HeldUpload | None:
         return HeldUpload(entry.signal.readonly_view(), entry.source_path, entry.store, entry.views)
 
 
-def _store_signal_views(token: str, views: SignalViews) -> None:
-    """Attach the QC stage's pyramids and overview to the upload for ``token``."""
-    with BUDGET.lock:
-        entry = _UPLOADS.get(token)
-        if entry is None:
-            logger.debug("Dropping signal views: upload token %s is no longer cached", token)
-            return
-        entry.views = views
-        _UPLOADS.resize(token)
-
-
 def _get_signal_views(token: str | None) -> SignalViews | None:
     """The pyramids and overview of the upload for ``token`` (sealed, so read-only)."""
     entry = _UPLOADS.get(token)
@@ -219,13 +208,11 @@ def _get_run_result(token: str | None) -> FloatArray | None:
     return stored.pulse_trains if stored is not None else None
 
 
-def _release_edit_sessions(session: str = DEFAULT_SESSION) -> None:
-    """Drop the edit session ``session`` holds, before it opens the next decomposition."""
-    _EDIT_SESSIONS.release_session(session)
-
-
 def _store_edit_session(edit: EditSession, session: str = DEFAULT_SESSION) -> str:
-    """Keep an edit session for ``session`` and return its token; dropping it closes the session."""
+    """Keep an edit session for ``session``, in place of its last, and return its token.
+
+    Dropping a session closes it.
+    """
     return _EDIT_SESSIONS.pin(_EditSessionEntry(edit), session)
 
 

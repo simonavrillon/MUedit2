@@ -128,13 +128,9 @@ export function applySessionInfoToDom(els, payload) {
   }
 
   // Reset to HTML defaults before applying parsed values so stale values
-  // from a previously loaded file don't bleed into the new one.
-  if (els.bidsSubject) els.bidsSubject.value = "1";
-  if (els.bidsTask) els.bidsTask.value = "trapezoid";
-  if (els.bidsSession) els.bidsSession.value = "1";
-  if (els.bidsAcquisition) els.bidsAcquisition.value = "";
-  if (els.bidsRun) els.bidsRun.value = "";
-  if (els.bidsProject) els.bidsProject.value = "";
+  // from a previously loaded file don't bleed into the new one. The Project
+  // field is the caller's: it comes with the edit session's project.
+  resetBidsEntityDefaults(els);
   if (els.bidsPlacementScheme)
     els.bidsPlacementScheme.value = "ChannelSpecific";
   if (els.bidsPlacementDescription) els.bidsPlacementDescription.value = "";

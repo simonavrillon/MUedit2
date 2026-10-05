@@ -49,7 +49,7 @@ export function createUiService(app) {
   /** @type {UiService["populateGridTabs"]} */
   const populateGridTabs = () => populateGridTabsController(app);
   /** @type {UiService["showWorkspace"]} */
-  const showWorkspace = (options = {}) => showWorkspaceController(app, options);
+  const showWorkspace = (target) => showWorkspaceController(app, target);
 
   return {
     setStatus,

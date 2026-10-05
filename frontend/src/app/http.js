@@ -2,6 +2,9 @@
 
 export const SESSION_HEADER = "X-MUedit-Session";
 
+/** How long a request may take before it is given up, unless it says otherwise. */
+const REQUEST_TIMEOUT_MS = 120000;
+
 /** One id per tab: the backend scopes what it caches to it and frees it when the tab closes. */
 export const SESSION_ID = newSessionId();
 
@@ -16,17 +19,46 @@ function newSessionId() {
 }
 
 /**
+ * An error response: its message, and what the backend's error envelope says
+ * went wrong (`field` names the request field at fault, when one is).
+ */
+export class ApiError extends Error {
+  /**
+   * @param {string} message
+   * @param {{ status: number, code?: string, field?: string }} info
+   */
+  constructor(message, { status, code = "", field = "" }) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.code = code;
+    this.field = field;
+  }
+}
+
+/** A request given up on: the server may still carry it out. */
+export class RequestTimeout extends Error {
+  constructor() {
+    super("Request timed out");
+    this.name = "RequestTimeout";
+  }
+}
+
+/**
  * @param {Response} res
- * @returns {Promise<string>}
+ * @returns {Promise<ApiError>}
  */
 async function parseApiError(res) {
   let message = `HTTP ${res.status}`;
+  let code = "";
+  let field = "";
   try {
     const data = await res.json();
     const err = data?.error || data;
     if (typeof err?.message === "string" && err.message.trim()) {
       message = err.message.trim();
     }
+    if (typeof err?.code === "string") code = err.code;
 
     const detail = err?.detail ?? data?.detail;
     if (typeof detail === "string" && detail.trim()) {
@@ -42,13 +74,14 @@ async function parseApiError(res) {
       }
     } else if (detail && typeof detail === "object" && !Array.isArray(detail)) {
       const reason = detail.reason || detail.message || "";
-      const field = detail.field ? `${detail.field} ` : "";
-      if (reason) message = `${message}: ${field}${reason}`.trim();
+      if (typeof detail.field === "string") field = detail.field;
+      const fieldText = field ? `${field} ` : "";
+      if (reason) message = `${message}: ${fieldText}${reason}`.trim();
     }
   } catch {
     // Keep status fallback.
   }
-  return message;
+  return new ApiError(message, { status: res.status, code, field });
 }
 
 /**
@@ -57,7 +90,11 @@ async function parseApiError(res) {
  * @param {number} [timeoutMs]
  * @returns {Promise<Response>}
  */
-export async function apiFetch(url, options = {}, timeoutMs = 120000) {
+export async function apiFetch(
+  url,
+  options = {},
+  timeoutMs = REQUEST_TIMEOUT_MS,
+) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   const headers = new Headers(options.headers);
@@ -69,12 +106,12 @@ export async function apiFetch(url, options = {}, timeoutMs = 120000) {
       signal: controller.signal,
     });
     if (!res.ok) {
-      throw new Error(await parseApiError(res));
+      throw await parseApiError(res);
     }
     return res;
   } catch (err) {
     if (err instanceof Error && err.name === "AbortError") {
-      throw new Error("Request timed out");
+      throw new RequestTimeout();
     }
     throw err;
   } finally {
@@ -110,7 +147,11 @@ export async function waitForBackend(
  * @param {number} [timeoutMs]
  * @returns {Promise<JsonObject>}
  */
-export async function apiJson(url, options = {}, timeoutMs = 120000) {
+export async function apiJson(
+  url,
+  options = {},
+  timeoutMs = REQUEST_TIMEOUT_MS,
+) {
   const res = await apiFetch(url, options, timeoutMs);
   const payload = await res.json();
   if (

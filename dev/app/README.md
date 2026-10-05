@@ -69,7 +69,7 @@ frontend/
     ├── state/
     │   ├── actions.js                   State mutators (set* functions)
     │   ├── selectors.js                 State selectors (get* functions)
-    │   └── transitions.js               State transitions (begin/rollback raw preview)
+    │   └── transitions.js               The state a newly opened raw file starts from
     └── view/
         ├── bids-renderer.js             BIDS form rendering
         ├── edit-canvas.js               Edit-stage canvas rendering + interaction binding

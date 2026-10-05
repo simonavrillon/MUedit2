@@ -131,9 +131,8 @@ class TestSeriesRequest:
 
         store = SessionStore.create("upload")
         signal = _signal()
-        token = cache._store_upload_signal(signal, session="drop", store=store)
         views, _ = build_signal_views(signal, store, [12, 8], [1, 1])
-        cache._store_signal_views(token, views)
+        token = cache._store_upload_signal(signal, session="drop", store=store, views=views)
 
         real_view = series_service.view
         seen: list[bool] = []

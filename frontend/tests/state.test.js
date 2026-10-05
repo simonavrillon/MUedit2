@@ -15,7 +15,7 @@ globalThis.window = {
 const { state: initialState } = await import("../src/state/state.js");
 const actions = await import("../src/state/actions.js");
 const selectors = await import("../src/state/selectors.js");
-const { beginRawPreviewTransition, rollbackRawPreviewTransition } =
+const { beginRawPreviewTransition } =
   await import("../src/state/transitions.js");
 
 const pristine = structuredClone(initialState);
@@ -322,32 +322,17 @@ describe("selectors", () => {
 });
 
 describe("raw preview transitions", () => {
-  test("begin resets the edit slice but keeps the BIDS root", () => {
-    state.edit.bidsRoot = "/data/bids";
+  test("begin resets the edit slice", () => {
     state.edit.dirty = true;
     state.uploadToken = "old";
     state.channelTraces = [[1]];
     state.discardMasks = [[1]];
     const file = { name: "new.otb+" };
     beginRawPreviewTransition(state, file);
-    assert.deepEqual(state.edit, { ...pristine.edit, bidsRoot: "/data/bids" });
+    assert.deepEqual(state.edit, pristine.edit);
     assert.equal(state.file, file);
     assert.equal(state.uploadToken, null);
     assert.deepEqual(state.channelTraces, []);
     assert.deepEqual(state.discardMasks, []);
-  });
-
-  test("rollback clears the file, token and preview", () => {
-    state.file = { name: "x" };
-    state.uploadToken = "t";
-    state.gridSeries = [new Float32Array([1])];
-    state.gridNames = ["g"];
-    state.seriesLength = 10;
-    rollbackRawPreviewTransition(state);
-    assert.equal(state.file, null);
-    assert.equal(state.uploadToken, null);
-    assert.deepEqual(state.gridSeries, []);
-    assert.deepEqual(state.gridNames, []);
-    assert.equal(state.seriesLength, null);
   });
 });

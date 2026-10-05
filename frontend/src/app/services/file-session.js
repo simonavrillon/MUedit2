@@ -1,13 +1,14 @@
 /**
- * The session form: file-type detection, the upload indicator, and the BIDS
- * entity, participant and hardware fields that travel with a run or a save.
- * Every DOM read or write of those fields goes through here.
+ * The session form: the upload indicator, and the BIDS entity, participant
+ * and hardware fields that travel with a run or a save. Every DOM read or
+ * write of those fields goes through here.
  */
 import {
   applyParticipantFields,
   applySessionInfoToDom,
   renderBidsAutoInfo as renderBidsAutoInfoView,
   renderBidsMuscleFields as renderBidsMuscleFieldsView,
+  resetBidsEntityDefaults,
 } from "../../view/bids-renderer.js";
 import {
   buildBidsAutoInfoModel,
@@ -38,6 +39,17 @@ export function createFileSessionService(app) {
   /** @type {FileSessionService["getBidsProject"]} */
   function getBidsProject() {
     return (els.bidsProject?.value || "").trim();
+  }
+
+  /** @type {FileSessionService["setBidsProject"]} */
+  function setBidsProject(project) {
+    if (els.bidsProject) els.bidsProject.value = project;
+    setEditProject(state, project);
+  }
+
+  /** @type {FileSessionService["resetSessionForm"]} */
+  function resetSessionForm(fileName) {
+    resetBidsEntityDefaults(els, fileName);
   }
 
   /** @type {FileSessionService["getBidsMuscleNames"]} */
@@ -125,10 +137,7 @@ export function createFileSessionService(app) {
     if (els.bidsAcquisition && entities.acq)
       els.bidsAcquisition.value = entities.acq;
     if (els.bidsRun && entities.run) els.bidsRun.value = entities.run;
-    if (els.bidsProject && entities.project) {
-      els.bidsProject.value = entities.project;
-      setEditProject(state, entities.project);
-    }
+    if (entities.project) setBidsProject(entities.project);
   }
 
   /** @type {FileSessionService["applyPreviewMetadata"]} */
@@ -229,6 +238,8 @@ export function createFileSessionService(app) {
 
   return {
     getBidsProject,
+    setBidsProject,
+    resetSessionForm,
     getBidsMuscleNames,
     collectBidsEntities,
     setBidsEntitiesInput,

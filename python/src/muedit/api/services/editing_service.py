@@ -21,7 +21,6 @@ from muedit.api.cache import (
     _get_edit_session,
     _get_run_result_entry,
     _live_edit_logs,
-    _release_edit_sessions,
     _resize_edit_session,
     _store_edit_session,
 )
@@ -264,8 +263,9 @@ def _new_session(
 def open_edit_session(filepath: str, session: str = DEFAULT_SESSION) -> Response:
     """Open a decomposition for editing; the frame holds its fields and discharge times.
 
-    The previous edit session of the tab closes first. ``recoverable_edits`` counts the
-    unsaved edits an earlier session left for this file (``/edit/session/recover``).
+    The tab's previous edit session closes once this one is built: a file that fails to open
+    leaves it open. ``recoverable_edits`` counts the unsaved edits an earlier session left for
+    this file (``/edit/session/recover``).
     """
     if require_existing_path(filepath).suffix.lower() not in {".npz", ".mat"}:
         raise HTTPException(
@@ -275,7 +275,6 @@ def open_edit_session(filepath: str, session: str = DEFAULT_SESSION) -> Response
                 "reason": "Unsupported decomposition format. Expected .mat or .npz",
             },
         )
-    _release_edit_sessions(session)
     store = SessionStore.create("edit")
     try:
         decomp, signal = load_decomposition(filepath, store, binary_trains=False)

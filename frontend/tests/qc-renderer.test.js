@@ -19,7 +19,7 @@ const { COLORS, traceColors } = await import("../src/config.js");
 const { state: initialState } = await import("../src/state/state.js");
 const { createApp } = await import("../src/app/create-app.js");
 const { requestAutoQc } = await import("../src/signal/qc.js");
-const { buildSelections, renderArtifactControls } =
+const { buildSelections, enableRoiSelection, renderArtifactControls } =
   await import("../src/view/qc-renderer.js");
 
 const pristine = structuredClone(initialState);
@@ -64,7 +64,7 @@ function dragOverview(fromX, toX) {
 }
 
 describe("ROI drag on the overview", () => {
-  beforeEach(() => app.enableRoiSelection("emgCanvas"));
+  beforeEach(() => enableRoiSelection(app, "emgCanvas"));
 
   test("a drag over a drawn window adjusts that window", () => {
     dragOverview(50, 150);
@@ -158,12 +158,6 @@ describe("ROI drag on the overview", () => {
   test("a drag past the canvas edge is clamped", () => {
     dragOverview(-40, 400);
     assert.deepEqual(app.state.rois[0], { start: 0, end: 1000 });
-    assert.equal(app.ensureQcTraces.calls.length, 1);
-  });
-
-  test("binding twice does not double the handlers", () => {
-    app.enableRoiSelection("emgCanvas");
-    dragOverview(50, 150);
     assert.equal(app.ensureQcTraces.calls.length, 1);
   });
 
@@ -327,6 +321,13 @@ describe("channel grid", () => {
     app.state.channelTraces = [];
     await app.renderChannelQC();
     assert.equal(app.ensureQcTraces.calls.length, 1);
+  });
+
+  test("switching grid redraws the channels, not the auxiliary plot", () => {
+    app.state.channelMeans.push([1, 2]);
+    app.setSelectedGrid(1);
+    assert.equal(cellsOf().children.length, 2);
+    assert.equal(els.auxCanvas.ctx.calls.length, 0);
   });
 
   test("a grid index past the data falls back to the first grid", async () => {

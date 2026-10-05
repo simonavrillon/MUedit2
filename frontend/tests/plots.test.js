@@ -227,6 +227,7 @@ describe("drawTrace", () => {
   });
 
   describe("selections", () => {
+    // Samples 0-3 sit at x = 0, 100, 200, 300, under the trace's points.
     const view = { start: 0, end: 4 };
     const trace = samples(ramp(4));
 
@@ -236,11 +237,11 @@ describe("drawTrace", () => {
         selections: [{ start: 1, end: 3 }],
       });
       const [rect] = ops(canvas.ctx, "fillRect");
-      assert.deepEqual(rect.args, [75, 0, 150, 100]);
+      assert.deepEqual(rect.args, [100, 0, 200, 100]);
       assert.equal(rect.fillStyle, COLORS.selectionFill);
       assert.deepEqual(
         ops(canvas.ctx, "strokeRect")[0].args,
-        [75, 0, 150, 100],
+        [100, 0, 200, 100],
       );
     });
 
@@ -254,8 +255,8 @@ describe("drawTrace", () => {
       });
       const rects = ops(canvas.ctx, "fillRect").map((r) => r.args);
       assert.deepEqual(rects, [
-        [75, 20, 150, 40],
-        [75, 0, 150, 100],
+        [100, 20, 200, 40],
+        [100, 0, 200, 100],
       ]);
     });
 
@@ -264,7 +265,7 @@ describe("drawTrace", () => {
       plots.drawTrace(canvas, trace, view, {
         selections: [{ start: -5, end: 2 }],
       });
-      assert.deepEqual(ops(canvas.ctx, "fillRect")[0].args, [0, 0, 150, 100]);
+      assert.deepEqual(ops(canvas.ctx, "fillRect")[0].args, [0, 0, 200, 100]);
     });
 
     test("with non-finite bounds are skipped", () => {
@@ -290,7 +291,7 @@ describe("drawTrace", () => {
       assert.deepEqual(texts(canvas.ctx), ["0.0", "10.0", "20.0", "30.0"]);
     });
 
-    test("label time in seconds at a round step", () => {
+    test("a step under a second is labelled to a tenth", () => {
       const canvas = fakeCanvas();
       plots.drawTrace(
         canvas,
@@ -309,6 +310,84 @@ describe("drawTrace", () => {
         "1.5s",
         "2.0s",
       ]);
+    });
+
+    test("a long recording shown whole keeps a few labels", () => {
+      const canvas = fakeCanvas();
+      plots.drawTrace(
+        canvas,
+        samples([1, 1]),
+        { start: 0, end: 600 * 1000 },
+        {
+          showAxes: true,
+          hideYAxis: true,
+          fsamp: 1000,
+        },
+      );
+      assert.deepEqual(texts(canvas.ctx), [
+        "0:00",
+        "2:00",
+        "4:00",
+        "6:00",
+        "8:00",
+        "10:00",
+      ]);
+    });
+
+    test("whole seconds are labelled without decimals", () => {
+      const canvas = fakeCanvas();
+      plots.drawTrace(
+        canvas,
+        samples([1, 1]),
+        { start: 0, end: 20 * 1000 },
+        {
+          showAxes: true,
+          hideYAxis: true,
+          fsamp: 1000,
+        },
+      );
+      assert.deepEqual(texts(canvas.ctx), ["0s", "5s", "10s", "15s", "20s"]);
+    });
+
+    test("time labels sit on their ticks, inside the plot at its edges", () => {
+      const canvas = fakeCanvas();
+      plots.drawTrace(
+        canvas,
+        samples([1, 1]),
+        { start: 0, end: 20 * 1000 + 1 },
+        { showAxes: true, hideYAxis: true, fsamp: 1000 },
+      );
+      // Each time tick is a line down from the plot's top, 8 px.
+      const ticks = ops(canvas.ctx, "moveTo")
+        .filter((c) => c.args[1] === 8)
+        .map((c) => c.args[0]);
+      const labels = ops(canvas.ctx, "fillText");
+      assert.deepEqual(
+        labels.map((c) => c.textAlign),
+        ["left", "center", "center", "center", "right"],
+      );
+      assert.deepEqual(
+        labels.map((c) => c.args[1]),
+        ticks,
+      );
+      assert.equal(canvas.ctx.textAlign, "start");
+    });
+
+    test("the lowest value label sits above the x axis", () => {
+      const canvas = fakeCanvas({ width: 200, height: 100 });
+      plots.drawTrace(
+        canvas,
+        samples([0, 30]),
+        { start: 0, end: 2 },
+        {
+          showAxes: true,
+        },
+      );
+      const [lowest] = ops(canvas.ctx, "fillText");
+      const axisY = 100 - 20;
+      assert.equal(lowest.args[0], "0.0");
+      assert.ok(lowest.args[2] < axisY, `${lowest.args[2]} above ${axisY}`);
+      assert.equal(canvas.ctx.textAlign, "start");
     });
 
     test("time labels follow the visible window", () => {
@@ -380,6 +459,13 @@ describe("drawGridOverlay", () => {
     ]);
     const colours = ops(canvas.ctx, "lineTo").map((c) => c.strokeStyle);
     assert.deepEqual(colours, ["#a", "#b"]);
+  });
+
+  test("a grid with no data leaves the others their colours", () => {
+    const canvas = fakeCanvas({ width: 100, height: 50 });
+    plots.drawGridOverlay(canvas, [[], [0, 10]], ["#a", "#b"]);
+    const colours = ops(canvas.ctx, "lineTo").map((c) => c.strokeStyle);
+    assert.deepEqual(colours, ["#b"]);
   });
 
   test("draws the ROI windows under the traces", () => {
@@ -475,6 +561,10 @@ describe("drawMiniSeries", () => {
   });
 });
 
+/** Resolve after the next animation frame. */
+const nextFrame = () =>
+  new Promise((resolve) => globalThis.window.requestAnimationFrame(resolve));
+
 test("oncePerFrame draws once at the next frame however often asked", async () => {
   let draws = 0;
   const schedule = plots.oncePerFrame(() => {
@@ -484,21 +574,20 @@ test("oncePerFrame draws once at the next frame however often asked", async () =
   schedule();
   schedule();
   assert.equal(draws, 0);
-  await plots.nextFrame();
+  await nextFrame();
   assert.equal(draws, 1);
   schedule();
-  await plots.nextFrame();
+  await nextFrame();
   assert.equal(draws, 2);
 });
 
-test("nextFrame resolves after the next animation frame", async () => {
-  let ran = false;
-  const original = globalThis.window.requestAnimationFrame;
-  globalThis.window.requestAnimationFrame = (fn) => {
-    ran = true;
-    return original(fn);
-  };
-  await plots.nextFrame();
-  globalThis.window.requestAnimationFrame = original;
-  assert.ok(ran);
+test("a box dragged over drawn samples is drawn over them", () => {
+  const scale = plots.viewScale({ start: 100, end: 110 }, 38, 254);
+  // The plot's edges are the view's first and last samples.
+  assert.equal(scale.toX(100), 38);
+  assert.equal(scale.toX(109), 292);
+  // A pointer at a drawn sample picks that sample, at any zoom.
+  for (let s = 100; s < 110; s++) {
+    assert.equal(Math.round(scale.toSample(scale.toX(s))), s);
+  }
 });

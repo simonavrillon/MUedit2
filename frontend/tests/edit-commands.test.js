@@ -80,6 +80,51 @@ describe("edit commands", () => {
     ]);
   });
 
+  test("a second edit waits for the first to finish", async () => {
+    app.state.edit.distimes = [Int32Array.from([1, 5, 9, 13])];
+    app.state.edit.token = "tok";
+    app.state.edit.totalSamples = 20;
+    /** @type {(value: unknown) => void} */
+    let answer = () => {};
+    const sent = [];
+    app.api = {
+      editOp: (op) => {
+        sent.push(op);
+        return new Promise((resolve) => (answer = resolve));
+      },
+    };
+    press("r");
+    press(" ");
+    assert.deepEqual(sent, ["remove-outliers"]);
+    assert.deepEqual(app.setEditStatus.calls.at(-1), [
+      "Wait for the current edit to finish",
+      "muted",
+    ]);
+    answer({ meta: { removed_count: 0, n_mu: 1 }, spikes: [], artifacts: [] });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    press(" ");
+    assert.deepEqual(sent, ["remove-outliers", "update-filter"]);
+  });
+
+  test("save is enabled while a session is open", () => {
+    assert.equal(els.editSaveBtn.disabled, true);
+    app.state.edit.token = "tok";
+    app.refreshEditModeButtons();
+    assert.equal(els.editSaveBtn.disabled, false);
+    app.resetEditState();
+    assert.equal(els.editSaveBtn.disabled, true);
+  });
+
+  test("keys are ignored on the landing page", () => {
+    els.workspace = fakeElement();
+    els.workspace.classList.add("hidden");
+    press("a");
+    assert.equal(app.state.edit.mode, null);
+    els.workspace.classList.remove("hidden");
+    press("a");
+    assert.equal(app.state.edit.mode, "add");
+  });
+
   test("keys are ignored while typing and off the edit page", () => {
     press("a", "INPUT");
     assert.equal(app.state.edit.mode, null);

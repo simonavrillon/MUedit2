@@ -19,17 +19,17 @@ const { state: initialState } = await import("../src/state/state.js");
 const { createApp } = await import("../src/app/create-app.js");
 const {
   bindEditCanvas,
-  bindEditDrCanvas,
   bindEditTimeline,
-  renderEditExplorer,
-  renderEditTimeline,
-  renderInstantaneousDr,
+  drawEditPulse,
+  drawEditRates,
+  drawEditTimeline,
 } = await import("../src/view/edit-canvas.js");
 
 const pristine = structuredClone(initialState);
 
-// With axes the pulse plot starts 38 px in and is 254 px wide, so a view of
-// 254 samples maps one sample to one pixel: sample = px - 38.
+// With axes the pulse plot starts 38 px in and is 254 px wide, from the view's
+// first sample to its last, so a view of 255 samples maps one sample to one
+// pixel: sample = px - 38.
 const PLOT_LEFT = 38;
 const PLOT_TOP = 8;
 
@@ -57,10 +57,15 @@ function pulseWindow(view, version = 1) {
   };
 }
 
+/**
+ * The app over an edit session of one MU. With `stage`, `renderEditExplorer`
+ * is the edit stage's own; otherwise a recorder.
+ */
 function editApp({
   samples = 1000,
-  view = { start: 0, end: 254 },
+  view = { start: 0, end: 255 },
   api = {},
+  stage = false,
 } = {}) {
   const state = structuredClone(pristine);
   Object.assign(state.edit, {
@@ -71,7 +76,6 @@ function editApp({
     muUids: ["g0_mu0"],
     muGridIndex: [0],
     versions: [1],
-    hasPulse: [true],
     fsamp: 1000,
     totalSamples: samples,
     view,
@@ -88,10 +92,9 @@ function editApp({
     addSpikesInSelection: recorder(),
     addArtifactInSelection: recorder(),
     deleteSpikesInSelection: recorder(),
-    deleteDrInSelection: recorder(),
-    renderEditExplorer: recorder(),
     scheduleEditRender: recorder(),
   });
+  if (!stage) built.renderEditExplorer = recorder();
   return built;
 }
 
@@ -148,7 +151,7 @@ describe("pulse canvas drag", () => {
   });
 
   test("samples follow the visible window, not the pixel", () => {
-    app.state.edit.view = { start: 500, end: 754 };
+    app.state.edit.view = { start: 500, end: 755 };
     app.state.edit.mode = "delete_spikes";
     dragPulse([50, 10], [150, 60]);
     const [[sel]] = app.deleteSpikesInSelection.calls;
@@ -211,6 +214,22 @@ describe("pulse canvas drag", () => {
     assert.equal(app.addSpikesInSelection.calls.length, 0);
   });
 
+  test("a near-click without a mode leaves no box drawn", () => {
+    dragPulse([100, 30], [103, 34]);
+    assert.equal(app.state.edit.draftSelectionPulse, null);
+    assert.equal(app.state.edit.selectionPulse, null);
+    assert.equal(app.scheduleEditRender.calls.length, 2);
+  });
+
+  test("an armed box is cleared from the plot as it is sent", () => {
+    app.state.edit.mode = "add";
+    dragPulse([50, 10], [150, 60]);
+    assert.equal(app.addSpikesInSelection.calls.length, 1);
+    assert.equal(app.state.edit.draftSelectionPulse, null);
+    // Redrawn after the move and after the release, without the box.
+    assert.equal(app.scheduleEditRender.calls.length, 2);
+  });
+
   test("add-artifact mode sends the box as an artifact", () => {
     app.state.edit.mode = "add_artifact";
     dragPulse([50, 10], [150, 60]);
@@ -248,37 +267,6 @@ describe("pulse canvas drag", () => {
     assert.deepEqual(app.state.edit.view, { start: 0, end: 1000 });
     assert.equal(app.state.edit.selectionPulse, null);
     assert.equal(app.state.edit.showBookmark, true);
-  });
-});
-
-describe("discharge-rate canvas drag", () => {
-  beforeEach(() => bindEditDrCanvas(app));
-
-  function dragDr() {
-    const canvas = els.editDrCanvas;
-    canvas.dispatch("pointerdown", { clientX: PLOT_LEFT + 50, clientY: 18 });
-    canvas.dispatch("pointermove", { clientX: PLOT_LEFT + 150, clientY: 68 });
-    canvas.dispatch("pointerup");
-  }
-
-  test("in delete-rate mode the box is sent for deletion", () => {
-    app.state.edit.mode = "delete_dr";
-    dragDr();
-    assert.deepEqual(app.deleteDrInSelection.calls, [
-      [{ start: 50, end: 150, yMin: 10, yMax: 60 }],
-    ]);
-    assert.deepEqual(app.state.edit.selectionDr, {
-      start: 50,
-      end: 150,
-      yMin: 10,
-      yMax: 60,
-    });
-  });
-
-  test("otherwise the box is only kept as the selection", () => {
-    dragDr();
-    assert.equal(app.deleteDrInSelection.calls.length, 0);
-    assert.equal(app.state.edit.selectionDr?.start, 50);
   });
 });
 
@@ -332,7 +320,7 @@ describe("timeline", () => {
         { mu_uid: "g0_mu0", spikes_added: [300], spikes_removed: [600] },
       ],
     });
-    renderEditTimeline(app);
+    drawEditTimeline(els, app.state);
     const rects = ops(els.editTimelineCanvas.ctx, "fillRect").map((r) => [
       r.fillStyle,
       ...r.args,
@@ -349,14 +337,10 @@ describe("timeline", () => {
 });
 
 describe("pulse plot", () => {
-  beforeEach(() => {
-    app.renderEditExplorer = () => renderEditExplorer(app);
-  });
-
   test("marks where the user stopped, midway across the view", () => {
     app.state.edit.bookmarkPosition = { muIdx: 0, position: 127 };
     app.state.edit.showBookmark = true;
-    renderEditExplorer(app);
+    drawEditPulse(els, app.state);
     const label = ops(els.editPulseCanvas.ctx, "fillText").find(
       (c) => c.args[0] === "You stopped here",
     );
@@ -366,31 +350,31 @@ describe("pulse plot", () => {
   test("the bookmark is hidden when dismissed or for another MU", () => {
     app.state.edit.bookmarkPosition = { muIdx: 0, position: 127 };
     app.state.edit.showBookmark = false;
-    renderEditExplorer(app);
+    drawEditPulse(els, app.state);
     app.state.edit.bookmarkPosition = { muIdx: 3, position: 127 };
     app.state.edit.showBookmark = true;
-    renderEditExplorer(app);
+    drawEditPulse(els, app.state);
     assert.ok(!texts(els.editPulseCanvas.ctx).includes("You stopped here"));
   });
 
   test("draws the fetched window with its discharges on it", () => {
-    renderEditExplorer(app);
+    drawEditPulse(els, app.state);
     const ctx = els.editPulseCanvas.ctx;
     const arcs = ops(ctx, "arc");
     assert.equal(arcs.length, 2);
-    // Sample t at x = 38 + t * 254 / 253, value t % 7 on a 0..6 range (100 → 2, 200 → 4).
+    // Sample t at x = 38 + t, value t % 7 on a 0..6 range (100 → 2, 200 → 4).
     assert.deepEqual(
       arcs.map((a) => a.args.slice(0, 2).map((v) => Math.round(v))),
       [
         [138, 56],
-        [239, 32],
+        [238, 32],
       ],
     );
   });
 
   test("a flagged MU is a flat line with its discharges at 0", () => {
     app.state.edit.flagged = [true];
-    renderEditExplorer(app);
+    drawEditPulse(els, app.state);
     const ctx = els.editPulseCanvas.ctx;
     const bottom = PLOT_TOP + 72;
     assert.ok(ops(ctx, "arc").every((a) => a.args[1] === bottom));
@@ -405,17 +389,17 @@ describe("pulse plot", () => {
           return pulseWindow({ start: params.start, end: params.end }, 1);
         },
       },
+      stage: true,
     });
     app.state.currentStage = "edit";
-    app.renderEditExplorer = () => renderEditExplorer(app);
     app.state.edit.view = { start: 300, end: 554 };
-    renderEditExplorer(app);
+    app.renderEditExplorer();
     assert.deepEqual(asked, [
       { token: "tok", mu: 0, start: 300, end: 554, bins: 254 },
     ]);
     await new Promise((resolve) => setTimeout(resolve, 0));
     assert.equal(app.state.edit.pulseView.start, 300);
-    renderEditExplorer(app);
+    app.renderEditExplorer();
     assert.equal(asked.length, 1, "the window shown is not asked for again");
   });
 
@@ -423,15 +407,27 @@ describe("pulse plot", () => {
     const asked = [];
     app = editApp({
       api: { fetchPulse: async (p) => (asked.push(p), new Promise(() => {})) },
+      stage: true,
     });
     app.state.edit.versions = [2];
-    renderEditExplorer(app);
+    app.renderEditExplorer();
     assert.equal(asked.length, 1);
   });
 
+  test("drawing changes nothing and asks the server for nothing", () => {
+    const asked = [];
+    app = editApp({ api: { fetchPulse: async (p) => asked.push(p) } });
+    Object.assign(app.state.edit, { view: null, versions: [2] });
+    drawEditPulse(els, app.state);
+    drawEditRates(els, app.state);
+    drawEditTimeline(els, app.state);
+    assert.equal(app.state.edit.view, null);
+    assert.deepEqual(asked, []);
+  });
+
   test("a view past the end of a shorter pulse is reset", () => {
-    app.state.edit.view = { start: 0, end: 5000 };
-    renderEditExplorer(app);
+    app = editApp({ view: { start: 0, end: 5000 }, stage: true });
+    app.renderEditExplorer();
     assert.deepEqual(app.state.edit.view, { start: 0, end: 1000 });
   });
 });
@@ -439,12 +435,12 @@ describe("pulse plot", () => {
 describe("discharge-rate plot", () => {
   test("a flagged MU shows no rate", () => {
     app.state.edit.flagged = [true];
-    renderInstantaneousDr(app);
+    drawEditRates(els, app.state);
     assert.deepEqual(texts(els.editDrCanvas.ctx), ["No data"]);
   });
 
   test("marks each rate and scales the axis to the fastest", () => {
-    renderInstantaneousDr(app);
+    drawEditRates(els, app.state);
     const ctx = els.editDrCanvas.ctx;
     assert.equal(ops(ctx, "arc").length, 1, "one interval, one rate");
     const yLabels = texts(ctx).filter((t) => !t.endsWith("s"));
@@ -455,6 +451,10 @@ describe("discharge-rate plot", () => {
 
 describe("MU dropdowns", () => {
   beforeEach(() => {
+    app = editApp({
+      api: { fetchPulse: () => new Promise(() => {}) },
+      stage: true,
+    });
     Object.assign(app.state.edit, {
       distimes: [Int32Array.from([100]), Int32Array.from([200])],
       muGridIndex: [0, 0],
@@ -465,13 +465,13 @@ describe("MU dropdowns", () => {
   });
 
   test("are rebuilt only when what they show changes", () => {
-    app.renderEditDropdowns();
+    app.renderEditExplorer();
     assert.equal(els.editMuSelect.children.length, 2);
     els.editMuSelect.children.push("untouched");
-    app.renderEditDropdowns();
+    app.renderEditExplorer();
     assert.equal(els.editMuSelect.children.at(-1), "untouched");
     app.state.edit.currentMu = 1;
-    app.renderEditDropdowns();
+    app.renderEditExplorer();
     assert.equal(els.editMuSelect.children.length, 2);
     assert.equal(els.editMuSelect.value, "1");
   });

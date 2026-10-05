@@ -12,7 +12,6 @@ from muedit.api import config
 from muedit.api.cache import (
     _hold_upload,
     _release_upload,
-    _store_signal_views,
     _store_upload_signal,
 )
 from muedit.api.common import (
@@ -42,21 +41,25 @@ from muedit.signal.qc_pipeline import run_auto_qc
 
 
 def _build_preview_core(filepath: str, session: str = DEFAULT_SESSION) -> dict[str, Any]:
-    """Load a signal into a session store, build the series the QC stage draws, and the preview."""
+    """Load a signal into a session store, build the series the QC stage draws, and the preview.
+
+    The upload is kept only once it is built: a second file opened in the same tab meanwhile
+    drops the uploads kept, never one still being written.
+    """
     _release_upload(session)
     store = SessionStore.create("upload")
     try:
         signal = load_signal(filepath, store=store)
+        coordinates, _, _, emg_type = format_hdemg_signal(signal.gridname)
+        views, channel_means = build_signal_views(
+            signal, store, [c.shape[0] for c in coordinates], emg_type
+        )
     except BaseException:
         store.close()
         raise
-    upload_token = _store_upload_signal(signal, source_path=filepath, session=session, store=store)
-
-    coordinates, _, _, emg_type = format_hdemg_signal(signal.gridname)
-    views, channel_means = build_signal_views(
-        signal, store, [c.shape[0] for c in coordinates], emg_type
+    upload_token = _store_upload_signal(
+        signal, source_path=filepath, session=session, store=store, views=views
     )
-    _store_signal_views(upload_token, views)
 
     return make_json_safe(
         {

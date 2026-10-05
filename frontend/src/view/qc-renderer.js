@@ -12,10 +12,8 @@ import { pickRoiSlot, syncRois } from "../signal/qc.js";
 import { getCurrentGrid } from "../state/selectors.js";
 import {
   addArtifactRegion,
-  ensureDiscardMasks,
   setArtifactDraft,
   setArtifactMode,
-  setCurrentGrid,
   setDiscardMaskChannel,
   setRoiDraft,
   setRoiForIndex,
@@ -89,14 +87,17 @@ export function refreshVisuals(app) {
 }
 
 /**
+ * Let drags on the canvas set the analysis windows, or add an artifact window
+ * when one is armed. Bound once, at setup; a drag before a signal is loaded
+ * is ignored.
+ *
  * @param {App} app
  * @param {RoiCanvasId} canvasId
  */
 export function enableRoiSelection(app, canvasId) {
   const { state, els, refreshVisuals, setStatus } = app;
   const canvas = els[canvasId];
-  if (!canvas || canvas.dataset.roiBound === "1") return;
-  canvas.dataset.roiBound = "1";
+  if (!canvas) return;
 
   let dragging = false;
   let startX = 0;
@@ -271,21 +272,16 @@ function buildChannelGrid(app, section, gridIdx, means, coords) {
 }
 
 /**
- * Show the current grid's channels: their cells are laid out once per grid's
+ * Draw the current grid's channels: their cells are laid out once per grid's
  * data, and each redraw only marks the discarded ones and redraws the traces.
  *
  * @param {App} app
  */
-export function renderChannelQC(app) {
+export function drawChannelQC(app) {
   const { state, els } = app;
   const section = els.qcSection;
   if (!section) return;
-  ensureDiscardMasks(state);
-  let gridIdx = getCurrentGrid(state);
-  if (!state.channelMeans[gridIdx] && state.channelMeans.length) {
-    gridIdx = 0;
-    setCurrentGrid(state, 0);
-  }
+  const gridIdx = getCurrentGrid(state);
   const means = state.channelMeans[gridIdx];
   if (!means?.length) {
     section.innerHTML = "";
@@ -306,7 +302,6 @@ export function renderChannelQC(app) {
 
   const mask = state.discardMasks[gridIdx] || [];
   const traces = state.channelTraces[gridIdx] || [];
-  app.ensureQcTraces();
   const { cells } = built;
   cells.forEach(({ cell }, chIdx) => {
     cell.classList.toggle("off", mask[chIdx] === 1);

@@ -99,13 +99,6 @@ export function prepareCanvas(canvasEl, fallback = {}) {
   return { canvasEl, ctx, width, height };
 }
 
-/** Resolve after the browser's next paint, once layout has settled. */
-export function nextFrame() {
-  return new Promise((/** @type {(value?: void) => void} */ resolve) => {
-    window.requestAnimationFrame(() => resolve());
-  });
-}
-
 /**
  * Wrap `draw` so that however often it is asked for, it runs once, at the
  * next animation frame: a drag's pointer events can outpace the screen.
@@ -121,6 +114,26 @@ export function oncePerFrame(draw) {
       pending = false;
       draw();
     });
+  };
+}
+
+/**
+ * The x scale of a plot over `view`: the samples `[view.start, view.end)`
+ * span `width` pixels from `left`, the first at the left edge and the last at
+ * the right one. The traces, selections, time axis, bookmark and pointer all
+ * use it, so what is drawn and what a pointer picks agree.
+ *
+ * @param {Span} view
+ * @param {number} left
+ * @param {number} width
+ */
+export function viewScale(view, left, width) {
+  const span = Math.max(1, view.end - view.start - 1);
+  return {
+    /** @param {number} sample */
+    toX: (sample) => left + ((sample - view.start) / span) * width,
+    /** @param {number} x */
+    toSample: (x) => view.start + ((x - left) / width) * span,
   };
 }
 
@@ -249,9 +262,7 @@ export function drawTrace(canvas, trace, view, options = {}) {
   );
   const { min, max } = options.range || traceRange(trace);
   const span = max - min || 1;
-  const toX = (/** @type {number} */ sample) =>
-    padding.left +
-    ((sample - view.start) / Math.max(1, viewSpan - 1)) * plotWidth;
+  const { toX } = viewScale(view, padding.left, plotWidth);
   const toY = (/** @type {number} */ v) =>
     padding.top + plotHeight - ((v - min) / span) * plotHeight;
   const inView = (/** @type {number} */ sample) =>
@@ -259,11 +270,10 @@ export function drawTrace(canvas, trace, view, options = {}) {
 
   for (const sel of options.selections || []) {
     if (!Number.isFinite(sel?.start) || !Number.isFinite(sel?.end)) continue;
-    const s = Math.max(view.start, Math.min(view.end, sel.start));
-    const e = Math.max(s + 1, Math.min(view.end, sel.end));
-    const startX = padding.left + ((s - view.start) / viewSpan) * plotWidth;
-    const endX = padding.left + ((e - view.start) / viewSpan) * plotWidth;
-    drawSelectionRect(ctx, startX, endX, sel, padding, plotHeight);
+    const last = view.end - 1;
+    const s = Math.max(view.start, Math.min(last, sel.start));
+    const e = Math.max(s, Math.min(last, sel.end));
+    drawSelectionRect(ctx, toX(s), toX(e), sel, padding, plotHeight);
   }
 
   if (showAxes) {
@@ -372,12 +382,31 @@ function drawAxes(
     ctx.stroke();
     ctx.fillStyle = COLORS.muted;
     ctx.textAlign = "right";
-    ctx.fillText(`${value.toFixed(1)}`, padding.left - 8, y + 3);
+    // The lowest label sits above the x axis, clear of the first time label.
+    ctx.fillText(`${value.toFixed(1)}`, padding.left - 8, i ? y + 3 : y - 2);
   }
+  ctx.textAlign = "start";
+}
+
+/** How near an edge of the plot a time label is aligned to its tick from inside, not centred. */
+const TIME_LABEL_EDGE = 12;
+
+/**
+ * A time label as precise as its step: "0.5s", "12s", or "2:00" from a
+ * minute up.
+ *
+ * @param {number} t Seconds.
+ * @param {number} step
+ */
+function timeLabel(t, step) {
+  if (step < 1) return `${t.toFixed(1)}s`;
+  const s = Math.round(t);
+  if (step < 60) return `${s}s`;
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 
 /**
- * Time labels in seconds at a round step, over the samples of `view`.
+ * Time labels at a round step, over the samples of `view`.
  *
  * @param {CanvasRenderingContext2D} ctx
  * @param {Padding} padding
@@ -387,8 +416,11 @@ function drawAxes(
  * @param {number} fsamp
  */
 function drawTimeAxis(ctx, padding, plotWidth, plotHeight, view, fsamp) {
+  const { toX } = viewScale(view, padding.left, plotWidth);
   const duration = (view.end - view.start) / fsamp;
-  const targets = [0.1, 0.2, 0.5, 1, 2, 5, 10, 20];
+  // Up to 10 min a step, so even an hour-long recording shown whole keeps
+  // its labels apart.
+  const targets = [0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 30, 60, 120, 300, 600];
   const desired = duration / 5;
   let step = targets[targets.length - 1];
   for (const cand of targets) {
@@ -403,15 +435,20 @@ function drawTimeAxis(ctx, padding, plotWidth, plotHeight, view, fsamp) {
   ctx.fillStyle = COLORS.muted;
   ctx.font = "10px sans-serif";
   for (let t = first; t <= tEnd; t += step) {
-    const frac = (t - tStart) / duration;
-    const x = padding.left + frac * plotWidth;
+    const x = toX(t * fsamp);
     ctx.strokeStyle = COLORS.gridLineDim;
     ctx.beginPath();
     ctx.moveTo(x, padding.top);
     ctx.lineTo(x, padding.top + plotHeight);
     ctx.stroke();
-    ctx.fillText(`${t.toFixed(1)}s`, x - 10, padding.top + plotHeight + 12);
+    // Centred on its tick; one at an edge of the plot stays inside it.
+    if (x - padding.left < TIME_LABEL_EDGE) ctx.textAlign = "left";
+    else if (padding.left + plotWidth - x < TIME_LABEL_EDGE)
+      ctx.textAlign = "right";
+    else ctx.textAlign = "center";
+    ctx.fillText(timeLabel(t, step), x, padding.top + plotHeight + 12);
   }
+  ctx.textAlign = "start";
 }
 
 /**
@@ -458,7 +495,9 @@ export function drawGridOverlay(
 
   const toY = (/** @type {number} */ v) =>
     height - ((v - globalMin) / span) * height;
-  validSeries.forEach((row, idx) => {
+  // Each grid keeps its own colour, whichever others have no data.
+  (seriesList || []).forEach((row, idx) => {
+    if (!seriesPoints(row)) return;
     ctx.strokeStyle = colors[idx % colors.length] || COLORS.primary;
     ctx.lineWidth = 1.2;
     strokeSeries(ctx, row, 0, width, toY);

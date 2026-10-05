@@ -22,7 +22,6 @@ from muedit.editing.edit_log import EditLog, find_recoverable
 from muedit.editing.operations import (
     add_artifact_in_roi,
     add_spikes_in_roi,
-    delete_high_discharge_rate_spikes_in_roi,
     delete_spikes_in_roi,
     remove_discharge_rate_outliers,
     update_motor_unit_filter_window,
@@ -117,16 +116,6 @@ class TestParity:
         )
         assert edit.spikes[2].tolist() == expected
         assert edit.history[-1]["type"] == "delete_spikes"
-
-    def test_delete_dr(self, edit: EditSession, pulse: np.ndarray) -> None:
-        spikes = sorted([*edit.spikes[0].tolist(), 3001, 3040])
-        edit.spikes[0] = np.asarray(sorted(set(spikes)), dtype=np.int32)
-        before = edit.spikes[0].tolist()
-        expected = delete_high_discharge_rate_spikes_in_roi(
-            pulse[0].astype(float), before, FSAMP, 2500, 3500, 20.0
-        )
-        edit.apply("delete-dr", {"mu": 0, "x_start": 2500, "x_end": 3500, "y_min": 20.0})
-        assert edit.spikes[0].tolist() == expected
 
     def test_remove_outliers(self, edit: EditSession, pulse: np.ndarray) -> None:
         edit.spikes[0] = np.asarray(sorted({*edit.spikes[0].tolist(), 4020}), dtype=np.int32)
@@ -345,7 +334,6 @@ class TestUndo:
             ("add-spikes", {"mu": 0, "x_start": 0, "x_end": N_SAMPLES, "y_min": 0.6}),
             ("add-artifact", {"mu": 1, "x_start": 0, "x_end": 5000, "y_min": 0.6}),
             ("delete-spikes", {"mu": 1, "x_start": 0, "x_end": 5000, "y_max": 2.0}),
-            ("delete-dr", {"mu": 2, "x_start": 0, "x_end": N_SAMPLES, "y_min": 5.0}),
             ("remove-outliers", {"mu": 0}),
             ("flag", {"mu": 2, "flag": True}),
             ("duplicate", {"mu": 1}),
@@ -417,8 +405,26 @@ class TestUndo:
         edit.apply("reset", {"mu": 0})
         np.testing.assert_array_equal(edit.values(0, 0, N_SAMPLES), pulse[0])
         np.testing.assert_array_equal(edit.spikes[0], spikes)
-        assert not edit.dirty
+        assert edit.dirty  # the reset is an unsaved edit too
         assert edit.history[-1]["type"] == "reset_mu"
+
+    @pytest.mark.parametrize(
+        ("op", "args"),
+        [
+            ("flag", {"mu": 0, "flag": True}),
+            ("add-artifact", {"mu": 0, "x_start": 0, "x_end": N_SAMPLES, "y_min": 5.0}),
+            ("duplicate", {"mu": 0}),
+        ],
+    )
+    def test_an_edit_that_keeps_the_discharge_times_is_unsaved_too(
+        self, edit: EditSession, op: str, args: dict[str, Any]
+    ) -> None:
+        states = [edit.dirty]
+        edit.apply(op, args)
+        states.append(edit.dirty)
+        edit.apply("undo", {})
+        states.append(edit.dirty)
+        assert states == [False, True, False]
 
     def test_duplicate_uids_skip_every_uid_the_log_named(self, edit: EditSession) -> None:
         edit.history.append({"type": "remove_duplicates", "removed_mu_uids": ["g0_mu7"]})
@@ -859,6 +865,27 @@ class TestSessionApi:
         other = tmp_path / "recording.otb4"
         other.write_bytes(b"")
         assert api.post(f"{API}/edit/session/open", json={"path": str(other)}).status_code == 400
+
+    def test_a_file_that_fails_to_open_leaves_the_open_one(
+        self, api: TestClient, decomp_file: Path, tmp_path: Path
+    ) -> None:
+        token = _open(api, decomp_file)[0]["token"]
+        broken = tmp_path / "broken_decomp.npz"
+        broken.write_bytes(b"not a decomposition")
+        resp = api.post(
+            f"{API}/edit/session/open",
+            json={"path": str(broken)},
+            headers={SESSION_HEADER: "tab-edit"},
+        )
+        assert resp.status_code >= 400
+        meta, _ = _op(api, token, "flag", mu=0, flag=True)
+        assert meta["flagged"][0] is True
+        replaced = _open(api, decomp_file)[0]["token"]
+        assert replaced != token
+        gone = api.post(
+            f"{API}/edit/ops/undo", json={"token": token}, headers={SESSION_HEADER: "tab-edit"}
+        )
+        assert gone.status_code == 400
 
     def test_a_spikes_only_file_draws_its_trains(self, api: TestClient, tmp_path: Path) -> None:
         path = tmp_path / "spikes_only_decomp.npz"

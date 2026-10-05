@@ -5,7 +5,6 @@ import {
   setAuxData,
   setChannelMeans,
   setChannelTraceForGrid,
-  setChannelTraces,
   setCoordinates,
   setDiscardMasks,
   setFsamp,
@@ -18,14 +17,16 @@ import {
   setUploadToken,
 } from "../state/actions.js";
 import { getCurrentGrid, roiStart, roiEnd } from "../state/selectors.js";
-import { nextFrame } from "../view/plots.js";
 import { handleError } from "../app/services/error-service.js";
 import { normalizePreviewPayload, toSpans } from "../api/payloads.js";
 import { createViewFetcher } from "../app/services/view-fetcher.js";
+import { withUpload } from "../app/services/upload.js";
+import { beginRawPreviewTransition } from "../state/transitions.js";
 import { OVERVIEW_BINS, QC_TRACE_BINS } from "../config.js";
 
 /** @typedef {import("../app/context.js").App} App */
 /** @typedef {import("../state/state.js").State} State */
+/** @typedef {import("../state/state.js").FileRef} FileRef */
 
 /**
  * The analysis window a new drag should replace. A drag over a drawn window
@@ -96,7 +97,9 @@ export async function requestAutoQc(app) {
   setStatus("Running automatic QC...", "muted");
 
   try {
-    const data = await api.runAutoQc({ upload_token: state.uploadToken });
+    const data = await withUpload(app, (token) =>
+      api.runAutoQc({ upload_token: token }),
+    );
     if (Array.isArray(data?.bad_channels_per_grid)) {
       setDiscardMasks(state, data.bad_channels_per_grid);
     }
@@ -142,16 +145,18 @@ export function createQcTraces(app) {
   const shown = new Map();
   const fetcher = createViewFetcher(
     async (
-      /** @type {{ key: string, grid: number, token: string, start: number, end: number }} */ p,
+      /** @type {{ key: string, grid: number, start: number, end: number }} */ p,
     ) => ({
       p,
-      view: await app.api.fetchSeries("emg", {
-        upload_token: p.token,
-        grid: p.grid,
-        start: p.start,
-        end: p.end,
-        bins: QC_TRACE_BINS,
-      }),
+      view: await withUpload(app, (token) =>
+        app.api.fetchSeries("emg", {
+          upload_token: token,
+          grid: p.grid,
+          start: p.start,
+          end: p.end,
+          bins: QC_TRACE_BINS,
+        }),
+      ),
     }),
     ({ p, view }) => {
       if (wanted.get(p.grid) !== p.key) return;
@@ -175,16 +180,19 @@ export function createQcTraces(app) {
     const key = `${token}:${grid}:${start}:${end}`;
     wanted.set(grid, key);
     if (shown.get(grid) === key && state.channelTraces[grid]?.length) return;
-    fetcher.want(key, { key, grid, token, start, end });
+    fetcher.want(key, { key, grid, start, end });
   };
 }
 
 /**
+ * Open a raw file. Its preview replaces the file shown only once it has all
+ * arrived: a file that fails to open leaves the current one, its edit session
+ * included, as it was.
+ *
  * @param {App} app
- * @param {{ silentFailure?: boolean, filepath?: string | null }} [options]
+ * @param {{ file: FileRef & { path: string }, silentFailure?: boolean }} options
  */
-export async function requestPreview(app, options = {}) {
-  const { silentFailure = false, filepath = null } = options;
+export async function requestPreview(app, { file, silentFailure = false }) {
   const {
     state,
     els,
@@ -192,35 +200,33 @@ export async function requestPreview(app, options = {}) {
     setUploadLoading,
     populateAuxSelector,
     populateGridTabs,
-    enableRoiSelection,
     renderBidsAutoInfo,
     renderBidsMuscleFields,
     setStatus,
     showWorkspace,
-    switchStage,
     applyPreviewMetadata,
   } = app;
 
-  if (!filepath) return false;
   setUploadLoading(true);
 
   try {
     const data = normalizePreviewPayload(
-      await api.fetchPreviewByPath(filepath),
+      await api.fetchPreviewByPath(file.path),
     );
-    setUploadToken(state, data.upload_token || null);
     // The whole-recording traces come as envelopes, sized for the canvases.
     const whole = { upload_token: data.upload_token, bins: OVERVIEW_BINS };
     const [overview, aux] = await Promise.all([
       api.fetchSeries("overview", whole),
       api.fetchSeries("aux", whole),
     ]);
+    beginRawPreviewTransition(state, file);
+    app.resetSessionForm(file.name ?? "");
+    setUploadToken(state, data.upload_token || null);
     setGridSeries(state, overview.rows);
     setGridNames(state, data.grid_names);
     setSeriesLength(state, data.total_samples);
     setChannelMeans(state, data.channel_means);
     setCoordinates(state, data.coordinates);
-    setChannelTraces(state, []);
     setMetadata(state, data.metadata);
     setMuscle(state, data.muscle);
     setAuxData(state, aux.rows, data.auxiliary_names);
@@ -229,35 +235,22 @@ export async function requestPreview(app, options = {}) {
     populateAuxSelector();
     ensureDiscardMasks(state);
     populateGridTabs();
-    const nwin = Number(els.nwindows?.value) || 1;
-    const defaultEnd = state.seriesLength || 0;
-    const rois = [];
-    for (let i = 0; i < nwin; i++) {
-      rois.push({ start: 0, end: defaultEnd });
-    }
-    setRois(state, rois);
+    // Every window starts as the whole recording, waiting for a drag.
+    setRois(state, []);
+    syncRois(state, Number(els.nwindows?.value) || 1);
     setArtifactRegions(state, []);
     setArtifactMode(state, false);
-    enableRoiSelection("emgCanvas");
-    enableRoiSelection("auxCanvas");
     // Raw preview resets edit slice first; ensure BIDS rows render in QC context
     // so they source run grid names instead of edit fallback ("Grid 1").
-    switchStage("qc");
+    showWorkspace("qc");
     renderBidsAutoInfo();
     renderBidsMuscleFields();
 
     setStatus("Preview ready", "success");
-    showWorkspace({ keepLandingVisible: true });
-    // Entering QC draws its page at the next frame; the landing goes once it has.
-    await nextFrame();
-    els.landing?.classList.add("hidden");
     return true;
   } catch (err) {
-    console.error(err);
-    setUploadToken(state, null);
-    if (!silentFailure) {
-      setStatus("Preview failed", "error");
-    }
+    if (silentFailure) console.error(err);
+    else handleError(err, setStatus, "Preview failed");
     return false;
   } finally {
     setUploadLoading(false);

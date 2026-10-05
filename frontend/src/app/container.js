@@ -22,6 +22,12 @@ export async function initializeApp() {
       sessionId: SESSION_ID,
     }),
   });
+  // The browser asks before a page with unsaved edits is closed or reloaded.
+  window.addEventListener("beforeunload", (event) => {
+    if (!state.edit.dirty) return;
+    event.preventDefault();
+    event.returnValue = "";
+  });
   window.addEventListener("pagehide", (event) => {
     // A page kept in the back-forward cache can come back with its tokens.
     if (!event.persisted) app.api.closeSession();

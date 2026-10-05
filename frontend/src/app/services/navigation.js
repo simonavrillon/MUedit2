@@ -39,18 +39,10 @@ export function updateWorkflowStepper(app, targetStage) {
     { key: "run", el: els.stepRun, complete: !!state.runResultToken },
     { key: "edit", el: els.stepEdit, complete: !!state.edit.distimes?.length },
   ];
-  /** @type {Record<WorkflowStep, WorkflowStep>} */
-  const activeKeyByStage = {
-    import: "import",
-    qc: "qc",
-    run: "run",
-    edit: "edit",
-  };
-  const activeKey = activeKeyByStage[targetStage] || "qc";
   steps.forEach((step) => {
     if (!step.el) return;
     step.el.classList.remove("active", "complete", "pending");
-    if (step.key === activeKey) {
+    if (step.key === targetStage) {
       step.el.classList.add("active");
     } else if (step.complete) {
       step.el.classList.add("complete");
@@ -84,17 +76,17 @@ export function positionStepIndicator(els) {
 }
 
 /**
+ * Leave the landing page for `target`'s page. The page draws at the next
+ * frame; the landing goes in that frame, after it, so nothing blank shows.
+ *
  * @param {App} app
- * @param {{ keepLandingVisible?: boolean }} [options]
+ * @param {StageKey} target
  */
-export function showWorkspace(app, options = {}) {
-  const { els, state } = app;
-  const { keepLandingVisible = false } = options;
-  if (els.landing && !keepLandingVisible) els.landing.classList.add("hidden");
-  if (els.workspace) els.workspace.classList.remove("hidden");
-  app.setSettingsOpen(false);
-  app.switchStage(state.currentStage || "qc");
-  app.populateGridTabs();
+export function showWorkspace(app, target) {
+  const { els } = app;
+  els.workspace?.classList.remove("hidden");
+  app.switchStage(target);
+  window.requestAnimationFrame(() => els.landing?.classList.add("hidden"));
 }
 
 /** @param {App} app */

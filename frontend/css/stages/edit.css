@@ -227,12 +227,15 @@
 }
 
 /* Sized by the card alone: the backing store, scaled to the screen's pixel
-   density, must not feed back into the layout. Boxes are dragged in both
-   directions, so touch does not scroll here. */
+   density, must not feed back into the layout. */
 #editDrCanvas,
 #editPulseCanvas {
   flex: 1 1 0;
   min-height: 0;
+}
+
+/* Boxes are dragged in both directions, so touch does not scroll here. */
+#editPulseCanvas {
   touch-action: none;
 }
 

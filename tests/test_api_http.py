@@ -25,6 +25,8 @@ from tests.conftest import REPO_ROOT
 FSAMP = 2000.0
 N_CHANNELS = 64
 N_SAMPLES = 6000
+#: Samples of the recording the full run (`mu_run`) decomposes.
+MU_RUN_SAMPLES = 20_000
 GRID = "GR08MM1305"
 API = "/api/v1"
 SESSION_HEADER = "X-MUedit-Session"
@@ -160,7 +162,7 @@ def stream_events(client: TestClient, upload_token: str) -> list[dict[str, Any]]
 @pytest.fixture(scope="module")
 def mu_run(client: TestClient, workspace: Path) -> dict[str, Any]:
     """A full-preview run on synthetic data that yields motor units, as the app starts it."""
-    n_samples = 20_000
+    n_samples = MU_RUN_SAMPLES
     path = workspace / "motor_units.mat"
     scipy.io.savemat(
         path,
@@ -298,6 +300,28 @@ class TestSessions:
         second = self._preview(client, signal_mat, "tab-next-file")
         _err(self._qc_auto(client, first), 400)
         _ok(self._qc_auto(client, second))
+
+    def test_a_file_opened_while_another_loads_leaves_both_whole(
+        self, client: TestClient, signal_mat: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from muedit.api.services import preview_service
+
+        real_build = preview_service.build_signal_views
+        nested: list[str] = []
+
+        def build_then_open_another(*args: Any, **kwargs: Any) -> Any:
+            built = real_build(*args, **kwargs)
+            if not nested:  # the tab opens a second file while the first is being built
+                nested.append("")
+                payload = preview_service._build_preview_core(str(signal_mat), "tab-overlap")
+                nested[0] = payload["upload_token"]
+            return built
+
+        monkeypatch.setattr(preview_service, "build_signal_views", build_then_open_another)
+        first = self._preview(client, signal_mat, "tab-overlap")
+        # The tab keeps the upload kept last; the other is gone, not half-deleted.
+        _ok(self._qc_auto(client, first))
+        _err(self._qc_auto(client, nested[0]), 400)
 
     def test_closing_a_session_drops_its_data(
         self, client: TestClient, signal_mat: Path, upload_token: str
@@ -549,23 +573,20 @@ class TestDecomposeStream:
             "parameters",
         } <= set(summary)
         assert summary["parameters"]["niter"] == 5
-        preview = done["preview"]
-        assert not {"pulse_trains_full", "distime_all"} & set(preview)
-        assert "run_result_token" not in preview  # no motor units, nothing to save
-        # Whole-recording series come from the upload's /series/* endpoints, never from here.
-        dropped = {"mean_abs", "grid_mean_abs", "auxiliary", "pulse_trains", "pulse_trains_all"}
-        assert not dropped & set(preview)
+        # The page shows the recording already; nothing of it comes back with the run.
+        assert set(done["preview"]) == {"mu_grid_index"}  # no motor units, nothing to save
 
     def test_full_run_keeps_its_pulse_trains_for_the_save(self, mu_run: dict[str, Any]) -> None:
         token = mu_run["preview"]["run_result_token"]
         pulse = cache._get_run_result(token)
         assert pulse is not None
         assert pulse.dtype == np.float32
-        assert pulse.shape == (mu_run["summary"]["mu_count"], mu_run["preview"]["total_samples"])
+        assert pulse.shape == (mu_run["summary"]["mu_count"], MU_RUN_SAMPLES)
 
     def test_discharge_times_stay_on_the_server(self, mu_run: dict[str, Any]) -> None:
         preview = mu_run["preview"]
-        assert not {"distime_all", "pulse_trains_full", "preview_binary_token"} & set(preview)
+        assert set(preview) == {"mu_grid_index", "run_result_token"}
+        assert len(preview["mu_grid_index"]) == mu_run["summary"]["mu_count"]
         run = cache._get_run_result_entry(preview["run_result_token"])
         assert run is not None
         assert len(run.spikes) == mu_run["summary"]["mu_count"]
@@ -752,7 +773,7 @@ class TestEditSave:
                 json={
                     "distimes": [s.tolist() for s in entry.spikes],
                     "remove_duplicates": False,
-                    "total_samples": preview["total_samples"],
+                    "total_samples": MU_RUN_SAMPLES,  # the page sends the length it shows
                     "fsamp": FSAMP,
                     "grid_names": [GRID],
                     "mu_grid_index": preview["mu_grid_index"],
@@ -779,7 +800,7 @@ class TestEditSave:
                 json={
                     "run_result_token": preview["run_result_token"],
                     "remove_duplicates": False,
-                    "total_samples": preview["total_samples"],
+                    "total_samples": MU_RUN_SAMPLES,  # the page sends the length it shows
                     "fsamp": FSAMP,
                     "project": "smoke",
                     "file_label": "motor_units_run.npz",

@@ -227,36 +227,9 @@ export function setParameters(state, parameters) {
 /**
  * @param {State} state
  */
-export function clearPreviewState(state) {
-  state.gridSeries = [];
-  state.gridNames = [];
-  state.channelMeans = [];
-  state.channelTraces = [];
-  state.seriesLength = null;
-}
-
-/**
- * @param {State} state
- */
 export function clearEditPulseSelections(state) {
   state.edit.selectionPulse = null;
   state.edit.draftSelectionPulse = null;
-}
-
-/**
- * @param {State} state
- */
-export function clearEditDrSelections(state) {
-  state.edit.selectionDr = null;
-  state.edit.draftSelectionDr = null;
-}
-
-/**
- * @param {State} state
- */
-export function clearAllEditSelections(state) {
-  clearEditPulseSelections(state);
-  clearEditDrSelections(state);
 }
 
 /**
@@ -281,6 +254,14 @@ export function setEditFilename(state, filename) {
  */
 export function setEditGridNames(state, gridNames) {
   state.edit.gridNames = gridNames;
+}
+
+/**
+ * @param {State} state
+ * @param {boolean} busy
+ */
+export function setEditBusy(state, busy) {
+  state.edit.busy = busy;
 }
 
 /**
@@ -313,22 +294,6 @@ export function setEditPulseSelection(state, selection) {
  */
 export function setEditPulseDraftSelection(state, selection) {
   state.edit.draftSelectionPulse = selection;
-}
-
-/**
- * @param {State} state
- * @param {Selection | null} selection
- */
-export function setEditDrSelection(state, selection) {
-  state.edit.selectionDr = selection;
-}
-
-/**
- * @param {State} state
- * @param {Selection | null} selection
- */
-export function setEditDrDraftSelection(state, selection) {
-  state.edit.draftSelectionDr = selection;
 }
 
 /**
@@ -504,7 +469,6 @@ function setEditPerMu(state, meta) {
   e.muUids = fill(meta.mu_uids, (i) => `mu${i}`).map(String);
   e.muGridIndex = fill(meta.mu_grid_index, () => 0).map(Number);
   e.versions = fill(meta.versions, () => 0).map(Number);
-  e.hasPulse = fill(meta.has_pulse, () => false).map(Boolean);
   e.dirty = !!meta.dirty;
   e.canUndo = !!meta.can_undo;
 }

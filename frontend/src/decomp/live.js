@@ -161,6 +161,57 @@ export function applyRunEvent(live, msg, now) {
 }
 
 /**
+ * The run ended without a result.
+ *
+ * @param {RunLive} live
+ * @param {string} message
+ * @param {number} now
+ */
+export function failRun(live, message, now) {
+  live.status = "failed";
+  live.error = message;
+  live.finishedAt = now;
+}
+
+/**
+ * The run ended with its result; saving it is next.
+ *
+ * @param {RunLive} live
+ * @param {RunSummary | null} summary The `done` event's, when it has one.
+ * @param {number} now
+ */
+export function finishRun(live, summary, now) {
+  if (summary) live.summary = summary;
+  live.phase = "save";
+  live.status = "done";
+  live.finishedAt = now;
+}
+
+/** @param {RunLive} live */
+export function startSave(live) {
+  live.saving = true;
+  live.saveError = "";
+}
+
+/**
+ * @param {RunLive} live
+ * @param {string} path Where the decomposition was saved.
+ */
+export function finishSave(live, path) {
+  live.saving = false;
+  live.savedPath = path;
+}
+
+/**
+ * @param {RunLive} live
+ * @param {string} message
+ */
+export function failSave(live, message) {
+  live.saving = false;
+  live.saveError = message;
+}
+
+/**
  * Seconds left in the search, from its pace so far; null until there is one.
  *
  * @param {RunLive} live

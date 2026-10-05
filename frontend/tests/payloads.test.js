@@ -2,40 +2,17 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 
-import {
-  normalizePreviewPayload,
-  toSpikeArray,
-  toSpans,
-} from "../src/api/payloads.js";
-
-describe("toSpikeArray", () => {
-  test("a typed row is kept as it is", () => {
-    const row = Int32Array.from([1, 2]);
-    assert.equal(toSpikeArray(row), row);
-  });
-
-  test("a JSON row becomes int32, dropping unreadable and negative times", () => {
-    const out = toSpikeArray([120, "x", undefined, Infinity, NaN, -3, "480"]);
-    assert.ok(out instanceof Int32Array);
-    assert.deepEqual(Array.from(out), [120, 480]);
-  });
-
-  test("anything but a row is empty", () => {
-    assert.equal(toSpikeArray("nope").length, 0);
-  });
-});
+import { normalizePreviewPayload, toSpans } from "../src/api/payloads.js";
 
 describe("normalizePreviewPayload", () => {
   test("every array field defaults to an empty array", () => {
     const out = normalizePreviewPayload({});
     for (const key of [
       "grid_names",
-      "rois",
       "channel_means",
       "coordinates",
       "muscle",
-      "distime_all",
-      "mu_grid_index",
+      "auxiliary_names",
     ]) {
       assert.deepEqual(out[key], [], key);
     }
@@ -43,32 +20,11 @@ describe("normalizePreviewPayload", () => {
     assert.equal(out.total_samples, 0);
   });
 
-  test("JSON discharge times become one Int32Array per MU", () => {
-    const out = normalizePreviewPayload({ distime_all: [[1, 2], "x"] });
-    assert.deepEqual(
-      out.distime_all.map((r) => Array.from(r)),
-      [[1, 2], []],
-    );
-  });
-
   test("valid fields are kept by reference", () => {
     const metadata = { device_name: "Quattrocento" };
     const out = normalizePreviewPayload({ metadata, total_samples: 20 });
     assert.equal(out.metadata, metadata);
     assert.equal(out.total_samples, 20);
-  });
-
-  test("ROIs sent as [start, end] pairs become spans", () => {
-    const out = normalizePreviewPayload({
-      rois: [
-        [0, 500],
-        [500, 1000],
-      ],
-    });
-    assert.deepEqual(out.rois, [
-      { start: 0, end: 500 },
-      { start: 500, end: 1000 },
-    ]);
   });
 
   test("a non-numeric total falls back to 0", () => {

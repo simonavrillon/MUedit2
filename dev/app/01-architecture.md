@@ -14,6 +14,8 @@ index.html
 ```
 initializeApp():
   1. app = createApp({ state, els, api })  # one context, every service merged in
+     beforeunload: the browser asks first while state.edit.dirty (unsaved edits)
+     pagehide: api.closeSession() unless the page goes to the back-forward cache
   2. setupImportEvents(app)              # browse button, stepper clicks
      setupQcEvents(app)                  # auto-QC, artifact buttons, ROI drag
      setupRunEvents(app)                 # start/cancel, run settings toggles
@@ -65,7 +67,11 @@ A member goes on `app` when another module calls it and goes through `app` to re
 Everything else is imported where it is used:
 
 - **A stage's own actions.** `setupEditEvents` wires the toolbar to `undoEdit(app)`, `saveEditedFile(app)` and the rest from `editing-service.js`; `setupRunEvents` wires start and cancel to `runDecomposition(app)` and `cancelDecomposition(app)`; `setupQcEvents` wires auto-QC and the artifact buttons. None of these is reached through `app`.
-- **Pure helpers:** plot drawing (`view/plots.js`), series math (`signal/series.js`), toggles and busy buttons (`view/controls.js`), BIDS naming (`io/bids.js`), state actions and selectors (`state/`), parameter building (`decomp/params.js`), and `COLORS`.
+- **Pure helpers:** plot drawing (`view/plots.js`, and the draw functions of `view/edit-canvas.js` and `view/qc-renderer.js`, which take the state and draw it as it is), series math (`signal/series.js`), toggles and busy buttons (`view/controls.js`), BIDS naming (`io/bids.js`), state actions and selectors (`state/`), parameter building (`decomp/params.js`), and `COLORS`.
+
+### Drawing
+
+A page is drawn through its stage's one render member: `renderEditExplorer` (edit stage) and `renderChannelQC` (QC stage). Each first settles what the data allows (the edit stage picks a grid that has MUs, one of its MUs, and a view inside the recording; the QC stage falls back to the first grid), then calls the view module's draw functions, which only draw, then asks for what the page still lacks (`ensureEditPulseView`, `ensureQcTraces`). The pulse window is asked for on every render, a resize included: its bins follow the plot's width.
 
 ### Type checking
 
@@ -152,18 +158,17 @@ plus the view, selection and bookmark setters.
   distimes: [],               // Int32Array per MU
   artifactTimes: [],          // Int32Array per MU
   versions: [],               // per MU; changes whenever the server edits it
-  hasPulse: [],               // per MU; false when the file has only discharge times
   gridNames: [], muGridIndex: [],
   fsamp, totalSamples,
   currentMuGrid, currentMu,
   view: { start, end },
-  selectionPulse, selectionDr,
-  draftSelectionPulse, draftSelectionDr,
-  mode,                       // "add" | "add_artifact" | "delete_spikes" | "delete_dr" | null
-  dirty, canUndo,             // the server's
+  selectionPulse,
+  draftSelectionPulse,
+  mode,                       // "add" | "add_artifact" | "delete_spikes" | null
+  dirty, canUndo,             // the server's; dirty asks before leaving or opening another file
   parameters,
   flagged: [],                // per-MU deletion flags
-  bidsRoot, project,
+  project,
   pulseView,                  // the fetched window: { mu, version, start, end, bins, row, spikes, … }
   muUids: [],
   editHistory: [],
@@ -221,7 +226,7 @@ STAGES = {
 
 `enter` and `exit` run only when the stage actually changes; re-selecting the current stage runs neither. `render` is what layout changes call: `scheduleLayoutRerender` draws only the active stage, since hidden stages are `display: none` and their canvases have no size, and every stage switch schedules a redraw. It draws once at the next frame however often it is asked; a `ResizeObserver` on the canvases and the channel grid asks whenever one changes size.
 
-Loading a new raw file is **not** a stage exit. The edit slice is reset by `beginRawPreviewTransition` in `state/transitions.js` because the session changed; leaving the edit stage to look at QC keeps the loaded decomposition and its edits.
+Loading a new raw file is **not** a stage exit. Once its preview has arrived, the edit slice is reset by `beginRawPreviewTransition` in `state/transitions.js` because the session changed (a file that fails to open changes nothing); leaving the edit stage to look at QC keeps the loaded decomposition and its edits.
 
 ### Per-stage service factories
 

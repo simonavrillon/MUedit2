@@ -2,21 +2,17 @@
 /** @typedef {import("../app/context.js").Span} Span */
 
 /**
- * A recording's preview (on load, or a run's); fields beyond these pass
- * through. The overview and aux traces are not read from it: they come from
- * the upload as envelopes (`/series/*`), and the pulse trains from the run
- * (`/series/pulse`).
+ * A raw file's preview, as the page reads it; fields beyond these pass
+ * through. The overview and aux traces are not in it: they come from the
+ * upload as envelopes (`/series/*`).
  *
  * @typedef {JsonObject & {
  *   grid_names: string[],
- *   rois: Span[],
  *   channel_means: number[][],
  *   coordinates: number[][][],
  *   metadata: JsonObject,
  *   muscle: string[],
  *   auxiliary_names: string[],
- *   distime_all: Int32Array[],
- *   mu_grid_index: number[],
  *   total_samples: number,
  * }} PreviewPayload
  */
@@ -32,23 +28,8 @@ function toFiniteNumber(value, fallback = 0) {
 }
 
 /**
- * One MU's discharge times as an `Int32Array` (a JSON list is converted; a
- * typed array is kept as it is).
- *
- * @param {unknown} row
- * @returns {Int32Array}
- */
-export function toSpikeArray(row) {
-  if (row instanceof Int32Array) return row;
-  if (!Array.isArray(row)) return new Int32Array(0);
-  return Int32Array.from(
-    row.map((v) => Number(v)).filter((v) => Number.isFinite(v) && v >= 0),
-  );
-}
-
-/**
- * Regions (ROIs, artifact windows) arrive as `{start, end}` objects or as
- * `[start, end]` pairs; everything past this point uses `Span` objects only.
+ * Artifact windows arrive as `{start, end}` objects or as `[start, end]`
+ * pairs; everything past this point uses `Span` objects only.
  * Regions with a non-finite bound are dropped.
  *
  * @param {unknown} regions
@@ -74,7 +55,6 @@ export function normalizePreviewPayload(payload) {
   return {
     ...source,
     grid_names: Array.isArray(source.grid_names) ? source.grid_names : [],
-    rois: toSpans(source.rois),
     channel_means: Array.isArray(source.channel_means)
       ? source.channel_means
       : [],
@@ -86,12 +66,6 @@ export function normalizePreviewPayload(payload) {
     muscle: Array.isArray(source.muscle) ? source.muscle : [],
     auxiliary_names: Array.isArray(source.auxiliary_names)
       ? source.auxiliary_names
-      : [],
-    distime_all: Array.isArray(source.distime_all)
-      ? source.distime_all.map(toSpikeArray)
-      : [],
-    mu_grid_index: Array.isArray(source.mu_grid_index)
-      ? source.mu_grid_index
       : [],
     total_samples: toFiniteNumber(source.total_samples, 0),
   };

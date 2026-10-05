@@ -73,9 +73,10 @@ without parsing message text. The stream ends with `done`, `error` (also when th
 or `cancelled`. A run is cancelled by `/decompose/cancel`, by the client disconnecting, by
 `/session/close` for its session, and at server shutdown; cancelling terminates the worker process.
 
-The `done` event's preview carries no arrays: neither `pulse_trains_full` nor `distime_all` crosses
-to the client. When the run has a full-length pulse matrix (`full_preview`), the preview carries
-`run_result_token`: the server keeps the matrix and the discharge times (the session's latest run,
+The `done` event's preview carries only `mu_grid_index` (`DONE_PREVIEW_KEYS`): the page already
+shows the recording the rest of the run's preview describes, and neither `pulse_trains_full` nor
+`distime_all` crosses to the client. When the run has a full-length pulse matrix (`full_preview`),
+the preview also carries `run_result_token`: the server keeps the matrix and the discharge times (the session's latest run,
 until the session closes) for `/series/pulse` and the run save, which sends the token instead of the
 data. A save naming a token the server no longer holds, and no discharge times, is refused with 400
 (`field: run_result_token`).
@@ -97,7 +98,7 @@ fetches pulse trains through `/series/pulse`.
 | POST | `/edit/session/save` | JSON: `EditSessionSavePayload` | JSON: save result + the per-MU fields | `save_edit_session(payload, session)` |
 | POST | `/edit/save` | JSON: `EditSavePayload` | JSON: save result | `save_edits(payload)` |
 
-**Operations** (`/edit/ops/{op}`): `add-spikes`, `add-artifact`, `delete-spikes`, `delete-dr`,
+**Operations** (`/edit/ops/{op}`): `add-spikes`, `add-artifact`, `delete-spikes`,
 `remove-outliers`, `update-filter`, `flag`, `reset`, `duplicate`, `remove-duplicates`, `undo`.
 An operation the session refuses (bad MU index, empty window, no EMG to refit on) is a 400. An
 expired token is a 400 with `field: token`.
@@ -208,8 +209,8 @@ Each operation reads the fields it takes; unset fields are not passed.
 |---|---|---|
 | `token` | `str` | all (required) |
 | `mu` | `int \| None` | every per-MU operation |
-| `x_start`, `x_end` | `int \| None` | `add-spikes`, `add-artifact`, `delete-spikes`, `delete-dr` |
-| `y_min` | `float \| None` | `add-spikes`, `add-artifact` (peak height), `delete-spikes`, `delete-dr` (rate in Hz) |
+| `x_start`, `x_end` | `int \| None` | `add-spikes`, `add-artifact`, `delete-spikes` |
+| `y_min` | `float \| None` | `add-spikes`, `add-artifact` (peak height), `delete-spikes` |
 | `y_max` | `float \| None` | `delete-spikes` |
 | `view_start`, `view_end` | `int \| None` | `update-filter` |
 | `use_peeloff`, `lock_spikes` | `bool \| None` | `update-filter` |
@@ -299,15 +300,14 @@ replaces its previous one. `on_drop` releases what an entry holds outside the he
 | Function | Description |
 |---|---|
 | `close_session(session)` | Drop everything the session holds |
-| `_release_upload(session)` | Drop the session's upload before it loads the next file |
-| `_store_upload_signal(signal, source_path, session, store) -> token` | Keep a signal; with `store`, take over the store it was loaded into, else keep a copy |
+| `_release_upload(session)` | Drop the session's upload before it loads the next file. A file opened while another loads in the same tab is pinned only once built, so a drop never deletes a store still being written: the upload pinned last stays, the other answers 400 (`field: upload_token`) |
+| `_store_upload_signal(signal, source_path, session, store, views) -> token` | Keep a signal and the QC stage's views, once both are built; with `store`, take over the store they were written in, else keep a copy |
 | `_get_upload_signal(token)` / `_get_upload_source_path(token)` | A read-only view of the signal / the file it came from |
 | `_hold_upload(token) -> HeldUpload \| None` | Signal, source path, store and views of an upload, the store held until `release()`; used by runs, `/qc/auto` and `/series/*` |
-| `_store_signal_views(token, views)` / `_get_signal_views(token)` | The QC stage's pyramids and overview of an upload |
+| `_get_signal_views(token)` | The QC stage's pyramids and overview of an upload |
 | `_store_run_result(pulse_trains, session, store, spikes) -> token` | Keep a finished run, taking over its run store |
 | `_get_run_result_entry(token) -> RunResult \| None` | The run, its pulse trains read-only; `_get_run_result(token)` returns the trains only |
-| `_release_edit_sessions(session)` | Close the session's edit session before it opens the next file |
-| `_store_edit_session(edit, session) -> token` | Keep an edit session |
+| `_store_edit_session(edit, session) -> token` | Keep an edit session in place of the session's last, which closes |
 | `_get_edit_session(token, session=None)` | The edit session; with `session`, it moves to that tab |
 | `_resize_edit_session(token)` | Recount its bytes after an edit |
 | `_live_edit_logs()` | The edit logs open sessions are writing (not offered for recovery) |

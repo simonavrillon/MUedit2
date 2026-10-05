@@ -9,8 +9,8 @@ import {
   decodeFrame,
   decodePulseFrame,
   decodeSeriesFrame,
-  encodeFrame,
 } from "../src/api/binary-payloads.js";
+import { encodeFrame } from "./frames.js";
 
 const encoder = new TextEncoder();
 

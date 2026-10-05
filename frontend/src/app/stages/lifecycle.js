@@ -93,7 +93,11 @@ export function switchStage(app, target) {
   }
 
   const from = state.currentStage;
-  if (from !== target) STAGES[from]?.exit?.(app);
+  if (from !== target) {
+    STAGES[from]?.exit?.(app);
+    // What finished on the page left is done with; errors and work under way stay.
+    if (els.status?.dataset.tone === "success") app.setStatus("", "muted");
+  }
   setCurrentStage(state, target);
   for (const [key, stage] of Object.entries(STAGES)) {
     els[stage.panel]?.classList.toggle("active", key === target);

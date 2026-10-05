@@ -24,7 +24,7 @@
 /** @typedef {import("../editing/operations.js").PulseViewMeta} PulseViewMeta */
 /** @typedef {import("../decomp/params.js").DecomposeParams} DecomposeParams */
 /** @typedef {"emgCanvas" | "auxCanvas"} RoiCanvasId Canvases that take ROI and artifact drags. */
-/** @typedef {"add-spikes" | "add-artifact" | "delete-spikes" | "delete-dr"} RoiAction */
+/** @typedef {"add-spikes" | "add-artifact" | "delete-spikes"} RoiAction */
 
 /**
  * A box drawn on an edit canvas, in samples and pulse-train units (Hz on the
@@ -57,13 +57,15 @@
  * @property {(open: boolean) => void} setSettingsOpen
  * @property {() => void} scheduleLayoutRerender Redraw the visible stage at the next frame, once however often asked.
  * @property {(target: StageKey) => void} switchStage
- * @property {(options?: { keepLandingVisible?: boolean }) => void} showWorkspace
+ * @property {(target: StageKey) => void} showWorkspace Leave the landing page for `target`'s page.
  * @property {() => void} populateGridTabs
  */
 
 /**
  * @typedef {object} FileSessionService
  * @property {() => string} getBidsProject
+ * @property {(project: string) => void} setBidsProject The Project field, and the edit session's project with it.
+ * @property {(fileName: string) => void} resetSessionForm The entity fields back to their defaults for a new raw file.
  * @property {() => string[]} getBidsMuscleNames
  * @property {() => JsonObject} collectBidsEntities
  * @property {(entities: Partial<BidsEntities> & { project?: string }) => void} setBidsEntitiesInput
@@ -82,8 +84,7 @@
  * @property {() => void} renderAuxiliaryChannels
  * @property {() => void} ensureQcTraces Fetch the current grid's channel traces over the first window, unless they are shown or on their way.
  * @property {(path: string, name: string, options?: { silentPreviewFailure?: boolean }) => Promise<boolean>} handleRawFilePath
- * @property {() => void} renderChannelQC
- * @property {(canvasId: RoiCanvasId) => void} enableRoiSelection
+ * @property {() => void} renderChannelQC Draw the current grid's channels (the first grid when the data has no other), and ask for its traces.
  * @property {() => void} refreshVisuals
  * @property {() => void} scheduleRefreshVisuals Redraw the QC plots at the next frame, once however often asked.
  * @property {(idx: number) => void} setSelectedGrid
@@ -102,19 +103,16 @@
 /**
  * @typedef {object} EditStage
  * @property {() => number} getPulsePlotHeight
- * @property {() => number} getDrPlotHeight
  * @property {() => void} resetEditState
  * @property {() => void} refreshEditModeButtons
  * @property {(mode: EditMode | null, message?: string) => void} setEditMode
- * @property {() => void} renderEditDropdowns
- * @property {() => void} renderEditExplorer
+ * @property {() => void} renderEditExplorer Settle the MU and view the data allows, draw the edit page, and ask for the pulse window it lacks.
  * @property {() => void} scheduleEditRender Redraw the edit plots at the next frame, once however often asked.
  * @property {() => void} ensureEditPulseView Fetch the current MU's window when the one shown is not it.
  * @property {(action: RoiAction, payload: RoiEditRequest) => Promise<void>} requestRoiEdit
  * @property {(sel: Selection) => void} addSpikesInSelection
  * @property {(sel: Selection) => void} addArtifactInSelection
  * @property {(sel: Selection) => void} deleteSpikesInSelection
- * @property {(sel: Selection) => void} deleteDrInSelection
  * @property {(path: string, options?: { open?: boolean }) => Promise<void>} loadDecompositionForEditByPath Load a decomposition into Edit; `open: false` stays on the current page.
  */
 

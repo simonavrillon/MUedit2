@@ -56,6 +56,7 @@ export function fakeContext() {
         args,
         fillStyle: ctx.fillStyle,
         strokeStyle: ctx.strokeStyle,
+        textAlign: ctx.textAlign,
       });
   }
   return ctx;

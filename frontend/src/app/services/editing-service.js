@@ -7,17 +7,16 @@
  * coupling. State mutations go exclusively through `state/actions.js`.
  */
 import { handleError } from "./error-service.js";
+import { RequestTimeout } from "../http.js";
 import { isToggleOn } from "../../view/controls.js";
 import { inferGridCount, normalizeGridNames } from "../../io/grid.js";
 import { getSuggestedNpzName } from "../../io/bids.js";
 import {
   applyEditChange,
   applyEditSave,
-  clearAllEditSelections,
-  clearEditDrSelections,
   clearEditPulseSelections,
-  setEditProject,
   setEditBookmark,
+  setEditBusy,
   setShowBookmark,
   setEditCurrentMu,
   setEditCurrentMuGrid,
@@ -27,7 +26,6 @@ import {
   setEditSession,
   setEditView,
   setGridNames,
-  setMuscle,
 } from "../../state/actions.js";
 
 /** @typedef {import("../context.js").App} App */
@@ -43,6 +41,11 @@ import {
 // The open session's token survives a reload of the page (not of the server),
 // so a reloaded tab can pick the session up again.
 const SESSION_TOKEN_KEY = "muedit.editSession";
+
+/** Resuming at a log entry without a view shows this long either side of its edits. */
+const RESUME_HALF_SPAN_S = 2;
+/** The sampling rate assumed for that when the file does not give one. */
+const ASSUMED_FSAMP = 2048;
 
 /** @param {string} token */
 function rememberSessionToken(token) {
@@ -88,13 +91,60 @@ function setEditBookmarkAndHide(state, muIdx, position) {
  * @param {JsonObject} [args]
  * @returns {Promise<JsonObject>} the change's fields
  */
-export async function requestEditOp(app, op, args = {}) {
+async function requestEditOp(app, op, args = {}) {
   const { state, api } = app;
-  if (!state.edit.token) throw new Error("No decomposition is open");
-  const frame = await api.editOp(op, { token: state.edit.token, ...args });
+  const token = state.edit.token;
+  if (!token) throw new Error("No decomposition is open");
+  let frame;
+  try {
+    frame = await api.editOp(op, { token, ...args });
+  } catch (err) {
+    if (err instanceof RequestTimeout && (await resyncAfterTimeout(app, token)))
+      throw new Error(
+        "Request timed out; the page now shows the session as the server left it",
+      );
+    throw err;
+  }
+  requireSameSession(state, token);
   applyEditChange(state, frame);
   app.refreshEditModeButtons();
   return frame.meta;
+}
+
+/**
+ * The page gave up on an edit the server may still carry out: take the
+ * session as the server has it once that edit is done, so the page and the
+ * server agree whether it happened.
+ *
+ * @param {App} app
+ * @param {string} token
+ * @returns {Promise<boolean>} whether the page took it
+ */
+async function resyncAfterTimeout(app, token) {
+  const { state, api } = app;
+  try {
+    const frame = await api.editSessionState(token);
+    if (state.edit.token !== token) return false;
+    setEditSession(state, frame);
+    app.refreshEditModeButtons();
+    return true;
+  } catch {
+    // The edit's own failure is what gets reported.
+    return false;
+  }
+}
+
+/**
+ * A change the server answered for a session the page has since left (another
+ * decomposition was opened) is not this session's.
+ *
+ * @param {State} state
+ * @param {string} token The session the request was for.
+ */
+function requireSameSession(state, token) {
+  if (state.edit.token !== token) {
+    throw new Error("Another decomposition was opened meanwhile");
+  }
 }
 
 /**
@@ -102,10 +152,19 @@ export async function requestEditOp(app, op, args = {}) {
  * how it went (`[text, tone]`, or nothing to leave the status be). A failure
  * is reported as `failed` and changes nothing.
  *
+ * Edits go one at a time. One asked for while another runs is refused: it
+ * was drawn on the pulse train as it was before the running edit changed it.
+ *
  * @param {App} app
  * @param {{ pending?: string, failed: string, run: () => Promise<[string, Tone] | void> }} edit
  */
 async function editAction(app, { pending, failed, run }) {
+  const { state } = app;
+  if (state.edit.busy) {
+    app.setEditStatus("Wait for the current edit to finish", "muted");
+    return;
+  }
+  setEditBusy(state, true);
   try {
     if (pending) app.setEditStatus(pending, "muted");
     const outcome = await run();
@@ -113,6 +172,8 @@ async function editAction(app, { pending, failed, run }) {
     if (outcome) app.setEditStatus(...outcome);
   } catch (err) {
     handleError(err, app.setEditStatus, failed);
+  } finally {
+    setEditBusy(state, false);
   }
 }
 
@@ -138,11 +199,7 @@ export async function requestRoiEdit(app, action, payload) {
         (payload.xStart + (payload.xEnd ?? payload.xStart)) / 2,
       );
       setEditBookmarkAndHide(state, payload.muIdx, bookmarkPos);
-      if (action === "delete-dr") {
-        clearEditDrSelections(state);
-      } else {
-        clearEditPulseSelections(state);
-      }
+      clearEditPulseSelections(state);
       app.setEditMode(null);
       return ["ROI applied", "success"];
     },
@@ -277,7 +334,7 @@ export async function undoEdit(app) {
     failed: "Undo failed",
     async run() {
       await requestEditOp(app, "undo");
-      clearAllEditSelections(state);
+      clearEditPulseSelections(state);
       return ["Undo applied", "success"];
     },
   });
@@ -291,7 +348,7 @@ export async function resetCurrentMuEdits(app) {
     failed: "Reset failed",
     async run() {
       await requestEditOp(app, "reset", { mu: state.edit.currentMu ?? 0 });
-      clearAllEditSelections(state);
+      clearEditPulseSelections(state);
     },
   });
 }
@@ -331,55 +388,41 @@ function entityLabelOf(filename) {
 
 /** @param {App} app */
 export async function saveEditedFile(app) {
-  const {
-    state,
-    api,
-    withBidsSaveFields,
-    getBidsMuscleNames,
-    setEditStatus,
-    renderEditExplorer,
-  } = app;
+  const { state, api, withBidsSaveFields, getBidsMuscleNames, setEditStatus } =
+    app;
 
   if (!state.edit.distimes?.length || !state.edit.token) {
     setEditStatus("Load a decomposition first", "error");
     return;
   }
+  const token = state.edit.token;
   const filename = state.edit.filename || "decomposition";
-  const before = state.edit.distimes.length;
-  try {
-    setEditStatus("Saving edited file...", "muted");
-    const saved = await api.editSessionSave(
-      withBidsSaveFields({
-        token: state.edit.token,
-        muscle: getBidsMuscleNames(),
-        entity_label: entityLabelOf(filename),
-        file_label: getSuggestedNpzName(filename, "_edited"),
-        software_versions: state.edit.softwareVersions || null,
-      }),
-    );
-    // Mirror the saved file: the backend drops flagged and duplicate MUs and logs it.
-    applyEditSave(state, saved);
-    app.refreshEditModeButtons();
-    const kept = saved?.kept_indices;
-    if (
-      Array.isArray(kept) &&
-      (kept.length !== before ||
-        kept.some(
-          (/** @type {number} */ k, /** @type {number} */ i) => k !== i,
-        ))
-    ) {
-      renderEditExplorer();
-    }
-    app.setStatus("Saved", "success");
-    setEditStatus(
-      saved?.path
-        ? `Edited decomposition saved to ${saved.path}`
-        : "Edited decomposition saved",
-      "success",
-    );
-  } catch (err) {
-    handleError(err, setEditStatus, "Save failed");
-  }
+  return editAction(app, {
+    pending: "Saving edited file...",
+    failed: "Save failed",
+    async run() {
+      const saved = await api.editSessionSave(
+        withBidsSaveFields({
+          token,
+          muscle: getBidsMuscleNames(),
+          entity_label: entityLabelOf(filename),
+          file_label: getSuggestedNpzName(filename, "_edited"),
+          software_versions: state.edit.softwareVersions || null,
+        }),
+      );
+      requireSameSession(state, token);
+      // Mirror the saved file: the backend drops flagged and duplicate MUs and logs it.
+      applyEditSave(state, saved);
+      app.refreshEditModeButtons();
+      app.setStatus("Saved", "success");
+      return [
+        saved.path
+          ? `Edited decomposition saved to ${saved.path}`
+          : "Edited decomposition saved",
+        "success",
+      ];
+    },
+  });
 }
 
 /**
@@ -426,7 +469,7 @@ function resumePosition(state) {
         );
         const halfSpan = Math.min(
           Math.round(total * 0.1),
-          (state.edit.fsamp || 2048) * 2,
+          (state.edit.fsamp || ASSUMED_FSAMP) * RESUME_HALF_SPAN_S,
         );
         targetView = {
           start: Math.max(0, mean - halfSpan),
@@ -452,7 +495,7 @@ function resumePosition(state) {
  * @param {{ open?: boolean }} [options] `open: false` loads it without leaving the current page.
  */
 function showEditSession(app, file, frame, { open = true } = {}) {
-  const { state, els, applySessionInfoFromDecomposition } = app;
+  const { state, applySessionInfoFromDecomposition } = app;
   const { meta } = frame;
   const resolvedGridNames = normalizeGridNames(meta.grid_names, {
     minimumCount: inferGridCount({
@@ -464,9 +507,7 @@ function showEditSession(app, file, frame, { open = true } = {}) {
   setGridNames(state, resolvedGridNames);
   setEditGridNames(state, resolvedGridNames);
   applySessionInfoFromDecomposition(file, meta);
-  const loadedProject = String(meta.project || "").trim();
-  if (els.bidsProject) els.bidsProject.value = loadedProject;
-  setEditProject(state, loadedProject);
+  app.setBidsProject(String(meta.project || "").trim());
   setEditFile(state, file);
   setEditFilename(state, file.name || meta.file_label || "decomposition");
   setEditSession(state, frame);
@@ -481,18 +522,13 @@ function showEditSession(app, file, frame, { open = true } = {}) {
     setEditBookmark(state, targetBookmark);
     setShowBookmark(state, true);
   }
-  clearAllEditSelections(state);
+  clearEditPulseSelections(state);
   app.refreshEditModeButtons();
-  if (els.editSaveBtn) els.editSaveBtn.disabled = false;
-  app.renderBidsMuscleFields?.();
-  if (open) {
-    app.showWorkspace({ keepLandingVisible: true });
-    app.switchStage("edit");
-    app.renderEditExplorer();
-    if (els.landing) els.landing.classList.add("hidden");
-  } else {
-    app.updateStepAvailability();
-  }
+  app.renderBidsMuscleFields();
+  // The QC tabs name the decomposition's grids.
+  app.populateGridTabs();
+  if (open) app.showWorkspace("edit");
+  else app.updateStepAvailability();
   prepareEditGrid(app, state.edit.currentMuGrid);
 }
 
@@ -513,6 +549,9 @@ function confirmRecovery(count) {
 }
 
 /**
+ * Open a decomposition for editing. One that fails to open leaves the one
+ * open as it was; once the server has opened it, the previous one is closed.
+ *
  * @param {App} app
  * @param {FileRef} file
  * @param {string} filepath
@@ -524,15 +563,15 @@ export async function loadDecompositionForEdit(
   filepath,
   options = {},
 ) {
-  const { state, api, setUploadLoading, setEditStatus, resetEditState } = app;
+  const { api, setUploadLoading, setEditStatus, resetEditState } = app;
 
   if (!filepath) return;
   setUploadLoading(true);
   setEditStatus("Loading...", "muted");
-  setEditGridNames(state, []);
-  setMuscle(state, []);
+  let opened = false;
   try {
     let frame = await api.editOpen(filepath);
+    opened = true;
     const recoverable = Number(frame.meta.recoverable_edits) || 0;
     let recovered = 0;
     if (recoverable > 0) {
@@ -549,7 +588,7 @@ export async function loadDecompositionForEdit(
     );
   } catch (err) {
     handleError(err, setEditStatus, "Failed to load");
-    resetEditState();
+    if (opened) resetEditState();
   } finally {
     setUploadLoading(false);
   }

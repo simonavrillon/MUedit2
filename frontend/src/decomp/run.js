@@ -1,34 +1,34 @@
 import {
-  ensureDiscardMasks,
-  setChannelMeans,
-  setChannelTraces,
-  setCoordinates,
-  setGridNames,
   setIsRunning,
   setLastRunDownloadKey,
-  setMetadata,
-  setMuscle,
   setParameters,
-  setRois,
   setRunDownloadInFlight,
   setRunLive,
   setRunResultToken,
-  setSeriesLength,
-  setUploadToken,
 } from "../state/actions.js";
-import { normalizePreviewPayload } from "../api/payloads.js";
 import { getSuggestedNpzName } from "../io/bids.js";
 import { errorMessage, handleError } from "../app/services/error-service.js";
-import { applyRunEvent, buildRunSummary, createRunLive } from "./live.js";
+import {
+  applyRunEvent,
+  buildRunSummary,
+  createRunLive,
+  failRun,
+  failSave,
+  finishRun,
+  finishSave,
+  startSave,
+} from "./live.js";
 import { renderRunTime, updateRunDots } from "../view/run-live.js";
 import { readNdjson } from "../api/ndjson.js";
+import { withUpload } from "../app/services/upload.js";
 
 /** @typedef {import("../app/context.js").App} App */
 /** @typedef {import("../app/context.js").JsonObject} JsonObject */
-/** @typedef {import("../api/payloads.js").PreviewPayload} PreviewPayload */
 
 /** How often the elapsed time and estimate refresh during a run. */
 const CLOCK_TICK_MS = 1000;
+/** How long a run may take to start streaming. */
+const RUN_START_TIMEOUT_MS = 15 * 60 * 1000;
 
 /** @param {App} app */
 export async function autoSaveRunDecomposition(app) {
@@ -51,42 +51,39 @@ export async function autoSaveRunDecomposition(app) {
   const key = `${suggestedName}:${token}`;
   if (state.lastRunDownloadKey === key) return;
 
-  const fs = state.fsamp;
   const payload = {
     run_result_token: token,
     total_samples: state.seriesLength || 0,
-    fsamp: fs != null && Number.isFinite(fs) && fs > 0 ? fs : null,
-    grid_names: state.gridNames || ["Grid 1"],
+    fsamp: state.fsamp,
+    grid_names: state.gridNames,
     mu_grid_index: live.summary.muGridIndex,
     parameters: state.parameters || {},
     muscle: getBidsMuscleNames(),
-    artifact_regions: state.artifactRegions || [],
+    artifact_regions: state.artifactRegions,
     file_label: suggestedName,
   };
   setRunDownloadInFlight(state, true);
-  live.saving = true;
-  live.saveError = "";
+  startSave(live);
   renderRunStage();
   try {
     setStatus("Saving decomposition...", "muted");
     const saved = await persistNpzBySaveTarget(payload, suggestedName);
     setLastRunDownloadKey(state, key);
-    live.savedPath = saved?.path || "";
+    finishSave(live, saved.path);
     setStatus(
-      saved?.path
+      saved.path
         ? `Decomposition saved to ${saved.path}`
         : "Decomposition saved",
       "success",
     );
     // Preloaded for the Edit step; the page stays on the run's result.
-    if (saved?.path) {
+    if (saved.path) {
       void loadDecompositionForEditByPath(saved.path, { open: false });
     }
   } catch (err) {
     handleError(err, setStatus, "Save failed");
-    live.saveError = errorMessage(err);
+    failSave(live, errorMessage(err));
   } finally {
-    live.saving = false;
     setRunDownloadInFlight(state, false);
     renderRunStage();
   }
@@ -130,26 +127,26 @@ export async function runDecomposition(app) {
     CLOCK_TICK_MS,
   );
 
-  const buildRunFormData = () => {
+  const buildRunFormData = (/** @type {string} */ token) => {
     const formData = new FormData();
-    formData.append("upload_token", state.uploadToken || "");
+    formData.append("upload_token", token);
 
     formData.append("params", JSON.stringify(buildParams()));
     formData.append("persist_output", "false");
-    if (state.discardMasks && state.discardMasks.length) {
+    if (state.discardMasks.length) {
       formData.append("discard_channels", JSON.stringify(state.discardMasks));
     }
-    if (state.rois && state.rois.length) {
+    if (state.rois.length) {
       formData.append("rois", JSON.stringify(state.rois));
     }
-    if (state.artifactRegions && state.artifactRegions.length) {
+    if (state.artifactRegions.length) {
       formData.append(
         "artifact_regions",
         JSON.stringify(state.artifactRegions),
       );
     }
 
-    const project = String(getBidsProject() || "").trim();
+    const project = getBidsProject();
     if (project) {
       formData.append("project", project);
     }
@@ -164,21 +161,11 @@ export async function runDecomposition(app) {
   };
 
   try {
-    let response;
-    try {
-      response = await api.decomposeStream(buildRunFormData(), 15 * 60 * 1000);
-    } catch (err) {
-      const message = errorMessage(err);
-      const sourcePath = state.file?.path;
-      if (!message.includes("upload_token") || !sourcePath) throw err;
-      setUploadToken(state, null);
-      setStatus("Session expired, reloading file...", "muted");
-      const preview = await api.fetchPreviewByPath(sourcePath);
-      if (!preview?.upload_token) throw err;
-      setUploadToken(state, preview.upload_token);
-      setStatus("Running decomposition...", "muted");
-      response = await api.decomposeStream(buildRunFormData(), 15 * 60 * 1000);
-    }
+    const response = await withUpload(app, (token) =>
+      api.decomposeStream(buildRunFormData(token), RUN_START_TIMEOUT_MS),
+    );
+    // A reloaded file reported itself on the status line.
+    setStatus("Running decomposition...", "muted");
 
     if (!response.body) {
       throw new Error("No response body");
@@ -205,29 +192,21 @@ export async function runDecomposition(app) {
     }
     // A stream that ends without `done`, `error` or `cancelled` left the run unfinished.
     if (state.runLive?.status === "running") {
-      failRun(app, "The decomposition stopped without a result");
+      failRun(
+        state.runLive,
+        "The decomposition stopped without a result",
+        Date.now(),
+      );
     }
   } catch (err) {
     handleError(err, setStatus, "Error");
-    failRun(app, errorMessage(err));
+    if (state.runLive) failRun(state.runLive, errorMessage(err), Date.now());
   } finally {
     globalThis.clearInterval(clock);
     setIsRunning(state, false);
     updateStartAvailability();
     renderRunStage();
   }
-}
-
-/**
- * @param {App} app
- * @param {string} message
- */
-function failRun(app, message) {
-  const live = app.state.runLive;
-  if (!live) return;
-  live.status = "failed";
-  live.error = message;
-  live.finishedAt = Date.now();
 }
 
 /** @param {App} app */
@@ -243,67 +222,6 @@ export async function cancelDecomposition(app) {
     handleError(err, setStatus, "Cancel failed");
     if (els.cancelRun) els.cancelRun.disabled = false;
   }
-}
-
-/**
- * @param {App} app
- * @param {PreviewPayload} preview
- */
-function applyPreviewData(app, preview) {
-  const {
-    state,
-    els,
-    renderBidsAutoInfo,
-    renderBidsMuscleFields,
-    populateAuxSelector,
-    populateGridTabs,
-    ensureQcTraces,
-    scheduleLayoutRerender,
-  } = app;
-
-  // The overview and aux traces stay the upload's envelopes (/series/*); the
-  // run preview's copies of them are not used.
-  const {
-    total_samples,
-    grid_names,
-    rois,
-    channel_means,
-    coordinates,
-    metadata,
-    muscle,
-  } = preview;
-
-  if (total_samples) {
-    setSeriesLength(state, total_samples);
-  }
-  if (rois.length) {
-    setRois(state, rois);
-    if (els.nwindows) els.nwindows.value = String(state.rois.length);
-  }
-  if (grid_names) {
-    setGridNames(state, grid_names);
-  }
-  if (channel_means) {
-    setChannelMeans(state, channel_means);
-  }
-  if (coordinates) {
-    setCoordinates(state, coordinates);
-  }
-  setChannelTraces(state, []);
-  if (metadata) {
-    setMetadata(state, metadata);
-  }
-  if (muscle) {
-    setMuscle(state, muscle);
-  }
-  populateAuxSelector();
-  ensureDiscardMasks(state);
-  populateGridTabs();
-  renderBidsAutoInfo();
-  renderBidsMuscleFields();
-  // The QC plots are drawn when their page is shown; their traces load now.
-  ensureQcTraces();
-  scheduleLayoutRerender();
 }
 
 /**
@@ -327,7 +245,7 @@ export function handleStreamMessage(app, msg) {
       ? `: ${typeof msg.detail === "string" ? msg.detail : JSON.stringify(msg.detail)}`
       : "";
     setStatus(`Error${detail}`, "error");
-    failRun(app, `${msg.message || "Run failed"}${detail}`);
+    failRun(live, `${msg.message || "Run failed"}${detail}`, Date.now());
     renderRunStage();
     return;
   }
@@ -349,17 +267,15 @@ export function handleStreamMessage(app, msg) {
     return;
   }
 
-  if (msg.preview) {
-    setRunResultToken(state, msg.preview.run_result_token);
-    applyPreviewData(app, normalizePreviewPayload(msg.preview));
-  }
-  if (msg.summary) {
-    live.summary = buildRunSummary(msg.summary, msg.preview);
-    if (msg.summary.parameters) setParameters(state, msg.summary.parameters);
-  }
-  live.phase = "save";
-  live.status = "done";
-  live.finishedAt = Date.now();
+  // The rest of the preview is the recording the page already shows; the
+  // session form the user filled in stays as it is.
+  if (msg.preview) setRunResultToken(state, msg.preview.run_result_token);
+  if (msg.summary?.parameters) setParameters(state, msg.summary.parameters);
+  finishRun(
+    live,
+    msg.summary ? buildRunSummary(msg.summary, msg.preview) : null,
+    Date.now(),
+  );
   setStatus("Complete", "success");
   updateStepAvailability();
   renderRunStage();

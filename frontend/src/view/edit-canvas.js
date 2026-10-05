@@ -1,26 +1,29 @@
 /**
  * Edit-stage canvas rendering and pointer interaction: pulse-train and
  * discharge-rate plots, the navigation timeline, the bookmark marker, and the
- * drag-to-select ROI handlers. The pulse plot draws the window of the current
- * MU the server sent (`state.edit.pulseView`) and asks for a new one when the
- * view or the MU changed. Selection gestures update draft/committed selection
- * state via the action helpers; the container re-renders in response.
+ * pulse plot's drag-to-select handlers. The pulse plot draws the window of
+ * the current MU the server sent (`state.edit.pulseView`). The draw functions
+ * only draw; the edit stage settles the state and asks for missing windows
+ * around them. Selection gestures update draft/committed selection state via
+ * the action helpers; the container re-renders in response.
  */
 import { COLORS } from "../config.js";
-import { drawTrace, getCanvasPlotMetrics, prepareCanvas } from "./plots.js";
 import {
-  clearEditDrSelections,
+  drawTrace,
+  getCanvasPlotMetrics,
+  prepareCanvas,
+  viewScale,
+} from "./plots.js";
+import {
   clearEditPulseSelections,
-  setEditDrDraftSelection,
-  setEditDrSelection,
   setEditPulseDraftSelection,
   setEditPulseSelection,
   setEditView,
   setShowBookmark,
 } from "../state/actions.js";
 import {
+  cachedDischargeRates,
   clampView,
-  dischargeRates,
   fastestRateInView,
 } from "../editing/operations.js";
 import { renderSelectPair } from "./select-renderers.js";
@@ -43,15 +46,12 @@ const TIMELINE_BAR_H = 12;
  * @param {Span} view
  */
 function pxToViewSample(canvas, px, view) {
-  const metrics = getCanvasPlotMetrics(canvas, true, { hideYAxis: false });
+  const { padding, plotWidth } = getCanvasPlotMetrics(canvas, true);
   const clamped = Math.max(
-    metrics.padding.left,
-    Math.min(metrics.padding.left + metrics.plotWidth, px),
+    padding.left,
+    Math.min(padding.left + plotWidth, px),
   );
-  const frac = metrics.plotWidth
-    ? (clamped - metrics.padding.left) / metrics.plotWidth
-    : 0;
-  return Math.round(view.start + frac * Math.max(0, view.end - view.start));
+  return Math.round(viewScale(view, padding.left, plotWidth).toSample(clamped));
 }
 
 /**
@@ -67,14 +67,15 @@ function renderBookmark(canvas, state, muIdx, view) {
 
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
-  const metrics = getCanvasPlotMetrics(canvas, true, { hideYAxis: false });
+  const metrics = getCanvasPlotMetrics(canvas, true);
 
   const bookmarkPos = Math.max(
     view.start,
     Math.min(view.end - 1, bookmark.position),
   );
-  const frac = (bookmarkPos - view.start) / Math.max(1, view.end - view.start);
-  const x = metrics.padding.left + frac * metrics.plotWidth;
+  const x = viewScale(view, metrics.padding.left, metrics.plotWidth).toX(
+    bookmarkPos,
+  );
 
   ctx.strokeStyle = COLORS.bookmark;
   ctx.lineWidth = 1;
@@ -213,16 +214,16 @@ function displayedPulse(shown, flagged) {
   };
 }
 
-/** @param {App} app */
-export function renderEditExplorer(app) {
-  const { els, state, renderEditDropdowns } = app;
-
-  renderEditDropdowns();
+/**
+ * The current MU's pulse train over the view, with its discharges, artifacts,
+ * the selections and the bookmark.
+ *
+ * @param {Els} els
+ * @param {State} state
+ */
+export function drawEditPulse(els, state) {
   const muIdx = state.edit.currentMu ?? 0;
   const total = state.edit.totalSamples || 0;
-  if (!state.edit.view || state.edit.view.end > total) {
-    setEditView(state, { start: 0, end: total });
-  }
   const view = state.edit.view || { start: 0, end: total };
   const overlays = [];
   if (state.edit.selectionPulse) overlays.push(state.edit.selectionPulse);
@@ -266,35 +267,15 @@ export function renderEditExplorer(app) {
   if (canvasEl) {
     renderBookmark(canvasEl, state, muIdx, state.edit.view);
   }
-  renderInstantaneousDr(app);
-  app.ensureEditPulseView();
 }
 
 /**
- * Discharge rates by MU's discharge times. An edit replaces an MU's array, so
- * an entry outlives no change to it; redraws while panning reuse it.
+ * The current MU's discharge rates over the view.
  *
- * @type {WeakMap<ArrayLike<number>, { fsamp: number | null, total: number, rates: ReturnType<typeof dischargeRates> }>}
+ * @param {Els} els
+ * @param {State} state
  */
-const ratesCache = new WeakMap();
-
-/**
- * @param {ArrayLike<number>} spikes
- * @param {number | null} fsamp
- * @param {number} total
- */
-function cachedDischargeRates(spikes, fsamp, total) {
-  const hit = ratesCache.get(spikes);
-  if (hit && hit.fsamp === fsamp && hit.total === total) return hit.rates;
-  const rates = dischargeRates(spikes, fsamp, total);
-  ratesCache.set(spikes, { fsamp, total, rates });
-  return rates;
-}
-
-/** @param {App} app */
-export function renderInstantaneousDr(app) {
-  const { state, els } = app;
-
+export function drawEditRates(els, state) {
   const canvas = els.editDrCanvas;
   const muIdx = state.edit.currentMu ?? 0;
   const spikes = state.edit.distimes?.[muIdx] || [];
@@ -305,10 +286,8 @@ export function renderInstantaneousDr(app) {
   }
   const view = state.edit.view || { start: 0, end: total };
   const dr = cachedDischargeRates(spikes, state.edit.fsamp, total);
-  const drSelection = state.edit.selectionDr || state.edit.draftSelectionDr;
   drawTrace(canvas, { row: null, start: view.start, end: view.end }, view, {
     range: { min: 0, max: fastestRateInView(dr, view) },
-    selections: drSelection ? [drSelection] : [],
     showAxes: true,
     hideYAxis: false,
     fsamp: state.edit.fsamp,
@@ -318,18 +297,24 @@ export function renderInstantaneousDr(app) {
   });
 }
 
+/**
+ * What a box drawn on the pulse plot does in each armed mode, and what a click
+ * there does instead: show `hint`, or (with none) edit the samples around it.
+ *
+ * @type {Partial<Record<import("../state/state.js").EditMode, { edit: "addSpikesInSelection" | "addArtifactInSelection" | "deleteSpikesInSelection", hint?: string }>>}
+ */
+const PULSE_BOX_EDITS = {
+  add: { edit: "addSpikesInSelection", hint: "Drag a box to add spikes" },
+  add_artifact: {
+    edit: "addArtifactInSelection",
+    hint: "Drag a box to mark an artifact",
+  },
+  delete_spikes: { edit: "deleteSpikesInSelection" },
+};
+
 /** @param {App} app */
 export function bindEditCanvas(app) {
-  const {
-    els,
-    state,
-    renderEditExplorer,
-    setEditStatus,
-    addSpikesInSelection,
-    addArtifactInSelection,
-    deleteSpikesInSelection,
-    setEditMode,
-  } = app;
+  const { els, state, renderEditExplorer, setEditStatus, setEditMode } = app;
 
   const canvas = els.editPulseCanvas;
   if (!canvas) return;
@@ -370,48 +355,25 @@ export function bindEditCanvas(app) {
     if (!drag.dragging) return;
     drag.stop();
     const sel = drag.selection();
+    // The box being drawn goes, however the gesture ends.
+    setEditPulseDraftSelection(state, null);
+    const armed = state.edit.mode ? PULSE_BOX_EDITS[state.edit.mode] : null;
     if (drag.delta < 6) {
-      if (state.edit.mode === "add") {
-        setEditStatus("Drag a box to add spikes", "muted");
-        return;
-      }
-      if (state.edit.mode === "add_artifact") {
-        setEditStatus("Drag a box to mark an artifact", "muted");
-        return;
-      }
-      if (state.edit.mode === "delete_spikes") {
-        const windowSel = {
+      if (armed?.hint) setEditStatus(armed.hint, "muted");
+      else if (armed) {
+        app[armed.edit]({
           ...sel,
           start: Math.max(0, sel.start - 2),
           end: sel.start + 2,
-        };
-        deleteSpikesInSelection(windowSel);
+        });
       }
-      return;
-    }
-
-    if (state.edit.mode === "add") {
-      addSpikesInSelection(sel);
+    } else if (armed) {
+      app[armed.edit](sel);
       setEditMode(null);
-      setEditPulseDraftSelection(state, null);
-      return;
+    } else {
+      setEditPulseSelection(state, sel);
     }
-    if (state.edit.mode === "add_artifact") {
-      addArtifactInSelection(sel);
-      setEditMode(null);
-      setEditPulseDraftSelection(state, null);
-      return;
-    }
-    if (state.edit.mode === "delete_spikes") {
-      deleteSpikesInSelection(sel);
-      setEditMode(null);
-      setEditPulseDraftSelection(state, null);
-      return;
-    }
-
-    setEditPulseSelection(state, sel);
-    setEditPulseDraftSelection(state, null);
-    renderEditExplorer();
+    app.scheduleEditRender();
   });
 
   canvas.addEventListener("dblclick", () => {
@@ -441,9 +403,14 @@ function fillTicks(ctx, positions, total, bw) {
   }
 }
 
-/** @param {App} app */
-export function renderEditTimeline(app) {
-  const { els, state } = app;
+/**
+ * The whole recording under the view: the current MU's discharges, its last
+ * edit, and where the view is.
+ *
+ * @param {Els} els
+ * @param {State} state
+ */
+export function drawEditTimeline(els, state) {
   const prepared = prepareCanvas(els?.editTimelineCanvas, { height: 20 });
   if (!prepared) return;
   const { ctx, width } = prepared;
@@ -564,52 +531,5 @@ export function bindEditTimeline(app) {
       clampView(Math.round(frac * total - span / 2), span, total),
     );
     renderEditExplorer();
-  });
-}
-
-/** @param {App} app */
-export function bindEditDrCanvas(app) {
-  const { els, state, renderEditExplorer, deleteDrInSelection } = app;
-
-  const canvas = els.editDrCanvas;
-  if (!canvas) return;
-
-  const pxToSample = (/** @type {number} */ px) =>
-    pxToViewSample(
-      canvas,
-      px,
-      state.edit.view || { start: 0, end: state.edit.totalSamples || 0 },
-    );
-
-  const drag = createDragState(canvas, pxToSample);
-
-  canvas.addEventListener("pointerdown", (e) => {
-    drag.begin(e);
-    setEditDrDraftSelection(state, null);
-  });
-
-  canvas.addEventListener("pointermove", (e) => {
-    if (!drag.dragging) return;
-    setEditDrDraftSelection(state, drag.update(e));
-    app.scheduleEditRender();
-  });
-
-  canvas.addEventListener("pointercancel", () => {
-    if (!drag.dragging) return;
-    drag.stop();
-    setEditDrDraftSelection(state, null);
-    app.scheduleEditRender();
-  });
-
-  canvas.addEventListener("pointerup", () => {
-    if (!drag.dragging) return;
-    drag.stop();
-    const sel = drag.selection();
-    clearEditDrSelections(state);
-    setEditDrSelection(state, sel);
-    renderEditExplorer();
-    if (state.edit.mode === "delete_dr") {
-      deleteDrInSelection(sel);
-    }
   });
 }

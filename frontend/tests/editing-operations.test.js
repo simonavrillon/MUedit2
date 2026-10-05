@@ -23,8 +23,11 @@ const {
   flagMuForDeletion,
   resetCurrentMuEdits,
   saveEditedFile,
+  removeOutliers,
+  loadDecompositionForEdit,
 } = await import("../src/app/services/editing-service.js");
 const ops = await import("../src/editing/operations.js");
+const { RequestTimeout } = await import("../src/app/http.js");
 
 const pristine = structuredClone(initialState);
 const PLOT_HEIGHT = 100;
@@ -73,7 +76,6 @@ function editState() {
     muUids: ["g0_mu0", "g0_mu1"],
     muGridIndex: [0, 0],
     versions: [1, 2],
-    hasPulse: [true, true],
     gridNames: ["GR08MM1305"],
     fsamp: 2000,
     totalSamples: 10,
@@ -118,7 +120,6 @@ function testApp(state) {
     renderEditExplorer: recorder(),
     requestRoiEdit: recorder(),
     getPulsePlotHeight: () => PLOT_HEIGHT,
-    getDrPlotHeight: () => PLOT_HEIGHT,
   });
   return app;
 }
@@ -324,23 +325,6 @@ describe("selection to ROI request", () => {
       assertClose(payload.yMin, 3.6, "yMin");
       assertClose(payload.yMax, 7.2, "yMax");
     }
-  });
-
-  test("delete-dr scales the plot to the fastest discharge rate in view", () => {
-    state.edit.totalSamples = 2000;
-    state.edit.distimes[0] = ints(0, 200, 400, 1000);
-    app.deleteDrInSelection({ start: 900, end: 100, yMin: 80, yMax: 30 });
-    const [[action, payload]] = app.requestRoiEdit.calls;
-    assert.equal(action, "delete-dr");
-    assert.deepEqual([payload.xStart, payload.xEnd], [100, 900]);
-    // Peak rate 2000/200 = 10 Hz; 80 px down a 100 px plot is 2 Hz.
-    assertClose(payload.yMin, 2, "yMin");
-  });
-
-  test("delete-dr needs two discharges", () => {
-    state.edit.distimes[0] = ints(5);
-    app.deleteDrInSelection({ start: 0, end: 9 });
-    assert.equal(app.requestRoiEdit.calls.length, 0);
   });
 });
 
@@ -566,5 +550,107 @@ describe("saveEditedFile", () => {
     assert.deepEqual(state.edit.editHistory, [saveEntry]);
     assert.equal(state.edit.dirty, false);
     assert.equal(app.renderEditExplorer.calls.length, 1);
+  });
+});
+
+describe("a session left during an edit", () => {
+  test("the change it answers is not applied to the new one", async () => {
+    app.api = {
+      editOp: async () => {
+        state.edit.token = "other";
+        return changeFrame({ changed: [0] }, [[7]]);
+      },
+    };
+    const before = rows(state.edit.distimes);
+    await removeOutliers(app);
+    assert.deepEqual(rows(state.edit.distimes), before);
+    assert.match(
+      app.setEditStatus.calls.at(-1)[0],
+      /Another decomposition was opened meanwhile/,
+    );
+    assert.equal(state.edit.busy, false);
+  });
+});
+
+describe("an edit the page gave up on", () => {
+  test("the page takes the session as the server left it", async () => {
+    const served = changeFrame({ token: "tok" }, []);
+    served.spikes = [ints(2, 6), ints(1, 4)];
+    served.artifacts = [ints(), ints()];
+    app.api = {
+      editOp: async () => {
+        throw new RequestTimeout();
+      },
+      editSessionState: async () => served,
+    };
+    await removeOutliers(app);
+    assert.deepEqual(rows(state.edit.distimes), [
+      [2, 6],
+      [1, 4],
+    ]);
+    assert.deepEqual(state.edit.versions, [5, 5]);
+    assert.match(
+      app.setEditStatus.calls.at(-1)[0],
+      /Outlier removal failed: Request timed out; the page now shows the session as the server left it/,
+    );
+    assert.equal(state.edit.busy, false);
+  });
+
+  test("a session the server cannot answer for stays as the page had it", async () => {
+    app.api = {
+      editOp: async () => {
+        throw new RequestTimeout();
+      },
+      editSessionState: async () => {
+        throw new Error("gone");
+      },
+    };
+    const before = rows(state.edit.distimes);
+    await removeOutliers(app);
+    assert.deepEqual(rows(state.edit.distimes), before);
+    assert.match(
+      app.setEditStatus.calls.at(-1)[0],
+      /Outlier removal failed: Request timed out$/,
+    );
+  });
+});
+
+describe("a decomposition that fails to open", () => {
+  function opening(api) {
+    app.api = api;
+    Object.assign(app, {
+      setUploadLoading: recorder(),
+      resetEditState: recorder(),
+    });
+  }
+
+  test("leaves the one open as it was", async () => {
+    opening({
+      editOpen: async () => {
+        throw new Error("not a decomposition");
+      },
+    });
+    const before = structuredClone(state.edit);
+    await loadDecompositionForEdit(app, { name: "b.npz" }, "/data/b.npz");
+    assert.deepEqual(state.edit, before);
+    assert.equal(app.resetEditState.calls.length, 0);
+    assert.match(
+      app.setEditStatus.calls.at(-1)[0],
+      /Failed to load: not a decomposition/,
+    );
+  });
+
+  test("once opened, a failed recovery leaves nothing of the closed one", async () => {
+    globalThis.window.confirm = () => true;
+    opening({
+      editOpen: async () =>
+        changeFrame({ token: "new", recoverable_edits: 2 }, []),
+      editRecover: async () => {
+        throw new Error("log unreadable");
+      },
+    });
+    await loadDecompositionForEdit(app, { name: "b.npz" }, "/data/b.npz");
+    delete globalThis.window.confirm;
+    assert.equal(app.resetEditState.calls.length, 1);
   });
 });

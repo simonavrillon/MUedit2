@@ -7,8 +7,8 @@ All HTTP endpoints used by the frontend, their payloads, and binary formats.
 | # | Method | Route | Client Method | Used By | Timeout | Purpose |
 |---|---|---|---|---|---|---|
 | 1 | GET | `/health` | `api.healthUrl()` | `initializeApp` → `waitForBackend` | 60s poll | Backend health check |
-| 2 | GET | `/dialog/open-file` | `api.openFileDialog()` | `importStage.handleNativeDialogOpen` | 120s | Open native OS file dialog |
-| 3 | POST | `/preview-by-path` | `api.fetchPreviewByPath(path)` | `qcStage.requestPreview` (with filepath) | 120s | Fetch preview metadata for raw file by path |
+| 2 | GET | `/dialog/open-file` | `api.openFileDialog()` | `importStage.handleNativeDialogOpen` (Browse disabled until the open ends) | 120s | Open native OS file dialog |
+| 3 | POST | `/preview-by-path` | `api.fetchPreviewByPath(path)` | `qcStage.requestPreview` (the file's path) | 120s | Fetch preview metadata for raw file by path |
 | 4 | GET | `/series/emg` | `api.fetchSeries("emg", params)` | `qcStage.ensureQcTraces` | 120s | One min/max envelope per channel of a grid over the ROI (`QC_TRACE_BINS` bins) |
 | 4b | GET | `/series/overview`, `/series/aux` | `api.fetchSeries(kind, params)` | `qcStage.requestPreview` | 120s | Whole-recording envelopes of each grid's mean \|EMG\| and of the aux channels (`OVERVIEW_BINS` bins) |
 | 5 | POST | `/qc/auto` | `api.runAutoQc(payload)` | `qcStage.runAutoQc` | 300s | Run automatic QC: detect bad channels + artifact windows |
@@ -16,11 +16,11 @@ All HTTP endpoints used by the frontend, their payloads, and binary formats.
 | 6b | POST | `/decompose/cancel` | `api.cancelDecomposition()` | `runStage.cancelDecomposition` (Cancel button) | 120s | Stop this tab's run; its stream ends with `cancelled` |
 | 7 | GET | `/series/pulse` | `api.fetchPulse(params)` | the edit canvas, through `createViewFetcher` | 120s | One MU's pulse train over the window on screen, with its discharges there |
 | 8 | POST | `/edit/save` | `api.editSave(payload)` | `fileSession.persistNpzBySaveTarget` ← `autoSaveRunDecomposition` | 120s | Save a finished run (its pulse trains and discharge times stay on the server) |
-| 9 | POST | `/edit/session/open` | `api.editOpen(filepath)` | `loadDecompositionForEdit` | 120s | Open a decomposition in a server-side edit session |
+| 9 | POST | `/edit/session/open` | `api.editOpen(filepath)` | `loadDecompositionForEdit` | 120s | Open a decomposition in a server-side edit session; one that fails to open leaves the open one as it was |
 | 10 | POST | `/edit/session/recover` | `api.editRecover(token, apply)` | `loadDecompositionForEdit`, when the open reports `recoverable_edits` | 120s | Replay or drop the unsaved edits an earlier session left |
 | 10b | POST | `/edit/session/prepare-grid` | `api.editPrepareGrid(token, grid, project)` | `prepareEditGrid` ← `showEditSession` (the grid on screen) and the grid dropdown | 10min | Filter a grid's EMG ahead of its first Update Filter; nothing waits for the answer |
-| 11 | GET | `/edit/session` | `api.editSessionState(token)` | `restoreEditSession` (page reload) | 120s | The whole state of the session this page had open |
-| 12 | POST | `/edit/ops/{op}` | `api.editOp(op, payload)` | `requestEditOp` ← every edit action | 120s | Apply one edit; the frame says what changed |
+| 11 | GET | `/edit/session` | `api.editSessionState(token)` | `restoreEditSession` (page reload), and `requestEditOp` after an edit timed out | 10min | The whole state of the session this page had open, once the edit it may be running is done |
+| 12 | POST | `/edit/ops/{op}` | `api.editOp(op, payload)` | `requestEditOp` ← every edit action | 120s; `update-filter` 10min (it waits for the grid's filtering) | Apply one edit; the frame says what changed. An edit that times out may still be carried out, so the page then takes the session's state from #11 |
 | 13 | POST | `/edit/session/save` | `api.editSessionSave(payload)` | `saveEditedFile` | 120s | Save the session's edits |
 | 14 | POST | `/session/close` | `api.closeSession()` | `initializeApp`'s `pagehide` handler | — | Free what the server holds for this tab and stop its run |
 
@@ -132,13 +132,14 @@ Response: NDJSON stream (one JSON object per line):
                                                       //   event (k kept, r rejected,
                                                       //   f too few spikes)
   { stage: "done",                                    // the run's result, in one event
-    preview: { run_result_token, mu_grid_index, total_samples, rois, ... },
+    preview: { run_result_token?, mu_grid_index },   // the token when units were kept
     summary: { mu_count, grid_names, sil, parameters } }
   { stage: "error", message: string, detail?: string }
   { stage: "cancelled", message: string }   (after /decompose/cancel, a disconnect or tab close)
 
-The preview carries neither `pulse_trains_full` nor `distime_all`: both stay on
-the server under `run_result_token` (see `/edit/save`). A second run while one
+The preview carries nothing of the recording the page already shows, and
+neither `pulse_trains_full` nor `distime_all`: both stay on the server under
+`run_result_token` (see `/edit/save`). A second run while one
 is active gets HTTP 409 before any stream starts.
 ```
 
@@ -197,7 +198,6 @@ and posts `/edit/session/recover` with `{ token, apply }` before showing the fil
 Request: { token, ...args }    // built by requestEditOp; unset args are left out
   add-spikes, add-artifact   { mu, x_start, x_end, y_min }          (drawn box → samples, pulse value)
   delete-spikes              { mu, x_start, x_end, y_min, y_max }
-  delete-dr                  { mu, x_start, x_end, y_min }          (y_min: rate in Hz)
   update-filter              { mu, view_start, view_end, use_peeloff, lock_spikes, project }
   remove-outliers, reset, duplicate   { mu }
   flag                       { mu, flag }
@@ -287,17 +287,23 @@ aligned 8   ...         array data; each array at dataStart + offset (8-byte ali
 `decodeFrame` returns typed-array views into the response buffer (no copy);
 `csrRows` cuts CSR `values`/`offsets` pairs into one `Int32Array` view per MU.
 dtypes: `f4`, `i4`, `i8`, `u1`, `i2`. Every frame goes from server to client;
-`encodeFrame` only builds the decoder tests' input.
+the tests build their input with `encodeFrame` in `tests/frames.js`.
 
 ---
 
 ## Error Handling
 
-### `http.js` — `parseApiError(res)`
+### `http.js` — `ApiError`
 
-Extracts error messages from JSON responses:
-- Handles `error.message` (FastAPI format)
-- Handles `detail` as string, array (Pydantic validation errors), or object
+`apiFetch` throws an `ApiError` for a response that is not ok. `parseApiError` builds it from
+the error envelope:
+- `message`: `error.message`, followed by `detail` as a string, as the first Pydantic
+  validation error of a list, or as an object's `field` and `reason`
+- `status`: the HTTP status
+- `code`: `error.code` (`http_400`, …)
+- `field`: `detail.field` when the detail is an object, e.g. `upload_token`
+
+A request that outlasts its timeout is aborted and throws `RequestTimeout` ("Request timed out"); the server may still carry it out. `requestEditOp` reloads the edit session's state when an edit times out.
 
 ### `error-service.js` — `handleError(err, setStatus, label)`
 
@@ -308,12 +314,9 @@ setStatus(`${label}: ${err.message}`, "error")
 
 ### Upload Token Expiry
 
-The backend caches the loaded signal under the upload token; it is lost on backend restart or cache eviction. When `/decompose_stream` returns an `upload_token` error, `runDecomposition` (`decomp/run.js`):
-1. Clears the token
-2. Calls `POST /preview-by-path` with `state.file.path` to mint a fresh token (ROIs, channel masks and artifact regions stay in frontend state and are reused)
-3. Retries the decomposition once; if the reload fails the original error is shown
-
-The QC-stage calls (`/series/*`, `/qc/auto`) do not retry; they report the error.
+The backend caches the loaded signal under the upload token; it is lost on backend restart or cache eviction. The run (`/decompose_stream`), automatic QC (`/qc/auto`) and the QC channel traces (`/series/emg`) send the token through `withUpload` (`app/services/upload.js`). When the answer is an `ApiError` whose `field` is `upload_token`, it:
+1. Calls `POST /preview-by-path` with `state.file.path` to mint a fresh token (ROIs, channel masks and artifact regions stay in frontend state and are reused). Requests that find the same upload gone share one reload, and a reload is dropped when another file was opened meanwhile.
+2. Sends the request once more with the fresh token; if the file has no path or the reload fails, the original error is reported.
 
 ### Edit Session Expiry
 

@@ -1,7 +1,7 @@
 import {
-  clearPreviewState,
   resetEditSlice,
   setChannelTraces,
+  setDiscardMasks,
   setFile,
   setRunLive,
   setRunResultToken,
@@ -12,31 +12,21 @@ import {
 /** @typedef {import("./state.js").FileRef} FileRef */
 
 /**
- * Keeps raw file selection state updates consistent across all entry points.
+ * A raw file whose preview has arrived replaces the one shown: its file, and
+ * nothing of the previous file's upload, traces or edit session.
  *
  * @param {State} state
  * @param {FileRef | null | undefined} fileLike
  */
 export function beginRawPreviewTransition(state, fileLike) {
-  const previousEditBidsRoot = String(state?.edit?.bidsRoot || "");
   resetEditSlice(state);
-  state.edit.bidsRoot = previousEditBidsRoot;
   setFile(state, fileLike || null);
   setUploadToken(state, null);
   setChannelTraces(state, []);
-  state.discardMasks = [];
+  setDiscardMasks(state, []);
   // The previous file's run no longer applies; one still streaming keeps its page.
   if (!state.isRunning) {
     setRunLive(state, null);
     setRunResultToken(state, "");
   }
-}
-
-/**
- * @param {State} state
- */
-export function rollbackRawPreviewTransition(state) {
-  setFile(state, null);
-  setUploadToken(state, null);
-  clearPreviewState(state);
 }

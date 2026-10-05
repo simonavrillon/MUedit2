@@ -3,15 +3,14 @@ import {
   addSpikesInSelection as addSpikesInSelectionFeature,
   addArtifactInSelection as addArtifactInSelectionFeature,
   deleteSpikesInSelection as deleteSpikesInSelectionFeature,
-  deleteDrInSelection as deleteDrInSelectionFeature,
   buildEditDropdownModel,
 } from "../../editing/operations.js";
 import {
-  renderEditExplorer as renderEditExplorerFeature,
-  renderEditTimeline as renderEditTimelineFeature,
+  drawEditPulse,
+  drawEditRates,
+  drawEditTimeline,
   renderEditDropdownsView,
   bindEditCanvas,
-  bindEditDrCanvas,
   bindEditTimeline,
 } from "../../view/edit-canvas.js";
 import {
@@ -33,6 +32,7 @@ import {
   setEditCurrentMu,
   setEditCurrentMuGrid,
   setEditPulseView,
+  setEditView,
 } from "../../state/actions.js";
 import { getEditMuIndicesForGrid } from "../../state/selectors.js";
 import { getCanvasPlotMetrics, oncePerFrame } from "../../view/plots.js";
@@ -70,6 +70,7 @@ export function createEditStageService(app) {
       state.edit.mode === "delete_spikes",
     );
     if (els.editUndoBtn) els.editUndoBtn.disabled = !state.edit.canUndo;
+    if (els.editSaveBtn) els.editSaveBtn.disabled = !state.edit.token;
   }
 
   /** @type {EditStage["setEditMode"]} */
@@ -94,15 +95,14 @@ export function createEditStageService(app) {
   /** @type {EditStage["resetEditState"]} */
   function resetEditState() {
     resetEditStateFeature(app);
-    if (els.editSaveBtn) els.editSaveBtn.disabled = true;
-    if (els.bidsProject) els.bidsProject.value = "";
+    app.setBidsProject("");
   }
 
-  /** What the dropdowns last showed; a redraw that changes none of it leaves them be. */
-  let shownDropdowns = "";
-
-  /** @type {EditStage["renderEditDropdowns"]} */
-  function renderEditDropdowns() {
+  /**
+   * Bring what the page shows in line with the data before it is drawn: a
+   * grid that has MUs, one of its MUs, and a view inside the recording.
+   */
+  function settleEditSelection() {
     const model = buildEditDropdownModel(state, (grid) =>
       getEditMuIndicesForGrid(state, grid),
     );
@@ -112,6 +112,18 @@ export function createEditStageService(app) {
     if (model.needsMuSwitch) {
       setEditCurrentMu(state, model.currentMu, { resetView: false });
     }
+    const total = state.edit.totalSamples || 0;
+    if (!state.edit.view || state.edit.view.end > total) {
+      setEditView(state, { start: 0, end: total });
+    }
+    return model;
+  }
+
+  /** What the dropdowns last showed; a redraw that changes none of it leaves them be. */
+  let shownDropdowns = "";
+
+  /** @param {import("../../editing/operations.js").EditDropdownModel} model */
+  function renderEditDropdowns(model) {
     const shown = JSON.stringify([
       model.gridNames,
       model.muOptions,
@@ -125,8 +137,12 @@ export function createEditStageService(app) {
 
   /** @type {EditStage["renderEditExplorer"]} */
   function renderEditExplorer() {
-    renderEditExplorerFeature(app);
-    renderEditTimelineFeature(app);
+    renderEditDropdowns(settleEditSelection());
+    drawEditPulse(els, state);
+    drawEditRates(els, state);
+    drawEditTimeline(els, state);
+    // The window drawn follows the view, the MU's edits and the plot's width.
+    ensureEditPulseView();
   }
 
   /** @type {EditStage["scheduleEditRender"]} */
@@ -185,8 +201,6 @@ export function createEditStageService(app) {
   /** @type {EditStage["deleteSpikesInSelection"]} */
   const deleteSpikesInSelection = (sel) =>
     deleteSpikesInSelectionFeature(app, sel);
-  /** @type {EditStage["deleteDrInSelection"]} */
-  const deleteDrInSelection = (sel) => deleteDrInSelectionFeature(app, sel);
 
   /** @type {EditStage["loadDecompositionForEditByPath"]} */
   function loadDecompositionForEditByPath(path, options) {
@@ -196,11 +210,9 @@ export function createEditStageService(app) {
 
   return {
     getPulsePlotHeight: () => plotHeight(els.editPulseCanvas),
-    getDrPlotHeight: () => plotHeight(els.editDrCanvas),
     resetEditState,
     refreshEditModeButtons,
     setEditMode,
-    renderEditDropdowns,
     renderEditExplorer,
     scheduleEditRender,
     ensureEditPulseView,
@@ -208,7 +220,6 @@ export function createEditStageService(app) {
     addSpikesInSelection,
     addArtifactInSelection,
     deleteSpikesInSelection,
-    deleteDrInSelection,
     loadDecompositionForEditByPath,
   };
 }
@@ -315,7 +326,6 @@ export function setupEditEvents(app) {
   const { els, state, renderEditExplorer, refreshEditModeButtons } = app;
 
   bindEditCanvas(app);
-  bindEditDrCanvas(app);
   bindEditTimeline(app);
 
   els.editMuGridSelect?.addEventListener("change", () => {
@@ -342,7 +352,7 @@ export function setupEditEvents(app) {
   }
 
   els.bidsProject?.addEventListener("input", () => {
-    setEditProject(state, els.bidsProject.value);
+    setEditProject(state, app.getBidsProject());
   });
 
   els.bidsPlacementScheme?.addEventListener("change", () => {
@@ -353,7 +363,9 @@ export function setupEditEvents(app) {
 
   refreshEditModeButtons();
   window.addEventListener("keydown", (e) => {
-    if (state.currentStage !== "edit" || typingInAField(e)) return;
+    // The landing page hides the workspace without leaving the edit stage.
+    const shown = !els.workspace?.classList.contains("hidden");
+    if (state.currentStage !== "edit" || !shown || typingInAField(e)) return;
     const key = e.key.toLowerCase();
     const command = EDIT_COMMANDS.find((c) => c.key === key);
     if (command) {

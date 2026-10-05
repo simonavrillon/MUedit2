@@ -200,13 +200,12 @@ Use this to trace what the user can reach.
 | `cache.BUDGET` | App-internal | The one `MemoryBudget`; swept by the app lifespan |
 | `cache.close_session()` | App-internal | Called by `POST /session/close` |
 | `cache._release_upload()` | App-internal | Called by the preview service before the next load |
-| `cache._store_upload_signal()` | App-internal | Called by preview service |
+| `cache._store_upload_signal()` | App-internal | Called by preview service, with the upload's views, once both are built |
 | `cache._hold_upload()` | App-internal | Called by decompose, preview (`/qc/auto`) and series services |
 | `cache._get_upload_signal()`, `cache._get_upload_source_path()`, `cache._get_signal_views()`, `cache._get_run_result()` | App-internal | Tests (the services use `_hold_upload` / `_get_run_result_entry`) |
-| `cache._store_signal_views()` | App-internal | Called by preview service |
 | `cache._store_run_result()` | App-internal | Called by decompose service |
 | `cache._get_run_result_entry()` | App-internal | Called by series service (`/series/pulse`) and `save_edits` |
-| `cache._release_edit_sessions()`, `cache._store_edit_session()` | App-internal | Called by `open_edit_session` |
+| `cache._store_edit_session()` | App-internal | Called by `open_edit_session`, in place of the tab's previous session |
 | `cache._get_edit_session()` | App-internal | Called by editing and series services |
 | `cache._resize_edit_session()` | App-internal | Called after each edit, recovery and save |
 | `cache._live_edit_logs()` | App-internal | Called by `open_edit_session` (logs not offered for recovery) |
@@ -334,7 +333,7 @@ Use this to trace what the user can reach.
 | `add_artifact_in_roi()` | User-exposed | `muedit.editing.__init__`, editing service |
 | `delete_spikes_in_roi()` | User-exposed | `muedit.editing.__init__`, editing service |
 | `delete_artifacts_in_roi()` | User-exposed | `muedit.editing.__init__`, editing service |
-| `delete_high_discharge_rate_spikes_in_roi()` | User-exposed | `muedit.editing.__init__`, editing service |
+| `delete_high_discharge_rate_spikes_in_roi()` | User-exposed | `muedit.editing.__init__` (no edit-session operation) |
 | `remove_discharge_rate_outliers()` | User-exposed | `muedit.editing.__init__`, editing service |
 | `SpikeTimes` | User-exposed | `muedit.editing.__init__` (type alias) |
 | `FilterUpdateResult` | User-exposed | `muedit.editing.__init__` (type alias) |

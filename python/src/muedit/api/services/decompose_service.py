@@ -41,8 +41,9 @@ from muedit.models import IntArray
 
 logger = logging.getLogger(__name__)
 
-#: Preview fields that stay on the server under the run token: the save reads them back.
-PREVIEW_ARRAY_KEYS = ("pulse_trains_full", "distime_all")
+#: The preview fields a ``done`` event carries: the page already shows the recording the rest
+#: describe, and the pulse trains and discharge times stay on the server under the run token.
+DONE_PREVIEW_KEYS = ("mu_grid_index",)
 #: How often a stream waiting for the next event checks that its client is still connected.
 DISCONNECT_POLL_SEC = 1.0
 SHUTDOWN_WAIT_SEC = 10.0
@@ -197,7 +198,7 @@ class _Run:
         preview_raw: dict[str, Any] = message.get("preview") or {}
         spikes = _preview_spikes(preview_raw)
         preview_payload = make_json_safe(
-            {k: v for k, v in preview_raw.items() if k not in PREVIEW_ARRAY_KEYS}
+            {k: preview_raw[k] for k in DONE_PREVIEW_KEYS if k in preview_raw}
         )
         # The run save reads the pulse trains and discharge times from the run's store.
         pulse_full = _as_matrix(preview_raw.get("pulse_trains_full")).astype(np.float32, copy=False)

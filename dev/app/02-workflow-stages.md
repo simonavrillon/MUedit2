@@ -44,36 +44,45 @@ The user selects a signal file (raw EMG or saved decomposition). The app detects
 
 ```
 User clicks #browseSignalBtn
+  -> importStage.openPickedFile()   # Browse is disabled until the open ends:
+                                    # the backend holds one upload per tab
   -> importStage.handleNativeDialogOpen()
      -> api.openFileDialog()   GET /dialog/open-file
      -> detectLandingFileType(name)
+     -> confirmLeavingUnsavedEdits(name)   # only while the open decomposition has
+                                           # unsaved edits; they stay in its edit log
         ├─ "raw"           -> qcStage.handleRawFilePath(path, name)
-        │                      -> requestPreview({ filepath: path })  POST /preview-by-path
-        │                      -> showWorkspace() -> switchStage("qc")
+        │                      -> requestPreview({ file })  POST /preview-by-path
+        │                      -> showWorkspace("qc")
         ├─ "decomposition"  -> editStage.loadDecompositionForEditByPath(path)
         │                      -> api.editOpen(path)   POST /edit/session/open
-        │                      -> showWorkspace() -> switchStage("edit")
+        │                      -> showWorkspace("edit")
         └─ "ambiguous_mat"  -> try raw first (silent),
                                fall back to decomposition on failure
 ```
 
-For `.bdf`/`.edf` files, BIDS entities are parsed from the filename. The project comes from the preview (`project`, the file's folder under the output folder), which `applyPreviewMetadata` puts in the Project field.
+For `.bdf`/`.edf` files that open, BIDS entities are parsed from the filename. The project comes from the preview (`project`, the file's folder under the output folder), which `applyPreviewMetadata` puts in the Project field.
 
 ### State Written
 
 ```
+Nothing is written until the preview and both envelopes have arrived; a file
+that fails to open leaves the file shown, and its edit session, as they were.
+
+  - fetchPreviewByPath, then fetchSeries("overview"), fetchSeries("aux")
+
 beginRawPreviewTransition(state, file):
-  - resetEditSlice(state)         [preserves bidsRoot]
+  - resetEditSlice(state)
   - setFile(state, file)
   - setUploadToken(state, null)
   - setChannelTraces(state, [])
-  - state.discardMasks = []
+  - setDiscardMasks(state, [])
 
-[after preview API succeeds]:
+then:
+  - resetSessionForm(name)        # entity defaults, file name
   - setUploadToken(state, data.upload_token)
-  - fetchSeries("overview"), fetchSeries("aux")   # whole-recording envelopes
   - setGridSeries, setGridNames, setSeriesLength
-  - setChannelMeans, setCoordinates, setChannelTraces([])
+  - setChannelMeans, setCoordinates
   - setMetadata, setMuscle, setAuxData, setFsamp
   - setRois
   - switchStage("qc")   # runs the Edit exit hook if the user was editing
@@ -95,7 +104,7 @@ The user reviews channel quality, discards bad channels, selects regions of inte
 |---|---|---|
 | `qcGridTabs` | Dynamic buttons | Click to switch active grid (one button per grid) |
 
-Each tab click calls `setCurrentGrid(state, idx)` then `renderChannelQC()`, which asks `ensureQcTraces()` for that grid's traces over the first window. Traces that arrive after the window moved on (a new ROI drag, another file) are dropped, so the grid never shows an older window's traces.
+Each tab click calls `setCurrentGrid(state, idx)` then `renderChannelQC()` (the aux plot does not depend on the grid and is not redrawn), which asks `ensureQcTraces()` for that grid's traces over the first window. Traces that arrive after the window moved on (a new ROI drag, another file) are dropped, so the grid never shows an older window's traces.
 
 #### Channel Quality Grid
 
@@ -196,12 +205,12 @@ Artifact windows are visually shaded on the EMG overview. They are OR'd into the
 
 ```
 [Preview loaded from Stage 1]
-  -> renderBidsAutoInfo()        shows auto-detected metadata
-  -> renderBidsMuscleFields()    creates muscle name inputs
-  -> switchStage("qc")           draws the page once, at the next frame:
+  -> showWorkspace("qc")         switchStage("qc"), which draws the page once, at the next frame:
        renderChannelQC()         channel grid with mini-plots (asks ensureQcTraces)
        refreshVisuals()          EMG overview and aux traces, with the windows
-  -> the landing page hides after that frame; the grid's traces fill in as they arrive
+  -> renderBidsAutoInfo()        shows auto-detected metadata
+  -> renderBidsMuscleFields()    creates muscle name inputs
+  -> the landing page hides in that frame, after the draw; the grid's traces fill in as they arrive
 
 User reviews channels:
   - clicks "Automatic QC" (#qcAutoBtn) to auto-detect bad channels + artifacts
@@ -274,20 +283,22 @@ User clicks "Decompose Signal" / "Start decomposition"
         - project, bids_entities, bids_export = "true"
         - full_preview = "true"
      6. api.decomposeStream(formData, 15min timeout)
-        - on an upload_token error: POST /preview-by-path with state.file.path
-          to mint a fresh token, then retry once (masks/ROIs are kept)
+        - sent through withUpload: on an upload_token ApiError, POST
+          /preview-by-path with state.file.path to mint a fresh token, then
+          retry once (masks/ROIs are kept)
      7. Stream NDJSON reader loop:
         - each line -> handleStreamMessage(msg), which folds it into state.runLive
-          - msg.stage=="error"      -> failRun(): live.status="failed", live.error
+          - msg.stage=="error"      -> failRun() (live.js): live.status="failed", live.error
           - msg.stage=="cancelled"  -> setRunLive(state, null): the page returns to the plan
           - otherwise applyRunEvent(): the event's phase moves the track; decompose
             events (grid, window, iter, outcomes) fill the row's dots and bump
             keptByGrid, then updateRunDots() restyles just the changed dots
-          - msg.stage=="done"       -> setRunResultToken; applyPreviewData() (state only:
-                                        the QC plots are drawn when their page is
-                                        shown; their traces are fetched now);
-                                        buildRunSummary(msg.summary); live.phase="save",
-                                        live.status="done"; autoSaveRunDecomposition()
+          - msg.stage=="done"       -> setRunResultToken (the rest of the preview is
+                                        the recording the page already shows; the
+                                        session form keeps what the user typed);
+                                        finishRun(live, buildRunSummary(msg.summary)):
+                                        live.phase="save", live.status="done";
+                                        autoSaveRunDecomposition()
         - a stream that ends without done/error/cancelled fails the run
           ("The decomposition stopped without a result")
      8. finally: clear the clock; setIsRunning(state, false); renderRunStage()
@@ -335,7 +346,6 @@ Render explorer: grid dropdown + MU dropdown + pulse canvas + DR canvas + timeli
   v
 User edits per-MU spike trains via:
   - Drag-box ROI on pulse canvas  -> add-spikes / delete-spikes / add-artifact
-  - Drag-box ROI on DR canvas     -> delete-dr (discharge-rate outliers)
   - Button actions                -> update-filter, remove-outliers, flag,
                                      duplicate, remove-duplicates, reset, undo
   - Timeline drag                -> pan/zoom the view window
@@ -357,6 +367,5 @@ Loading a `.npz` file from the Import stage skips QC and Decompose, going straig
 Import (.npz file) -> editStage.loadDecompositionForEditByPath(path)
   -> api.editOpen(filepath)   POST /edit/session/open
   -> setEditSession(state.edit)
-  -> showWorkspace() -> switchStage("edit")
-  -> renderEditExplorer()
+  -> showWorkspace("edit")   [switchStage draws the edit page at the next frame; the landing hides after it]
 ```

@@ -26,7 +26,6 @@ from muedit.editing.operations import (
     add_artifact_in_roi,
     add_spikes_in_roi,
     delete_artifacts_in_roi,
-    delete_high_discharge_rate_spikes_in_roi,
     delete_spikes_in_roi,
     remove_discharge_rate_outliers,
     update_motor_unit_filter_window,
@@ -166,6 +165,7 @@ class EditSession:
         self.versions = [next(self._counter) for _ in range(n_mu)]
         self.history: list[dict[str, Any]] = list(history or [])
         self.undo_stack: list[_Undo] = []
+        self.unsaved = 0  # edits since the file was opened or saved, less the undos
 
     # ── state ───────────────────────────────────────────────────────────────
 
@@ -175,11 +175,8 @@ class EditSession:
 
     @property
     def dirty(self) -> bool:
-        """Whether any MU's discharge times differ from the file's."""
-        return any(
-            not np.array_equal(now, then)
-            for now, then in zip(self.spikes, self.original_spikes, strict=True)
-        )
+        """Whether edits were made since the file was opened or saved: what its log keeps."""
+        return self.unsaved > 0
 
     @property
     def can_undo(self) -> bool:
@@ -302,7 +299,6 @@ class EditSession:
         "add-spikes",
         "add-artifact",
         "delete-spikes",
-        "delete-dr",
         "remove-outliers",
         "update-filter",
         "flag",
@@ -319,7 +315,6 @@ class EditSession:
                 "add-spikes": self.add_spikes,
                 "add-artifact": self.add_artifact,
                 "delete-spikes": self.delete_spikes,
-                "delete-dr": self.delete_dr,
                 "remove-outliers": self.remove_outliers,
                 "update-filter": self.update_filter,
                 "flag": self.flag,
@@ -336,6 +331,7 @@ class EditSession:
             except TypeError as exc:
                 raise EditError(f"Invalid arguments for {op}: {exc}") from exc
             change = handler(**args)
+            self.unsaved = max(0, self.unsaved - 1) if op == "undo" else self.unsaved + 1
             if self.log is not None:
                 self.log.append(op, args)
             return change
@@ -442,24 +438,6 @@ class EditSession:
             _, gone = _diff(artifacts_before, self.artifacts[mu])
             if gone:
                 self._entry("delete_artifact", mu, artifacts_removed=gone)
-        self.flagged[mu] = False
-        self._touch(mu)
-        return Change([mu], start)
-
-    def delete_dr(self, mu: int, x_start: int, x_end: int, y_min: float | None = None) -> Change:
-        """Delete one discharge of each pair faster than ``y_min`` Hz centred in the ROI."""
-        self.check_mu(mu)
-        self._check_fsamp()
-        start = len(self.history)
-        self._begin("delete_dr", mu)
-        height = float("inf") if y_min is None else float(y_min)
-        before = self.spikes[mu]
-        kept = delete_high_discharge_rate_spikes_in_roi(
-            _PulseLookup(self, mu), before.tolist(), self.fsamp, x_start, x_end, height
-        )
-        self.spikes[mu] = spike_array(kept)
-        added, removed = _diff(before, self.spikes[mu])
-        self._entry("delete_dr", mu, spikes_added=added or None, spikes_removed=removed or None)
         self.flagged[mu] = False
         self._touch(mu)
         return Change([mu], start)
@@ -813,6 +791,7 @@ class EditSession:
         self.history.extend(entries)
         self.original_spikes = [s.copy() for s in self.spikes]
         self.original_rows = list(self.rows)
+        self.unsaved = 0
         # A baseline train is never written in place: the next refit copies it.
         self.owned = [False] * self.n_mu
 
