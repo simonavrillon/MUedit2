@@ -1,5 +1,3 @@
-import { GRID_COLORS } from "../config.js";
-
 /** @typedef {import("./context.js").Span} Span */
 /** @typedef {import("./context.js").StageKey} StageKey */
 /** @typedef {import("./context.js").JsonObject} JsonObject */
@@ -80,7 +78,6 @@ import { GRID_COLORS } from "../config.js";
  * @property {Span[]} rois
  * @property {string[]} gridNames
  * @property {ChannelTrace[]} gridSeries Per grid, the smoothed mean |EMG| of the whole recording.
- * @property {string[]} gridColors
  * @property {JsonObject | null} parameters
  * @property {number[][]} channelMeans
  * @property {number[][][]} coordinates Per grid, per channel: [row, col].
@@ -153,7 +150,6 @@ export const state = {
   rois: [],
   gridNames: [],
   gridSeries: [],
-  gridColors: GRID_COLORS,
   parameters: null,
   channelMeans: [],
   coordinates: [],

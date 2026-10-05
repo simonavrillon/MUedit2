@@ -1,5 +1,25 @@
 // A recording 2D context and a minimal DOM, enough to drive the canvas views
 // in Node. Not a test file itself: `npm test` only runs tests/*.test.js.
+import { readFileSync } from "node:fs";
+
+/** The custom properties of css/tokens.css, with `var()` references resolved. */
+function readTokens() {
+  const css = readFileSync(
+    new URL("../css/tokens.css", import.meta.url),
+    "utf8",
+  );
+  const raw = new Map();
+  for (const [, name, value] of css.matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g)) {
+    raw.set(name, value.trim());
+  }
+  const resolve = (value) =>
+    value.replace(/var\((--[\w-]+)\)/g, (_, ref) =>
+      resolve(raw.get(ref) ?? ""),
+    );
+  return new Map([...raw].map(([name, value]) => [name, resolve(value)]));
+}
+
+const tokens = readTokens();
 
 const CONTEXT_METHODS = [
   "clearRect",
@@ -24,6 +44,10 @@ export function fakeContext() {
     lineWidth: 1,
     font: "",
     textAlign: "start",
+    transform: [1, 0, 0, 1, 0, 0],
+    setTransform(...args) {
+      ctx.transform = args;
+    },
   };
   for (const op of CONTEXT_METHODS) {
     ctx[op] = (...args) =>
@@ -95,6 +119,10 @@ export function fakeElement(tag = "div") {
     setAttribute(name, value) {
       el.attributes[name] = String(value);
     },
+    capturedPointer: null,
+    setPointerCapture(id) {
+      el.capturedPointer = id;
+    },
     addEventListener(type, fn) {
       (listeners[type] ||= []).push(fn);
     },
@@ -150,18 +178,15 @@ export function installDom() {
     },
     setTimeout: () => 0,
   };
+  globalThis.getComputedStyle = () => ({
+    getPropertyValue: (name) => tokens.get(name) ?? "",
+  });
   globalThis.document = {
+    documentElement: fakeElement("html"),
     getElementById: (id) => elementsById[id] ?? null,
     createElement: (tag) =>
       tag === "canvas" ? fakeCanvas({ width: 0, height: 0 }) : fakeElement(tag),
   };
-}
-
-/** Fire a window-level event, as a mouseup outside the canvas would. */
-export function dispatchWindow(type, init = {}) {
-  for (const fn of windowListeners[type] || []) {
-    fn({ preventDefault() {}, ...init });
-  }
 }
 
 /** Forget window listeners and registered ids between tests. */

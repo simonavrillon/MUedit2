@@ -113,7 +113,7 @@ To add a service method: add its signature to the matching typedef in `context.j
   file, uploadToken, isRunning, seriesLength,
   rois: [], roiDraft,
   artifactRegions: [], artifactDraft, artifactMode,
-  gridNames: [], gridSeries: [], gridColors,
+  gridNames: [], gridSeries: [],
   channelMeans: [], coordinates: [],
   discardMasks: [], channelTraces: [],
   qcWindowLoading: {},
@@ -214,7 +214,7 @@ STAGES = {
 | `exit` | disarm artifact selection | — | clear the armed edit mode (add / add artifact / delete) |
 | `render` | channel grid + EMG/aux plots | the run page (plan, live view or result) | edit plots, once data is loaded |
 
-`enter` and `exit` run only when the stage actually changes; re-selecting the current stage runs neither. `render` is what layout changes call: `scheduleLayoutRerender` draws only the active stage, since hidden stages are `display: none` and their canvases have no size, and every stage switch schedules a redraw.
+`enter` and `exit` run only when the stage actually changes; re-selecting the current stage runs neither. `render` is what layout changes call: `scheduleLayoutRerender` draws only the active stage, since hidden stages are `display: none` and their canvases have no size, and every stage switch schedules a redraw. It draws once at the next frame however often it is asked; a `ResizeObserver` on the canvases and the channel grid asks whenever one changes size.
 
 Loading a new raw file is **not** a stage exit. The edit slice is reset by `beginRawPreviewTransition` in `state/transitions.js` because the session changed; leaving the edit stage to look at QC keeps the loaded decomposition and its edits.
 
@@ -257,7 +257,7 @@ switchStage(app, target):
   if stage changes: STAGES[target].enter(app)
   updateStepAvailability()
   updateWorkflowStepper(target)
-  scheduleLayoutRerender(0)                      # -> STAGES[target].render(app)
+  scheduleLayoutRerender()                       # -> STAGES[target].render(app)
 ```
 
 ### `updateStepAvailability()` — `navigation.js`

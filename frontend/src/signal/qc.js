@@ -21,8 +21,8 @@ import {
 } from "../state/actions.js";
 import { getCurrentGrid, roiStart, roiEnd } from "../state/selectors.js";
 import { nextFrame } from "../view/plots.js";
-import { errorMessage } from "../app/services/error-service.js";
-import { toSpans } from "../api/payloads.js";
+import { handleError } from "../app/services/error-service.js";
+import { normalizePreviewPayload, toSpans } from "../api/payloads.js";
 import { OVERVIEW_BINS, QC_TRACE_BINS } from "../config.js";
 
 /** @typedef {import("../app/context.js").App} App */
@@ -71,7 +71,6 @@ export function pickRoiSlot(rois, span, total) {
  * @param {number} nwin
  */
 export function syncRois(state, nwin) {
-  if (!state.rois) state.rois = [];
   if (state.rois.length > nwin) state.rois = state.rois.slice(0, nwin);
   while (state.rois.length < nwin) {
     state.rois.push({ start: 0, end: state.seriesLength || 0 });
@@ -121,8 +120,7 @@ export async function requestAutoQc(app) {
     );
     return true;
   } catch (err) {
-    console.error(err);
-    setStatus(`Automatic QC failed: ${errorMessage(err)}`, "error");
+    handleError(err, setStatus, "Automatic QC failed");
     return false;
   } finally {
     if (els?.qcAutoBtn) els.qcAutoBtn.disabled = false;
@@ -157,10 +155,7 @@ export async function requestQcGridWindow(app, gridIdx, start, end) {
       renderChannelQC();
     }
   } catch (err) {
-    console.error(err);
-    if (typeof setStatus === "function") {
-      setStatus(`QC window update failed: ${errorMessage(err)}`, "error");
-    }
+    handleError(err, setStatus, "QC window update failed");
   } finally {
     setQcWindowLoadingForGrid(state, gridIdx, false);
   }
@@ -195,7 +190,9 @@ export async function requestPreview(app, options = {}) {
   setUploadLoading(true);
 
   try {
-    const data = await api.fetchPreviewByPath(filepath);
+    const data = normalizePreviewPayload(
+      await api.fetchPreviewByPath(filepath),
+    );
     setUploadToken(state, data.upload_token || null);
     // The whole-recording traces come as envelopes, sized for the canvases.
     const whole = { upload_token: data.upload_token, bins: OVERVIEW_BINS };
@@ -204,15 +201,15 @@ export async function requestPreview(app, options = {}) {
       api.fetchSeries("aux", whole),
     ]);
     setGridSeries(state, overview.rows);
-    setGridNames(state, data.grid_names || []);
+    setGridNames(state, data.grid_names);
     setSeriesLength(state, data.total_samples);
-    setChannelMeans(state, data.channel_means || []);
-    setCoordinates(state, data.coordinates || []);
+    setChannelMeans(state, data.channel_means);
+    setCoordinates(state, data.coordinates);
     setChannelTraces(state, []);
     setQcWindowLoading(state, {});
-    setMetadata(state, data.metadata || {});
-    setMuscle(state, data.muscle || []);
-    setAuxData(state, aux.rows, data.auxiliary_names || []);
+    setMetadata(state, data.metadata);
+    setMuscle(state, data.muscle);
+    setAuxData(state, aux.rows, data.auxiliary_names);
     setFsamp(state, data.fsamp);
     applyPreviewMetadata(data);
     populateAuxSelector();

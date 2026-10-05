@@ -1,35 +1,72 @@
 // The MUedit server serves the page and the API on one origin.
 export const API_BASE = `${window.location.origin}/api/v1`;
 
-export const COLORS = {
-  primary: "#ffffff",
-  secondary: "#ffd43b",
-  warning: "#ffd43b",
-  muted: "#b7b7b7",
-  muPurple: "#e7c1ff",
-  artifactMarker: "#ff8c66",
-  gridEmpty: "#555",
-  roiFill: "rgba(242, 167, 185, 0.08)",
-  roiStroke: "rgba(242, 167, 185, 0.6)",
-  artifactFill: "rgba(255, 140, 102, 0.18)",
-  artifactStroke: "rgba(255, 140, 102, 0.75)",
-  selectionFill: "rgba(195, 155, 242, 0.08)",
-  selectionStroke: "rgba(195, 155, 242, 0.6)",
-  gridLineDim: "rgba(255, 255, 255, 0.08)",
-  gridAxis: "rgba(255, 255, 255, 0.15)",
+/** @type {Map<string, string>} */
+const tokenCache = new Map();
+
+/**
+ * A colour custom property of `:root`, as css/tokens.css defines it.
+ *
+ * @param {string} name
+ */
+function cssToken(name) {
+  let value = tokenCache.get(name);
+  if (value === undefined) {
+    value = getComputedStyle(document.documentElement)
+      .getPropertyValue(name)
+      .trim();
+    tokenCache.set(name, value);
+  }
+  return value;
+}
+
+const COLOR_TOKENS = {
+  primary: "--text",
+  warning: "--accent-2",
+  muted: "--muted",
+  muPurple: "--mu-4",
+  artifactMarker: "--artifact-clr",
+  pulse: "--plot-trace-2",
+  gridEmpty: "--plot-empty",
+  roiFill: "--plot-roi-fill",
+  roiStroke: "--plot-roi-stroke",
+  artifactFill: "--plot-artifact-fill",
+  artifactStroke: "--plot-artifact-stroke",
+  selectionFill: "--plot-selection-fill",
+  selectionStroke: "--plot-selection-stroke",
+  gridLineDim: "--plot-gridline",
+  gridAxis: "--plot-axis",
+  markerOutline: "--plot-marker-outline",
+  bookmark: "--plot-bookmark",
+  timelineTrack: "--plot-timeline-track",
+  timelineAdded: "--plot-timeline-added",
+  timelineRemoved: "--plot-timeline-removed",
+  timelineSpikes: "--plot-timeline-spikes",
+  timelineViewFill: "--plot-timeline-view-fill",
+  timelineViewStroke: "--plot-timeline-view-stroke",
 };
 
-export const GRID_COLORS = [
-  "#ffffff",
-  "#f5f5f5",
-  "#e8e8e8",
-  "#dcdcdc",
-  "#3776ab",
-  "#ffd43b",
-  "#2ca02c",
-];
+/**
+ * Canvas colours, read from css/tokens.css on first use.
+ *
+ * @type {{ readonly [K in keyof typeof COLOR_TOKENS]: string }}
+ */
+export const COLORS = /** @type {any} */ ({});
+for (const [key, name] of Object.entries(COLOR_TOKENS)) {
+  Object.defineProperty(COLORS, key, {
+    get: () => cssToken(name),
+    enumerable: true,
+  });
+}
 
-export const UNIFORM_PULSE_COLOR = GRID_COLORS[1];
+const TRACE_COLOR_COUNT = 7;
+
+/** One colour per grid or auxiliary trace, cycled past the last. */
+export function traceColors() {
+  return Array.from({ length: TRACE_COLOR_COUNT }, (_, i) =>
+    cssToken(`--plot-trace-${i + 1}`),
+  );
+}
 
 /** Bins of the whole-recording envelopes (grid overview, aux): about a wide canvas in pixels. */
 export const OVERVIEW_BINS = 2048;

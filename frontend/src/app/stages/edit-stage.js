@@ -38,7 +38,7 @@ import {
   setEditPulseView,
 } from "../../state/actions.js";
 import { getEditMuIndicesForGrid } from "../../state/selectors.js";
-import { getCanvasPlotMetrics } from "../../view/plots.js";
+import { getCanvasPlotMetrics, oncePerFrame } from "../../view/plots.js";
 import { handleKeyboardNavigation } from "../services/navigation.js";
 import { createViewFetcher } from "../services/view-fetcher.js";
 import { errorMessage } from "../services/error-service.js";
@@ -103,6 +103,9 @@ export function createEditStageService(app) {
     return getEditMuIndicesForGrid(state, gridIdx);
   }
 
+  /** What the dropdowns last showed; a redraw that changes none of it leaves them be. */
+  let shownDropdowns = "";
+
   /** @type {EditStage["renderEditDropdowns"]} */
   function renderEditDropdowns() {
     const model = buildEditDropdownModel(state, getEditMuIndices);
@@ -112,6 +115,14 @@ export function createEditStageService(app) {
     if (model.needsMuSwitch) {
       setEditCurrentMu(state, model.currentMu, { resetView: false });
     }
+    const shown = JSON.stringify([
+      model.gridNames,
+      model.muOptions,
+      model.targetGrid,
+      model.currentMu,
+    ]);
+    if (shown === shownDropdowns) return;
+    shownDropdowns = shown;
     renderEditDropdownsView(els, model);
   }
 
@@ -125,6 +136,9 @@ export function createEditStageService(app) {
     renderEditExplorerFeature(app);
     renderEditTimelineFeature(app);
   }
+
+  /** @type {EditStage["scheduleEditRender"]} */
+  const scheduleEditRender = oncePerFrame(() => app.renderEditExplorer());
 
   const pulseFetcher = createViewFetcher(
     (
@@ -226,6 +240,7 @@ export function createEditStageService(app) {
     renderEditDropdowns,
     undoEdit,
     renderEditExplorer,
+    scheduleEditRender,
     ensureEditPulseView,
     restoreEditSession,
     renderInstantaneousDr,

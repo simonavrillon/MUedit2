@@ -81,13 +81,6 @@ describe("setGridNames", () => {
     actions.setGridNames(state, ["a", "b"]);
     assert.equal(state.currentGrid, 0);
   });
-
-  test("a non-array clears the names and the current grid", () => {
-    state.currentGrid = 3;
-    actions.setGridNames(state, null);
-    assert.deepEqual(state.gridNames, []);
-    assert.equal(state.currentGrid, 0);
-  });
 });
 
 describe("ROIs and artifact regions", () => {
@@ -100,19 +93,6 @@ describe("ROIs and artifact regions", () => {
     ]);
     actions.setRoiForIndex(state, -1, { start: 1, end: 2 });
     assert.equal(state.rois.length, 3);
-  });
-
-  test("setArtifactRegions stores the spans, or none", () => {
-    actions.setArtifactRegions(state, [{ start: 1, end: 2 }]);
-    assert.deepEqual(state.artifactRegions, [{ start: 1, end: 2 }]);
-    actions.setArtifactRegions(state, null);
-    assert.deepEqual(state.artifactRegions, []);
-  });
-
-  test("addArtifactRegion skips non-finite bounds", () => {
-    actions.addArtifactRegion(state, { start: 1, end: 2 });
-    actions.addArtifactRegion(state, { start: 1, end: "x" });
-    assert.deepEqual(state.artifactRegions, [{ start: 1, end: 2 }]);
   });
 
   test("removeLastArtifactRegion reports whether it removed anything", () => {

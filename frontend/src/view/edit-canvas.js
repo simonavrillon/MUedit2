@@ -6,8 +6,8 @@
  * view or the MU changed. Selection gestures update draft/committed selection
  * state via the action helpers; the container re-renders in response.
  */
-import { COLORS, UNIFORM_PULSE_COLOR } from "../config.js";
-import { drawTrace, getCanvasPlotMetrics } from "./plots.js";
+import { COLORS } from "../config.js";
+import { drawTrace, getCanvasPlotMetrics, prepareCanvas } from "./plots.js";
 import {
   clearEditDrSelections,
   clearEditPulseSelections,
@@ -95,14 +95,14 @@ function renderBookmark(canvas, state, muIdx, view, getCanvasPlotMetrics) {
   const frac = (bookmarkPos - view.start) / Math.max(1, view.end - view.start);
   const x = metrics.padding.left + frac * metrics.plotWidth;
 
-  ctx.strokeStyle = "#22c55e";
+  ctx.strokeStyle = COLORS.bookmark;
   ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.moveTo(x, metrics.padding.top);
   ctx.lineTo(x, metrics.padding.top + metrics.plotHeight);
   ctx.stroke();
 
-  ctx.fillStyle = "#22c55e";
+  ctx.fillStyle = COLORS.bookmark;
   ctx.font = "12px sans-serif";
   ctx.textAlign = "center";
   ctx.fillText("You stopped here", x, metrics.padding.top + 15);
@@ -136,8 +136,14 @@ function createDragState(canvas, getCanvasPlotMetrics, pxToSample) {
   let endPy = 0;
 
   return {
-    /** @param {MouseEvent} e */
+    /**
+     * Start a drag; the canvas keeps the pointer until it is released, even
+     * outside it.
+     *
+     * @param {PointerEvent} e
+     */
     begin(e) {
+      canvas.setPointerCapture(e.pointerId);
       const rect = canvas.getBoundingClientRect();
       startPx = e.clientX - rect.left;
       endPx = startPx;
@@ -145,7 +151,7 @@ function createDragState(canvas, getCanvasPlotMetrics, pxToSample) {
       endPy = startPy;
       dragging = true;
     },
-    /** @param {MouseEvent} e */
+    /** @param {PointerEvent} e */
     update(e) {
       if (!dragging) return null;
       const rect = canvas.getBoundingClientRect();
@@ -254,7 +260,7 @@ export function renderEditExplorer(app) {
       !!state.edit.flagged?.[muIdx],
     );
     drawTrace(canvasEl, trace, view, {
-      color: UNIFORM_PULSE_COLOR,
+      color: COLORS.pulse,
       range,
       selections: overlays,
       showAxes: true,
@@ -291,6 +297,27 @@ export function renderEditExplorer(app) {
   app.ensureEditPulseView();
 }
 
+/**
+ * Discharge rates by MU's discharge times. An edit replaces an MU's array, so
+ * an entry outlives no change to it; redraws while panning reuse it.
+ *
+ * @type {WeakMap<ArrayLike<number>, { fsamp: number | null, total: number, rates: ReturnType<typeof dischargeRates> }>}
+ */
+const ratesCache = new WeakMap();
+
+/**
+ * @param {ArrayLike<number>} spikes
+ * @param {number | null} fsamp
+ * @param {number} total
+ */
+function cachedDischargeRates(spikes, fsamp, total) {
+  const hit = ratesCache.get(spikes);
+  if (hit && hit.fsamp === fsamp && hit.total === total) return hit.rates;
+  const rates = dischargeRates(spikes, fsamp, total);
+  ratesCache.set(spikes, { fsamp, total, rates });
+  return rates;
+}
+
 /** @param {App} app */
 export function renderInstantaneousDr(app) {
   const { state, els } = app;
@@ -304,7 +331,7 @@ export function renderInstantaneousDr(app) {
     return;
   }
   const view = state.edit.view || { start: 0, end: total };
-  const dr = dischargeRates(spikes, state.edit.fsamp, total);
+  const dr = cachedDischargeRates(spikes, state.edit.fsamp, total);
   const drSelection = state.edit.selectionDr || state.edit.draftSelectionDr;
   drawTrace(canvas, { row: null, start: view.start, end: view.end }, view, {
     range: { min: 0, max: fastestRateInView(dr, view) },
@@ -347,20 +374,26 @@ export function bindEditCanvas(app) {
 
   const drag = createDragState(canvas, getCanvasPlotMetrics, pxToSample);
 
-  canvas.addEventListener("mousedown", (e) => {
+  canvas.addEventListener("pointerdown", (e) => {
     if (!hasMu()) return;
     drag.begin(e);
     setEditPulseDraftSelection(state, null);
   });
 
-  canvas.addEventListener("mousemove", (e) => {
+  canvas.addEventListener("pointermove", (e) => {
     if (!drag.dragging) return;
-    const sel = drag.update(e);
-    setEditPulseDraftSelection(state, sel);
-    renderEditExplorer();
+    setEditPulseDraftSelection(state, drag.update(e));
+    app.scheduleEditRender();
   });
 
-  window.addEventListener("mouseup", () => {
+  canvas.addEventListener("pointercancel", () => {
+    if (!drag.dragging) return;
+    drag.stop();
+    setEditPulseDraftSelection(state, null);
+    app.scheduleEditRender();
+  });
+
+  canvas.addEventListener("pointerup", () => {
     if (!drag.dragging) return;
     drag.stop();
     const sel = drag.selection();
@@ -438,31 +471,25 @@ function fillTicks(ctx, positions, total, bw) {
 /** @param {App} app */
 export function renderEditTimeline(app) {
   const { els, state } = app;
-  const canvas = els?.editTimelineCanvas;
-  if (!canvas) return;
-
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return;
-  const w = canvas.clientWidth || canvas.width || 1;
-  canvas.width = w;
-  canvas.height = 20;
-  ctx.clearRect(0, 0, w, 20);
+  const prepared = prepareCanvas(els?.editTimelineCanvas, { height: 20 });
+  if (!prepared) return;
+  const { ctx, width } = prepared;
 
   const muIdx = state.edit.currentMu ?? 0;
   const total = state.edit.distimes?.[muIdx] ? state.edit.totalSamples || 0 : 0;
   if (!total) return;
 
-  const bw = Math.max(1, w - TIMELINE_PAD_L - TIMELINE_PAD_R);
+  const bw = Math.max(1, width - TIMELINE_PAD_L - TIMELINE_PAD_R);
 
-  ctx.fillStyle = "rgba(255,255,255,0.07)";
+  ctx.fillStyle = COLORS.timelineTrack;
   ctx.fillRect(TIMELINE_PAD_L, TIMELINE_BAR_TOP, bw, TIMELINE_BAR_H);
 
   // Last edit action for this MU: green = added, red = removed
   const muUid = state.edit.muUids?.[muIdx];
-  if (muUid && Array.isArray(state.edit.editHistory)) {
-    const lastEntry = [...state.edit.editHistory]
-      .reverse()
-      .find((e) => e.mu_uid === muUid);
+  if (muUid) {
+    const lastEntry = state.edit.editHistory.findLast(
+      (e) => e.mu_uid === muUid,
+    );
     if (lastEntry) {
       const added = [
         ...(lastEntry.spikes_added || []),
@@ -472,15 +499,15 @@ export function renderEditTimeline(app) {
         ...(lastEntry.spikes_removed || []),
         ...(lastEntry.artifacts_removed || []),
       ];
-      ctx.fillStyle = "rgba(74,222,128,0.85)";
+      ctx.fillStyle = COLORS.timelineAdded;
       fillTicks(ctx, added, total, bw);
-      ctx.fillStyle = "rgba(248,113,113,0.85)";
+      ctx.fillStyle = COLORS.timelineRemoved;
       fillTicks(ctx, removed, total, bw);
     }
   }
 
   // Current spike positions (faint purple, drawn on top of history)
-  ctx.fillStyle = "rgba(231,193,255,0.35)";
+  ctx.fillStyle = COLORS.timelineSpikes;
   fillTicks(ctx, state.edit.distimes?.[muIdx] || [], total, bw);
 
   // View window
@@ -488,9 +515,9 @@ export function renderEditTimeline(app) {
   const x1 = TIMELINE_PAD_L + (Math.max(0, view.start) / total) * bw;
   const x2 = TIMELINE_PAD_L + (Math.min(total, view.end) / total) * bw;
   const ww = Math.max(4, x2 - x1);
-  ctx.fillStyle = "rgba(195,155,242,0.28)";
+  ctx.fillStyle = COLORS.timelineViewFill;
   ctx.fillRect(x1, TIMELINE_BAR_TOP - 2, ww, TIMELINE_BAR_H + 4);
-  ctx.strokeStyle = "rgba(195,155,242,0.75)";
+  ctx.strokeStyle = COLORS.timelineViewStroke;
   ctx.lineWidth = 1;
   ctx.strokeRect(
     x1 + 0.5,
@@ -522,7 +549,8 @@ export function bindEditTimeline(app) {
     );
   };
 
-  canvas.addEventListener("mousedown", (e) => {
+  canvas.addEventListener("pointerdown", (e) => {
+    canvas.setPointerCapture(e.pointerId);
     dragging = true;
     didMove = false;
     startClientX = e.clientX;
@@ -530,7 +558,7 @@ export function bindEditTimeline(app) {
     dragViewStart = (state.edit.view || { start: 0, end: total }).start;
   });
 
-  window.addEventListener("mousemove", (e) => {
+  canvas.addEventListener("pointermove", (e) => {
     if (!dragging) return;
     if (Math.abs(e.clientX - startClientX) > 3) didMove = true;
     if (!didMove) return;
@@ -542,10 +570,14 @@ export function bindEditTimeline(app) {
     const view = state.edit.view || { start: 0, end: total };
     const span = view.end - view.start;
     setEditView(state, clampView(dragViewStart + delta, span, total));
-    renderEditExplorer();
+    app.scheduleEditRender();
   });
 
-  window.addEventListener("mouseup", (e) => {
+  canvas.addEventListener("pointercancel", () => {
+    dragging = false;
+  });
+
+  canvas.addEventListener("pointerup", (e) => {
     if (!dragging) return;
     dragging = false;
     if (didMove) return;
@@ -578,19 +610,25 @@ export function bindEditDrCanvas(app) {
 
   const drag = createDragState(canvas, getCanvasPlotMetrics, pxToSample);
 
-  canvas.addEventListener("mousedown", (e) => {
+  canvas.addEventListener("pointerdown", (e) => {
     drag.begin(e);
     setEditDrDraftSelection(state, null);
   });
 
-  canvas.addEventListener("mousemove", (e) => {
+  canvas.addEventListener("pointermove", (e) => {
     if (!drag.dragging) return;
-    const sel = drag.update(e);
-    setEditDrDraftSelection(state, sel);
-    renderEditExplorer();
+    setEditDrDraftSelection(state, drag.update(e));
+    app.scheduleEditRender();
   });
 
-  window.addEventListener("mouseup", () => {
+  canvas.addEventListener("pointercancel", () => {
+    if (!drag.dragging) return;
+    drag.stop();
+    setEditDrDraftSelection(state, null);
+    app.scheduleEditRender();
+  });
+
+  canvas.addEventListener("pointerup", () => {
     if (!drag.dragging) return;
     drag.stop();
     const sel = drag.selection();

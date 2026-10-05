@@ -151,17 +151,27 @@ function resolveCanvas(canvas) {
 }
 
 /**
- * Size a canvas's backing store to its layout box and clear it.
+ * Size a canvas's backing store to its layout box at the screen's pixel
+ * density, and clear it. Drawing is then in CSS pixels, `width` x `height`.
+ *
  * @param {CanvasRef} canvas
+ * @param {{ width?: number, height?: number }} [fallback] The size while the canvas has no layout box.
  */
-function prepareCanvas(canvas) {
+export function prepareCanvas(canvas, fallback = {}) {
   const canvasEl = resolveCanvas(canvas);
   const ctx = canvasEl?.getContext("2d");
   if (!canvasEl || !ctx) return null;
-  canvasEl.width = canvasEl.clientWidth || canvasEl.width || 1;
-  canvasEl.height = canvasEl.clientHeight || canvasEl.height || 220;
-  ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
-  return { canvasEl, ctx };
+  const width = canvasEl.clientWidth || fallback.width || 1;
+  const height = canvasEl.clientHeight || fallback.height || 1;
+  const dpr = window.devicePixelRatio || 1;
+  const backingWidth = Math.round(width * dpr);
+  const backingHeight = Math.round(height * dpr);
+  // Assigning a size reallocates and clears the store even when it is unchanged.
+  if (canvasEl.width !== backingWidth) canvasEl.width = backingWidth;
+  if (canvasEl.height !== backingHeight) canvasEl.height = backingHeight;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, width, height);
+  return { canvasEl, ctx, width, height };
 }
 
 /** Resolve after the browser's next paint, once layout has settled. */
@@ -169,6 +179,24 @@ export function nextFrame() {
   return new Promise((/** @type {(value?: void) => void} */ resolve) => {
     window.requestAnimationFrame(() => resolve());
   });
+}
+
+/**
+ * Wrap `draw` so that however often it is asked for, it runs once, at the
+ * next animation frame: a drag's pointer events can outpace the screen.
+ *
+ * @param {() => void} draw
+ */
+export function oncePerFrame(draw) {
+  let pending = false;
+  return () => {
+    if (pending) return;
+    pending = true;
+    window.requestAnimationFrame(() => {
+      pending = false;
+      draw();
+    });
+  };
 }
 
 /**
@@ -282,7 +310,7 @@ export function traceRange(trace) {
  * @param {TraceOptions} [options]
  */
 export function drawTrace(canvas, trace, view, options = {}) {
-  const prepared = prepareCanvas(canvas);
+  const prepared = prepareCanvas(canvas, { height: 220 });
   if (!prepared) return;
   const { canvasEl, ctx } = prepared;
 
@@ -364,23 +392,26 @@ export function drawTrace(canvas, trace, view, options = {}) {
 
   for (const set of markers) {
     ctx.fillStyle = set.color;
+    if (set.outlined) {
+      ctx.strokeStyle = COLORS.markerOutline;
+      ctx.lineWidth = 1;
+    }
+    // Each marker is its own small path: one path of many overlapping
+    // circles fills several times slower in Chromium.
+    /** @type {Set<number>} */
     const drawn = new Set();
     for (let i = 0; i < set.positions.length; i++) {
       const m = set.positions[i];
       if (!inView(m)) continue;
       const x = Math.min(padding.left + plotWidth, toX(m));
       const y = toY(set.values[i]);
-      const pixel = `${Math.round(x)},${Math.round(y)}`;
+      const pixel = Math.round(x) * 0x10000 + (Math.round(y) & 0xffff);
       if (drawn.has(pixel)) continue;
       drawn.add(pixel);
       ctx.beginPath();
       ctx.arc(x, y, set.radius ?? 3, 0, Math.PI * 2);
       ctx.fill();
-      if (set.outlined) {
-        ctx.strokeStyle = "rgba(0,0,0,0.4)";
-        ctx.lineWidth = 1;
-        ctx.stroke();
-      }
+      if (set.outlined) ctx.stroke();
     }
   }
 }
@@ -487,9 +518,9 @@ export function drawGridOverlay(
   selections = [],
   totalSamples = null,
 ) {
-  const prepared = prepareCanvas(canvas);
+  const prepared = prepareCanvas(canvas, { height: 220 });
   if (!prepared) return;
-  const { canvasEl, ctx } = prepared;
+  const { ctx, width, height } = prepared;
 
   const validSeries = (seriesList || []).filter((s) => seriesPoints(s) > 0);
   if (!validSeries.length) {
@@ -509,21 +540,15 @@ export function drawGridOverlay(
   const span = globalMax - globalMin || 1;
 
   if (selections && selections.length && totalSamples) {
-    drawRoiRects(
-      ctx,
-      selections,
-      totalSamples,
-      canvasEl.width,
-      canvasEl.height,
-    );
+    drawRoiRects(ctx, selections, totalSamples, width, height);
   }
 
   const toY = (/** @type {number} */ v) =>
-    canvasEl.height - ((v - globalMin) / span) * canvasEl.height;
+    height - ((v - globalMin) / span) * height;
   validSeries.forEach((row, idx) => {
     ctx.strokeStyle = colors[idx % colors.length] || COLORS.primary;
     ctx.lineWidth = 1.2;
-    strokeSeries(ctx, row, 0, canvasEl.width, toY);
+    strokeSeries(ctx, row, 0, width, toY);
   });
 }
 
@@ -533,15 +558,12 @@ export function drawGridOverlay(
  * @param {boolean} [off]
  */
 export function drawMiniSeries(canvas, series, off = false) {
-  if (!canvas) return;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return;
-  canvas.width = canvas.clientWidth || 60;
-  canvas.height = canvas.clientHeight || 28;
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const prepared = prepareCanvas(canvas, { width: 60, height: 28 });
+  if (!prepared) return;
+  const { ctx, width, height } = prepared;
   if (!series || !seriesPoints(series)) {
     ctx.fillStyle = COLORS.gridEmpty;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillRect(0, 0, width, height);
     return;
   }
   const { min, max } = seriesRange([series]);
@@ -552,7 +574,7 @@ export function drawMiniSeries(canvas, series, off = false) {
     ctx,
     series,
     0,
-    canvas.width,
-    (v) => canvas.height - ((v - min) / span) * canvas.height,
+    width,
+    (v) => height - ((v - min) / span) * height,
   );
 }

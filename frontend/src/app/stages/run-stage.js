@@ -15,6 +15,7 @@ import {
   POSTPROCESS_MODES,
   buildDecomposeParams,
 } from "../../decomp/params.js";
+import { oncePerFrame } from "../../view/plots.js";
 
 /** @typedef {import("../context.js").App} App */
 /** @typedef {import("../context.js").RunStage} RunStage */
@@ -71,6 +72,7 @@ export function createRunStageService(app) {
 
   return {
     renderRunStage,
+    scheduleRunRender: oncePerFrame(() => app.renderRunStage()),
     renderRunClock: () => renderRunTime(els, state.runLive, Date.now()),
     updateRunDots: (change) =>
       state.runLive && updateRunDotsView(els, state.runLive, change),

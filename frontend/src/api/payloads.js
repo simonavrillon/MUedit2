@@ -2,9 +2,10 @@
 /** @typedef {import("../app/context.js").Span} Span */
 
 /**
- * A run's preview; fields beyond these pass through. The overview and aux
- * traces are not read from it: they come from the upload as envelopes
- * (`/series/*`), and the pulse trains from the run (`/series/pulse`).
+ * A recording's preview (on load, or a run's); fields beyond these pass
+ * through. The overview and aux traces are not read from it: they come from
+ * the upload as envelopes (`/series/*`), and the pulse trains from the run
+ * (`/series/pulse`).
  *
  * @typedef {JsonObject & {
  *   grid_names: string[],
@@ -13,6 +14,7 @@
  *   coordinates: number[][][],
  *   metadata: JsonObject,
  *   muscle: string[],
+ *   auxiliary_names: string[],
  *   distime_all: Int32Array[],
  *   mu_grid_index: number[],
  *   total_samples: number,
@@ -82,6 +84,9 @@ export function normalizePreviewPayload(payload) {
         ? source.metadata
         : {},
     muscle: Array.isArray(source.muscle) ? source.muscle : [],
+    auxiliary_names: Array.isArray(source.auxiliary_names)
+      ? source.auxiliary_names
+      : [],
     distime_all: Array.isArray(source.distime_all)
       ? source.distime_all.map(toSpikeArray)
       : [],

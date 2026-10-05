@@ -8,11 +8,14 @@ import {
 import {
   ensureSettingsToggleIcon as ensureSettingsToggleIconController,
   initLayoutResizePolicy as initLayoutResizePolicyController,
-  scheduleLayoutRerender as scheduleLayoutRerenderController,
   setSettingsOpen as setSettingsOpenController,
   toggleSettingsOpen as toggleSettingsOpenController,
 } from "./layout.js";
-import { switchStage as switchStageController } from "../stages/lifecycle.js";
+import {
+  renderActiveStage,
+  switchStage as switchStageController,
+} from "../stages/lifecycle.js";
+import { oncePerFrame } from "../../view/plots.js";
 
 /** @typedef {import("../context.js").App} App */
 /** @typedef {import("../context.js").UiService} UiService */
@@ -43,8 +46,7 @@ export function createUiService(app) {
   const updateStepAvailability = () => updateStepAvailabilityController(app);
 
   /** @type {UiService["scheduleLayoutRerender"]} */
-  const scheduleLayoutRerender = (delay = 90) =>
-    scheduleLayoutRerenderController(app, delay);
+  const scheduleLayoutRerender = oncePerFrame(() => renderActiveStage(app));
   /** @type {UiService["initLayoutResizePolicy"]} */
   const initLayoutResizePolicy = () => initLayoutResizePolicyController(app);
   /** @type {UiService["setSettingsOpen"]} */

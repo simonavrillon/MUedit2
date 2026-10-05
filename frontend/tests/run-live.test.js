@@ -3,15 +3,9 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 
-// config.js reads window.location at import time.
-globalThis.window = {
-  location: {
-    port: "8080",
-    protocol: "http:",
-    hostname: "localhost",
-    origin: "http://localhost:8080",
-  },
-};
+import { installDom } from "./fake-dom.js";
+
+installDom();
 
 const live = await import("../src/decomp/live.js");
 const { DOT, applyRunEvent, createRunLive } = live;

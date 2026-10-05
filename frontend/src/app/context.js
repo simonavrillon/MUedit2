@@ -58,7 +58,7 @@
  * @property {() => void} toggleSettingsOpen
  * @property {() => void} ensureSettingsToggleIcon
  * @property {() => void} initLayoutResizePolicy
- * @property {(delay?: number) => void} scheduleLayoutRerender
+ * @property {() => void} scheduleLayoutRerender Redraw the visible stage at the next frame, once however often asked.
  * @property {(target: StageKey) => void} switchStage
  * @property {(options?: { keepLandingVisible?: boolean }) => void} showWorkspace
  * @property {() => void} populateGridTabs
@@ -101,6 +101,7 @@
  * @property {(waitForMiniPlots?: boolean) => Promise<void> | void} renderChannelQC
  * @property {(canvasId: RoiCanvasId) => void} enableRoiSelection
  * @property {() => void} refreshVisuals
+ * @property {() => void} scheduleRefreshVisuals Redraw the QC plots at the next frame, once however often asked.
  * @property {(nwin: number) => void} syncRois
  * @property {() => Promise<boolean>} runAutoQc
  * @property {() => void} toggleArtifactMode
@@ -111,6 +112,7 @@
 /**
  * @typedef {object} RunStage
  * @property {() => void} renderRunStage Draw the run page for the current run, or the plan without one.
+ * @property {() => void} scheduleRunRender Redraw the run page at the next frame, once however often asked.
  * @property {() => void} renderRunClock
  * @property {(change: { row: number, from: number, to: number }) => void} updateRunDots
  * @property {() => Promise<void>} autoSaveRunDecomposition
@@ -132,6 +134,7 @@
  * @property {(mode: EditMode | null, message?: string) => void} setEditMode
  * @property {() => void} renderEditDropdowns
  * @property {() => void} renderEditExplorer
+ * @property {() => void} scheduleEditRender Redraw the edit plots at the next frame, once however often asked.
  * @property {() => void} ensureEditPulseView Fetch the current MU's window when the one shown is not it.
  * @property {() => Promise<boolean>} restoreEditSession
  * @property {() => void} renderInstantaneousDr

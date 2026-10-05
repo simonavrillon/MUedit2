@@ -114,6 +114,34 @@ describe("drawTrace", () => {
     assert.equal(canvas.height, 180);
   });
 
+  test("on a dense screen the store is scaled and drawing stays in CSS px", () => {
+    globalThis.window.devicePixelRatio = 2;
+    try {
+      const canvas = fakeCanvas({ width: 420, height: 180 });
+      plots.drawTrace(canvas, samples([1, 2]), { start: 0, end: 2 });
+      assert.deepEqual([canvas.width, canvas.height], [840, 360]);
+      assert.deepEqual(canvas.ctx.transform, [2, 0, 0, 2, 0, 0]);
+      assert.deepEqual(ops(canvas.ctx, "clearRect")[0].args, [0, 0, 420, 180]);
+    } finally {
+      delete globalThis.window.devicePixelRatio;
+    }
+  });
+
+  test("a store already the right size is not reassigned", () => {
+    const canvas = fakeCanvas({ width: 420, height: 180 });
+    let assigned = 0;
+    let width = 420;
+    Object.defineProperty(canvas, "width", {
+      get: () => width,
+      set: (v) => {
+        assigned += 1;
+        width = v;
+      },
+    });
+    plots.drawTrace(canvas, samples([1, 2]), { start: 0, end: 2 });
+    assert.equal(assigned, 0);
+  });
+
   test("a canvas can be given by id, and a missing one is ignored", () => {
     const canvas = fakeCanvas();
     registerElement("pulse", canvas);
@@ -184,7 +212,7 @@ describe("drawTrace", () => {
     assert.equal(arcs[0].fillStyle, "#f86");
     assert.equal(
       ops(canvas.ctx, "stroke").at(-1).strokeStyle,
-      "rgba(0,0,0,0.4)",
+      COLORS.markerOutline,
     );
   });
 
@@ -450,6 +478,22 @@ describe("drawMiniSeries", () => {
     assert.equal(canvas.width, 60);
     assert.equal(canvas.height, 28);
   });
+});
+
+test("oncePerFrame draws once at the next frame however often asked", async () => {
+  let draws = 0;
+  const schedule = plots.oncePerFrame(() => {
+    draws += 1;
+  });
+  schedule();
+  schedule();
+  schedule();
+  assert.equal(draws, 0);
+  await plots.nextFrame();
+  assert.equal(draws, 1);
+  schedule();
+  await plots.nextFrame();
+  assert.equal(draws, 2);
 });
 
 test("nextFrame resolves after the next animation frame", async () => {

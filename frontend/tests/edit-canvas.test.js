@@ -4,8 +4,8 @@ import { test, describe, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  dispatchWindow,
   fakeCanvas,
+  fakeElement,
   installDom,
   ops,
   recorder,
@@ -14,6 +14,7 @@ import {
 } from "./fake-dom.js";
 
 installDom();
+const { COLORS } = await import("../src/config.js");
 const { state: initialState } = await import("../src/app/state.js");
 const { createApp } = await import("../src/app/create-app.js");
 const {
@@ -89,6 +90,7 @@ function editApp({
     deleteSpikesInSelection: recorder(),
     deleteDrInSelection: recorder(),
     renderEditExplorer: recorder(),
+    scheduleEditRender: recorder(),
   });
   return built;
 }
@@ -100,9 +102,9 @@ function dragPulse(from, to) {
     clientX: 10 + PLOT_LEFT + x,
     clientY: 20 + PLOT_TOP + y,
   });
-  canvas.dispatch("mousedown", at(from));
-  canvas.dispatch("mousemove", at(to));
-  dispatchWindow("mouseup");
+  canvas.dispatch("pointerdown", at(from));
+  canvas.dispatch("pointermove", at(to));
+  canvas.dispatch("pointerup");
 }
 
 beforeEach(() => {
@@ -153,10 +155,16 @@ describe("pulse canvas drag", () => {
     assert.deepEqual([sel.start, sel.end], [550, 650]);
   });
 
-  test("moving the mouse updates the draft and redraws", () => {
+  test("moving the pointer updates the draft and schedules a redraw", () => {
     const canvas = els.editPulseCanvas;
-    canvas.dispatch("mousedown", { clientX: 10 + PLOT_LEFT + 50, clientY: 38 });
-    canvas.dispatch("mousemove", { clientX: 10 + PLOT_LEFT + 80, clientY: 58 });
+    canvas.dispatch("pointerdown", {
+      clientX: 10 + PLOT_LEFT + 50,
+      clientY: 38,
+    });
+    canvas.dispatch("pointermove", {
+      clientX: 10 + PLOT_LEFT + 80,
+      clientY: 58,
+    });
     assert.deepEqual(
       [
         app.state.edit.draftSelectionPulse?.start,
@@ -164,7 +172,32 @@ describe("pulse canvas drag", () => {
       ],
       [50, 80],
     );
-    assert.equal(app.renderEditExplorer.calls.length, 1);
+    assert.equal(app.scheduleEditRender.calls.length, 1);
+    assert.equal(app.renderEditExplorer.calls.length, 0);
+  });
+
+  test("the canvas captures the pointer for the drag", () => {
+    const canvas = els.editPulseCanvas;
+    canvas.dispatch("pointerdown", { pointerId: 7, clientX: 60, clientY: 38 });
+    assert.equal(canvas.capturedPointer, 7);
+  });
+
+  test("a cancelled gesture drops the draft and applies nothing", () => {
+    app.state.edit.mode = "add";
+    const canvas = els.editPulseCanvas;
+    canvas.dispatch("pointerdown", {
+      clientX: 10 + PLOT_LEFT + 50,
+      clientY: 38,
+    });
+    canvas.dispatch("pointermove", {
+      clientX: 10 + PLOT_LEFT + 80,
+      clientY: 58,
+    });
+    canvas.dispatch("pointercancel");
+    canvas.dispatch("pointerup");
+    assert.equal(app.state.edit.draftSelectionPulse, null);
+    assert.equal(app.addSpikesInSelection.calls.length, 0);
+    assert.equal(app.state.edit.mode, "add");
   });
 
   test("without a mode the box is kept as the selection", () => {
@@ -223,9 +256,9 @@ describe("discharge-rate canvas drag", () => {
 
   function dragDr() {
     const canvas = els.editDrCanvas;
-    canvas.dispatch("mousedown", { clientX: PLOT_LEFT + 50, clientY: 18 });
-    canvas.dispatch("mousemove", { clientX: PLOT_LEFT + 150, clientY: 68 });
-    dispatchWindow("mouseup");
+    canvas.dispatch("pointerdown", { clientX: PLOT_LEFT + 50, clientY: 18 });
+    canvas.dispatch("pointermove", { clientX: PLOT_LEFT + 150, clientY: 68 });
+    canvas.dispatch("pointerup");
   }
 
   test("in delete-rate mode the box is sent for deletion", () => {
@@ -258,35 +291,35 @@ describe("timeline", () => {
   });
 
   test("a click centres the view on that point, keeping its width", () => {
-    els.editTimelineCanvas.dispatch("mousedown", { clientX: 38 + 150 });
-    dispatchWindow("mouseup", { clientX: 38 + 150 });
+    els.editTimelineCanvas.dispatch("pointerdown", { clientX: 38 + 150 });
+    els.editTimelineCanvas.dispatch("pointerup", { clientX: 38 + 150 });
     assert.deepEqual(app.state.edit.view, { start: 1350, end: 1650 });
   });
 
   test("a click near an edge keeps the view inside the recording", () => {
-    els.editTimelineCanvas.dispatch("mousedown", { clientX: 40 });
-    dispatchWindow("mouseup", { clientX: 40 });
+    els.editTimelineCanvas.dispatch("pointerdown", { clientX: 40 });
+    els.editTimelineCanvas.dispatch("pointerup", { clientX: 40 });
     assert.deepEqual(app.state.edit.view, { start: 0, end: 300 });
   });
 
   test("dragging pans the view by the dragged distance", () => {
-    els.editTimelineCanvas.dispatch("mousedown", { clientX: 100 });
-    dispatchWindow("mousemove", { clientX: 130 });
-    dispatchWindow("mouseup", { clientX: 130 });
+    els.editTimelineCanvas.dispatch("pointerdown", { clientX: 100 });
+    els.editTimelineCanvas.dispatch("pointermove", { clientX: 130 });
+    els.editTimelineCanvas.dispatch("pointerup", { clientX: 130 });
     assert.deepEqual(app.state.edit.view, { start: 300, end: 600 });
   });
 
   test("panning stops at the end of the recording", () => {
     app.state.edit.view = { start: 2800, end: 3000 };
-    els.editTimelineCanvas.dispatch("mousedown", { clientX: 100 });
-    dispatchWindow("mousemove", { clientX: 130 });
+    els.editTimelineCanvas.dispatch("pointerdown", { clientX: 100 });
+    els.editTimelineCanvas.dispatch("pointermove", { clientX: 130 });
     assert.deepEqual(app.state.edit.view, { start: 2800, end: 3000 });
   });
 
   test("a jitter under 4 px counts as a click, not a pan", () => {
-    els.editTimelineCanvas.dispatch("mousedown", { clientX: 38 + 150 });
-    dispatchWindow("mousemove", { clientX: 38 + 152 });
-    dispatchWindow("mouseup", { clientX: 38 + 150 });
+    els.editTimelineCanvas.dispatch("pointerdown", { clientX: 38 + 150 });
+    els.editTimelineCanvas.dispatch("pointermove", { clientX: 38 + 152 });
+    els.editTimelineCanvas.dispatch("pointerup", { clientX: 38 + 150 });
     assert.deepEqual(app.state.edit.view, { start: 1350, end: 1650 });
   });
 
@@ -305,12 +338,12 @@ describe("timeline", () => {
       ...r.args,
     ]);
     assert.deepEqual(rects, [
-      ["rgba(255,255,255,0.07)", 38, 4, 300, 12],
-      ["rgba(74,222,128,0.85)", 68, 4, 2, 12],
-      ["rgba(248,113,113,0.85)", 98, 4, 2, 12],
-      ["rgba(231,193,255,0.35)", 38, 4, 2, 12],
-      ["rgba(231,193,255,0.35)", 188, 4, 2, 12],
-      ["rgba(195,155,242,0.28)", 38, 2, 30, 16],
+      [COLORS.timelineTrack, 38, 4, 300, 12],
+      [COLORS.timelineAdded, 68, 4, 2, 12],
+      [COLORS.timelineRemoved, 98, 4, 2, 12],
+      [COLORS.timelineSpikes, 38, 4, 2, 12],
+      [COLORS.timelineSpikes, 188, 4, 2, 12],
+      [COLORS.timelineViewFill, 38, 2, 30, 16],
     ]);
   });
 });
@@ -417,5 +450,29 @@ describe("discharge-rate plot", () => {
     const yLabels = texts(ctx).filter((t) => !t.endsWith("s"));
     // 100 samples between discharges at 1 kHz is 10 Hz.
     assert.deepEqual(yLabels, ["0.0", "3.3", "6.7", "10.0"]);
+  });
+});
+
+describe("MU dropdowns", () => {
+  beforeEach(() => {
+    Object.assign(app.state.edit, {
+      distimes: [Int32Array.from([100]), Int32Array.from([200])],
+      muGridIndex: [0, 0],
+      gridNames: ["A"],
+    });
+    els.editMuGridSelect = fakeElement("select");
+    els.editMuSelect = fakeElement("select");
+  });
+
+  test("are rebuilt only when what they show changes", () => {
+    app.renderEditDropdowns();
+    assert.equal(els.editMuSelect.children.length, 2);
+    els.editMuSelect.children.push("untouched");
+    app.renderEditDropdowns();
+    assert.equal(els.editMuSelect.children.at(-1), "untouched");
+    app.state.edit.currentMu = 1;
+    app.renderEditDropdowns();
+    assert.equal(els.editMuSelect.children.length, 2);
+    assert.equal(els.editMuSelect.value, "1");
   });
 });

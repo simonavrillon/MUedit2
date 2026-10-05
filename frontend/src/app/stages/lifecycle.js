@@ -102,7 +102,7 @@ export function switchStage(app, target) {
 
   app.updateStepAvailability();
   app.updateWorkflowStepper(target);
-  app.scheduleLayoutRerender(0);
+  app.scheduleLayoutRerender();
 }
 
 /** @param {App} app */

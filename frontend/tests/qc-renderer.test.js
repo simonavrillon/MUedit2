@@ -4,7 +4,6 @@ import { test, describe, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  dispatchWindow,
   fakeCanvas,
   fakeElement,
   installDom,
@@ -16,7 +15,7 @@ import {
 } from "./fake-dom.js";
 
 installDom();
-const { COLORS, GRID_COLORS } = await import("../src/config.js");
+const { COLORS, traceColors } = await import("../src/config.js");
 const { state: initialState } = await import("../src/app/state.js");
 const { createApp } = await import("../src/app/create-app.js");
 const { buildSelections, renderArtifactControls } =
@@ -50,6 +49,7 @@ beforeEach(() => {
   app = createApp({ state, els, api: {} });
   Object.assign(app, {
     refreshVisuals: recorder(),
+    scheduleRefreshVisuals: recorder(),
     requestQcGridWindow: recorder(),
     setStatus: recorder(),
   });
@@ -57,9 +57,9 @@ beforeEach(() => {
 
 /** Drag across the EMG overview from one x to another, in canvas px. */
 function dragOverview(fromX, toX) {
-  els.emgCanvas.dispatch("mousedown", { clientX: fromX });
-  els.emgCanvas.dispatch("mousemove", { clientX: toX });
-  dispatchWindow("mouseup");
+  els.emgCanvas.dispatch("pointerdown", { clientX: fromX });
+  els.emgCanvas.dispatch("pointermove", { clientX: toX });
+  els.emgCanvas.dispatch("pointerup");
 }
 
 describe("ROI drag on the overview", () => {
@@ -119,11 +119,22 @@ describe("ROI drag on the overview", () => {
     ]);
   });
 
-  test("shows a draft while dragging", () => {
-    els.emgCanvas.dispatch("mousedown", { clientX: 150 });
-    els.emgCanvas.dispatch("mousemove", { clientX: 50 });
+  test("shows a draft while dragging, redrawn at the next frame", () => {
+    els.emgCanvas.dispatch("pointerdown", { clientX: 150 });
+    els.emgCanvas.dispatch("pointermove", { clientX: 50 });
     assert.deepEqual(app.state.roiDraft, { start: 250, end: 750 });
-    assert.equal(app.refreshVisuals.calls.length, 1);
+    assert.equal(app.scheduleRefreshVisuals.calls.length, 1);
+    assert.equal(app.refreshVisuals.calls.length, 0);
+  });
+
+  test("a cancelled drag drops the draft and keeps the windows", () => {
+    els.emgCanvas.dispatch("pointerdown", { clientX: 50 });
+    els.emgCanvas.dispatch("pointermove", { clientX: 150 });
+    els.emgCanvas.dispatch("pointercancel");
+    els.emgCanvas.dispatch("pointerup");
+    assert.equal(app.state.roiDraft, null);
+    assert.deepEqual(app.state.rois[0], { start: 0, end: 1000 });
+    assert.equal(app.requestQcGridWindow.calls.length, 0);
   });
 
   test("in artifact mode adds an artifact window and disarms", () => {
@@ -252,11 +263,44 @@ describe("channel grid", () => {
     assert.equal(strokeOf(discarded), COLORS.warning);
   });
 
-  test("clicking a channel toggles it and redraws the grid", async () => {
+  test("clicking a channel toggles it, its cell and its trace only", async () => {
     await app.renderChannelQC(true);
-    cellsOf().children[0].dispatch("click");
+    const cells = cellsOf();
+    const [first, second] = cells.children;
+    first.dispatch("click");
     assert.deepEqual(app.state.discardMasks[0], [1, 1, 0, 0]);
-    assert.ok(cellsOf().children[0].classList.contains("off"));
+    assert.equal(cellsOf(), cells, "the grid is not rebuilt");
+    assert.ok(first.classList.contains("off"));
+    assert.equal(
+      ops(first.children[1].ctx, "stroke").at(-1).strokeStyle,
+      COLORS.warning,
+    );
+    assert.equal(ops(second.children[1].ctx, "stroke").length, 1);
+    first.dispatch("click");
+    assert.deepEqual(app.state.discardMasks[0], [0, 1, 0, 0]);
+    assert.ok(!first.classList.contains("off"));
+  });
+
+  test("a redraw keeps the cells and follows the masks", async () => {
+    await app.renderChannelQC(true);
+    const cells = cellsOf();
+    const first = cells.children[0];
+    app.state.discardMasks = [[1, 0, 0, 0]];
+    await app.renderChannelQC(true);
+    assert.equal(cellsOf(), cells);
+    assert.equal(cellsOf().children[0], first);
+    assert.ok(first.classList.contains("off"));
+    assert.ok(!cellsOf().children[1].classList.contains("off"));
+  });
+
+  test("new channel data lays the grid out again", async () => {
+    await app.renderChannelQC(true);
+    const cells = cellsOf();
+    app.state.channelMeans = [[1, 2]];
+    app.state.discardMasks = [[0, 0]];
+    await app.renderChannelQC(true);
+    assert.notEqual(cellsOf(), cells);
+    assert.equal(cellsOf().children.length, 2);
   });
 
   test("channels without a position fill the grid row by row", async () => {
@@ -330,8 +374,8 @@ describe("auxiliary channels", () => {
       c.fillStyle,
     ]);
     assert.deepEqual(labels, [
-      ["Force", 12, GRID_COLORS[0]],
-      ["Aux 2", 24, GRID_COLORS[1]],
+      ["Force", 12, traceColors()[0]],
+      ["Aux 2", 24, traceColors()[1]],
     ]);
   });
 

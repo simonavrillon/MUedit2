@@ -20,7 +20,8 @@ import { getCurrentGrid, roiStart, roiEnd } from "../state/selectors.js";
 import { normalizePreviewPayload } from "../api/payloads.js";
 import { getSuggestedNpzName } from "../io/bids.js";
 import { drawGridOverlay } from "../view/plots.js";
-import { errorMessage } from "../app/services/error-service.js";
+import { traceColors } from "../config.js";
+import { errorMessage, handleError } from "../app/services/error-service.js";
 import { applyRunEvent, buildRunSummary, createRunLive } from "./live.js";
 
 /** @typedef {import("../app/context.js").App} App */
@@ -83,9 +84,8 @@ export async function autoSaveRunDecomposition(app) {
       void loadDecompositionForEditByPath(saved.path, { open: false });
     }
   } catch (err) {
-    console.error(err);
+    handleError(err, setStatus, "Save failed");
     live.saveError = errorMessage(err);
-    setStatus(`Save failed: ${live.saveError}`, "error");
   } finally {
     live.saving = false;
     setRunDownloadInFlight(state, false);
@@ -223,8 +223,7 @@ export async function runDecomposition(app) {
       failRun(app, "The decomposition stopped without a result");
     }
   } catch (err) {
-    console.error(err);
-    setStatus(`Error: ${errorMessage(err)}`, "error");
+    handleError(err, setStatus, "Error");
     failRun(app, errorMessage(err));
   } finally {
     globalThis.clearInterval(clock);
@@ -256,8 +255,7 @@ export async function cancelDecomposition(app) {
     await api.cancelDecomposition();
     setStatus("Cancelling decomposition...", "muted");
   } catch (err) {
-    console.error(err);
-    setStatus(`Cancel failed: ${errorMessage(err)}`, "error");
+    handleError(err, setStatus, "Cancel failed");
     if (els.cancelRun) els.cancelRun.disabled = false;
   }
 }
@@ -329,7 +327,7 @@ function applyPreviewData(app, preview) {
   drawGridOverlay(
     els.emgCanvas,
     state.gridSeries,
-    state.gridColors,
+    traceColors(),
     state.rois,
     state.seriesLength,
   );
@@ -347,6 +345,7 @@ export function handleStreamMessage(app, msg) {
     state,
     setStatus,
     renderRunStage,
+    scheduleRunRender,
     updateRunDots,
     autoSaveRunDecomposition,
     updateStepAvailability,
@@ -371,14 +370,13 @@ export function handleStreamMessage(app, msg) {
     return;
   }
 
+  // Progress events can arrive faster than frames: the dots they change are
+  // restyled now, and the rest of the page once per frame.
   const change = applyRunEvent(live, msg, Date.now());
-  if (change) {
-    updateRunDots(change);
-    renderRunStage();
-  }
+  if (change) updateRunDots(change);
 
   if (msg.stage !== "done") {
-    if (!change && msg.phase) renderRunStage();
+    if (change || msg.phase) scheduleRunRender();
     return;
   }
 

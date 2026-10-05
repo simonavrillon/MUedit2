@@ -25,11 +25,8 @@ export function setCurrentGrid(state, idx) {
  * @param {State} state
  */
 export function ensureDiscardMasks(state) {
-  if (!state.channelMeans || !state.channelMeans.length) return;
-  if (
-    !state.discardMasks ||
-    state.discardMasks.length !== state.channelMeans.length
-  ) {
+  if (!state.channelMeans.length) return;
+  if (state.discardMasks.length !== state.channelMeans.length) {
     const badPerGrid = state.metadata?.bad_channels_per_grid;
     state.discardMasks = state.channelMeans.map((cm, gridIdx) => {
       const bad = badPerGrid?.[gridIdx];
@@ -87,10 +84,10 @@ export function setEditProject(state, value) {
 
 /**
  * @param {State} state
- * @param {string[] | null | undefined} muscle
+ * @param {string[]} muscle
  */
 export function setMuscle(state, muscle) {
-  state.muscle = Array.isArray(muscle) ? muscle : [];
+  state.muscle = muscle;
 }
 
 /**
@@ -127,26 +124,26 @@ export function setSeriesLength(state, totalSamples) {
 
 /**
  * @param {State} state
- * @param {Span[] | null | undefined} rois
+ * @param {Span[]} rois
  */
 export function setRois(state, rois) {
-  state.rois = Array.isArray(rois) ? rois : [];
+  state.rois = rois;
 }
 
 /**
  * @param {State} state
- * @param {ChannelTrace[] | null | undefined} series
+ * @param {ChannelTrace[]} series
  */
 export function setGridSeries(state, series) {
-  state.gridSeries = Array.isArray(series) ? series : [];
+  state.gridSeries = series;
 }
 
 /**
  * @param {State} state
- * @param {string[] | null | undefined} names
+ * @param {string[]} names
  */
 export function setGridNames(state, names) {
-  state.gridNames = Array.isArray(names) ? names : [];
+  state.gridNames = names;
   if (!state.gridNames.length) {
     state.currentGrid = 0;
     return;
@@ -162,26 +159,26 @@ export function setGridNames(state, names) {
 
 /**
  * @param {State} state
- * @param {number[][] | null | undefined} means
+ * @param {number[][]} means
  */
 export function setChannelMeans(state, means) {
-  state.channelMeans = Array.isArray(means) ? means : [];
+  state.channelMeans = means;
 }
 
 /**
  * @param {State} state
- * @param {number[][][] | null | undefined} coordinates
+ * @param {number[][][]} coordinates
  */
 export function setCoordinates(state, coordinates) {
-  state.coordinates = Array.isArray(coordinates) ? coordinates : [];
+  state.coordinates = coordinates;
 }
 
 /**
  * @param {State} state
- * @param {ChannelTrace[][] | null | undefined} traces
+ * @param {ChannelTrace[][]} traces
  */
 export function setChannelTraces(state, traces) {
-  state.channelTraces = Array.isArray(traces) ? traces : [];
+  state.channelTraces = traces;
 }
 
 /**
@@ -190,19 +187,15 @@ export function setChannelTraces(state, traces) {
  * @param {ChannelTrace[]} trace
  */
 export function setChannelTraceForGrid(state, gridIdx, trace) {
-  if (!Array.isArray(state.channelTraces)) {
-    state.channelTraces = [];
-  }
   state.channelTraces[gridIdx] = trace;
 }
 
 /**
  * @param {State} state
- * @param {Record<number, boolean> | null | undefined} loadingMap
+ * @param {Record<number, boolean>} loadingMap
  */
 export function setQcWindowLoading(state, loadingMap) {
-  state.qcWindowLoading =
-    loadingMap && typeof loadingMap === "object" ? loadingMap : {};
+  state.qcWindowLoading = loadingMap;
 }
 
 /**
@@ -211,28 +204,25 @@ export function setQcWindowLoading(state, loadingMap) {
  * @param {boolean} isLoading
  */
 export function setQcWindowLoadingForGrid(state, gridIdx, isLoading) {
-  if (!state.qcWindowLoading || typeof state.qcWindowLoading !== "object") {
-    state.qcWindowLoading = {};
-  }
-  state.qcWindowLoading[gridIdx] = !!isLoading;
+  state.qcWindowLoading[gridIdx] = isLoading;
 }
 
 /**
  * @param {State} state
- * @param {JsonObject | null | undefined} metadata
+ * @param {JsonObject} metadata
  */
 export function setMetadata(state, metadata) {
-  state.metadata = metadata && typeof metadata === "object" ? metadata : {};
+  state.metadata = metadata;
 }
 
 /**
  * @param {State} state
- * @param {ChannelTrace[] | null | undefined} auxiliary
- * @param {string[] | null | undefined} auxiliaryNames
+ * @param {ChannelTrace[]} auxiliary
+ * @param {string[]} auxiliaryNames
  */
 export function setAuxData(state, auxiliary, auxiliaryNames) {
-  state.auxSeries = Array.isArray(auxiliary) ? auxiliary : [];
-  state.auxNames = Array.isArray(auxiliaryNames) ? auxiliaryNames : [];
+  state.auxSeries = auxiliary;
+  state.auxNames = auxiliaryNames;
 }
 
 /**
@@ -304,10 +294,10 @@ export function setEditFilename(state, filename) {
 
 /**
  * @param {State} state
- * @param {string[] | null | undefined} gridNames
+ * @param {string[]} gridNames
  */
 export function setEditGridNames(state, gridNames) {
-  state.edit.gridNames = Array.isArray(gridNames) ? gridNames : [];
+  state.edit.gridNames = gridNames;
 }
 
 /**
@@ -420,7 +410,6 @@ export function setRoiDraft(state, draft) {
  * @param {Span} roi
  */
 export function setRoiForIndex(state, idx, roi) {
-  if (!Array.isArray(state.rois)) state.rois = [];
   if (idx < 0) return;
   while (state.rois.length <= idx) {
     state.rois.push({ start: 0, end: 0 });
@@ -446,31 +435,25 @@ export function setArtifactDraft(state, draft) {
 
 /**
  * @param {State} state
- * @param {Span[] | null | undefined} regions
+ * @param {Span[]} regions
  */
 export function setArtifactRegions(state, regions) {
-  state.artifactRegions = Array.isArray(regions) ? regions : [];
+  state.artifactRegions = regions;
 }
 
 /**
  * @param {State} state
- * @param {Partial<Span> | null | undefined} region
+ * @param {Span} region
  */
 export function addArtifactRegion(state, region) {
-  if (!Array.isArray(state.artifactRegions)) state.artifactRegions = [];
-  const start = Number(region?.start);
-  const end = Number(region?.end);
-  if (!Number.isFinite(start) || !Number.isFinite(end)) return;
-  state.artifactRegions.push({ start, end });
+  state.artifactRegions.push({ start: region.start, end: region.end });
 }
 
 /**
  * @param {State} state
  */
 export function removeLastArtifactRegion(state) {
-  if (!Array.isArray(state.artifactRegions) || !state.artifactRegions.length) {
-    return false;
-  }
+  if (!state.artifactRegions.length) return false;
   state.artifactRegions.pop();
   return true;
 }
@@ -493,11 +476,7 @@ export function setDiscardMasks(state, masks) {
  * @param {number} value
  */
 export function setDiscardMaskChannel(state, gridIdx, chIdx, value) {
-  if (!Array.isArray(state.discardMasks)) state.discardMasks = [];
-  if (!Array.isArray(state.discardMasks[gridIdx])) {
-    state.discardMasks[gridIdx] = [];
-  }
-  state.discardMasks[gridIdx][chIdx] = value ? 1 : 0;
+  (state.discardMasks[gridIdx] ??= [])[chIdx] = value ? 1 : 0;
 }
 
 /**

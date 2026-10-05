@@ -22,6 +22,7 @@ import {
   setCurrentGrid,
 } from "../../state/actions.js";
 import { roiEnd, roiStart } from "../../state/selectors.js";
+import { oncePerFrame } from "../../view/plots.js";
 
 /** @typedef {import("../context.js").App} App */
 /** @typedef {import("../context.js").QcStage} QcStage */
@@ -90,6 +91,9 @@ export function createQcStageService(app) {
     refreshVisualsController(app);
   }
 
+  /** @type {QcStage["scheduleRefreshVisuals"]} */
+  const scheduleRefreshVisuals = oncePerFrame(() => app.refreshVisuals());
+
   /** @type {QcStage["syncRois"]} */
   function syncRois(nwin) {
     syncRoisController(state, nwin);
@@ -151,6 +155,7 @@ export function createQcStageService(app) {
     renderChannelQC,
     enableRoiSelection,
     refreshVisuals,
+    scheduleRefreshVisuals,
     syncRois,
     runAutoQc,
     toggleArtifactMode,

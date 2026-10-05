@@ -236,7 +236,7 @@ All elements are registered in `dom.js` as `els.*` properties.
 | `toggleSettingsOpen` | [A] | setupLayoutEvents (settingsToggleBtn) |
 | `ensureSettingsToggleIcon` | [A] | setupLayoutEvents |
 | `initLayoutResizePolicy` | [A] | setupLayoutEvents |
-| `scheduleLayoutRerender` | [A] | switchStage, setSettingsOpen, resize |
+| `scheduleLayoutRerender` | [A] | switchStage, setSettingsOpen, canvas resize (ResizeObserver) |
 | `showWorkspace` | [A] | qc.js, run.js, editing-service, import-stage stepper |
 | `switchStage` | [A] | see `lifecycle.js` |
 | `populateGridTabs` | [A] | showWorkspace, requestPreview |
@@ -257,7 +257,6 @@ All elements are registered in `dom.js` as `els.*` properties.
 | `setSettingsOpen` | [A] | ui.js |
 | `toggleSettingsOpen` | [A] | ui.js |
 | `ensureSettingsToggleIcon` | [A] | ui.js |
-| `scheduleLayoutRerender` | [A] | ui.js |
 | `initLayoutResizePolicy` | [A] | ui.js |
 
 ---
@@ -700,9 +699,8 @@ All functions are state mutators (`set*` functions). Each is called by at least 
 | Export | [A] | Used By |
 |---|---|---|
 | `API_BASE` | [A] | container.js, api/client.js |
-| `COLORS` | [A] | plots.js, edit-canvas.js, qc-renderer.js |
-| `GRID_COLORS` | [A] | state.js (gridColors), plots.js |
-| `UNIFORM_PULSE_COLOR` | [A] | edit-canvas.js |
+| `COLORS` (read from css/tokens.css) | [A] | plots.js, edit-canvas.js, qc-renderer.js |
+| `traceColors` (read from css/tokens.css) | [A] | qc-renderer.js, decomp/run.js |
 
 ---
 

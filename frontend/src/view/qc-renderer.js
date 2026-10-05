@@ -1,9 +1,10 @@
-import { COLORS } from "../config.js";
+import { COLORS, traceColors } from "../config.js";
 import {
   drawGridOverlay,
   drawMiniSeries,
   drawRoiRects,
   nextFrame,
+  prepareCanvas,
   seriesPoints,
   seriesRange,
   strokeSeries,
@@ -83,7 +84,7 @@ export function refreshVisuals(app) {
   drawGridOverlay(
     els.emgCanvas,
     state.gridSeries,
-    state.gridColors,
+    traceColors(),
     selections,
     state.seriesLength,
   );
@@ -163,8 +164,9 @@ export function enableRoiSelection(app, canvasId) {
     setStatus(`Artifact window added (${n} window${n > 1 ? "s" : ""})`);
   };
 
-  canvas.addEventListener("mousedown", (e) => {
+  canvas.addEventListener("pointerdown", (e) => {
     if (!state.seriesLength) return;
+    canvas.setPointerCapture(e.pointerId);
     dragging = true;
     dragIsArtifact = !!state.artifactMode;
     const rect = canvas.getBoundingClientRect();
@@ -174,7 +176,7 @@ export function enableRoiSelection(app, canvasId) {
     setArtifactDraft(state, null);
   });
 
-  canvas.addEventListener("mousemove", (e) => {
+  canvas.addEventListener("pointermove", (e) => {
     if (!dragging || !state.seriesLength) return;
     const rect = canvas.getBoundingClientRect();
     endX = e.clientX - rect.left;
@@ -185,10 +187,18 @@ export function enableRoiSelection(app, canvasId) {
     };
     if (dragIsArtifact) setArtifactDraft(state, draft);
     else setRoiDraft(state, draft);
-    refreshVisuals();
+    app.scheduleRefreshVisuals();
   });
 
-  window.addEventListener("mouseup", () => {
+  canvas.addEventListener("pointercancel", () => {
+    if (!dragging) return;
+    dragging = false;
+    setRoiDraft(state, null);
+    setArtifactDraft(state, null);
+    app.scheduleRefreshVisuals();
+  });
+
+  canvas.addEventListener("pointerup", () => {
     if (!dragging || !state.seriesLength) {
       dragging = false;
       return;
@@ -206,57 +216,48 @@ export function enableRoiSelection(app, canvasId) {
 }
 
 /**
- * @param {App} app
- * @param {boolean} [waitForMiniPlots]
- * @returns {Promise<void> | undefined}
+ * The channel grid on screen: the data it lays out, and each channel's cell
+ * and trace canvas.
+ *
+ * @typedef {object} BuiltGrid
+ * @property {number} gridIdx
+ * @property {number[]} means
+ * @property {number[][] | undefined} coords
+ * @property {{ cell: HTMLElement, mini: HTMLCanvasElement }[]} cells
  */
-export function renderChannelQC(app, waitForMiniPlots = false) {
-  const { state, els, requestQcGridWindow } = app;
-  const section = els.qcSection;
-  if (!section) return waitForMiniPlots ? Promise.resolve() : undefined;
-  section.innerHTML = "";
-  ensureDiscardMasks(state);
-  let gridIdx = getCurrentGrid(state);
-  const allMeans = state.channelMeans || [];
-  if (!allMeans[gridIdx] && allMeans.length) {
-    gridIdx = 0;
-    setCurrentGrid(state, 0);
-  }
-  const means = allMeans[gridIdx];
-  const meanList = Array.isArray(means) ? means : Array.from(means || []);
-  if (!means || !meanList.length)
-    return waitForMiniPlots ? Promise.resolve() : undefined;
+
+/** @type {WeakMap<HTMLElement, BuiltGrid>} */
+const builtGrids = new WeakMap();
+
+/**
+ * Lay out one cell per channel of `gridIdx`. A click toggles that channel
+ * alone: its mask, its cell and its trace.
+ *
+ * @param {App} app
+ * @param {HTMLElement} section
+ * @param {number} gridIdx
+ * @param {number[]} means
+ * @param {number[][] | undefined} coords
+ * @returns {BuiltGrid}
+ */
+function buildChannelGrid(app, section, gridIdx, means, coords) {
+  const { state } = app;
+  const positions = coords || [];
+  const { cols } = gridDimensionsFor(positions);
   const wrap = document.createElement("div");
   wrap.className = "qc-grid";
+  const cellsEl = document.createElement("div");
+  cellsEl.className = "cells";
+  cellsEl.style.gridTemplateColumns = `repeat(${cols}, minmax(26px, 1fr))`;
 
-  const cells = document.createElement("div");
-  cells.className = "cells";
-  const coords = state.coordinates?.[gridIdx] || [];
-  const { cols } = gridDimensionsFor(coords);
-  cells.style.gridTemplateColumns = `repeat(${cols}, minmax(26px, 1fr))`;
-
-  const mask = state.discardMasks?.[gridIdx] || [];
-  const traces = state.channelTraces?.[gridIdx] || [];
-  /** @type {(() => void)[]} */
-  const miniDrawJobs = [];
-  if (!traces.length) {
-    const roi = state.rois?.[0];
-    requestQcGridWindow(
-      gridIdx,
-      roiStart(roi),
-      roiEnd(roi, state.seriesLength),
-    );
-  }
-  meanList.forEach((val, chIdx) => {
-    const pos = coords[chIdx] || [];
+  const cells = means.map((val, chIdx) => {
+    const pos = positions[chIdx] || [];
     const r = pos[0] ?? Math.floor(chIdx / cols);
     const c = pos[1] ?? chIdx % cols;
     const cell = document.createElement("button");
     cell.className = "qc-cell";
     cell.style.gridRow = `${r + 1}`;
     cell.style.gridColumn = `${c + 1}`;
-    const off = mask[chIdx] === 1;
-    if (off) cell.classList.add("off");
     const label = document.createElement("div");
     label.textContent = String(chIdx + 1);
     label.className = "qc-label";
@@ -269,27 +270,86 @@ export function renderChannelQC(app, waitForMiniPlots = false) {
     const meanText = Number.isFinite(meanVal) ? meanVal.toFixed(3) : "n/a";
     cell.title = `Channel ${chIdx + 1} • mean |EMG| ${meanText}`;
     cell.addEventListener("click", () => {
-      setDiscardMaskChannel(state, gridIdx, chIdx, off ? 0 : 1);
-      renderChannelQC(app, false);
+      const off = state.discardMasks[gridIdx]?.[chIdx] !== 1;
+      setDiscardMaskChannel(state, gridIdx, chIdx, off ? 1 : 0);
+      cell.classList.toggle("off", off);
+      drawMiniSeries(mini, state.channelTraces[gridIdx]?.[chIdx], off);
     });
-    miniDrawJobs.push(() =>
-      drawMiniSeries(mini, traces[chIdx], mask[chIdx] === 1),
-    );
-    cells.appendChild(cell);
+    cellsEl.appendChild(cell);
+    return { cell, mini };
   });
 
-  wrap.appendChild(cells);
+  wrap.appendChild(cellsEl);
+  section.innerHTML = "";
   section.appendChild(wrap);
-  const runMiniDraw = () => {
-    miniDrawJobs.forEach((job) => job());
+  return { gridIdx, means, coords, cells };
+}
+
+/**
+ * Show the current grid's channels: their cells are laid out once per grid's
+ * data, and each redraw only marks the discarded ones and redraws the traces.
+ *
+ * @param {App} app
+ * @param {boolean} [waitForMiniPlots]
+ * @returns {Promise<void> | undefined}
+ */
+export function renderChannelQC(app, waitForMiniPlots = false) {
+  const { state, els, requestQcGridWindow } = app;
+  const section = els.qcSection;
+  const nothing = () => (waitForMiniPlots ? Promise.resolve() : undefined);
+  if (!section) return nothing();
+  ensureDiscardMasks(state);
+  let gridIdx = getCurrentGrid(state);
+  if (!state.channelMeans[gridIdx] && state.channelMeans.length) {
+    gridIdx = 0;
+    setCurrentGrid(state, 0);
+  }
+  const means = state.channelMeans[gridIdx];
+  if (!means?.length) {
+    section.innerHTML = "";
+    builtGrids.delete(section);
+    return nothing();
+  }
+  const coords = state.coordinates[gridIdx];
+  let built = builtGrids.get(section);
+  const fresh =
+    !built ||
+    built.gridIdx !== gridIdx ||
+    built.means !== means ||
+    built.coords !== coords;
+  if (!built || fresh) {
+    built = buildChannelGrid(app, section, gridIdx, means, coords);
+    builtGrids.set(section, built);
+  }
+
+  const mask = state.discardMasks[gridIdx] || [];
+  const traces = state.channelTraces[gridIdx] || [];
+  if (!traces.length) {
+    const roi = state.rois[0];
+    requestQcGridWindow(
+      gridIdx,
+      roiStart(roi),
+      roiEnd(roi, state.seriesLength),
+    );
+  }
+  const { cells } = built;
+  cells.forEach(({ cell }, chIdx) => {
+    cell.classList.toggle("off", mask[chIdx] === 1);
+  });
+  const drawMinis = () => {
+    cells.forEach(({ mini }, chIdx) => {
+      drawMiniSeries(mini, traces[chIdx], mask[chIdx] === 1);
+    });
   };
   if (waitForMiniPlots) {
     return nextFrame().then(() => {
-      runMiniDraw();
+      drawMinis();
       return nextFrame();
     });
   }
-  setTimeout(runMiniDraw, 0);
+  // New cells get their size at the next layout; kept ones have it now.
+  if (fresh) setTimeout(drawMinis, 0);
+  else drawMinis();
   return undefined;
 }
 
@@ -316,15 +376,9 @@ export function populateAuxSelector(els, state) {
  * @param {State} state
  */
 export function renderAuxiliaryChannels(els, state) {
-  const canvas = els.auxCanvas;
-  if (!canvas) return;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return;
-  const w = canvas.clientWidth || canvas.width || 1;
-  const h = canvas.clientHeight || canvas.height || 120;
-  canvas.width = w;
-  canvas.height = h;
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const prepared = prepareCanvas(els.auxCanvas, { height: 120 });
+  if (!prepared) return;
+  const { ctx, width, height } = prepared;
 
   if (!state.auxSeries || !state.auxSeries.length) {
     ctx.fillStyle = COLORS.muted;
@@ -342,25 +396,20 @@ export function renderAuxiliaryChannels(els, state) {
   const span = globalMax - globalMin || 1;
 
   const selections = buildSelections(state);
-  drawRoiRects(
-    ctx,
-    selections,
-    state.seriesLength,
-    canvas.width,
-    canvas.height,
-  );
+  drawRoiRects(ctx, selections, state.seriesLength, width, height);
 
+  const colors = traceColors();
   let labelCount = 0;
   shown.forEach((row, idx) => {
     if (!row || !seriesPoints(row)) return;
-    ctx.strokeStyle = state.gridColors[idx % state.gridColors.length];
+    ctx.strokeStyle = colors[idx % colors.length];
     ctx.lineWidth = 1;
     strokeSeries(
       ctx,
       row,
       0,
-      canvas.width,
-      (v) => canvas.height - ((v - globalMin) / span) * canvas.height,
+      width,
+      (v) => height - ((v - globalMin) / span) * height,
     );
 
     ctx.fillStyle = ctx.strokeStyle;

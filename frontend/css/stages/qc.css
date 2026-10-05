@@ -211,6 +211,7 @@
 #auxCanvas {
   flex: 1 1 auto;
   min-height: clamp(var(--plot-qc-min), 22vh, var(--plot-qc-max));
+  touch-action: pan-y;
 }
 
 #emgCanvas {
