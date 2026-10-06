@@ -168,6 +168,68 @@ class _Segment:
     scale: float
 
 
+@dataclass
+class _Trace:
+    """One feedback channel (target or performed path) at its own sampling rate."""
+
+    name: str
+    values: np.ndarray
+    fs: float
+
+
+def _read_feedback_traces(tmpdir: str) -> list[_Trace]:
+    """Feedback channels (float64, already in %MVC) of track files besides ``Tracks_000.xml``."""
+    xml_paths = sorted(
+        os.path.join(root, f)
+        for root, _, files in os.walk(tmpdir)
+        for f in files
+        if f.endswith(".xml") and "Tracks_" in f and f != "Tracks_000.xml"
+    )
+    traces: list[_Trace] = []
+    for xml_path in xml_paths:
+        with open(xml_path, "rb") as fd:
+            root_node = xmltodict.parse(fd.read()).get("ArrayOfTrackInfo") or {}
+        for track in _ensure_list(root_node.get("TrackInfo") or []):
+            sig_name = os.path.basename(track.get("SignalStreamPath", ""))
+            name = " - ".join(p for p in (track.get("Title"), track.get("SubTitle")) if p)
+            sig_path = _find_file(tmpdir, sig_name) if sig_name else None
+            if sig_path is None:
+                logger.warning("Skipping feedback track %s: %s is missing", name, sig_name)
+                continue
+            if int(track.get("SampleSize", 0)) != 8:
+                logger.warning("Skipping feedback track %s: samples are not float64", name)
+                continue
+            n_total = int(track["TotalChannelsInFile"])
+            values = np.fromfile(sig_path, dtype=np.float64)
+            if values.size == 0 or values.size % n_total != 0:
+                logger.warning(
+                    "Skipping feedback track %s: cannot split %s into %d channels",
+                    name,
+                    sig_name,
+                    n_total,
+                )
+                continue
+            frames = values.reshape(-1, n_total)
+            first = int(track["AcquisitionChannel"])
+            n_ch = int(track.get("NumberOfChannels", 1))
+            traces.extend(
+                _Trace(
+                    name=name if n_ch == 1 else f"{name} {i + 1}",
+                    values=frames[:, first + i].copy(),
+                    fs=float(track["SamplingFrequency"]),
+                )
+                for i in range(n_ch)
+            )
+    return traces
+
+
+def _fit_trace(trace: _Trace, fs_out: float, n_samples: int) -> np.ndarray:
+    """``trace`` on the EMG clock: linear between its samples, its last value held past its end."""
+    t_in = np.arange(trace.values.size) / trace.fs
+    t_out = np.arange(n_samples) / fs_out
+    return np.interp(t_out, t_in, trace.values)
+
+
 def _write_segments(
     store: ArrayStore,
     name: str,
@@ -175,22 +237,26 @@ def _write_segments(
     n_samples: int,
     n_copy: int,
     dtype: type[np.floating[Any]],
+    traces: list[_Trace] | None = None,
+    fs_out: float = 0.0,
 ) -> np.ndarray:
-    """Stack the segments' channels into one float32 array: ``n_copy`` samples each, zeros after."""
-    out = store.allocate(
-        name, (sum(len(seg.rows) for seg in segments), n_samples), np.float32, zero=True
-    )
+    """Stack the segments' channels (``n_copy`` samples, zeros after), then ``traces``, as float32."""
+    traces = traces or []
+    n_rows = sum(len(seg.rows) for seg in segments)
+    out = store.allocate(name, (n_rows + len(traces), n_samples), np.float32, zero=True)
     width = min(n_copy, n_samples)
     row = 0
     for seg in segments:
         scale = np.full(len(seg.rows), seg.scale, dtype=dtype)
         _write_rows(out[row : row + len(seg.rows), :width], seg.frames, seg.rows, scale)
         row += len(seg.rows)
+    for i, trace in enumerate(traces):
+        out[n_rows + i] = _fit_trace(trace, fs_out, n_samples)
     return store.seal(out)
 
 
 def _parse_otb4_novecento(
-    tmpdir: str, track_list: list[dict[str, Any]], store: ArrayStore
+    tmpdir: str, track_list: list[dict[str, Any]], store: ArrayStore, traces: list[_Trace]
 ) -> _OTB4Channels:
     """Parse channel data for the Novecento+ device (grouped int32 signal files)."""
     grouped = _group_tracks(track_list)
@@ -248,7 +314,9 @@ def _parse_otb4_novecento(
     n_samples = grid_len if grid_len is not None else aux_len
     # The Novecento loader always scaled in float32.
     grid_data = _write_segments(store, "emg", grid_segments, n_samples, n_samples, np.float32)
-    auxiliary = _write_segments(store, "aux", auxiliary_segments, n_samples, aux_len, np.float32)
+    auxiliary = _write_segments(
+        store, "aux", auxiliary_segments, n_samples, aux_len, np.float32, traces, fs_out
+    )
 
     return _OTB4Channels(
         grid_data=grid_data,
@@ -266,7 +334,7 @@ def _parse_otb4_novecento(
 
 
 def _parse_otb4_generic(
-    tmpdir: str, track_list: list[dict[str, Any]], store: ArrayStore
+    tmpdir: str, track_list: list[dict[str, Any]], store: ArrayStore, traces: list[_Trace]
 ) -> _OTB4Channels:
     """Parse channel data for generic OTB4 devices (flat int16 signal file)."""
     sig_paths = sorted(
@@ -279,10 +347,13 @@ def _parse_otb4_generic(
     )
     if not sig_paths:
         raise FileNotFoundError("No .sig files found in OTB4 archive.")
+    # Feedback tracks bring their own .sig: pick the one Tracks_000.xml names.
+    stream = os.path.basename(track_list[0].get("SignalStreamPath") or "")
+    sig_path = (_find_file(tmpdir, stream) if stream else None) or sig_paths[0]
 
     total_channels = sum(int(t["NumberOfChannels"]) for t in track_list)
     try:
-        frames = _sample_frames(sig_paths[0], np.dtype(np.int16), total_channels)
+        frames = _sample_frames(sig_path, np.dtype(np.int16), total_channels)
     except OSError as exc:
         raise ValueError("Cannot reshape .sig into channels x samples") from exc
 
@@ -349,7 +420,14 @@ def _parse_otb4_generic(
     n_samples = frames.shape[0]
     grid_data = _write_segments(store, "emg", grid_segments, n_samples, n_samples, np.float64)
     auxiliary = _write_segments(
-        store, "aux", [seg for _, seg, _ in filtered_aux], n_samples, n_samples, np.float64
+        store,
+        "aux",
+        [seg for _, seg, _ in filtered_aux],
+        n_samples,
+        n_samples,
+        np.float64,
+        traces,
+        fs_out,
     )
 
     return _OTB4Channels(
@@ -719,11 +797,16 @@ def load_otb4(filepath: str, store: ArrayStore | None = None) -> SignalImport:
         device_field = next((t.get("Device") for t in track_list if "Device" in t), "Unknown")
         device = device_field.split(";")[0]
 
+        traces = _read_feedback_traces(tmpdir)
         ch = (
-            _parse_otb4_novecento(tmpdir, track_list, store)
+            _parse_otb4_novecento(tmpdir, track_list, store, traces)
             if device == "Novecento+"
-            else _parse_otb4_generic(tmpdir, track_list, store)
+            else _parse_otb4_generic(tmpdir, track_list, store, traces)
         )
+        ch.auxiliary_names += [trace.name for trace in traces]
+        ch.aux_gains += [1.0] * len(traces)
+        ch.aux_hpf += ["n/a"] * len(traces)
+        ch.aux_lpf += ["n/a"] * len(traces)
 
         filters_list = []
         for track in track_list:

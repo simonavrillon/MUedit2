@@ -17,7 +17,7 @@ import pytest
 import scipy.io
 
 from muedit.io import factory, store
-from muedit.io._otb import _read_sip
+from muedit.io._otb import _fit_trace, _read_feedback_traces, _read_sip, _Trace
 from muedit.io.store import RamStore, SessionStore
 from muedit.models import SignalImport, resident_nbytes
 from tests._platform import deleted
@@ -414,3 +414,44 @@ class TestSipTraces:
     ) -> None:
         assert _read_sip(self._sip(tmp_path, []), 6) is None
         assert "holds no samples" in caplog.text
+
+
+class TestOtb4FeedbackTraces:
+    """OTB4 feedback tracks (target and performed path) are read from their own track file."""
+
+    def _archive(self, tmp_path: Path, sample_size: int = 8) -> Path:
+        tracks = "".join(
+            f"<TrackInfo><Title>Trapezoidal track</Title><SubTitle>{sub}</SubTitle>"
+            f"<SignalStreamPath>FB.sig</SignalStreamPath><TotalChannelsInFile>2"
+            f"</TotalChannelsInFile><AcquisitionChannel>{col}</AcquisitionChannel>"
+            f"<NumberOfChannels>1</NumberOfChannels><SampleSize>{sample_size}</SampleSize>"
+            f"<SamplingFrequency>10</SamplingFrequency></TrackInfo>"
+            for col, sub in enumerate(["Performed Path", "Original Path"])
+        )
+        (tmp_path / "TrapezoidalTracks_010.xml").write_text(
+            f"<ArrayOfTrackInfo>{tracks}</ArrayOfTrackInfo>"
+        )
+        (tmp_path / "Tracks_000.xml").write_text("<ArrayOfTrackInfo/>")
+        np.array([[1.0, 0.0], [2.0, 5.0], [3.0, 10.0]]).tofile(tmp_path / "FB.sig")
+        return tmp_path
+
+    def test_reads_each_channel_by_its_column(self, tmp_path: Path) -> None:
+        traces = _read_feedback_traces(str(self._archive(tmp_path)))
+        assert [t.name for t in traces] == [
+            "Trapezoidal track - Performed Path",
+            "Trapezoidal track - Original Path",
+        ]
+        np.testing.assert_array_equal(traces[0].values, [1.0, 2.0, 3.0])
+        np.testing.assert_array_equal(traces[1].values, [0.0, 5.0, 10.0])
+        assert traces[0].fs == 10.0
+
+    def test_unknown_sample_size_is_skipped(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        assert _read_feedback_traces(str(self._archive(tmp_path, sample_size=4))) == []
+        assert "not float64" in caplog.text
+
+    def test_fit_interpolates_and_holds_the_last_value(self) -> None:
+        trace = _Trace("t", np.array([0.0, 10.0]), fs=1.0)
+        fitted = _fit_trace(trace, fs_out=4.0, n_samples=8)
+        np.testing.assert_allclose(fitted, [0.0, 2.5, 5.0, 7.5, 10.0, 10.0, 10.0, 10.0])
