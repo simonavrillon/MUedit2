@@ -30,6 +30,8 @@ jobs:
   python:
     name: Python · mypy + pytest (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    # A hung test fails the job instead of holding a runner for GitHub's 6 h limit.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:

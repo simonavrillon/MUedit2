@@ -11,6 +11,7 @@ import tempfile
 import threading
 import traceback
 from collections.abc import AsyncGenerator, Awaitable, Callable, Generator, Iterator
+from multiprocessing.connection import wait
 from multiprocessing.process import BaseProcess
 from pathlib import Path
 from typing import Any
@@ -150,8 +151,15 @@ class _Run:
                     self._process = process
             finally:
                 sender.close()  # the worker holds the only sending end: its exit ends the stream
+            # Waits on the process too: on Windows a worker killed before it unpickled its
+            # arguments leaves its sending end open in this process, so EOF never comes.
+            # ``wait``, not ``poll``: on Windows ``poll`` raises on a pipe the worker broke.
             try:
                 while True:
+                    if receiver not in wait([receiver, process.sentinel]) and not wait(
+                        [receiver], 0
+                    ):
+                        break  # the worker exited and left nothing to read
                     try:
                         yield receiver.recv()
                     except EOFError:
