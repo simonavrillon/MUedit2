@@ -331,7 +331,11 @@ Runs `_channel_qc_diagnostics` per grid on the samples `keep` marks (all when it
 
 Detects artifact-contaminated sample regions (transient noise) from filtered multi-channel EMG, per grid, using a two-stage robust amplitude detector. Output is a boolean mask (`True` = artifact) used by the decomposition pipeline to skip state updates on contaminated batches.
 
-**Algorithm:** Stage 1 computes per-channel windowed |amplitude|, max-aggregates across channels (top-k by `min_channels`), builds a robust baseline (global median + MAD, optionally a local rolling median via `local_baseline_s`), flags candidate windows via dual criterion (robust z-score OR amplitude-over-median ratio). Stage 2 computes per-channel z-scores and requires a minimum quorum of channels exceeding a per-channel z-threshold (a real artifact excites many channels; a MU burst only spikes a few). Morphological closing + dilation cleans up the mask. Polarity-agnostic.
+**Algorithm:** Stage 1 computes per-channel windowed |amplitude|, max-aggregates across channels (top-k by `min_channels`), builds a robust baseline (global median + MAD, optionally a local rolling median via `local_baseline_s`), flags candidate windows via dual criterion (robust z-score OR amplitude-over-median ratio). Stage 2 computes per-channel z-scores and requires a minimum quorum of channels exceeding a per-channel z-threshold (a real artifact excites many channels; a MU burst only spikes a few). Morphological closing bridges short gaps; each run is then extended over the artifact it starts or ends (`_extend_runs`: while the top-k level stays anomalous against the global baseline, above `extend_ratio` x its level beside the run and above `extend_hold_frac` of its level inside the run, by `max_extend_s` at most each way), so an artifact longer than the local baseline is masked whole rather than at its edges; dilation pads the result. Polarity-agnostic.
+
+**Cost:** the top-k level is a running top-k over the rows (a partition for `min_channels` > 16), and the local baseline of the per-channel windows is filtered only over spans around the candidate samples (`_moving_median_and_mad_at`), matching the whole-row filter exactly.
+
+**Limitation:** an artifact on an abrupt (instantaneous, roughly 5x or more) step of EMG can extend over the step, up to `max_extend_s`; ramped contractions are not affected. Set `max_extend_s=0` to disable the extension.
 
 ### `ArtifactMaskConfig`
 
@@ -345,6 +349,9 @@ Detects artifact-contaminated sample regions (transient noise) from filtered mul
 | `local_baseline_s` | `float \| None` | `2.0` | Local rolling baseline window (s); `None` to disable |
 | `pad_ms` | `int` | `25` | Dilation radius (ms) |
 | `min_gap_ms` | `int` | `20` | Closing bridge length (ms) |
+| `extend_ratio` | `float` | `3.0` | A run extends while the level stays above this x its level beside the run |
+| `extend_hold_frac` | `float` | `0.3` | ...and above this fraction of its level inside the run |
+| `max_extend_s` | `float` | `5.0` | Maximum extension each way (s); `0` disables |
 
 ```python
 def _detect_artifact_mask(data, fsamp, config=None) -> np.ndarray

@@ -9,6 +9,7 @@ from muedit.signal.artifact_mask import (
     ArtifactMaskConfig,
     _detect_artifact_mask,
     detect_artifact_masks,
+    mask_to_intervals,
 )
 from muedit.signal.filters import bandpass_signals
 from tests._platform import MAPPED_FILES_STAY
@@ -167,7 +168,7 @@ def test_multi_grid_masks_are_per_grid_and_ored() -> None:
 
 
 def _reference_mask(data: np.ndarray, fsamp: float, cfg: ArtifactMaskConfig) -> np.ndarray:
-    """The detector as it was before stage 12: whole-grid arrays, whole-array medians."""
+    """The detector as it was before stage 12, without run extension: whole-grid arrays and medians."""
     from scipy.ndimage import binary_closing, binary_dilation, maximum_filter1d, median_filter
 
     def baselines(x: np.ndarray, cols: np.ndarray | None) -> list[tuple[np.ndarray, np.ndarray]]:
@@ -237,7 +238,7 @@ def test_blocks_of_samples_give_the_whole_grid_mask(
     if block_bytes is not None:
         monkeypatch.setattr(store, "BLOCK_BYTES", block_bytes)
     data = _artifacted_grid()
-    cfg = ArtifactMaskConfig()
+    cfg = ArtifactMaskConfig(max_extend_s=0.0)
     want = _reference_mask(data, FSAMP, cfg)
     assert want.any()
     np.testing.assert_array_equal(_detect_artifact_mask(data, FSAMP, cfg), want)
@@ -250,7 +251,44 @@ def test_blocks_of_samples_give_the_whole_grid_mask(
 def test_kept_rows_give_the_mask_of_the_stacked_rows() -> None:
     data = _artifacted_grid()
     rows = np.array([0, 2, 5, 7, 9, *range(12, N_CHANNELS)])
-    want = _reference_mask(data[rows], FSAMP, ArtifactMaskConfig())
-    np.testing.assert_array_equal(_detect_artifact_mask(data, FSAMP, rows=rows), want)
-    per_grid, _ = detect_artifact_masks(data, FSAMP, [rows.size], grid_rows=[rows])
+    cfg = ArtifactMaskConfig(max_extend_s=0.0)
+    want = _reference_mask(data[rows], FSAMP, cfg)
+    np.testing.assert_array_equal(_detect_artifact_mask(data, FSAMP, cfg, rows=rows), want)
+    per_grid, _ = detect_artifact_masks(data, FSAMP, [rows.size], cfg, grid_rows=[rows])
     np.testing.assert_array_equal(per_grid[0], want)
+
+
+# ── Run extension ───────────────────────────────────────────────────────────
+
+
+def _long_burst_grid() -> np.ndarray:
+    """A 3 s broadband burst on every channel, longer than the 2 s local baseline."""
+    data = _clean_emg(n_samples=40_000)
+    burst = np.random.default_rng(5).normal(0, 0.2, (N_CHANNELS, 6_000)).astype(np.float32)
+    data[:, 15_000:21_000] += bandpass_signals(burst, FSAMP, emg_type=1).astype(np.float32)
+    return data
+
+
+def test_long_artifact_is_masked_whole() -> None:
+    data = _long_burst_grid()
+    mask = _detect_artifact_mask(data, FSAMP)
+    assert mask[15_000:21_000].mean() > 0.95
+    assert not mask[:14_000].any() and not mask[22_000:].any()
+    # Without the extension only its edges stand out against the local baseline.
+    edges = _detect_artifact_mask(data, FSAMP, ArtifactMaskConfig(max_extend_s=0.0))
+    assert edges[15_000:21_000].mean() < 0.1
+
+
+def test_extension_is_capped() -> None:
+    mask = _detect_artifact_mask(_long_burst_grid(), FSAMP, ArtifactMaskConfig(max_extend_s=0.5))
+    runs = mask_to_intervals(mask)
+    assert runs.size and (runs[:, 1] - runs[:, 0]).max() < 2 * 0.5 * FSAMP + 0.2 * FSAMP
+
+
+def test_extension_stops_at_emg_well_below_the_artifact() -> None:
+    """A contraction starting under a brief artifact is not masked with it."""
+    data = _clean_emg(n_samples=40_000)
+    data[:, 15_000:21_000] *= 3
+    data = _inject_artifact(data, 15_000, amplitude=0.3)
+    mask = _detect_artifact_mask(data, FSAMP)
+    assert mask[15_000] and not mask[15_400:].any()

@@ -20,6 +20,7 @@ Rows = slice | IntArray
 _MAD_TO_STD: float = 1.4826
 _SIGMA_FLOOR_FRAC: float = 0.20
 _LOCAL_STEP_MS: int = 25
+_RUNNING_TOP_MAX_K: int = 16
 
 
 @dataclass
@@ -34,6 +35,9 @@ class ArtifactMaskConfig:
     local_baseline_s: float | None = 2.0
     pad_ms: int = 25
     min_gap_ms: int = 20
+    extend_ratio: float = 3.0
+    extend_hold_frac: float = 0.3
+    max_extend_s: float = 5.0
 
 
 def _median_and_mad(x: FloatArray) -> tuple[FloatArray, FloatArray]:
@@ -65,13 +69,43 @@ def _baselines(
     n_samples = x.shape[-1]
     step = max(1, int(round(fsamp * _LOCAL_STEP_MS / 1000.0)))
     xd = x[..., ::step]
-    size = (1,) * (xd.ndim - 1) + (max(3, int(round(cfg.local_baseline_s * fsamp / step)) | 1),)
-    med_d = median_filter(xd, size=size, mode="nearest")
-    mad_d = median_filter(np.abs(xd - med_d), size=size, mode="nearest")
-    idx = np.arange(n_samples) if cols is None else cols
-    idx = np.minimum(idx // step, xd.shape[-1] - 1)
-    med = med_d[..., idx]
-    yield med, np.maximum(_MAD_TO_STD * mad_d[..., idx], _SIGMA_FLOOR_FRAC * med)
+    width = max(3, int(round(cfg.local_baseline_s * fsamp / step)) | 1)
+    if cols is None:
+        med_d, mad_d = _moving_median_and_mad(xd, width)
+        idx = np.minimum(np.arange(n_samples) // step, xd.shape[-1] - 1)
+        med, mad = med_d[..., idx], mad_d[..., idx]
+    else:
+        med, mad = _moving_median_and_mad_at(xd, width, np.minimum(cols // step, xd.shape[-1] - 1))
+    yield med, np.maximum(_MAD_TO_STD * mad, _SIGMA_FLOOR_FRAC * med)
+
+
+def _moving_median_and_mad(x: FloatArray, width: int) -> tuple[FloatArray, FloatArray]:
+    """Moving median of ``x`` over ``width`` samples, and the moving median of its deviations."""
+    size = (1,) * (x.ndim - 1) + (width,)
+    med = median_filter(x, size=size, mode="nearest")
+    return med, median_filter(np.abs(x - med), size=size, mode="nearest")
+
+
+def _moving_median_and_mad_at(
+    x: FloatArray, width: int, idx: IntArray
+) -> tuple[FloatArray, FloatArray]:
+    """:func:`_moving_median_and_mad` at the columns ``idx`` only, from spans around them.
+
+    Each span reaches ``2 * (width // 2)`` columns past the ones it serves: the deviations'
+    median needs the median that far out, so the values match the whole-row filter.
+    """
+    reach = 2 * (width // 2)
+    cols, inverse = np.unique(idx, return_inverse=True)
+    med = np.empty((*x.shape[:-1], cols.size), dtype=x.dtype)
+    mad = np.empty_like(med)
+    breaks = np.flatnonzero(np.diff(cols) > 2 * reach) + 1
+    for group in np.split(np.arange(cols.size), breaks):
+        lo = max(0, int(cols[group[0]]) - reach)
+        hi = min(x.shape[-1], int(cols[group[-1]]) + reach + 1)
+        span_med, span_mad = _moving_median_and_mad(x[..., lo:hi], width)
+        med[..., group] = span_med[..., cols[group] - lo]
+        mad[..., group] = span_mad[..., cols[group] - lo]
+    return med[..., inverse], mad[..., inverse]
 
 
 def _exceeds(
@@ -112,8 +146,66 @@ def _window_maxima(
             :, start - lo : stop - lo
         ]
         ch_win[:, start:stop] = block
-        win_stat[start:stop] = np.partition(block, n_channels - k, axis=0)[n_channels - k]
+        win_stat[start:stop] = _kth_largest(block, k)
     return ch_win, win_stat
+
+
+def _kth_largest(block: FloatArray, k: int) -> FloatArray:
+    """The ``k``-th largest value of each column of ``block``."""
+    if k > _RUNNING_TOP_MAX_K:
+        return np.partition(block, block.shape[0] - k, axis=0)[block.shape[0] - k]
+    # A running top-k, one row at a time: far cheaper than partitioning down each column.
+    top = np.full((k, block.shape[1]), -np.inf, dtype=block.dtype)
+    carry = np.empty(block.shape[1], dtype=block.dtype)
+    larger = np.empty_like(carry)
+    for row in block:
+        carry[:] = row
+        for j in range(k):
+            np.maximum(top[j], carry, out=larger)
+            np.minimum(top[j], carry, out=carry)
+            top[j] = larger
+    return top[k - 1]
+
+
+def _extend_runs(
+    confirmed: BoolArray, win_stat: FloatArray, fsamp: float, cfg: ArtifactMaskConfig, bridge: int
+) -> BoolArray:
+    """Grow each run of ``confirmed`` over the samples of the artifact it starts or ends.
+
+    A run grows, by ``max_extend_s`` at most each way, while ``win_stat`` stays anomalous
+    against its global baseline, above ``extend_ratio`` times its level beside the run and
+    above ``extend_hold_frac`` of its level inside the run. So an artifact longer than the
+    local baseline is masked whole rather than at its edges, while EMG well below the
+    artifact that starts or ends it is not. Dips shorter than ``bridge`` are crossed.
+    """
+    max_extend = int(round(cfg.max_extend_s * fsamp))
+    if max_extend <= 0 or cfg.local_baseline_s is None:
+        return confirmed
+    n_samples = win_stat.size
+    level = maximum_filter1d(win_stat, size=bridge, mode="nearest")
+    med, mad = (float(v[0]) for v in _median_and_mad(win_stat))
+    sigma = max(_MAD_TO_STD * mad, _SIGMA_FLOOR_FRAC * med)
+    floor = min(med + cfg.z_thr * sigma, cfg.amp_ratio * med)
+    reach = int(round(cfg.local_baseline_s * fsamp))
+
+    def beside(lo: int, hi: int) -> float:
+        quiet = win_stat[lo:hi][~confirmed[lo:hi]]
+        return float(np.median(quiet)) if quiet.size else med
+
+    out = confirmed.copy()
+    for run_start, run_end in mask_to_intervals(confirmed).tolist():
+        hold = max(floor, cfg.extend_hold_frac * float(np.median(level[run_start:run_end])))
+        threshold = max(hold, cfg.extend_ratio * beside(max(0, run_start - reach), run_start))
+        ahead = level[run_end : min(n_samples, run_end + max_extend)]
+        below = np.flatnonzero(ahead < threshold)
+        end = run_end + (int(below[0]) if below.size else ahead.size)
+
+        threshold = max(hold, cfg.extend_ratio * beside(end, min(n_samples, end + reach)))
+        behind = level[max(0, run_start - max_extend) : run_start][::-1]
+        below = np.flatnonzero(behind < threshold)
+        start = run_start - (int(below[0]) if below.size else behind.size)
+        out[start:end] = True
+    return out
 
 
 def _detect_artifact_mask(
@@ -155,6 +247,7 @@ def _detect_artifact_mask(
     bridge = max(1, int(round(fsamp * cfg.min_gap_ms / 1000.0)))
     pad = max(1, int(round(fsamp * cfg.pad_ms / 1000.0)))
     confirmed = binary_closing(confirmed, structure=np.ones(bridge, dtype=bool))
+    confirmed = _extend_runs(confirmed, win_stat, fsamp, cfg, bridge)
     mask = binary_dilation(confirmed, structure=np.ones(pad, dtype=bool))
 
     logger.debug(
