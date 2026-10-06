@@ -133,8 +133,16 @@ def _windows_working_set_bytes() -> int | None:
     # The only caller is Windows-only, but mypy checks this body on every OS and
     # ctypes.windll exists only in the Windows stubs.
     if sys.platform == "win32":
-        process = ctypes.windll.kernel32.GetCurrentProcess()
-        if ctypes.windll.psapi.GetProcessMemoryInfo(process, ctypes.byref(counters), counters.cb):
+        from ctypes import wintypes
+
+        # Typed on a private handle to the DLL: ctypes would otherwise take the process
+        # handle for a 32-bit int and truncate it.  ``windll``'s prototypes are shared.
+        kernel32 = ctypes.WinDLL("kernel32")
+        kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+        query = kernel32.K32GetProcessMemoryInfo
+        query.argtypes = [wintypes.HANDLE, ctypes.POINTER(_Counters), wintypes.DWORD]
+        query.restype = wintypes.BOOL
+        if query(kernel32.GetCurrentProcess(), ctypes.byref(counters), counters.cb):
             working_set = int(counters.WorkingSetSize)
     return working_set
 

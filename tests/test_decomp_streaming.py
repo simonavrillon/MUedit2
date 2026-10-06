@@ -40,6 +40,7 @@ from muedit.signal.filters import (
     notch_signals,
 )
 from muedit.signal.streaming import RowSelection, StreamedExtender, extend_mask
+from tests._platform import MAPPED_FILES_STAY
 from tests._synthetic_emg import FSAMP, motor_unit_emg
 
 RTOL = 1e-10
@@ -348,7 +349,7 @@ def test_pulse_trains_in_the_store_match_the_heap(store_prep: dict, mode: Postpr
         np.testing.assert_array_equal(got, want)
     assert stored.mu_grid_index == heap.mu_grid_index
     assert resident_nbytes(stored.pulse_t) == 0
-    assert "pulse_all" not in _store_files(store)
+    assert MAPPED_FILES_STAY or "pulse_all" not in _store_files(store)
 
 
 def test_run_in_a_store_matches_the_heap_run(
@@ -377,7 +378,7 @@ def test_run_in_a_store_matches_the_heap_run(
     assert resident_nbytes(stored["preview"]["pulse_trains_full"]) == 0
     # Only the kept pulse trains outlive the run: the filtered EMG and the
     # pre-dedup matrix were deleted.
-    assert _store_files(store) == ["pulse_trains"]
+    assert MAPPED_FILES_STAY or _store_files(store) == ["pulse_trains"]
 
 
 def _calibration_case(raw: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:

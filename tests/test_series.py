@@ -12,6 +12,7 @@ from muedit.models import SignalImport
 from muedit.signal.downsample import PREVIEW_MOVING_AVG_MS, moving_average_ms
 from muedit.signal.filters import bandpass_signals
 from muedit.signal.pyramid import MinMaxPyramid, pyramid_factors, view
+from tests._platform import deleted
 
 FSAMP = 2048.0
 N_SAMPLES = 40_011  # not a multiple of any level's bin
@@ -147,4 +148,4 @@ class TestSeriesRequest:
         _, arrays = unpack_frame(bytes(response.body))
         assert seen == [True]
         assert arrays["max"].shape == (8, 64)
-        assert not store.path.exists()
+        assert deleted(store.path)

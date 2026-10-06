@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import sys
 import threading
 import time
 from collections.abc import Callable, Iterator
@@ -29,6 +28,7 @@ from muedit.api.services.decompose_service import (
 from muedit.api.services.decompose_worker import RunJob
 from muedit.io.store import sessions_dir
 from muedit.models import resident_nbytes
+from tests._platform import deleted
 from tests._synthetic_emg import motor_unit_emg
 
 API = "/api/v1"
@@ -113,11 +113,6 @@ def _run(
     )
     assert resp.status_code == 200, resp.text
     return [json.loads(line) for line in resp.text.splitlines()]
-
-
-def _closed(folder: Path) -> bool:
-    """Whether a closed store's folder is gone; Windows keeps it while this process maps it."""
-    return sys.platform == "win32" or not folder.exists()
 
 
 def _run_folders() -> set[Path]:
@@ -244,7 +239,7 @@ class TestOneRunAtATime:
         resp = client.post(f"{API}/session/close", params={"session": "closing"})
         assert resp.status_code == 204
         assert run.finish()[-1]["stage"] == "cancelled"
-        assert _closed(upload.store.path)
+        assert deleted(upload.store.path)
 
     def test_an_upload_dropped_mid_run_stays_until_the_run_ends(
         self, client: TestClient, recording: Path
@@ -256,7 +251,7 @@ class TestOneRunAtATime:
         cache._release_upload("drop")
         assert upload.store.path.exists()
         assert run.finish()[-1]["stage"] == "done"
-        assert _closed(upload.store.path)
+        assert deleted(upload.store.path)
 
 
 class TestStreamEnd:

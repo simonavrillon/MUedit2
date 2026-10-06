@@ -29,6 +29,7 @@ from muedit.editing.operations import (
 from muedit.editing.session import EditError, EditSession
 from muedit.io.store import SessionStore
 from muedit.models import EditSignalContext, SignalImport
+from tests._platform import deleted
 from tests.test_editing_operations import (
     EDGE,
     FSAMP,
@@ -381,7 +382,7 @@ class TestUndo:
         assert set(edit.arrays) == {"base"}
         assert isinstance(copy, np.memmap)
         assert copy.filename is not None
-        assert not Path(copy.filename).exists()
+        assert deleted(Path(copy.filename))
 
     def test_a_copy_a_duplicate_still_shows_is_kept(self, edit: EditSession) -> None:
         _write_patch(edit, 0, 100, np.full(50, 7.0, np.float32))

@@ -20,6 +20,7 @@ from muedit.io import factory, store
 from muedit.io._otb import _read_sip
 from muedit.io.store import RamStore, SessionStore
 from muedit.models import SignalImport, resident_nbytes
+from tests._platform import deleted
 from tests.test_io_intan import (
     _GRID,
     _reference_signals,
@@ -84,7 +85,7 @@ class TestSessionStore:
         arr = st.seal(st.allocate("x", (2, 2), np.float64, zero=True))
         path = Path(str(cast(np.memmap, arr).filename))
         st.discard(arr)
-        assert not path.exists()
+        assert deleted(path)
         np.testing.assert_array_equal(arr, 0)  # the live map keeps its pages
         outside = np.lib.format.open_memmap(
             tmp_path / "y.npy", mode="w+", dtype=np.float32, shape=(2,)

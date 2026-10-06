@@ -11,6 +11,7 @@ from muedit.signal.artifact_mask import (
     detect_artifact_masks,
 )
 from muedit.signal.filters import bandpass_signals
+from tests._platform import MAPPED_FILES_STAY
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -242,7 +243,8 @@ def test_blocks_of_samples_give_the_whole_grid_mask(
     np.testing.assert_array_equal(_detect_artifact_mask(data, FSAMP, cfg), want)
     session = store.SessionStore.create("artifact")
     np.testing.assert_array_equal(_detect_artifact_mask(data, FSAMP, cfg, store=session), want)
-    assert not any(session.path.glob("artifact-windows*"))  # the working array is deleted
+    # The working array is deleted.
+    assert MAPPED_FILES_STAY or not any(session.path.glob("artifact-windows*"))
 
 
 def test_kept_rows_give_the_mask_of_the_stacked_rows() -> None:

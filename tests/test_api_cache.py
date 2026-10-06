@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import sys
 import tracemalloc
 from collections.abc import Iterator
-from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -17,6 +15,7 @@ from muedit.api.services.series_service import build_signal_views
 from muedit.editing.session import EditSession
 from muedit.io.store import RamStore, SessionStore
 from muedit.models import IntArray, SignalImport
+from tests._platform import deleted
 
 
 class FakeClock:
@@ -326,11 +325,6 @@ class TestSessions:
 # ── T1 session stores owned by cache entries ─────────────────────────────────
 
 
-def _closed(folder: Path) -> bool:
-    """Whether a closed store's folder is gone; Windows keeps it while this process maps it."""
-    return sys.platform == "win32" or not folder.exists()
-
-
 def _stored_upload(session: str = "tab-a") -> tuple[str, SessionStore]:
     st = SessionStore.create("upload")
     data = st.allocate("emg", (4, 100), np.float32)
@@ -375,14 +369,14 @@ class TestSessionStores:
         else:
             cache.BUDGET.clear()
         assert cache._get_upload_signal(token) is None
-        assert _closed(st.path)
+        assert deleted(st.path)
 
     def test_idle_sessions_lose_their_stores(self, clock: FakeClock) -> None:
         _, idle = _stored_upload("tab-a")
         _stored_upload("tab-b")
         clock.advance(SESSION_IDLE_SEC)
         cache.BUDGET.sweep()
-        assert _closed(idle.path)
+        assert deleted(idle.path)
 
     def test_run_result_keeps_its_store_until_its_session_closes(self, clock: FakeClock) -> None:
         token, st = _stored_run("tab-a")
@@ -390,10 +384,10 @@ class TestSessionStores:
         assert got is not None and not got.flags.writeable
         assert cache.BUDGET.used_bytes == 0
         cache.close_session("tab-a")
-        assert _closed(st.path)
+        assert deleted(st.path)
 
     def test_the_next_run_deletes_the_previous_store(self, clock: FakeClock) -> None:
         _, first = _stored_run("tab-a")
         _, second = _stored_run("tab-a")
-        assert _closed(first.path)
+        assert deleted(first.path)
         assert second.path.exists()
