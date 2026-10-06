@@ -42,8 +42,8 @@ def _noisy(data: np.ndarray) -> None:
     data[CH] = bandpass(np.random.default_rng(99).normal(0, 0.02, (1, N_SAMPLES)))[0]
 
 
-def _quantized(data: np.ndarray) -> None:
-    """Stuck between two ADC levels with a handful of transitions."""
+def _stuck_levels(data: np.ndarray) -> None:
+    """Stuck between two ADC levels with a handful of transitions; QC sees it bandpassed."""
     stuck = np.full(N_SAMPLES, -0.1, dtype=np.float32)
     stuck[9000:9200] = 0.1
     stuck[15000:15100] = 0.1
@@ -73,7 +73,7 @@ def _contact_loss(data: np.ndarray) -> None:
         (_dc_stuck, "flat"),
         (_saturated, "saturated"),
         (_noisy, "noisy"),
-        (_quantized, "quantized"),
+        (_stuck_levels, "noisy"),
         (_low_snr, "low-SNR"),
         (_intermittent, "intermittent"),
         (_contact_loss, "contact-loss"),
@@ -83,7 +83,7 @@ def _contact_loss(data: np.ndarray) -> None:
         "dc-stuck",
         "saturated",
         "noisy",
-        "quantized",
+        "stuck-levels",
         "low-snr",
         "intermittent",
         "contact-loss",
@@ -138,3 +138,24 @@ def test_per_grid_without_coordinates_still_flags_flat() -> None:
     data[0] = 1e-12
     masks = detect_bad_channels_per_grid(data, FSAMP, [N_CHANNELS, N_CHANNELS], None)
     assert [np.flatnonzero(m).tolist() for m in masks] == [[0], []]
+
+
+def test_structural_pass_runs_only_flat_and_saturated() -> None:
+    data = correlated_emg()
+    _flat(data)
+    _noisy(data[CH + 1 :])
+    diag = _channel_qc_diagnostics(data, FSAMP, grid_coords(), structural_only=True)
+    assert np.flatnonzero(diag.mask).tolist() == [CH]
+    assert np.isnan(diag.snr).all() and (diag.mean_neighbor_corr == 1.0).all()
+
+
+def test_per_grid_ignores_samples_outside_keep() -> None:
+    """Transients confined to masked-out samples do not flag the channel."""
+    data = correlated_emg()
+    keep = np.ones(N_SAMPLES, dtype=bool)
+    for center in (5000, 10000, 15000):
+        data[CH, center - 10 : center + 10] += 3.0
+        keep[center - 60 : center + 60] = False
+    coords = [grid_coords()]
+    assert detect_bad_channels_per_grid(data, FSAMP, [N_CHANNELS], coords)[0][CH]
+    assert not detect_bad_channels_per_grid(data, FSAMP, [N_CHANNELS], coords, keep=keep)[0].any()

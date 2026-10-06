@@ -280,7 +280,7 @@ Methods: `to_dict()`
 | `streaming.py` | `StreamedExtender`: the extended signal read batch by batch instead of whole |
 | `decomp_primitives.py` | `extend_signal()`, `signed_square()`, `find_refractory_peaks()`, `split_by_amplitude()`, `isi_cov()` |
 | `grid.py` | `GridSpec` catalog, `format_hdemg_signal()`, `get_grid_electrode_metadata()` |
-| `channel_qc.py` | Bad-channel detection (7 criteria: flat, saturated, quantized, noisy, low-SNR, intermittent, contact-loss) |
+| `channel_qc.py` | Bad-channel detection (6 criteria: flat, saturated, noisy, low-SNR, intermittent, contact-loss) |
 | `artifact_mask.py` | Artifact region detection (two-stage robust amplitude detector with local baseline) |
 | `qc_pipeline.py` | `run_auto_qc()` — orchestrates channel QC + artifact detection |
 

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from dataclasses import replace as dc_replace
 
 import numpy as np
 
@@ -40,19 +39,13 @@ def run_auto_qc(
     store: ArrayStore | None = None,
 ) -> QCPipelineResult:
     """Run the automatic QC pipeline; ``store`` takes the artifact detector's working array."""
-    prelim_config = dc_replace(
-        channel_qc_config or ChannelQCConfig(),
-        intermittent_amp_ratio=float("inf"),
-        contact_loss_min_run_ms=10**9,
-        noisy_corr_threshold=-1.0,
-        snr_thr=-float("inf"),
-    )
     prelim_bad_masks = detect_bad_channels_per_grid(
         data,
         fsamp,
         grid_channel_counts,
         grid_coordinates,
-        prelim_config,
+        channel_qc_config,
+        structural_only=True,
     )
     prelim_bad = sum(int(m.sum()) for m in prelim_bad_masks)
     total_ch = sum(grid_channel_counts)
@@ -79,13 +72,13 @@ def run_auto_qc(
         100.0 * artifact_mask.sum() / data.shape[1],
     )
 
-    qc_data = _exclude_samples(data, artifact_mask)
     final_bad_masks = detect_bad_channels_per_grid(
-        qc_data,
+        data,
         fsamp,
         grid_channel_counts,
         grid_coordinates,
         channel_qc_config,
+        keep=~artifact_mask,
     )
 
     bad_channel_masks = [
@@ -119,13 +112,3 @@ def _kept_rows(
         rows.append(ch_idx + kept)
         ch_idx += n_ch
     return rows
-
-
-def _exclude_samples(
-    data: FloatArray,
-    exclude_mask: BoolArray,
-) -> FloatArray:
-    """Drop excluded columns so channel QC only sees valid samples."""
-    if not exclude_mask.any() or exclude_mask.all():
-        return data
-    return data[:, ~exclude_mask]

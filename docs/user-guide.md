@@ -49,7 +49,7 @@ This stage lets you inspect signal quality and define which part of the recordin
 
 Each electrode on the grid is shown as a tile. Channels can be toggled to exclude them from decomposition.
 
-**Automatic QC:** press the **Automatic QC** button (sparkle icon, next to the grid tabs) to run the server-side QC pipeline. It detects bad channels (flat, saturated, quantized, noisy, low-SNR, intermittent, contact-loss) and artifact-contaminated time regions automatically. Detected bad channels replace the current discard masks — click individual tiles to override. Detected artifact regions populate the artifact windows list (see below). Nothing is committed yet; you can review and correct the results before decomposing.
+**Automatic QC:** press the **Automatic QC** button (sparkle icon, next to the grid tabs) to run the server-side QC pipeline. It detects bad channels (flat, saturated, noisy, low-SNR, intermittent, contact-loss) and artifact-contaminated time regions automatically. Detected bad channels replace the current discard masks — click individual tiles to override. Detected artifact regions populate the artifact windows list (see below). Nothing is committed yet; you can review and correct the results before decomposing.
 
 ### Average EMG Activity chart
 

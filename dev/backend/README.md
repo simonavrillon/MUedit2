@@ -97,7 +97,7 @@ python/src/muedit/
 │   ├── grid.py                               GridSpec catalog, format_hdemg_signal
 │   ├── pyramid.py                            Min/max pyramids and viewport envelopes
 │   ├── streaming.py                          StreamedExtender: the extended signal read batch by batch
-│   ├── channel_qc.py                         Bad-channel detection (7 criteria)
+│   ├── channel_qc.py                         Bad-channel detection (6 criteria)
 │   ├── artifact_mask.py                      Artifact region detection
 │   └── qc_pipeline.py                        Auto QC orchestration (run_auto_qc)
 │

@@ -245,14 +245,14 @@ Returns BIDS electrode metadata dict for the grid model. Unknown grids return `"
 Orchestrates bad-channel detection and artifact masking in three stages, where each stage benefits from the previous:
 
 ```
-Stage 0: preliminary bad channels (robust criteria only)
+Stage 0: preliminary bad channels (structural_only: flat/saturated)
     -> _select_kept_channels (drop bad channels)
 Stage 1: detect_artifact_masks (kept channels only)
-Stage 2: detect_bad_channels_per_grid on _exclude_samples(data, artifact_mask)
+Stage 2: detect_bad_channels_per_grid(..., keep=~artifact_mask)
     -> OR preliminary + final masks
 ```
 
-**Artifact-aware bad-channel detection:** Stage 2 excludes artifact-contaminated samples (`_exclude_samples`) before running the full bad-channel criteria, so a rest-time artifact doesn't inflate the peak/median ratio and create a false intermittent-contact flag.
+**Artifact-aware bad-channel detection:** Stage 2 passes `keep=~artifact_mask`, so each grid's criteria run on its non-artifact samples only (one grid copied at a time, never the whole array), so a rest-time artifact doesn't inflate the peak/median ratio and create a false intermittent-contact flag.
 
 ### `QCPipelineResult` dataclass
 
@@ -265,29 +265,27 @@ Stage 2: detect_bad_channels_per_grid on _exclude_samples(data, artifact_mask)
 def run_auto_qc(data, fsamp, grid_channel_counts, grid_coordinates=None,
                 artifact_config=None, channel_qc_config=None) -> QCPipelineResult
 ```
-Top-level orchestrator. Stage 0 uses a `dc_replace`'d `ChannelQCConfig` with intermittent/contact-loss/noisy/SNR criteria disabled (only flat/saturated/quantized run).
+Top-level orchestrator. Stage 0 runs with `structural_only=True`: only the flat and saturated metrics are computed.
 
 ---
 
 ## Bad-Channel Detection (`signal/channel_qc.py`)
 
-Identifies defective channels across 7 criteria: flat, saturated, quantized, noisy, low-SNR, intermittent-contact, sustained contact-loss. This is **spatial** (which channels); artifact masking is **temporal** (when).
+Identifies defective channels across 6 criteria: flat, saturated, noisy, low-SNR, intermittent-contact, sustained contact-loss. This is **spatial** (which channels); artifact masking is **temporal** (when).
 
 ### `ChannelQCConfig`
 
 | Field | Type | Default | Purpose |
 |---|---|---|---|
-| `flat_rms_ratio` | `float` | `0.10` | Flat if RMS < this x grid median RMS |
+| `flat_rms_ratio` | `float` | `0.20` | Flat if RMS < this x grid median RMS |
 | `flat_abs_floor` | `float` | `1e-8` | Skip flat detection if grid median RMS below this |
 | `sat_extreme_frac` | `float` | `0.005` | Saturated if > this fraction at min/max extreme |
 | `sat_tol_frac` | `float` | `0.001` | Tolerance for extreme test (fraction of p-p range) |
-| `quant_max_unique_frac` | `float` | `0.80` | Quantized if unique values < this x n_samples |
-| `quant_min_samples` | `int` | `1000` | Min n_samples for quantization check |
 | `neighbor_dist` | `float` | `1.5` | Max grid distance for "neighbour" |
-| `noisy_corr_threshold` | `float` | `0.10` | Noisy if mean neighbour corr below this |
+| `noisy_corr_threshold` | `float` | `0.30` | Noisy if mean neighbour corr below this |
 | `noisy_abs_floor` | `float` | `1e-7` | Skip noisy check if grid RMS below this |
 | `snr_win_ms` | `int` | `500` | SNR window (ms) |
-| `snr_thr` | `float` | `5.0` | Low-SNR if SNR (dB) below this |
+| `snr_thr` | `float` | `7.0` | Low-SNR if SNR (dB) below this |
 | `low_snr_corr_thr` | `float` | `0.50` | Low-SNR also requires corr below this |
 | `snr_min_windows` | `int` | `4` | Min windows for SNR check |
 | `instability_win_ms` | `int` | `50` | Envelope window for contact-instability |
@@ -305,9 +303,9 @@ def _detect_bad_channels(data, fsamp, coordinates=None, config=None) -> np.ndarr
 Returns `(n_channels,)` bool mask. Thin wrapper around `_channel_qc_diagnostics(...).mask`.
 
 ```python
-def _channel_qc_diagnostics(data, fsamp, coordinates=None, config=None) -> ChannelQCMetrics
+def _channel_qc_diagnostics(data, fsamp, coordinates=None, config=None, *, structural_only=False) -> ChannelQCMetrics
 ```
-Full-featured detector returning metrics + reasons. Computes all 7 criteria and OR-combines into the mask.
+Full-featured detector returning metrics + reasons. Computes all 6 criteria (only flat and saturated when `structural_only`) and OR-combines them into the mask. Works in float32 with float64 accumulators; the neighbour correlation is accumulated over sample blocks.
 
 ### `ChannelQCMetrics`
 
@@ -317,16 +315,15 @@ Full-featured detector returning metrics + reasons. Computes all 7 criteria and 
 | `rms` | `np.ndarray` | `(n_channels,)` |
 | `snr` | `np.ndarray` | `(n_channels,)` dB |
 | `sat_frac` | `np.ndarray` | `(n_channels,)` |
-| `n_unique` | `np.ndarray` | `(n_channels,)` int |
 | `mean_neighbor_corr` | `np.ndarray` | `(n_channels,)` |
 | `max_win_ratio` | `np.ndarray` | `(n_channels,)` |
 | `max_loss_run` | `np.ndarray` | `(n_channels,)` int |
 | `reasons` | `list[str]` | per-channel reason strings |
 
 ```python
-def detect_bad_channels_per_grid(data, fsamp, grid_channel_counts, grid_coordinates=None, config=None) -> list[np.ndarray]
+def detect_bad_channels_per_grid(data, fsamp, grid_channel_counts, grid_coordinates=None, config=None, *, keep=None, structural_only=False) -> list[np.ndarray]
 ```
-Runs `_detect_bad_channels` per grid; returns list of per-grid masks.
+Runs `_channel_qc_diagnostics` per grid on the samples `keep` marks (all when it is `None`, all-True or all-False); returns list of per-grid masks.
 
 ---
 
