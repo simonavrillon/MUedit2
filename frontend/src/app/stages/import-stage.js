@@ -16,7 +16,7 @@ function clearUploadFormatError(els) {
 function showUnsupportedUploadFormatError(els) {
   if (!els.uploadFormatError) return;
   els.uploadFormatError.textContent =
-    "Accepted: raw (.mat, .otb+, .otb4, .bdf, .edf, .rhd) or decomposition (.npz, .mat)";
+    "Accepted: raw (.mat, .otb+, .otb4, .bdf, .edf, .rhd, .oebin) or decomposition (.npz, .mat)";
   els.uploadFormatError.classList.remove("hidden");
 }
 
@@ -29,6 +29,7 @@ const KIND_BY_EXTENSION = {
   bdf: "raw",
   edf: "raw",
   rhd: "raw",
+  oebin: "raw",
   npz: "decomposition",
   // A .mat can be either; it is tried as a recording first.
   mat: "ambiguous_mat",
@@ -48,19 +49,28 @@ function detectLandingFileType(file) {
   return KIND_BY_EXTENSION[extension] ?? "unsupported";
 }
 
+/** Header files whose name is fixed, so the recording is named after its folder. */
+const FOLDER_NAMED_FILES = { "info.rhd": ".rhd", "structure.oebin": ".oebin" };
+
 /**
  * @param {string} fullPath
  * @param {string} name
  * @returns {string}
  */
 function displayNameForPath(fullPath, name) {
-  if (String(name || "").toLowerCase() !== "info.rhd") return name;
+  const extension =
+    FOLDER_NAMED_FILES[
+      /** @type {keyof typeof FOLDER_NAMED_FILES} */ (
+        String(name || "").toLowerCase()
+      )
+    ];
+  if (!extension) return name;
   const parts = String(fullPath || "")
     .replace(/\\/g, "/")
     .split("/")
     .filter(Boolean);
   const folder = parts[parts.length - 2];
-  return folder ? `${folder}.rhd` : name;
+  return folder ? `${folder}${extension}` : name;
 }
 
 /**

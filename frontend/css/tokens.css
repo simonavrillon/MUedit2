@@ -8,14 +8,17 @@
   --border: #3a3a3a;
   --radius: 8px;
   --radius-sm: 6px;
+  /* Edit toolbar buttons, and the pitch of the settings rail's icons. */
+  --control-h: 40px;
   --font: "Open Sans", sans-serif;
-  --fs-sm: 12px;
-  --fs-md: 14px;
-  --fs-lg: 20px;
-  --fs-xl: 40px;
-  --fw-light: 300;
+  /* rem, so the browser's font-size setting scales the whole interface. */
+  --fs-xs: 0.75rem;
+  --fs-sm: 0.8125rem;
+  --fs-md: 0.875rem;
+  --fs-lg: 1.25rem;
+  --fs-xl: 2.5rem;
   --fw-regular: 400;
-  --fw-medium: 500;
+  --fw-semibold: 600;
   --fw-bold: 700;
   --plot-qc-min: 120px;
   --plot-qc-max: 260px;

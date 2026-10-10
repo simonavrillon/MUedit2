@@ -88,7 +88,7 @@ function editApp({
   };
   const built = createApp({ state, els, api });
   Object.assign(built, {
-    setEditStatus: recorder(),
+    setStatus: recorder(),
     addSpikesInSelection: recorder(),
     addArtifactInSelection: recorder(),
     deleteSpikesInSelection: recorder(),
@@ -249,7 +249,7 @@ describe("pulse canvas drag", () => {
     app.state.edit.mode = "add";
     dragPulse([100, 30], [103, 30]);
     assert.equal(app.addSpikesInSelection.calls.length, 0);
-    assert.deepEqual(app.setEditStatus.calls, [
+    assert.deepEqual(app.setStatus.calls, [
       ["Drag a box to add spikes", "muted"],
     ]);
   });

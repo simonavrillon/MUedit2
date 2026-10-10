@@ -78,7 +78,7 @@ export function createEditStageService(app) {
     setEditModeAction(state, mode);
     refreshEditModeButtons();
     if (mode) {
-      app.setEditStatus(message || `Mode: ${mode}`, "muted");
+      app.setStatus(message || `Mode: ${mode}`, "muted");
     }
   }
 
@@ -156,8 +156,7 @@ export function createEditStageService(app) {
       setEditPulseView(state, view);
       if (state.currentStage === "edit") renderEditExplorer();
     },
-    (err) =>
-      app.setEditStatus(`Pulse train failed: ${errorMessage(err)}`, "error"),
+    (err) => app.setStatus(`Pulse train failed: ${errorMessage(err)}`, "error"),
   );
 
   /** @type {EditStage["ensureEditPulseView"]} */

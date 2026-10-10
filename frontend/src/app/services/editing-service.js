@@ -161,17 +161,17 @@ function requireSameSession(state, token) {
 async function editAction(app, { pending, failed, run }) {
   const { state } = app;
   if (state.edit.busy) {
-    app.setEditStatus("Wait for the current edit to finish", "muted");
+    app.setStatus("Wait for the current edit to finish", "muted");
     return;
   }
   setEditBusy(state, true);
   try {
-    if (pending) app.setEditStatus(pending, "muted");
+    if (pending) app.setStatus(pending, "muted");
     const outcome = await run();
     app.renderEditExplorer();
-    if (outcome) app.setEditStatus(...outcome);
+    if (outcome) app.setStatus(...outcome);
   } catch (err) {
-    handleError(err, app.setEditStatus, failed);
+    handleError(err, app.setStatus, failed);
   } finally {
     setEditBusy(state, false);
   }
@@ -226,12 +226,12 @@ export function prepareEditGrid(app, grid) {
 
 /** @param {App} app */
 export async function requestFilterUpdate(app) {
-  const { state, els, setEditStatus } = app;
+  const { state, els, setStatus } = app;
   if (!state.edit.distimes?.length) return;
   const muIdx = state.edit.currentMu ?? 0;
   const total = state.edit.totalSamples || 0;
   if (!total) {
-    setEditStatus("No pulse train available", "muted");
+    setStatus("No pulse train available", "muted");
     return;
   }
   const view = state.edit.view || { start: 0, end: total };
@@ -257,10 +257,10 @@ export async function requestFilterUpdate(app) {
 
 /** @param {App} app */
 export async function removeOutliers(app) {
-  const { state, setEditStatus } = app;
+  const { state, setStatus } = app;
   const muIdx = state.edit.currentMu ?? 0;
   if ((state.edit.distimes?.[muIdx]?.length ?? 0) < 3) {
-    setEditStatus("Not enough spikes for outlier removal", "muted");
+    setStatus("Not enough spikes for outlier removal", "muted");
     return;
   }
   return editAction(app, {
@@ -282,9 +282,9 @@ export async function removeOutliers(app) {
 
 /** @param {App} app */
 export async function removeDuplicateMus(app) {
-  const { state, setEditStatus } = app;
+  const { state, setStatus } = app;
   if ((state.edit.distimes?.length ?? 0) < 2) {
-    setEditStatus("Need at least 2 MUs to deduplicate", "muted");
+    setStatus("Need at least 2 MUs to deduplicate", "muted");
     return;
   }
   return editAction(app, {
@@ -305,10 +305,10 @@ export async function removeDuplicateMus(app) {
 
 /** @param {App} app */
 export async function flagMuForDeletion(app) {
-  const { state, setEditStatus } = app;
+  const { state, setStatus } = app;
   const muIdx = state.edit.currentMu ?? 0;
   if (!state.edit.distimes?.length) {
-    setEditStatus("No MU loaded", "muted");
+    setStatus("No MU loaded", "muted");
     return;
   }
   const flag = !state.edit.flagged?.[muIdx];
@@ -325,9 +325,9 @@ export async function flagMuForDeletion(app) {
 
 /** @param {App} app */
 export async function undoEdit(app) {
-  const { state, setEditStatus } = app;
+  const { state, setStatus } = app;
   if (!state.edit.canUndo) {
-    setEditStatus("Nothing to undo", "muted");
+    setStatus("Nothing to undo", "muted");
     return;
   }
   return editAction(app, {
@@ -355,9 +355,9 @@ export async function resetCurrentMuEdits(app) {
 
 /** @param {App} app */
 export async function duplicateMu(app) {
-  const { state, setEditStatus } = app;
+  const { state, setStatus } = app;
   if (!state.edit.distimes?.length) {
-    setEditStatus("No MU loaded", "muted");
+    setStatus("No MU loaded", "muted");
     return;
   }
   return editAction(app, {
@@ -388,11 +388,10 @@ function entityLabelOf(filename) {
 
 /** @param {App} app */
 export async function saveEditedFile(app) {
-  const { state, api, withBidsSaveFields, getBidsMuscleNames, setEditStatus } =
-    app;
+  const { state, api, withBidsSaveFields, getBidsMuscleNames, setStatus } = app;
 
   if (!state.edit.distimes?.length || !state.edit.token) {
-    setEditStatus("Load a decomposition first", "error");
+    setStatus("Load a decomposition first", "error");
     return;
   }
   const token = state.edit.token;
@@ -563,11 +562,11 @@ export async function loadDecompositionForEdit(
   filepath,
   options = {},
 ) {
-  const { api, setUploadLoading, setEditStatus, resetEditState } = app;
+  const { api, setUploadLoading, setStatus, resetEditState } = app;
 
   if (!filepath) return;
   setUploadLoading(true);
-  setEditStatus("Loading...", "muted");
+  setStatus("Loading...", "muted");
   let opened = false;
   try {
     let frame = await api.editOpen(filepath);
@@ -580,14 +579,14 @@ export async function loadDecompositionForEdit(
       recovered = Number(frame.meta.recovered_edits) || 0;
     }
     showEditSession(app, file, frame, options);
-    setEditStatus(
+    setStatus(
       recovered
         ? `Loaded, with ${recovered} unsaved edit${recovered !== 1 ? "s" : ""} restored.`
         : "Loaded. You can start interacting with the pulse train.",
       "success",
     );
   } catch (err) {
-    handleError(err, setEditStatus, "Failed to load");
+    handleError(err, setStatus, "Failed to load");
     if (opened) resetEditState();
   } finally {
     setUploadLoading(false);
@@ -606,7 +605,7 @@ export async function restoreEditSession(app) {
   try {
     const frame = await app.api.editSessionState(token);
     showEditSession(app, { name: String(frame.meta.file_label || "") }, frame);
-    app.setEditStatus("Edit session restored", "success");
+    app.setStatus("Edit session restored", "success");
     return true;
   } catch {
     forgetSessionToken();

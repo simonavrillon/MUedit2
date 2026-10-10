@@ -94,6 +94,19 @@ FORMATS = {
             "intan_ports": ["A", "B"],
         },
     ),
+    "openephys": Format(
+        "openephys_dir",
+        64,
+        20000.0,
+        ["MYOMNP-1x32"] * 2,
+        n_muscles=2,
+        metadata={
+            "manufacturer": "Open Ephys",
+            "device_name": "Acquisition Board",
+            "software_versions": "Open Ephys GUI 1.0.2",
+            "units": "mV",
+        },
+    ),
     "mat": Format(
         "real_emg_mat_file",
         64,

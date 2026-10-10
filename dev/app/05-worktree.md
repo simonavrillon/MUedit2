@@ -53,7 +53,6 @@ All elements are registered in `dom.js` as `els.*` properties.
 | `bidsDeviceModel` | [U] | Device model input |
 | `fsamp` | [U] | Sampling frequency (readonly) |
 | `bidsPowerlineFreq` | [U] | Powerline frequency select |
-| `bidsAutoInfo` | [U] | Auto-detected metadata box |
 | `niter` | [U] | Decomposition iterations |
 | `nwindows` | [U] | Analysis window count |
 | `duplicatesthresh` | [U] | Duplicate threshold |
@@ -75,7 +74,7 @@ All elements are registered in `dom.js` as `els.*` properties.
 |---|---|---|
 | `stageQc` | [U] | QC stage container |
 | `qcGridTabs` | [U] | Dynamic grid tab buttons |
-| `startBtn` | [U] | "Decompose Signal" button |
+| `startBtn` | [U] | "Decompose signal" button |
 | `qcAutoBtn` | [U] | Run automatic QC (bad channels + artifact regions) |
 | `artifactAddBtn` | [U] | Toggle artifact-region drawing on the EMG overview |
 | `artifactRemoveBtn` | [U] | Remove the last artifact region |
@@ -90,8 +89,6 @@ All elements are registered in `dom.js` as `els.*` properties.
 | Element ID | [U/A] | Purpose |
 |---|---|---|
 | `stageRun` | [U] | Run stage container (`data-mode` pre / live / result picks what shows) |
-| `runPlan` | [U] | Pre-run plan: grids, windows, iterations, the filters |
-| `runStartBtn` | [U] | "Start decomposition" button (pre mode) |
 | `runPhases` | [U] | Phase track: Load → Filter → Decompose → Post-process → Save |
 | `runCount` | [U] | Units kept so far, then the summary's final count |
 | `runCountLabel` | [U] | "motor unit(s) found" / "kept" |
@@ -114,13 +111,13 @@ All elements are registered in `dom.js` as `els.*` properties.
 | `editMuGridSelect` | [U] | Grid dropdown (edit) |
 | `editMuSelect` | [U] | MU dropdown (edit) |
 | `editFlagBtn` | [U] | Flag MU button |
-| `editDeduplicateBtn` | [U] | Remove Duplicates button |
+| `editDeduplicateBtn` | [U] | Remove duplicates button |
 | `editDuplicateBtn` | [U] | Duplicate MU button |
-| `editOutliersBtn` | [U] | Remove Outliers button |
-| `editAddBtn` | [U] | Add Spike button |
-| `editAddArtifactBtn` | [U] | Add Artifact button |
-| `editDeleteSpikeBtn` | [U] | Delete Spike/Artifact button |
-| `editUpdateBtn` | [U] | Update Filter button |
+| `editOutliersBtn` | [U] | Remove outliers button |
+| `editAddBtn` | [U] | Add spike button |
+| `editAddArtifactBtn` | [U] | Add artifact button |
+| `editDeleteSpikeBtn` | [U] | Delete spike/artifact button |
+| `editUpdateBtn` | [U] | Update filter button |
 | `editPeelOffToggle` | [U] | Peel-off toggle (edit) |
 | `editLockSpikesToggle` | [U] | Lock spikes toggle (edit) |
 | `editUndoBtn` | [U] | Undo button |
@@ -129,7 +126,6 @@ All elements are registered in `dom.js` as `els.*` properties.
 | `editPulseCanvas` | [U] | Pulse train canvas (edit) |
 | `editDrCanvas` | [U] | Discharge rate canvas (edit) |
 | `editTimelineCanvas` | [U] | Navigation timeline canvas (edit) |
-| `editStatus` | [U] | Edit status pill |
 
 ---
 
@@ -229,7 +225,6 @@ All elements are registered in `dom.js` as `els.*` properties.
 | Function | [A/?] | Called By |
 |---|---|---|
 | `setStatus` | [A] | all stages |
-| `setEditStatus` | [A] | editing-service, edit-stage |
 | `updateWorkflowStepper` | [A] | switchStage, import-stage |
 | `updateStepAvailability` | [A] | switchStage, initializeApp |
 | `setSettingsOpen` | [A] | switchStage, setupLayoutEvents |
@@ -266,7 +261,7 @@ All elements are registered in `dom.js` as `els.*` properties.
 | `setBidsEntitiesInput` | [A] | import-stage (BDF/EDF entity label) |
 | `applyPreviewMetadata` | [A] | qc.js requestPreview |
 | `applySessionInfoFromDecomposition` | [A] | loadDecompositionForEdit |
-| `renderBidsAutoInfo` | [A] | qc.js requestPreview |
+| `prefillHardwareFields` | [A] | qc.js requestPreview |
 | `renderBidsMuscleFields` | [A] | qc.js requestPreview, loadDecompositionForEdit |
 | `persistNpzBySaveTarget` | [A] | autoSaveRunDecomposition (the run save, `POST /edit/save`) |
 
@@ -367,7 +362,7 @@ All elements are registered in `dom.js` as `els.*` properties.
 | `autoSaveRunDecomposition` | [A] | handleStreamMessage (on done), setupRunEvents (runRetrySaveBtn) |
 | `handleStreamMessage` | [A] | runDecomposition (stream loop) |
 | `updateStartAvailability` | [A] | handleRawFilePath, runDecomposition, setupRunEvents |
-| `buildParams` | [A] | runDecomposition, renderRunStage (the plan) |
+| `buildParams` | [A] | runDecomposition |
 | `setupRunEvents` | [A] | initializeApp: start, cancel and retry buttons, run settings toggles |
 
 ---
@@ -481,7 +476,6 @@ All elements are registered in `dom.js` as `els.*` properties.
 | `buildRunSummary` | [A] | handleStreamMessage (the done event) |
 | `failRun`, `finishRun` | [A] | runDecomposition, handleStreamMessage (how the run ended) |
 | `startSave`, `finishSave`, `failSave` | [A] | autoSaveRunDecomposition (the save of the result) |
-| `buildRunPlan` | [A] | run-stage.renderRunStage (the pre-run plan) |
 | `RUN_PHASES`, `DOT` | [A] | view/run-live.js (the phase track, the dots' codes) |
 
 ---
@@ -502,7 +496,7 @@ All elements are registered in `dom.js` as `els.*` properties.
 | Function | [A/?] | Called By |
 |---|---|---|
 | `autoSaveRunDecomposition` | [A] | run-stage.autoSaveRunDecomposition |
-| `runDecomposition` | [A] | setupRunEvents (startBtn, runStartBtn, runAgainBtn) |
+| `runDecomposition` | [A] | setupRunEvents (startBtn, runAgainBtn) |
 | `cancelDecomposition` | [A] | setupRunEvents (cancelRunBtn) |
 | `handleStreamMessage` | [A] | run-stage.handleStreamMessage |
 
@@ -535,7 +529,6 @@ All elements are registered in `dom.js` as `els.*` properties.
 | `getSuggestedNpzName` | [A] | autoSaveRunDecomposition, saveEditedFile |
 | `parseBidsEntitiesFromLabel` | [A] | buildSessionInfoFromDecomposition |
 | `listifyMuscles` | [A] | buildBidsMuscleRowsModel |
-| `buildBidsAutoInfoModel` | [A] | renderBidsAutoInfo |
 | `buildBidsMuscleRowsModel` | [A] | renderBidsMuscleFields |
 | `naToEmpty` | [A] | applySessionInfoToDom |
 | `buildSessionInfoFromDecomposition` | [A] | applySessionInfoFromDecomposition |
@@ -614,10 +607,8 @@ All functions are state mutators (`set*` functions). Each is called by at least 
 
 | Function | [A/?] | Called By |
 |---|---|---|
-| `makeInfoItem` | [A] | renderBidsAutoInfo |
 | `resetBidsEntityDefaults` | [A] | file-session.resetSessionForm, applySessionInfoToDom |
 | `applyParticipantFields` | [A] | applySessionInfoToDom |
-| `renderBidsAutoInfo` | [A] | file-session renderBidsAutoInfo |
 | `renderBidsMuscleFields` | [A] | file-session renderBidsMuscleFields |
 | `applySessionInfoToDom` | [A] | applySessionInfoFromDecomposition (entity defaults through resetBidsEntityDefaults; the Project field is left to setBidsProject) |
 
@@ -647,7 +638,7 @@ All functions are state mutators (`set*` functions). Each is called by at least 
 
 | Function | [A/?] | Called By |
 |---|---|---|
-| `renderRunStage` | [A] | run-stage.renderRunStage (the plan, live view or result) |
+| `renderRunStage` | [A] | run-stage.renderRunStage (empty, live view or result) |
 | `renderRunTime` | [A] | run-stage.renderRunClock (the 1s tick) |
 | `updateRunDots` | [A] | run-stage.updateRunDots (one event's dots) |
 
@@ -719,7 +710,7 @@ All functions are state mutators (`set*` functions). Each is called by at least 
 | Stage | Buttons | Canvases | Form Fields | Dropdowns | Other |
 |---|---|---|---|---|---|
 | Import | 1 (browse) | 0 | 0 | 0 | 4 (loader, error, filename, global status) |
-| QC | 4 (start, auto QC, add/remove artifact) + N (grid tabs) + N (channel cells) | 2 (emg, aux) | 18 (BIDS) + 8 (decomp) + 3 (filters) | 1 (aux) | 2 (auto-info, artifact count) |
-| Run | 4 (start, run again, retry save, cancel) | 0 | 0 | 0 | 11 (plan, phases, counter ×3, clock ×2, dots, error, result stats, save text) |
-| Edit | 13 (toolbar) | 3 (pulse, DR, timeline) | 1 (project) | 2 (grid, MU) | 1 (edit status) |
+| QC | 4 (start, auto QC, add/remove artifact) + N (grid tabs) + N (channel cells) | 2 (emg, aux) | 18 (BIDS) + 8 (decomp) + 3 (filters) | 1 (aux) | 1 (artifact count) |
+| Run | 3 (run again, retry save, cancel) | 0 | 0 | 0 | 10 (phases, counter ×3, clock ×2, dots, error, result stats, save text) |
+| Edit | 13 (toolbar) | 3 (pulse, DR, timeline) | 1 (project) | 2 (grid, MU) | 0 |
 | **Total** | **~22 + N** | **5** | **~30** | **3** | **~18** |

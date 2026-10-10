@@ -37,7 +37,7 @@ beforeEach(() => {
   state.currentStage = "edit";
   app = createApp({ state, els, api: {} });
   Object.assign(app, {
-    setEditStatus: recorder(),
+    setStatus: recorder(),
     renderEditExplorer: recorder(),
   });
   setupEditEvents(app);
@@ -74,7 +74,7 @@ describe("edit commands", () => {
     answer({ meta: { removed_count: 0, n_mu: 1 }, spikes: [], artifacts: [] });
     await new Promise((resolve) => setTimeout(resolve, 0));
     assert.equal(els.editOutliersBtn.dataset.busy, undefined);
-    assert.deepEqual(app.setEditStatus.calls.at(-1), [
+    assert.deepEqual(app.setStatus.calls.at(-1), [
       "No outliers detected",
       "muted",
     ]);
@@ -96,7 +96,7 @@ describe("edit commands", () => {
     press("r");
     press(" ");
     assert.deepEqual(sent, ["remove-outliers"]);
-    assert.deepEqual(app.setEditStatus.calls.at(-1), [
+    assert.deepEqual(app.setStatus.calls.at(-1), [
       "Wait for the current edit to finish",
       "muted",
     ]);

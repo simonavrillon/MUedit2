@@ -27,13 +27,6 @@ export function createUiService(app) {
     setStatusController(els, text, tone);
   }
 
-  /** @type {UiService["setEditStatus"]} */
-  function setEditStatus(text, tone = "muted") {
-    if (!els.editStatus) return;
-    els.editStatus.textContent = text;
-    els.editStatus.dataset.tone = tone;
-  }
-
   /** @type {UiService["updateWorkflowStepper"]} */
   const updateWorkflowStepper = (targetStage) =>
     updateWorkflowStepperController(app, targetStage);
@@ -53,7 +46,6 @@ export function createUiService(app) {
 
   return {
     setStatus,
-    setEditStatus,
     updateWorkflowStepper,
     updateStepAvailability,
     setSettingsOpen,

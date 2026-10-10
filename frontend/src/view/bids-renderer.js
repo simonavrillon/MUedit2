@@ -2,25 +2,8 @@ import { naToEmpty } from "../io/bids.js";
 
 /** @typedef {import("../app/context.js").Els} Els */
 /** @typedef {import("../io/bids.js").ParticipantFields} ParticipantFields */
-/** @typedef {import("../io/bids.js").BidsAutoInfoModel} BidsAutoInfoModel */
 /** @typedef {import("../io/bids.js").BidsMuscleRows} BidsMuscleRows */
 /** @typedef {import("../io/bids.js").SessionInfo} SessionInfo */
-
-/**
- * @param {string} label
- * @param {string} value
- */
-function makeInfoItem(label, value) {
-  const row = document.createElement("div");
-  row.className = "auto-info-item";
-  const l = document.createElement("span");
-  l.textContent = label;
-  const v = document.createElement("span");
-  v.textContent = value;
-  row.appendChild(l);
-  row.appendChild(v);
-  return row;
-}
 
 /**
  * @param {Els} els
@@ -50,38 +33,6 @@ export function applyParticipantFields(els, participant) {
     els.bidsParticipantSex.value = naToEmpty(participant.sex);
   if (els.bidsParticipantHandedness && participant.handedness != null)
     els.bidsParticipantHandedness.value = naToEmpty(participant.handedness);
-}
-
-/**
- * @param {Els} els
- * @param {BidsAutoInfoModel} model
- */
-export function renderBidsAutoInfo(els, model) {
-  const box = els.bidsAutoInfo;
-  if (!box) return;
-  // Manufacturer and device model now have editable fields — only show
-  // filters and gain in the auto-info box.
-  const hasInfo =
-    model &&
-    !model.hidden &&
-    (model.musclesText || model.filtersText || model.gainText);
-  if (!hasInfo) {
-    box.classList.add("hidden");
-    return;
-  }
-  box.classList.remove("hidden");
-  box.innerHTML = "";
-
-  const title = document.createElement("b");
-  title.textContent = "Auto-detected Metadata";
-  box.appendChild(title);
-
-  if (model.musclesText)
-    box.appendChild(makeInfoItem("Muscles:", model.musclesText));
-  if (model.filtersText)
-    box.appendChild(makeInfoItem("Filters:", model.filtersText));
-  if (model.gainText)
-    box.appendChild(makeInfoItem("Amplifier Gain:", model.gainText));
 }
 
 /**

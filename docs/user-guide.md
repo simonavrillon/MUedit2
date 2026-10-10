@@ -26,6 +26,7 @@ App-wide messages (connecting to the backend, errors, save confirmations) appear
 | OT Biolab+ | `.otb+` | Archive with XML + `.sig` |
 | OT Biolab 4 | `.otb4` | Proprietary binary |
 | Intan RHD | `.rhd` | Single-file or directory (all three save layouts) |
+| Open Ephys | `.oebin` | Binary format: `structure.oebin` or its recording directory |
 | BIDS EMG | `.bdf`, `.edf` | Requires a `*_channels.tsv` sidecar (legacy `*_emg_channels.tsv` also accepted) |
 | Decomposition | `.npz` | Saved decomposition — goes straight to Edit |
 
@@ -34,6 +35,8 @@ App-wide messages (connecting to the backend, errors, save confirmations) appear
 Click the folder icon in the landing page to browse.
 
 **Intan RHD recordings:** point to the `.rhd` file or the recording directory. The loader supports all three Intan save layouts (traditional single-file, one file per channel, one file per signal type). Amplifier channels are grouped into one grid per port in header order. Grid identity is resolved from a `muedit_grids.json` sidecar beside the recording (if present), or defaulted for 64-channel ports. Auxiliary, supply, board-ADC, and digital I/O channels are returned alongside the EMG data.
+
+**Open Ephys recordings:** point to `structure.oebin` or the recording directory that holds it. The loader reads the continuous stream with ephys channels: the ephys channels become the EMG data (in mV), and the stream's ADC/AUX channels and any TTL lines with edges become auxiliary channels. structure.oebin does not record the electrode array, so grid identity comes from a `muedit_grids.json` sidecar in the recording, experiment or Record Node folder (the nearest one wins, so one sidecar beside `settings.xml` covers every recording), or defaults to one grid per headstage listed in the Record Node's `settings.xml`: `MYOMNP-1x32` for a 32-channel headstage, `INTAN64-1305` per 64 channels otherwise. A single grid name is repeated to cover all channels. Hardware filter cutoffs are read from the Record Node's `settings.xml`.
 
 **BIDS recordings:** point to either the `*_emg.bdf/.edf` file or the `emg/` directory. MUedit reads all grids and auxiliary channels defined in the `*_channels.tsv` sidecar automatically.
 
@@ -45,30 +48,30 @@ Once the file loads the app moves to the QC stage.
 
 This stage lets you inspect signal quality and define which part of the recording to decompose.
 
-### Grid Channel Quality panel
+### EMG channels panel
 
 Each electrode on the grid is shown as a tile. Channels can be toggled to exclude them from decomposition.
 
 **Automatic QC:** press the **Automatic QC** button (sparkle icon, next to the grid tabs) to run the server-side QC pipeline. It detects bad channels (flat, saturated, noisy, low-SNR, intermittent, contact-loss) and artifact-contaminated time regions automatically. Detected bad channels replace the current discard masks — click individual tiles to override. Detected artifact regions populate the artifact windows list (see below). Nothing is committed yet; you can review and correct the results before decomposing.
 
-### Average EMG Activity chart
+### Average EMG activity chart
 
 Displays the rectified average across all active channels. Use this to identify the contraction window you want to decompose.
 
 **Artifact windows:** use the **+** button (top-right of the chart card) to arm artifact selection, then drag on the chart to mark a time region as an artifact. Marked windows are shaded on the chart. Use the **-** button to remove the last window. The count next to the buttons shows how many windows are active. Artifact windows are excluded from decomposition filter updates and state propagation — they prevent transient noise from corrupting the separation. These windows are combined with any automatically detected artifacts (from the Automatic QC button) and travel with the decomposition request.
 
-### Auxiliary Channels panel
+### Auxiliary channels panel
 
 Shows force, torque, or other auxiliary signals recorded alongside the EMG. Use the dropdown to select individual channels or view all overlaid.
 
-**Defining an ROI:** click and drag on the Average EMG Activity chart or the Auxiliary Channels panel to draw a region of interest. The decomposition will run only on the selected time window. With more than one analysis window, a drag over a window you have already drawn adjusts that window; otherwise it fills the first window not drawn yet; once every window is drawn, a drag moves the window starting nearest to it.
+**Defining an ROI:** click and drag on the Average EMG activity chart or the Auxiliary channels panel to draw a region of interest. The decomposition will run only on the selected time window. With more than one analysis window, a drag over a window you have already drawn adjusts that window; otherwise it fills the first window not drawn yet; once every window is drawn, a drag moves the window starting nearest to it.
 
 
 ### Settings panel (left sidebar)
 
 Open the panel with the button on the rail on the left. It contains three collapsible sections:
 
-**Session Info**
+**Session info**
 
 | Field | Description |
 |---|---|
@@ -98,13 +101,13 @@ field. Acquisition and Run stay optional.
 
 > **Fill in any missing metadata before saving.** Not every recording format
 > carries all of this information, so some fields may be blank when you open a
-> file. To keep the BIDS export compliant, review the **Session Info**,
+> file. To keep the BIDS export compliant, review the **Session info**,
 > participant, and acquisition/hardware fields and complete anything that is
 > missing (subject, task, muscle, manufacturer, device model, powerline
 > frequency, etc.) before you run a decomposition or save. Fields left empty are
 > written as `n/a` placeholders, which remain valid BIDS but lose provenance.
 
-**Decomposition Settings**
+**Decomposition settings**
 
 | Field | Description |
 |---|---|
@@ -114,7 +117,7 @@ field. Acquisition and Run stay optional.
 | Peeloff | Toggle peeloff; set window in ms (default 25 ms) |
 | Post-processing | Mode for applying MU filters after decomposition: **Windowed** (default — filters applied only over the decomposed windows), **Full trace** (filters applied batch by batch across the whole recording, without adaptation), or **Adaptive** (use adaptive online post-processing) |
 
-**Quality Filters** (applied after decomposition)
+**Quality filters** (applied after decomposition)
 
 | Filter | Description |
 |---|---|
@@ -125,7 +128,7 @@ field. Acquisition and Run stay optional.
 
 ## Step 3 — Decompose
 
-Click **Decompose Signal** to start. The run page first lists the plan your settings imply — the grids and their kept channels, the analysis windows, the iteration count and the filters — then follows the run as it happens:
+Click **Decompose signal** to start. The run page follows the run as it happens:
 
 - **Phase track** — Load, Filter, Decompose, Post-process, Save
 - **Search** — one dot per iteration: kept, rejected, or too few spikes
@@ -155,25 +158,25 @@ Use the **Grid** and **Motor Unit** dropdowns, or the keyboard shortcuts `<` (pr
 
 | Button | Shortcut | Description |
 |---|---|---|
-| Add Spike | `A` | Activate add mode, then drag a box on the pulse train to add spikes within the selection |
-| Add Artifact | `X` | Activate artifact mode, then drag a box to mark a peak as an artifact (see below) |
-| Delete Spike/Artifact | `D` | Activate delete mode, then drag a box (or click) to remove both spikes and artifact markers within the selection |
-| Remove Outliers | `R` | Automatically remove spikes with abnormally high discharge rates |
-| Update Filter | `Space` | Recompute the MU filter from the EMG over the current view window (the recording in the BIDS dataset, or the EMG saved in the decomposition file) |
+| Add spike | `A` | Activate add mode, then drag a box on the pulse train to add spikes within the selection |
+| Add artifact | `X` | Activate artifact mode, then drag a box to mark a peak as an artifact (see below) |
+| Delete spike/artifact | `D` | Activate delete mode, then drag a box (or click) to remove both spikes and artifact markers within the selection |
+| Remove outliers | `R` | Automatically remove spikes with abnormally high discharge rates |
+| Update filter | `Space` | Recompute the MU filter from the EMG over the current view window (the recording in the BIDS dataset, or the EMG saved in the decomposition file) |
 | Peel-off | `P` | Toggle peel-off for filter updates (see below) |
-| Lock Spikes | `L` | Toggle spike-locking for filter updates — preserves your existing spikes when recomputing the filter (see below) |
+| Lock spikes | `L` | Toggle spike-locking for filter updates — preserves your existing spikes when recomputing the filter (see below) |
 | Flag MU | — | Mark the current MU for deletion — it will be excluded when saving |
 | Duplicate MU | — | Create an identical copy of the current MU in the same grid (same pulse train and discharge times) — intended as a starting point for separating two merged units |
-| Remove Duplicates | — | Run duplicate detection immediately, exactly as the decomposition does: within each grid and then across grids (unless the decomposition's parameters set `duplicatesbgrids` to false), pairs whose lag-corrected spike overlap exceeds the **Duplicates thresh** setting are deduplicated, keeping the unit with the lowest inter-spike interval variability |
-| Undo | — | Take back the last edit, whichever MU it was on; repeat to go further back (up to 100 edits). **Remove Duplicates** and **Save** start the undo history over |
+| Remove duplicates | — | Run duplicate detection immediately, exactly as the decomposition does: within each grid and then across grids (unless the decomposition's parameters set `duplicatesbgrids` to false), pairs whose lag-corrected spike overlap exceeds the **Duplicates thresh** setting are deduplicated, keeping the unit with the lowest inter-spike interval variability |
+| Undo | — | Take back the last edit, whichever MU it was on; repeat to go further back (up to 100 edits). **Remove duplicates** and **Save** start the undo history over |
 | Reset | — | Bring the current MU back to its state in the file (spike times and pulse train), clearing its artifacts and flag. Reset can itself be undone |
 | Save | — | Write the edited decomposition to disk |
 
-**Peel-off during filter update:** when the Peel-off toggle is **On**, Update Filter subtracts the waveform contributions of all other motor units on the same grid from the whitened signal before recomputing the filter. This can improve separation in crowded windows where spike trains overlap, but may also overcorrect if the other units are not well estimated. It is off by default. Toggle it on or off as needed before pressing Update Filter or `Space`.
+**Peel-off during filter update:** when the Peel-off toggle is **On**, Update filter subtracts the waveform contributions of all other motor units on the same grid from the whitened signal before recomputing the filter. This can improve separation in crowded windows where spike trains overlap, but may also overcorrect if the other units are not well estimated. It is off by default. Toggle it on or off as needed before pressing Update filter or `Space`.
 
-**Lock Spikes during filter update:** when the Lock Spikes toggle is **On**, Update Filter keeps the spikes you already have in the window instead of letting the recomputed filter replace them. Each existing spike is realigned to its nearest signal peak (within ±10 samples) and then merged with any newly detected spikes. Use this when you have already curated a window and want a filter refresh to *add* missed discharges without discarding your manual edits. With it **Off** (the default), the window's spikes are taken solely from the new filter. Toggle it before pressing Update Filter or `Space`; it is independent of Peel-off, so the two can be combined.
+**Lock spikes during filter update:** when the Lock spikes toggle is **On**, Update filter keeps the spikes you already have in the window instead of letting the recomputed filter replace them. Each existing spike is realigned to its nearest signal peak (within ±10 samples) and then merged with any newly detected spikes. Use this when you have already curated a window and want a filter refresh to *add* missed discharges without discarding your manual edits. With it **Off** (the default), the window's spikes are taken solely from the new filter. Toggle it before pressing Update filter or `Space`; it is independent of Peel-off, so the two can be combined.
 
-**Add Artifact workflow:** use this when a high-amplitude peak in the pulse train is clearly a noise artifact rather than a real discharge. Press `X` or click **Add Artifact** to enter artifact mode (button highlights), then drag a box around the peak. The peak is marked with an orange dot and recorded as an artifact for the current MU. Artifacts are **not** added to the spike train — they are excluded from it. The next time you press **Update Filter**, the signal around each artifact peak is subtracted from the whitened EMG (peel-off style, 25 ms window) before the filter is recomputed, preventing the artifact from corrupting the new filter. Artifact markers are preserved when you save and reload the file. To remove an artifact, use **Delete Spike** mode and drag a box over it — delete mode removes both spikes and artifact markers within the selection. **Undo** takes back an artifact you just added; **Reset** clears all artifacts for the current MU.
+**Add artifact workflow:** use this when a high-amplitude peak in the pulse train is clearly a noise artifact rather than a real discharge. Press `X` or click **Add artifact** to enter artifact mode (button highlights), then drag a box around the peak. The peak is marked with an orange dot and recorded as an artifact for the current MU. Artifacts are **not** added to the spike train — they are excluded from it. The next time you press **Update filter**, the signal around each artifact peak is subtracted from the whitened EMG (peel-off style, 25 ms window) before the filter is recomputed, preventing the artifact from corrupting the new filter. Artifact markers are preserved when you save and reload the file. To remove an artifact, use **Delete spike** mode and drag a box over it — delete mode removes both spikes and artifact markers within the selection. **Undo** takes back an artifact you just added; **Reset** clears all artifacts for the current MU.
 
 **Add / Delete workflow:** press the shortcut or click the button to enter the mode (button highlights), then drag a rectangular region on the pulse train canvas. The action applies to all spikes within the box. Press the shortcut again or click elsewhere to exit the mode.
 
@@ -212,7 +215,7 @@ The `.npz` contains the corrected spike times, and the pulse trains when they ar
 
 Each save also refreshes the **BIDS events file** (`<entity>_desc-decomposition_events.tsv`, with a companion `.json`): a standards-compliant representation of the motor-unit discharges, with one row per spike (onset, sample index, and unit ID). It is regenerated from the current edits every time you save, so it always reflects the latest corrected spike trains. Saving additionally upserts the subject row in `participants.tsv`; see [saved-files.md](saved-files.md) for the full file list.
 
-Flagged MUs are removed on save. Duplicate MUs are also removed on save, with the same rules as the decomposition (within each grid, then across grids unless `duplicatesbgrids` is false): pairs whose lag-corrected spike overlap exceeds the **Duplicates thresh** setting (default 0.3) are considered duplicates, and only the one with the lowest inter-spike interval variability is kept. An MU copied with **Duplicate MU** is therefore removed on save unless you have edited it enough to fall below the threshold. The edit history records every MU removed on save (`remove_flagged` and `remove_duplicates` entries with `on_save: true`), and the editor drops them too so it matches the saved file. You can also trigger deduplication at any point during editing using the **Remove Duplicates** button.
+Flagged MUs are removed on save. Duplicate MUs are also removed on save, with the same rules as the decomposition (within each grid, then across grids unless `duplicatesbgrids` is false): pairs whose lag-corrected spike overlap exceeds the **Duplicates thresh** setting (default 0.3) are considered duplicates, and only the one with the lowest inter-spike interval variability is kept. An MU copied with **Duplicate MU** is therefore removed on save unless you have edited it enough to fall below the threshold. The edit history records every MU removed on save (`remove_flagged` and `remove_duplicates` entries with `on_save: true`), and the editor drops them too so it matches the saved file. You can also trigger deduplication at any point during editing using the **Remove duplicates** button.
 
 ---
 
@@ -274,7 +277,7 @@ Additional history action types:
 MUedit saves into a **per-project folder inside its output folder**, which is
 the repository's `data/` directory unless you set another one. You don't type a
 full path — you just name the project in the **Project** field of the Settings
-panel (Session Info), and that becomes your BIDS dataset root:
+panel (Session info), and that becomes your BIDS dataset root:
 
 ```
 <output>/<project>/    ← BIDS dataset root (the folder that contains sub-<subject>/)
@@ -321,7 +324,7 @@ so you can confirm the dataset is fully compliant before distribution.
 | Symptom | Fix |
 |---|---|
 | File won't load | Check the extension is supported; for BIDS files confirm the `_channels.tsv` sidecar exists alongside the `.bdf/.edf` |
-| Update Filter fails | Ensure the **Project** field is set and the original EMG file is accessible |
+| Update filter fails | Ensure the **Project** field is set and the original EMG file is accessible |
 | Save fails | Check the **Project** field holds a folder name, not a path — output is written to `<output>/<project>/` |
 | Port already in use | MUedit needs port 8000. Close any earlier MUedit terminal window, or quit the program holding the port, then relaunch |
 | "Backend unreachable — please restart the app" | The Python backend is not running or crashed; stop and relaunch MUedit (`MUedit.command` / `MUedit.bat`, or `scripts/run_MUedit.sh` / `.ps1`) |

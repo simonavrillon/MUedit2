@@ -8,7 +8,6 @@ import {
   normalizeGridNames,
 } from "../src/io/grid.js";
 import {
-  buildBidsAutoInfoModel,
   buildBidsMuscleRowsModel,
   buildEntityLabelFromSession,
   buildSessionInfoFromDecomposition,
@@ -160,40 +159,6 @@ describe("muscles and metadata", () => {
     assert.equal(naToEmpty("n/a"), "");
     assert.equal(naToEmpty(undefined), "");
     assert.equal(naToEmpty("42"), "42");
-  });
-
-  test("the auto-info panel hides with no hardware metadata", () => {
-    assert.deepEqual(buildBidsAutoInfoModel({ metadata: {}, muscle: [] }), {
-      hidden: true,
-    });
-  });
-
-  test("the auto-info panel shows the first filter and gain, unique muscles", () => {
-    const model = buildBidsAutoInfoModel({
-      metadata: {
-        manufacturer: "OT Bioelettronica",
-        device_name: "Quattrocento",
-        emg_hpf: [10, 10],
-        emg_lpf: 500,
-        gains: [150, 150],
-      },
-      muscle: ["TA", "TA", " ", "GM"],
-    });
-    assert.deepEqual(model, {
-      hidden: false,
-      manufacturer: "OT Bioelettronica",
-      deviceName: "Quattrocento",
-      musclesText: "TA, GM",
-      filtersText: "10 - 500 Hz",
-      gainText: "150",
-    });
-  });
-
-  test("a missing filter edge reads n/a", () => {
-    const model = buildBidsAutoInfoModel({
-      metadata: { device_name: "X", emg_lpf: 500 },
-    });
-    assert.equal(model.filtersText, "n/a - 500 Hz");
   });
 });
 

@@ -8,15 +8,6 @@
   margin-bottom: 10px;
 }
 
-.mu-controls label {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: var(--fs-sm);
-  color: var(--muted);
-  font-weight: var(--fw-light);
-}
-
 .mu-controls select {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -36,40 +27,15 @@
 }
 
 .stage-run[data-mode="pre"] .run-live,
-.stage-run:not([data-mode="pre"]) .run-pre,
 .stage-run[data-mode="live"] .run-result,
 .stage-run[data-mode="live"] .run-again-btn {
   display: none;
 }
 
-.run-pre,
 .run-live {
   display: flex;
   flex-direction: column;
   gap: 18px;
-}
-
-.run-pre {
-  max-width: 960px;
-}
-
-.run-plan {
-  display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
-  gap: 8px 24px;
-  margin: 0;
-  font-size: var(--fs-md);
-}
-
-.run-plan dt {
-  color: var(--muted);
-  font-weight: var(--fw-light);
-}
-
-.run-plan dd {
-  margin: 0;
-  color: var(--text);
-  overflow-wrap: anywhere;
 }
 
 .run-action-btn {

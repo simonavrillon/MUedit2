@@ -219,7 +219,7 @@ STAGES = {
 
 | Hook | QC | Run | Edit |
 |---|---|---|---|
-| `blocked` | no file (silent) | no file (silent); no preview → "Run step is locked until preview is loaded" | never |
+| `blocked` | no file (silent) | no file (silent); no preview → "Run step is locked until preview is loaded"; no run started (silent) | never |
 | `enter` | — | — | no edit data → status "Load a decomposition file to edit" |
 | `exit` | disarm artifact selection | — | clear the armed edit mode (add / add artifact / delete) |
 | `render` | channel grid + EMG/aux plots | the run page (plan, live view or result) | edit plots, once data is loaded |
@@ -274,7 +274,7 @@ switchStage(app, target):
 ### `updateStepAvailability()` — `navigation.js`
 
 ```
-stepRun.disabled  = !hasFile || !hasPreview
+stepRun.disabled  = !hasFile || !hasPreview || !runLive
 stepEdit.disabled = !hasEditData && (!hasFile || !hasRunResults)
 ```
 

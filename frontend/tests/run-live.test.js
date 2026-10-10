@@ -132,41 +132,6 @@ describe("buildRunSummary", () => {
   });
 });
 
-describe("buildRunPlan", () => {
-  test("lists grids with kept channels, windows and the settings", () => {
-    const state = structuredClone(initialState);
-    Object.assign(state, {
-      fsamp: 2000,
-      gridNames: ["GR08MM1305"],
-      discardMasks: [[0, 1, 0, 0]],
-      rois: [
-        { start: 0, end: 4000 },
-        { start: 6000, end: 8000 },
-      ],
-    });
-    const params = {
-      niter: 150,
-      sil_thr: 0.9,
-      cov_thr: 0.5,
-      covfilter: 0,
-      peel_off_enabled: 1,
-      peel_off_win: 0.025,
-    };
-    const plan = Object.fromEntries(
-      live
-        .buildRunPlan(state, params, "windowed")
-        .map((r) => [r.label, r.value]),
-    );
-    assert.equal(plan.Grids, "GR08MM1305 (3/4 ch)");
-    assert.equal(plan.Windows, "2 · 3.0 s");
-    assert.equal(plan.Iterations, "150 per window · 300 total");
-    assert.equal(plan["CoV filter"], "Off");
-    assert.equal(plan["Peel-off"], "On · 25 ms");
-    assert.equal(plan["Post-processing"], "Windowed");
-    assert.equal(plan["Artifact windows"], undefined);
-  });
-});
-
 describe("run stream handling", () => {
   function testApp() {
     const state = structuredClone(initialState);
@@ -179,7 +144,7 @@ describe("run stream handling", () => {
       populateAuxSelector: recorder(),
       populateGridTabs: recorder(),
       scheduleLayoutRerender: recorder(),
-      renderBidsAutoInfo: recorder(),
+      prefillHardwareFields: recorder(),
       renderBidsMuscleFields: recorder(),
       autoSaveRunDecomposition: recorder(),
     });

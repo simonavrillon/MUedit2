@@ -241,6 +241,7 @@ export function handleStreamMessage(app, msg) {
     scheduleRunRender,
     autoSaveRunDecomposition,
     updateStepAvailability,
+    switchStage,
   } = app;
   const live = state.runLive;
   if (!live) return;
@@ -258,7 +259,9 @@ export function handleStreamMessage(app, msg) {
   if (msg.stage === "cancelled") {
     setStatus("Decomposition cancelled", "muted");
     setRunLive(state, null);
-    renderRunStage();
+    // The run page is empty without a run; QC is where the next one starts.
+    if (state.currentStage === "run") switchStage("qc");
+    else updateStepAvailability();
     return;
   }
 

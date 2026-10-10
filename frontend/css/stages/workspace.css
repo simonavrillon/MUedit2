@@ -29,8 +29,7 @@
   color: var(--muted);
   font-size: var(--fs-sm);
   letter-spacing: 0.02em;
-  text-transform: none;
-  font-weight: var(--fw-light);
+  font-weight: var(--fw-regular);
 }
 
 .app-status {
@@ -54,7 +53,8 @@
   width: 100%;
   color: var(--text);
   border-radius: 0;
-  padding: 6px 0;
+  height: var(--control-h);
+  padding: 0;
   line-height: 0;
   box-shadow: none;
   border-bottom: 1px solid var(--border);
@@ -170,7 +170,7 @@
 .step-chip-label::after {
   content: attr(data-label);
   height: 0;
-  font-weight: var(--fw-bold);
+  font-weight: var(--fw-semibold);
   visibility: hidden;
   overflow: hidden;
 }
@@ -208,7 +208,7 @@
 
 .step-chip.active {
   opacity: 1;
-  font-weight: var(--fw-bold);
+  font-weight: var(--fw-semibold);
 }
 
 .step-chip.complete {
@@ -261,7 +261,7 @@
   transition: width 0.2s ease;
   z-index: 21;
   gap: 0;
-  font-weight: var(--fw-light);
+  font-weight: var(--fw-regular);
 }
 
 @supports not (height: 100dvh) {
@@ -276,7 +276,7 @@
 }
 
 .workspace.settings-open .settings-panel {
-  width: min(290px, 90vw);
+  width: min(330px, 90vw);
   overflow-y: auto;
 }
 
@@ -295,26 +295,37 @@
 
 /* ── Settings Panel Density ── */
 
+/* The panel is a fixed-height column: a tall open section must make it scroll,
+   not squeeze the rows above it. */
+.settings-panel > * {
+  flex-shrink: 0;
+}
+
+/* Each rail row, divider included, is one toolbar button tall. */
 .settings-panel .panel-section {
-  padding: 6px 0;
+  padding: 0;
+}
+
+.settings-panel .panel-section:not(.collapsed) {
+  padding-bottom: 10px;
 }
 
 .settings-panel .section-header {
   font-size: var(--fs-sm);
-  font-weight: var(--fw-regular);
-  letter-spacing: 0.08em;
+  font-weight: var(--fw-semibold);
+  color: var(--muted);
   margin-bottom: 0;
-  height: 20px;
+  height: calc(var(--control-h) - 1px);
 }
 
 .settings-panel .section-header::after {
-  font-size: var(--fs-sm);
+  font-size: var(--fs-xs);
   line-height: 1;
 }
 
 .settings-panel .section-content {
   gap: 5px;
-  margin-top: 5px;
+  margin-top: 0;
 }
 
 #bidsMuscleContainer {
@@ -327,11 +338,11 @@
 .settings-panel .file-display,
 .settings-panel .form-row label {
   font-size: var(--fs-sm);
-  font-weight: var(--fw-light);
+  font-weight: var(--fw-regular);
 }
 
 .settings-panel .form-row {
-  grid-template-columns: 110px 140px;
+  grid-template-columns: 116px minmax(0, 1fr);
   gap: 5px;
 }
 
@@ -339,8 +350,8 @@
 .settings-panel .form-row select {
   border-radius: 5px;
   padding: 6px 8px;
-  font-size: var(--fs-sm);
-  font-weight: var(--fw-light);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-regular);
 }
 
 .settings-panel .form-row [aria-invalid="true"] {
@@ -366,19 +377,6 @@
   letter-spacing: 0.01em;
 }
 
-.settings-panel .start-btn {
-  padding: 10px;
-  font-size: var(--fs-sm);
-  font-weight: var(--fw-regular);
-  letter-spacing: 0.04em;
-}
-
-.settings-panel .auto-info-box {
-  margin-top: 8px;
-  padding: 8px;
-  font-size: var(--fs-sm);
-}
-
 .panel-section {
   border-radius: 0;
   padding: 10px 0 12px;
@@ -388,9 +386,7 @@
 
 .section-header {
   font-size: var(--fs-sm);
-  font-weight: var(--fw-bold);
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
+  font-weight: var(--fw-semibold);
   color: var(--text);
   margin-bottom: 12px;
   display: flex;
@@ -445,14 +441,14 @@
 .field-label {
   font-size: var(--fs-md);
   color: var(--muted);
-  font-weight: var(--fw-light);
+  font-weight: var(--fw-regular);
 }
 
 .file-display {
   flex: 1;
   text-align: right;
   color: var(--text);
-  font-weight: var(--fw-bold);
+  font-weight: var(--fw-semibold);
   font-size: var(--fs-md);
 }
 
@@ -475,17 +471,24 @@
   margin-bottom: 8px;
 }
 
+/* Reads as the plot's heading, like the chart titles. */
+.form-row.aux-selector-row select {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+}
+
 .form-row label {
   color: var(--muted);
   font-size: var(--fs-md);
-  font-weight: var(--fw-light);
+  font-weight: var(--fw-regular);
 }
 
 .form-hint {
   margin: -2px 0 0;
   color: var(--muted);
   font-size: var(--fs-sm);
-  font-weight: var(--fw-light);
+  font-weight: var(--fw-regular);
   line-height: 1.4;
 }
 
@@ -528,7 +531,7 @@
   border: 1px solid var(--border);
   background: var(--surface);
   color: var(--text);
-  font-weight: var(--fw-bold);
+  font-weight: var(--fw-semibold);
   font-size: var(--fs-md);
   letter-spacing: 0.02em;
   cursor: pointer;
@@ -556,9 +559,7 @@
   border: none;
   border-radius: var(--radius);
   padding: 13px;
-  font-weight: var(--fw-bold);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+  font-weight: var(--fw-semibold);
   font-size: var(--fs-md);
   cursor: pointer;
   transition: opacity 0.12s ease;
@@ -624,9 +625,7 @@
 
 .chart-title {
   color: var(--muted);
-  font-weight: var(--fw-bold);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font-weight: var(--fw-semibold);
   font-size: var(--fs-sm);
   margin-bottom: 8px;
 }

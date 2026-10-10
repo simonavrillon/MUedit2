@@ -98,12 +98,14 @@ conversion step:
 | OT Biolab+ | `.otb+` |
 | OT Biolab 4 | `.otb4` |
 | Intan | `.rhd` file, or the recording folder |
+| Open Ephys (binary format) | `structure.oebin`, or the recording folder |
 | BIDS EMG | `.bdf` or `.edf`, with its `_channels.tsv` sidecar beside it |
 | A previous MUedit session | `.npz` — opens straight into the editor |
 
 For Intan recordings you can point either at the `.rhd` file or at the folder,
 whichever your acquisition software produced; MUedit works out the layout and
-groups the amplifier channels into one grid per port. For BIDS recordings, the
+groups the amplifier channels into one grid per port. For Open Ephys recordings,
+pick the `structure.oebin` inside one recording's folder. For BIDS recordings, the
 `_channels.tsv` sidecar next to the data file tells MUedit which channels belong
 to which grid, and which are auxiliary signals such as force.
 
@@ -140,7 +142,7 @@ you have a reason not to.
 
 ### Decomposing
 
-Press **Decompose Signal** and the run page follows the search as it happens:
+Press **Decompose signal** and the run page follows the search as it happens:
 the pipeline's phases, a dot for every iteration, the units kept so far, and an
 estimate of the time left. When it finishes, the result is already loaded into
 the editor, so the **Edit** step is ready the moment you want it — there is no

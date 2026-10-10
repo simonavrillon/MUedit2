@@ -84,7 +84,7 @@ describe("decomposition cancel", () => {
     assert.equal(app.setStatus.calls.at(-1)[1], "error");
   });
 
-  test("the cancelled event returns the page to the plan", () => {
+  test("the cancelled event clears the run from the page", () => {
     const app = testApp({});
     app.state.runLive = createRunLive(0);
     app.handleStreamMessage({
@@ -96,6 +96,24 @@ describe("decomposition cancel", () => {
       ["Decomposition cancelled", "muted"],
     ]);
     assert.equal(app.state.runLive, null);
+  });
+
+  test("a cancel seen from the run page goes back to QC", () => {
+    const app = testApp({});
+    app.state.runLive = createRunLive(0);
+    app.state.currentStage = "run";
+    app.handleStreamMessage({ stage: "cancelled" });
+    assert.deepEqual(app.switchStage.calls, [["qc"]]);
+  });
+
+  test("a cancel seen from another page leaves the user there", () => {
+    const app = testApp({});
+    app.state.runLive = createRunLive(0);
+    app.state.currentStage = "edit";
+    app.updateStepAvailability = recorder();
+    app.handleStreamMessage({ stage: "cancelled" });
+    assert.deepEqual(app.switchStage.calls, []);
+    assert.equal(app.updateStepAvailability.calls.length, 1);
   });
 
   test("the button shows only while a run is going", () => {

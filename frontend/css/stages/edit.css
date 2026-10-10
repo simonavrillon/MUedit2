@@ -8,6 +8,11 @@
   margin-bottom: 0;
 }
 
+/* The shortcut line is the last thing above the plots; its margin would only add a gap. */
+.edit-top-row .hint {
+  margin-bottom: 0;
+}
+
 .edit-full {
   width: 100%;
   margin-top: 10px;
@@ -32,10 +37,10 @@
 }
 
 .edit-selects select {
-  height: 40px;
+  height: var(--control-h);
   padding: 0 12px;
   font-size: var(--fs-md);
-  font-weight: var(--fw-bold);
+  font-weight: var(--fw-semibold);
   line-height: 1;
 }
 
@@ -82,13 +87,13 @@
 .edit-toolbar-row .pill-toggle {
   width: auto;
   flex: 0 0 auto;
-  height: 40px;
+  height: var(--control-h);
   padding: 0 12px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   font-size: var(--fs-md);
-  font-weight: var(--fw-bold);
+  font-weight: var(--fw-semibold);
   line-height: 1;
 }
 
@@ -96,13 +101,13 @@
   width: auto;
   margin-top: 0;
   flex: 0 0 auto;
-  height: 40px;
+  height: var(--control-h);
   padding: 0 14px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   font-size: var(--fs-md);
-  font-weight: var(--fw-bold);
+  font-weight: var(--fw-semibold);
   line-height: 1;
 }
 
@@ -220,8 +225,9 @@
   overflow: hidden;
 }
 
+/* 1.2 : 2 gives the firing rate the room the edit status line used to take. */
 #editDrCard {
-  flex-grow: 1;
+  flex-grow: 1.2;
 }
 
 #editPulseCard {

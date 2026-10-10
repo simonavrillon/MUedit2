@@ -169,3 +169,31 @@ describe("required session fields", () => {
     assert.ok(els.bidsProject.focused);
   });
 });
+
+describe("hardware pre-fill", () => {
+  test("the file's metadata fills only the hardware fields left empty", () => {
+    const els = {
+      bidsManufacturer: { value: "" },
+      bidsDeviceModel: { value: "Typed by hand" },
+      bidsPowerlineFreq: { value: "" },
+    };
+    const state = {
+      metadata: {
+        manufacturer: "OT Bioelettronica",
+        device_name: "Quattrocento",
+        powerline_freq: 60,
+      },
+    };
+    createFileSessionService(
+      /** @type {any} */ ({ els, state, api: {} }),
+    ).prefillHardwareFields();
+    assert.deepEqual(
+      [
+        els.bidsManufacturer.value,
+        els.bidsDeviceModel.value,
+        els.bidsPowerlineFreq.value,
+      ],
+      ["OT Bioelettronica", "Typed by hand", "60"],
+    );
+  });
+});

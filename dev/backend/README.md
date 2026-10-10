@@ -26,7 +26,7 @@ Auto-generated documentation of the MUedit2 Python backend: architecture, API su
 
 The backend serves four user-facing stages (mirroring the frontend):
 
-1. **File Loading** — Raw EMG import from `.mat`, `.otb+`, `.otb4`, `.bdf`/`.edf`, `.rhd` formats. Signal preview computation, grid geometry inference, BIDS export.
+1. **File Loading** — Raw EMG import from `.mat`, `.otb+`, `.otb4`, `.bdf`/`.edf`, `.rhd`, `.oebin` formats. Signal preview computation, grid geometry inference, BIDS export.
 2. **Quality Check & Experiment Info** — Automatic QC pipeline: bad-channel detection, artifact masking. BIDS metadata enrichment (participant, hardware, electrode placement).
 3. **Decomposition** — FastICA-based convolutive source separation with optional adaptive online post-processing. SIL scoring, duplicate removal, preview payload generation.
 4. **Editing** — A server-side edit session per tab: filter updates, spike add/delete, artifact marking, discharge-rate pruning, outlier removal, deduplication, flagging, undo, recovery of unsaved edits after a crash, and BIDS save.
@@ -85,6 +85,7 @@ python/src/muedit/
 │   ├── bids.py                               BIDS EMG export (EDF/BDF + sidecars + derivatives)
 │   ├── _bids_reader.py                       BIDS EMG reading (pyedflib + channels.tsv)
 │   ├── _intan.py                             Intan RHD loader (3 save layouts)
+│   ├── _openephys.py                         Open Ephys binary-format loader
 │   ├── mat.py                                MATLAB .mat v5 + v7.3 (HDF5) loader
 │   ├── _otb.py                               OT Bioelettronica OTB+ and OTB4 loaders
 │   ├── npz.py                                Aligned .npz writer, memory-mapping reader, legacy unpickler

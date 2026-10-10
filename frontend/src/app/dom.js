@@ -13,7 +13,6 @@ const canvas = (id) => /** @type {HTMLCanvasElement} */ (element(id));
 
 export const els = {
   status: element("status"),
-  bidsAutoInfo: element("bidsAutoInfo"),
   stepImport: button("stepImport"),
   stepQc: button("stepQc"),
   stepRun: button("stepRun"),
@@ -29,8 +28,6 @@ export const els = {
   settingsPanel: element("settingsPanel"),
   start: button("startBtn"),
   cancelRun: button("cancelRunBtn"),
-  runStartBtn: button("runStartBtn"),
-  runPlan: element("runPlan"),
   runPhases: element("runPhases"),
   runCount: element("runCount"),
   runCountLabel: element("runCountLabel"),
@@ -80,7 +77,6 @@ export const els = {
   bidsParticipantAge: input("bidsParticipantAge"),
   bidsParticipantSex: select("bidsParticipantSex"),
   bidsParticipantHandedness: select("bidsParticipantHandedness"),
-  editStatus: element("editStatus"),
   fsamp: input("fsamp"),
   bidsProject: input("bidsProject"),
   editMuGridSelect: select("editMuGridSelect"),

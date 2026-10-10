@@ -65,29 +65,6 @@ canvas {
 
 /* ── Misc ── */
 
-.auto-info-box {
-  margin-top: 10px;
-  padding: 10px;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  font-size: var(--fs-sm);
-  line-height: 1.4;
-  color: var(--muted);
-}
-
-.auto-info-box b {
-  display: block;
-  color: var(--text);
-  margin-bottom: 4px;
-}
-
-.auto-info-item {
-  display: flex;
-  justify-content: space-between;
-  margin-bottom: 2px;
-}
-
 .icon-btn {
   border: none;
   background: transparent;

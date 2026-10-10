@@ -200,7 +200,7 @@ export async function requestPreview(app, { file, silentFailure = false }) {
     setUploadLoading,
     populateAuxSelector,
     populateGridTabs,
-    renderBidsAutoInfo,
+    prefillHardwareFields,
     renderBidsMuscleFields,
     setStatus,
     showWorkspace,
@@ -243,7 +243,7 @@ export async function requestPreview(app, { file, silentFailure = false }) {
     // Raw preview resets edit slice first; ensure BIDS rows render in QC context
     // so they source run grid names instead of edit fallback ("Grid 1").
     showWorkspace("qc");
-    renderBidsAutoInfo();
+    prefillHardwareFields();
     renderBidsMuscleFields();
 
     setStatus("Preview ready", "success");

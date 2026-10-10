@@ -9,7 +9,6 @@ import {
 
 /** @typedef {import("../app/context.js").Els} Els */
 /** @typedef {import("../decomp/live.js").RunLive} RunLive */
-/** @typedef {{ label: string, value: string }} PlanItem */
 
 /** Grid colours on the run page: the step colours, extended to ten. */
 const GRID_COLOR_COUNT = 10;
@@ -20,23 +19,6 @@ const DOT_CLASS = ["", "is-kept", "is-rejected", "is-few", "is-skipped"];
 /** The run whose dots are on screen; a new run rebuilds them. */
 /** @type {RunLive | null} */
 let dotsFor = null;
-
-/**
- * @param {HTMLElement | null} list
- * @param {PlanItem[]} items
- */
-function renderPairs(list, items) {
-  if (!list) return;
-  list.replaceChildren(
-    ...items.flatMap(({ label, value }) => {
-      const dt = document.createElement("dt");
-      dt.textContent = label;
-      const dd = document.createElement("dd");
-      dd.textContent = value;
-      return [dt, dd];
-    }),
-  );
-}
 
 /** @param {number} grid */
 function gridColor(grid) {
@@ -222,19 +204,18 @@ function renderResult(els, live) {
 }
 
 /**
- * Draw the run page for `live`: the plan before a run, the live search during
+ * Draw the run page for `live`: nothing before a run, the live search during
  * one, and the result after.
  *
  * @param {Els} els
  * @param {RunLive | null} live
- * @param {{ gridNames: string[], plan: PlanItem[], now: number }} ctx
+ * @param {{ gridNames: string[], now: number }} ctx
  */
 export function renderRunStage(els, live, ctx) {
   const stage = els.stageRun;
   if (!stage) return;
   if (!live) {
     stage.dataset.mode = "pre";
-    renderPairs(els.runPlan, ctx.plan);
     return;
   }
   stage.dataset.mode = live.status === "running" ? "live" : "result";

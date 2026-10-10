@@ -4,7 +4,6 @@ import {
   runDecomposition,
   handleStreamMessage as handleStreamMessageFeature,
 } from "../../decomp/run.js";
-import { buildRunPlan } from "../../decomp/live.js";
 import { renderRunStage as renderRunStageView } from "../../view/run-live.js";
 import {
   DEFAULT_POSTPROCESS_MODE,
@@ -32,7 +31,7 @@ export function createRunStageService(app) {
   /** @type {RunStage["updateStartAvailability"]} */
   function updateStartAvailability() {
     const blocked = !state.file || state.isRunning;
-    for (const btn of [els.start, els.runStartBtn, els.runAgainBtn]) {
+    for (const btn of [els.start, els.runAgainBtn]) {
       if (btn) btn.disabled = blocked;
     }
     if (els.cancelRun) {
@@ -58,16 +57,8 @@ export function createRunStageService(app) {
 
   /** @type {RunStage["renderRunStage"]} */
   function renderRunStage() {
-    const plan = state.runLive
-      ? []
-      : buildRunPlan(
-          state,
-          buildParams(),
-          els.postprocessMode?.value || DEFAULT_POSTPROCESS_MODE,
-        );
     renderRunStageView(els, state.runLive, {
       gridNames: state.gridNames || [],
-      plan,
       now: Date.now(),
     });
   }
@@ -84,11 +75,10 @@ export function createRunStageService(app) {
 
 /** @param {App} app */
 export function setupRunEvents(app) {
-  const { els, state } = app;
+  const { els } = app;
 
   const run = () => void runDecomposition(app);
   els.start?.addEventListener("click", run);
-  els.runStartBtn?.addEventListener("click", run);
   els.runAgainBtn?.addEventListener("click", run);
   els.cancelRun?.addEventListener("click", () => void cancelDecomposition(app));
   els.runRetrySaveBtn?.addEventListener("click", () => {
@@ -115,13 +105,6 @@ export function setupRunEvents(app) {
     toggleConditional("silSettings", on),
   );
   app.updateStartAvailability();
-
-  // Keep the plan shown before a run in step with the settings panel.
-  const refreshPlan = () => {
-    if (state.currentStage === "run" && !state.runLive) app.renderRunStage();
-  };
-  els.settingsPanel?.addEventListener("change", refreshPlan);
-  els.settingsPanel?.addEventListener("click", refreshPlan);
 
   // A session field marked missing clears once it is filled.
   const clearFilled = (/** @type {Event} */ e) => {

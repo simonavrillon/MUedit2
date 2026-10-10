@@ -51,7 +51,6 @@
 /**
  * @typedef {object} UiService
  * @property {(text: string, tone?: Tone) => void} setStatus
- * @property {(text: string, tone?: Tone) => void} setEditStatus
  * @property {(target: WorkflowStep) => void} updateWorkflowStepper
  * @property {() => void} updateStepAvailability
  * @property {(open: boolean) => void} setSettingsOpen
@@ -72,7 +71,7 @@
  * @property {(entities: Partial<BidsEntities> & { project?: string }) => void} setBidsEntitiesInput
  * @property {(data: JsonObject) => void} applyPreviewMetadata
  * @property {(file: FileRef | null, data?: JsonObject) => void} applySessionInfoFromDecomposition
- * @property {() => void} renderBidsAutoInfo
+ * @property {() => void} prefillHardwareFields Fill the empty manufacturer, device and power-line fields from the file's metadata.
  * @property {() => void} renderBidsMuscleFields
  * @property {(payload: JsonObject, fallbackName?: string) => Promise<{ path: string }>} persistNpzBySaveTarget
  * @property {(payload: JsonObject) => JsonObject} withBidsSaveFields
@@ -93,7 +92,7 @@
 
 /**
  * @typedef {object} RunStage
- * @property {() => void} renderRunStage Draw the run page for the current run, or the plan without one.
+ * @property {() => void} renderRunStage Draw the run page for the current run; it is empty without one.
  * @property {() => void} scheduleRunRender Redraw the run page at the next frame, once however often asked.
  * @property {() => Promise<void>} autoSaveRunDecomposition
  * @property {(msg: JsonObject) => void} handleStreamMessage

@@ -273,6 +273,7 @@ Use this to trace what the user can reach.
 | `load_otb4()` | App-internal | Called via `factory._LOADERS` |
 | `load_bids_signal()` | App-internal | Called via `factory._LOADERS` |
 | `load_intan()` | App-internal | Called via `factory._LOADERS` |
+| `load_openephys()` | App-internal | Called via `factory._LOADERS` |
 | `export_bids_emg()` | App-internal | Called by `preprocess._export_raw_emg_bids`, editing service |
 | `write_bids_dataset_description()` | App-internal | Called by `preprocess`, editing service |
 | `export_bids_mu_derivatives()` | App-internal | Called by editing service |

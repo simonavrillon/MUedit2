@@ -2,9 +2,7 @@
 
 .form-subsection-label {
   font-size: var(--fs-sm);
-  font-weight: var(--fw-medium);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-weight: var(--fw-semibold);
   color: var(--muted);
   margin-top: 10px;
   margin-bottom: 2px;

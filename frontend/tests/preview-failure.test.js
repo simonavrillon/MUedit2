@@ -109,7 +109,7 @@ describe("raw preview failure", () => {
       applyPreviewMetadata: recorder(),
       populateAuxSelector: recorder(),
       populateGridTabs: recorder(),
-      renderBidsAutoInfo: recorder(),
+      prefillHardwareFields: recorder(),
       renderBidsMuscleFields: recorder(),
       showWorkspace: recorder(),
     });

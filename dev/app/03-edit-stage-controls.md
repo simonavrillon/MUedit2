@@ -16,22 +16,21 @@ edit is one `POST /edit/ops/{op}`, and the page applies the change the server re
 |  [editMuGridSelect v] [editMuSelect v]                          |
 |                                                                |
 |  +--- Toolbar ---------------------------------------------+  |
-|  | [Flag MU]  [Remove Duplicates]  [Duplicate MU]            |  |
-|  | [Remove Outliers]  [Add Spike]  [Add Artifact]            |  |
-|  | [Delete Spike/Artifact]                                   |  |
-|  | [Update Filter]  [Peel-off: Off]  [Lock: Off]             |  |
+|  | [Flag MU]  [Remove duplicates]  [Duplicate MU]            |  |
+|  | [Remove outliers]  [Add spike]  [Add artifact]            |  |
+|  | [Delete spike/artifact]                                   |  |
+|  | [Update filter]  [Peel-off: Off]  [Lock: Off]             |  |
 |  | [Undo]  [Reset]  [Save]                                    |  |
 |  +-----------------------------------------------------------+  |
 |                                                                |
 |  Shortcuts: < > R A X D Space P L <- -> up down               |
-|  [editStatus pill]                                             |
 +----------------------------------------------------------------+
 |                                                                |
 |  +-----------------------------------------------------------+ |
-|  | Firing Rate (pps)          (#editDrCanvas)                 | |
+|  | Firing rate (pps)          (#editDrCanvas)                 | |
 |  +-----------------------------------------------------------+ |
 |  +-----------------------------------------------------------+ |
-|  | Pulse Train                (#editPulseCanvas)              | |
+|  | Pulse train                (#editPulseCanvas)              | |
 |  +-----------------------------------------------------------+ |
 |  [-----------------------------------------------------------] |
 |  Navigation Timeline (#editTimelineCanvas)                     |
@@ -51,13 +50,13 @@ button shows busy; one with `run` only changes the page.
 | Button ID | Label | Handler | API Call | Description |
 |---|---|---|---|---|
 | `editFlagBtn` | Flag MU | `flagMuForDeletion()` | `op: flag` | Toggles the deletion flag of the current MU. A flagged MU is drawn as a flat line and is dropped on save. |
-| `editDeduplicateBtn` | Remove Duplicates | `removeDuplicateMus()` | `op: remove-duplicates` | Removes duplicate MUs with the decomposition's rules (within each grid, then across grids unless `duplicatesbgrids` is false). The change's `kept_indices` reorder every per-MU array (`keepEditMus`). Clears the undo stack. |
+| `editDeduplicateBtn` | Remove duplicates | `removeDuplicateMus()` | `op: remove-duplicates` | Removes duplicate MUs with the decomposition's rules (within each grid, then across grids unless `duplicatesbgrids` is false). The change's `kept_indices` reorder every per-MU array (`keepEditMus`). Clears the undo stack. |
 | `editDuplicateBtn` | Duplicate MU | `duplicateMu()` | `op: duplicate` | Appends a copy of the current MU with a new UID `g{grid}_mu{n}` and switches to it. |
-| `editOutliersBtn` | Remove Outliers | `removeOutliers()` | `op: remove-outliers` | Removes outlier spikes from the current MU based on discharge rate statistics. |
-| `editAddBtn` | Add Spike | `setEditMode("add")` | — | Enters "add" mode. The user then drags a box on the pulse canvas to add spikes. |
-| `editAddArtifactBtn` | Add Artifact | `setEditMode("add_artifact")` | — | Enters "add_artifact" mode. The user drags a box on the pulse canvas to mark artifacts. |
-| `editDeleteSpikeBtn` | Delete Spike/Artifact | `setEditMode("delete_spikes")` | — | Enters "delete_spikes" mode. The user drags a box on the pulse canvas to delete the spikes and artifacts in it. |
-| `editUpdateBtn` | Update Filter | `requestFilterUpdate()` | `op: update-filter` | Refits the current MU's filter on the EMG in view. Sends the peel-off and lock-spike toggles and the project. 10min timeout: it waits for the grid's filtering. |
+| `editOutliersBtn` | Remove outliers | `removeOutliers()` | `op: remove-outliers` | Removes outlier spikes from the current MU based on discharge rate statistics. |
+| `editAddBtn` | Add spike | `setEditMode("add")` | — | Enters "add" mode. The user then drags a box on the pulse canvas to add spikes. |
+| `editAddArtifactBtn` | Add artifact | `setEditMode("add_artifact")` | — | Enters "add_artifact" mode. The user drags a box on the pulse canvas to mark artifacts. |
+| `editDeleteSpikeBtn` | Delete spike/artifact | `setEditMode("delete_spikes")` | — | Enters "delete_spikes" mode. The user drags a box on the pulse canvas to delete the spikes and artifacts in it. |
+| `editUpdateBtn` | Update filter | `requestFilterUpdate()` | `op: update-filter` | Refits the current MU's filter on the EMG in view. Sends the peel-off and lock-spike toggles and the project. 10min timeout: it waits for the grid's filtering. |
 | `editPeelOffToggle` | Peel-off: Off/On | `applyLabeledToggle(...)` | — | Sets `use_peeloff`, read by `requestFilterUpdate`. |
 | `editLockSpikesToggle` | Lock: Off/On | `applyLabeledToggle(...)` | — | Sets `lock_spikes`, read by `requestFilterUpdate`. |
 | `editUndoBtn` | Undo | `undoEdit()` | `op: undo` | Takes back the last edit, whichever MU it touched (up to 100 levels). Disabled while `state.edit.canUndo` is false. |
@@ -81,7 +80,7 @@ server answers after another decomposition was opened is not applied.
 
 ## Canvas Interactions
 
-### Pulse Train Canvas (`#editPulseCanvas`)
+### Pulse train Canvas (`#editPulseCanvas`)
 
 | Interaction | Action |
 |---|---|
@@ -281,7 +280,7 @@ in `sessionStorage`, and `restoreEditSession` reopens it at startup.
 
 | Element ID | Purpose |
 |---|---|
-| `editStatus` | `aria-live="polite"` status pill; updated by `setEditStatus(msg, kind)` |
+| `status` | The app's top-right `aria-live="polite"` status pill, shared with the other stages; updated by `setStatus(msg, kind)` |
 
 Status messages are set after each operation (e.g., "Spikes added", "Filter updated", "MU flagged", "Saved to ...").
 
@@ -304,6 +303,6 @@ User clicks Save (#editSaveBtn)
            editHistory = saved.edit_history      [with the remove_flagged/remove_duplicates entries]
         3. refreshEditModeButtons()               [the undo stack starts over]
         4. renderEditExplorer()
-        5. setEditStatus("Edited decomposition saved to {path}", "success")
-        6. (on error: handleError(err, setEditStatus, "Save failed"))
+        5. setStatus("Edited decomposition saved to {path}", "success")
+        6. (on error: handleError(err, setStatus, "Save failed"))
 ```

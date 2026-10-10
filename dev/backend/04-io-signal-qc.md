@@ -37,12 +37,14 @@ same rules.
 | `.bdf` | `load_bids_signal` | `_bids_reader.py` |
 | `.edf` | `load_bids_signal` | `_bids_reader.py` |
 | `.rhd` | `load_intan` | `_intan.py` |
+| `.oebin` | `load_openephys` | `_openephys.py` |
 
 #### Dispatch logic (`get_loader`)
 
 - If `filepath` is a **directory**:
   - Globs for `*_emg.bdf` / `*_emg.edf` -> returns `load_bids_signal`
   - Globs for `*.rhd` -> returns `load_intan`
+  - Holds `structure.oebin` -> returns `load_openephys`
   - Otherwise raises `ValueError`
 - If a **file**: looks up `path.suffix.lower()` in `_LOADERS`; raises `ValueError` if not found.
 
@@ -77,6 +79,13 @@ Accepts a recording directory, its `info.rhd`, or a single-file `.rhd`. Supports
 Scales amplifier data to millivolts (0.195 uV/bit x amplifier gain 192), scales auxiliary streams to physical units, groups amplifier channels into one grid per port, resolves grid model names (from args -> `muedit_grids.json` sidecar -> channel-count default), calls `format_hdemg_signal` for coordinates/IEDs.
 
 Key structures: `_IntanChannel`, `_IntanHeader` (with `enabled_channels()`, `samples_per_block`), `_Recording`. Magic: `_RHD_MAGIC = 0xC6912702`. Default grids: `{64: "INTAN64-1305"}`.
+
+### Open Ephys (`_openephys.py`)
+
+```python
+def load_openephys(filepath: str, grid_names=None, muscles=None, store=None) -> SignalImport
+```
+Accepts `structure.oebin` or the recording directory holding it (GUI binary format). Picks the continuous stream with the most ephys (`type` 0) channels and reads its interleaved int16 `continuous.dat` in blocks. Ephys channels are scaled by their `bit_volts` to millivolts; the stream's other channels (ADC, AUX) are scaled to volts, and TTL lines with edges (`events/<stream>/TTL`) become 0/1 auxiliary rows `TTL<n>`. Grid names come from args -> the nearest `muedit_grids.json` (recording, experiment, then Record Node folder) -> one default per headstage that `settings.xml` lists (`HSOPTIONS` slots flagged `full_channels`, 32 channels each -> `MYOMNP-1x32`), else `INTAN64-1305` per 64 channels; a single name is repeated, and the grids must cover every ephys channel. Filter cutoffs come from the source processor's `EDITOR` in the Record Node's `settings.xml` (`settings_<n>.xml` for `experiment<n>`); the acquisition date comes from `sync_messages.txt`.
 
 ### OT Bioelettronica (`_otb.py`)
 

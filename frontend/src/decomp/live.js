@@ -1,5 +1,3 @@
-import { POSTPROCESS_MODES, DEFAULT_POSTPROCESS_MODE } from "./params.js";
-
 /** @typedef {import("../app/context.js").JsonObject} JsonObject */
 /** @typedef {import("../state/state.js").State} State */
 
@@ -269,56 +267,4 @@ export function buildRunSummary(summary, preview) {
     perGrid[g < ngrid ? g : 0] += 1;
   }
   return { muCount, perGrid, muGridIndex };
-}
-
-/**
- * The settings a run is about to use, as the page lists them before it starts.
- *
- * @param {State} state
- * @param {import("./params.js").DecomposeParams} params
- * @param {string} postprocessMode
- * @returns {{ label: string, value: string }[]}
- */
-export function buildRunPlan(state, params, postprocessMode) {
-  const fs = Number(state.fsamp) || 0;
-  const rois = state.rois || [];
-  const gridCount = (state.gridNames || []).length;
-  const grids = (state.gridNames || []).map((name, idx) => {
-    const mask = state.discardMasks?.[idx] || [];
-    const kept = mask.filter((d) => !d).length;
-    const channels = mask.length ? ` (${kept}/${mask.length} ch)` : "";
-    return `${name || `Grid ${idx + 1}`}${channels}`;
-  });
-  const roiSeconds = fs
-    ? rois.reduce((sum, r) => sum + Math.max(0, r.end - r.start), 0) / fs
-    : 0;
-  const windows = `${rois.length || 1}${roiSeconds ? ` · ${roiSeconds.toFixed(1)} s` : ""}`;
-  const searches = gridCount * Math.max(1, rois.length);
-  const mode =
-    POSTPROCESS_MODES[postprocessMode] ||
-    POSTPROCESS_MODES[DEFAULT_POSTPROCESS_MODE];
-  const artifacts = (state.artifactRegions || []).length;
-  return [
-    { label: "Grids", value: grids.join(", ") || "None" },
-    { label: "Windows", value: windows },
-    {
-      label: "Iterations",
-      value: `${params.niter} per window${searches > 1 ? ` · ${params.niter * searches} total` : ""}`,
-    },
-    { label: "Silhouette threshold", value: String(params.sil_thr) },
-    {
-      label: "CoV filter",
-      value: params.covfilter ? `On · ≤ ${params.cov_thr}` : "Off",
-    },
-    {
-      label: "Peel-off",
-      value: params.peel_off_enabled
-        ? `On · ${Math.round(params.peel_off_win * 1000)} ms`
-        : "Off",
-    },
-    { label: "Post-processing", value: mode.label },
-    ...(artifacts
-      ? [{ label: "Artifact windows", value: String(artifacts) }]
-      : []),
-  ];
 }

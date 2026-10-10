@@ -26,6 +26,7 @@ DATA_FIXTURES = frozenset(
         "otb_plus_file",
         "otb4_file",
         "intan_dir",
+        "openephys_dir",
         "decomp_mat_file",
         "novecento_otb4_file",
         "simulation_mat_files",
@@ -81,6 +82,12 @@ def otb4_file() -> Path:
 def intan_dir() -> Path:
     """Intan RHD recording directory ("one file per channel", 2x64 ch @ 10 kHz)."""
     return require_sample(DATA_DIR / "Intan")
+
+
+@pytest.fixture(scope="session")
+def openephys_dir() -> Path:
+    """Open Ephys binary recording folder (2x MYOMNP-1x32 + 8 ADC @ 20 kHz, grid sidecar)."""
+    return require_sample(DATA_DIR / "Record Node 101" / "experiment1" / "21_con_fs")
 
 
 @pytest.fixture(scope="session")

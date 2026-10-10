@@ -6,12 +6,10 @@
 import {
   applyParticipantFields,
   applySessionInfoToDom,
-  renderBidsAutoInfo as renderBidsAutoInfoView,
   renderBidsMuscleFields as renderBidsMuscleFieldsView,
   resetBidsEntityDefaults,
 } from "../../view/bids-renderer.js";
 import {
-  buildBidsAutoInfoModel,
   buildBidsMuscleRowsModel,
   buildEntityLabelFromSession,
   buildSessionInfoFromDecomposition,
@@ -170,28 +168,23 @@ export function createFileSessionService(app) {
     setFsamp(state, payload.fsampText);
   }
 
-  /** @type {FileSessionService["renderBidsAutoInfo"]} */
-  function renderBidsAutoInfo() {
-    const model = buildBidsAutoInfoModel(state);
-    renderBidsAutoInfoView(els, model);
-    // Pre-fill editable hardware fields from loader metadata when empty.
-    if (model && !model.hidden) {
-      if (
-        els.bidsManufacturer &&
-        !els.bidsManufacturer.value &&
-        model.manufacturer
-      )
-        els.bidsManufacturer.value = model.manufacturer;
-      if (els.bidsDeviceModel && !els.bidsDeviceModel.value && model.deviceName)
-        els.bidsDeviceModel.value = model.deviceName;
-      const meta = state.metadata || {};
-      if (
-        els.bidsPowerlineFreq &&
-        !els.bidsPowerlineFreq.value &&
-        meta.powerline_freq
-      )
-        els.bidsPowerlineFreq.value = String(meta.powerline_freq);
-    }
+  /** @type {FileSessionService["prefillHardwareFields"]} */
+  function prefillHardwareFields() {
+    const meta = state.metadata || {};
+    if (
+      els.bidsManufacturer &&
+      !els.bidsManufacturer.value &&
+      meta.manufacturer
+    )
+      els.bidsManufacturer.value = String(meta.manufacturer);
+    if (els.bidsDeviceModel && !els.bidsDeviceModel.value && meta.device_name)
+      els.bidsDeviceModel.value = String(meta.device_name);
+    if (
+      els.bidsPowerlineFreq &&
+      !els.bidsPowerlineFreq.value &&
+      meta.powerline_freq
+    )
+      els.bidsPowerlineFreq.value = String(meta.powerline_freq);
   }
 
   /** @type {FileSessionService["renderBidsMuscleFields"]} */
@@ -286,7 +279,7 @@ export function createFileSessionService(app) {
     setBidsEntitiesInput,
     applyPreviewMetadata,
     applySessionInfoFromDecomposition,
-    renderBidsAutoInfo,
+    prefillHardwareFields,
     renderBidsMuscleFields,
     persistNpzBySaveTarget,
     withBidsSaveFields,

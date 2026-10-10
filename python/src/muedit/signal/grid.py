@@ -236,17 +236,18 @@ _GRID_CATALOG: dict[str, GridSpec] = {
         electrode_material="gold coated",
     ),
     # ── camber – Emory University intramuscular arrays (32 ch) ──────────────
+    # One column per thread, in Open Ephys GUI channels (Myomatrix "Open Ephys GUI pinout").
     "MYOMRF-4x8": GridSpec(
         channel_map=np.array(
             [
-                [25, 1, 16, 24],
-                [26, 2, 15, 23],
-                [27, 3, 14, 22],
-                [28, 4, 13, 21],
-                [29, 5, 12, 20],
-                [30, 6, 11, 19],
-                [31, 7, 10, 18],
-                [32, 8, 9, 17],
+                [25, 1, 9, 17],
+                [26, 2, 10, 18],
+                [27, 3, 11, 19],
+                [28, 4, 12, 20],
+                [29, 5, 13, 21],
+                [30, 6, 14, 22],
+                [31, 7, 15, 23],
+                [32, 8, 16, 24],
             ]
         ),
         nbelectrodes=32,
@@ -256,17 +257,19 @@ _GRID_CATALOG: dict[str, GridSpec] = {
         electrode_type="intramuscular array",
         electrode_material="gold coated",
     ),
+    # One thread folded into its four 8-contact groups, in Open Ephys GUI channels
+    # from the ZIF end to the tip (Myomatrix "Open Ephys GUI pinout").
     "MYOMNP-1x32": GridSpec(
         channel_map=np.array(
             [
-                [24, 25, 16, 1],
-                [23, 26, 15, 2],
-                [22, 27, 14, 3],
-                [21, 28, 13, 4],
-                [20, 29, 12, 5],
-                [19, 30, 11, 6],
-                [18, 31, 10, 7],
-                [17, 32, 9, 8],
+                [24, 16, 25, 1],
+                [23, 15, 26, 2],
+                [22, 14, 27, 3],
+                [21, 13, 28, 4],
+                [20, 12, 29, 5],
+                [19, 11, 30, 6],
+                [18, 10, 31, 7],
+                [17, 9, 32, 8],
             ]
         ),
         nbelectrodes=32,

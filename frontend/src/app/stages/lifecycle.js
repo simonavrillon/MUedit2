@@ -49,6 +49,8 @@ const STAGES = {
       if (!state.gridSeries?.length) {
         return "Run step is locked until preview is loaded";
       }
+      // Without a run the page is empty: Decompose signal on QC starts one.
+      if (!state.runLive) return "";
       return null;
     },
     render(app) {
@@ -71,7 +73,7 @@ const STAGES = {
     exit(app) {
       if (!app.state.edit.mode) return;
       app.setEditMode(null);
-      app.setEditStatus("", "muted");
+      app.setStatus("", "muted");
     },
   },
 };

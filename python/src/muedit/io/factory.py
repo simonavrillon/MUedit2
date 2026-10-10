@@ -11,6 +11,7 @@ from muedit.io.loaders import (
     load_bids_signal,
     load_intan,
     load_mat,
+    load_openephys,
     load_otb4,
     load_otb_plus,
 )
@@ -48,6 +49,7 @@ _LOADERS: dict[str, LoaderFn] = {
     ".bdf": load_bids_signal,
     ".edf": load_bids_signal,
     ".rhd": load_intan,
+    ".oebin": load_openephys,
 }
 
 
@@ -67,7 +69,7 @@ def supported_extensions() -> tuple[str, ...]:
 
 
 def get_loader(filepath: str | Path) -> LoaderFn:
-    """Return loader function for filepath extension; accepts BIDS EMG or Intan directories."""
+    """Return loader function for filepath extension; accepts BIDS EMG, Intan or Open Ephys directories."""
     path = Path(filepath)
     if path.is_dir():
         candidates = sorted(path.glob("*_emg.bdf")) + sorted(path.glob("*_emg.edf"))
@@ -75,8 +77,11 @@ def get_loader(filepath: str | Path) -> LoaderFn:
             return load_bids_signal
         if sorted(path.glob("*.rhd")):
             return load_intan
+        if (path / "structure.oebin").is_file():
+            return load_openephys
         raise ValueError(
-            f"Directory does not contain a recognized BIDS EMG or Intan RHD file: {path}"
+            "Directory does not contain a recognized BIDS EMG, Intan RHD or Open Ephys "
+            f"structure.oebin file: {path}"
         )
     ext = path.suffix.lower()
     loader = _LOADERS.get(ext)

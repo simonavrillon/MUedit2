@@ -18,6 +18,7 @@ globalThis.window = {
 const { state: initialState } = await import("../src/state/state.js");
 const { createApp } = await import("../src/app/create-app.js");
 const { renderActiveStage } = await import("../src/app/stages/lifecycle.js");
+const { createRunLive } = await import("../src/decomp/live.js");
 
 const pristine = structuredClone(initialState);
 
@@ -60,6 +61,7 @@ beforeEach(() => {
   app.setStatus = recorder();
   app.state.file = { name: "a.otb+", path: "/a.otb+" };
   app.state.gridSeries = [new Float32Array([1, 2, 3])];
+  app.state.runLive = createRunLive(0);
 });
 
 const activePanels = () =>
@@ -105,6 +107,13 @@ describe("switchStage", () => {
     ]);
   });
 
+  test("Run before any run has started refuses silently", () => {
+    app.state.runLive = null;
+    app.switchStage("run");
+    assert.equal(app.state.currentStage, "qc");
+    assert.deepEqual(app.setStatus.calls, []);
+  });
+
   test("entering Edit without data says so but still enters", () => {
     app.switchStage("edit");
     assert.equal(app.state.currentStage, "edit");
@@ -125,10 +134,10 @@ describe("switchStage", () => {
     app.state.edit.distimes = [[1]];
     app.switchStage("edit");
     app.setEditMode("add", "Drag a box on pulse train to add spikes");
-    app.setEditStatus = recorder();
+    app.setStatus = recorder();
     app.switchStage("qc");
     assert.equal(app.state.edit.mode, null);
-    assert.deepEqual(app.setEditStatus.calls, [["", "muted"]]);
+    assert.deepEqual(app.setStatus.calls, [["", "muted"]]);
   });
 
   test("leaving Edit keeps the loaded decomposition", () => {

@@ -314,7 +314,7 @@ const PULSE_BOX_EDITS = {
 
 /** @param {App} app */
 export function bindEditCanvas(app) {
-  const { els, state, renderEditExplorer, setEditStatus, setEditMode } = app;
+  const { els, state, renderEditExplorer, setStatus, setEditMode } = app;
 
   const canvas = els.editPulseCanvas;
   if (!canvas) return;
@@ -359,7 +359,7 @@ export function bindEditCanvas(app) {
     setEditPulseDraftSelection(state, null);
     const armed = state.edit.mode ? PULSE_BOX_EDITS[state.edit.mode] : null;
     if (drag.delta < 6) {
-      if (armed?.hint) setEditStatus(armed.hint, "muted");
+      if (armed?.hint) setStatus(armed.hint, "muted");
       else if (armed) {
         app[armed.edit]({
           ...sel,

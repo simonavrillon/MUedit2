@@ -261,10 +261,11 @@ Methods: `to_dict()`
 | Component | Responsibility |
 |---|---|
 | `factory.py` | Loader registry, dispatch by extension, `load_signal()` |
-| `loaders.py` | Thin re-export of all 5 format loaders |
+| `loaders.py` | Thin re-export of all 6 format loaders |
 | `bids.py` | BIDS EMG export (EDF/BDF + sidecars + derivatives) |
 | `_bids_reader.py` | BIDS EMG reading via pyedflib + channels.tsv |
 | `_intan.py` | Intan RHD loader (3 save layouts: traditional, per-channel, per-signal-type) |
+| `_openephys.py` | Open Ephys binary-format loader (`structure.oebin` + `continuous.dat`) |
 | `mat.py` | MATLAB .mat v5 (scipy) + v7.3 (h5py/HDF5) loader |
 | `_otb.py` | OT Bioelettronica OTB+ and OTB4 archive loaders |
 | `npz.py` | `NpzWriter` (aligned, uncompressed, written row block by row block), `NpzArchive` (one open, members memory-mapped), the restricted unpickler for legacy files |

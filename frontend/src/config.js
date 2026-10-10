@@ -62,7 +62,12 @@ for (const [key, name] of Object.entries(COLOR_TOKENS)) {
 
 /** Canvas text: the page's font at its small size. */
 export function canvasFont() {
-  return `${cssToken("--fs-sm")} ${cssToken("--font")}`;
+  // Canvas text is drawn in pixels, so the rem token is resolved against the root size.
+  const rootPx = parseFloat(
+    getComputedStyle(document.documentElement).fontSize,
+  );
+  const sizePx = parseFloat(cssToken("--fs-xs")) * (rootPx || 16);
+  return `${sizePx}px ${cssToken("--font")}`;
 }
 
 const TRACE_COLOR_COUNT = 7;

@@ -98,8 +98,9 @@ export function updateStepAvailability(app) {
   const hasEditData = !!state.edit.distimes?.length;
 
   if (els.stepRun) {
-    // Run becomes available once a preview exists, independent of active stage.
-    els.stepRun.disabled = !hasFile || !hasPreview;
+    // The run page only has something to show once a run has started; the QC
+    // page's Decompose signal is what starts one.
+    els.stepRun.disabled = !hasFile || !hasPreview || !state.runLive;
   }
   if (els.stepEdit) {
     // Edit is available when edit data is loaded, or after a full run.

@@ -129,7 +129,7 @@ return `{saved, path, kept_indices, mu_uids, edit_history, bids_emg_paths?, bids
 |---|---|---|---|---|
 | GET | `/open-file` | — | JSON: `{path: str|None, name: str|None}` | `_open_dialog_macos()` (AppleScript) or `_open_dialog_tkinter()` (subprocess) |
 
-Accepted extensions: `mat, otb+, otb4, npz, bdf, edf, rhd`. Returns 408 on timeout, 500 on failure.
+Accepted extensions: `mat, otb+, otb4, npz, bdf, edf, rhd, oebin`. Returns 408 on timeout, 500 on failure.
 
 ### Session Router (`routes/memory.py`)
 

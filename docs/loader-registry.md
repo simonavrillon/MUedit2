@@ -11,6 +11,7 @@ python/src/muedit/io/
   mat.py            ← MAT v5/v7.3 loader (helpers shared with decomp/decomposition_file.py)
   _otb.py           ← OTB+ and OTB4 loaders
   _intan.py         ← Intan RHD loader (all three save layouts)
+  _openephys.py     ← Open Ephys binary-format loader (structure.oebin)
   _bids_reader.py   ← BIDS (EDF/BDF) loader + grid-read helpers
   bids.py           ← BIDS export + re-exports of read helpers
 ```
@@ -20,7 +21,7 @@ python/src/muedit/io/
 Loader dispatch is registry-based in `python/src/muedit/io/factory.py`:
 
 - `register_loader(ext, loader, *, overwrite=False)` — register/override an extension (`overwrite` is keyword-only)
-- `get_loader(filepath)` — resolve the loader for a path (or a BIDS/Intan recording directory)
+- `get_loader(filepath)` — resolve the loader for a path (or a BIDS/Intan/Open Ephys recording directory)
 - `supported_extensions()` — list registered extensions
 - `load_signal(filepath, store=None)` — load a file and return a `SignalImport`; with a
   `store`, its EMG and auxiliary arrays are written into that session store (memory-mapped)

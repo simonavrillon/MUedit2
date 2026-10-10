@@ -559,6 +559,20 @@ def _scale_auxiliary(
     return store.seal(auxiliary), names
 
 
+def _read_grid_sidecar(sidecar: Path) -> tuple[list[str], list[str]]:
+    """Return the grid names and muscle labels a ``muedit_grids.json`` sidecar lists, if any."""
+    if not sidecar.exists():
+        return [], []
+    try:
+        payload = json.loads(sidecar.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise OSError(f"Cannot read grid sidecar {sidecar}: {exc}") from exc
+    return (
+        [str(g) for g in _as_list(payload.get("gridname"))],
+        [str(m) for m in _as_list(payload.get("muscle"))],
+    )
+
+
 def _resolve_grids(
     rec: _Recording,
     ports: list[str],
@@ -567,17 +581,7 @@ def _resolve_grids(
     muscles: str | list[str] | None,
 ) -> tuple[list[str], list[str]]:
     """Resolve the grid model and muscle label of each amplifier port."""
-    sidecar_names: list[str] = []
-    sidecar_muscles: list[str] = []
-    sidecar = rec.directory / _GRID_SIDECAR
-    if sidecar.exists():
-        try:
-            payload = json.loads(sidecar.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            raise OSError(f"Cannot read grid sidecar {sidecar}: {exc}") from exc
-        sidecar_names = [str(g) for g in _as_list(payload.get("gridname"))]
-        sidecar_muscles = [str(m) for m in _as_list(payload.get("muscle"))]
-
+    sidecar_names, sidecar_muscles = _read_grid_sidecar(rec.directory / _GRID_SIDECAR)
     resolved = [str(g) for g in _as_list(grid_names)] or sidecar_names
     if not resolved:
         missing = sorted({n for n in channels_per_port if n not in _DEFAULT_GRIDS})

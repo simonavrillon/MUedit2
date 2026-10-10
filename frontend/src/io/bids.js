@@ -4,7 +4,6 @@ import { inferGridCount } from "./grid.js";
 /** @typedef {import("../state/state.js").FileRef} FileRef */
 /** @typedef {import("../app/context.js").JsonObject} JsonObject */
 
-/** @typedef {ReturnType<typeof buildBidsAutoInfoModel>} BidsAutoInfoModel */
 /** @typedef {ReturnType<typeof buildBidsMuscleRowsModel>} BidsMuscleRows */
 /** @typedef {ReturnType<typeof buildSessionInfoFromDecomposition>} SessionInfo */
 /** @typedef {{ age?: string | null, sex?: string | null, handedness?: string | null }} ParticipantFields */
@@ -91,38 +90,6 @@ export function listifyMuscles(value) {
     return value.map((v) => String(v || "").trim()).filter(Boolean);
   if (typeof value === "string" && value.trim()) return [value.trim()];
   return [];
-}
-
-/**
- * @param {State} state
- */
-export function buildBidsAutoInfoModel(state) {
-  const meta = state.metadata || {};
-  const muscles = Array.isArray(state.muscle) ? state.muscle : [];
-  const hasMeta =
-    !!meta.hardware_filters ||
-    !!meta.gains ||
-    muscles.length > 0 ||
-    !!meta.device_name;
-  if (!hasMeta) {
-    return { hidden: true };
-  }
-
-  const uniqueMuscles = [
-    ...new Set(muscles.filter((m) => m && typeof m === "string" && m.trim())),
-  ];
-  const hpf = Array.isArray(meta.emg_hpf) ? meta.emg_hpf[0] : meta.emg_hpf;
-  const lpf = Array.isArray(meta.emg_lpf) ? meta.emg_lpf[0] : meta.emg_lpf;
-  const gain = Array.isArray(meta.gains) ? meta.gains[0] : meta.gains;
-
-  return {
-    hidden: false,
-    manufacturer: meta.manufacturer || "",
-    deviceName: meta.device_name || "",
-    musclesText: uniqueMuscles.length ? uniqueMuscles.join(", ") : "",
-    filtersText: hpf || lpf ? `${hpf || "n/a"} - ${lpf || "n/a"} Hz` : "",
-    gainText: gain ? String(gain) : "",
-  };
 }
 
 /**

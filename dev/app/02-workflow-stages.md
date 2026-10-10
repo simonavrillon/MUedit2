@@ -30,6 +30,7 @@ The user selects a signal file (raw EMG or saved decomposition). The app detects
 | OTB4 | `.otb4` | Raw → QC stage |
 | BIDS EMG | `.bdf`, `.edf` | Raw → QC stage (parses BIDS entities from filename) |
 | Intan RHD | `.rhd` | Raw → QC stage (folder-named if header is "info.rhd") |
+| Open Ephys | `.oebin` | Raw → QC stage (folder-named if header is "structure.oebin") |
 | Decomposition | `.npz` | Decomposition → Edit stage (skips QC and Decompose) |
 
 ### User-Exposed UI
@@ -38,7 +39,7 @@ The user selects a signal file (raw EMG or saved decomposition). The app detects
 |---|---|---|
 | `browseSignalBtn` | Button | Opens native OS file dialog |
 | `uploadLoader` | Spinner | Loading indicator during upload |
-| `uploadFormatError` | Alert | Shows "Accepted: raw (.mat, .otb+, .otb4, .bdf, .edf, .rhd) or decomposition (.npz, .mat)" on unsupported file |
+| `uploadFormatError` | Alert | Shows "Accepted: raw (.mat, .otb+, .otb4, .bdf, .edf, .rhd, .oebin) or decomposition (.npz, .mat)" on unsupported file |
 
 ### Flow
 
@@ -94,7 +95,7 @@ then:
 
 ### Purpose
 
-The user reviews channel quality, discards bad channels, selects regions of interest (ROIs), marks artifact windows, fills in BIDS experiment metadata, and configures decomposition parameters. There is no explicit pass/fail gate — the user advances by clicking "Decompose Signal".
+The user reviews channel quality, discards bad channels, selects regions of interest (ROIs), marks artifact windows, fills in BIDS experiment metadata, and configures decomposition parameters. There is no explicit pass/fail gate — the user advances by clicking "Decompose signal".
 
 ### User-Exposed UI
 
@@ -141,7 +142,7 @@ ROI drag selection updates the nearest ROI window and triggers a QC grid window 
 
 Artifact windows are visually shaded on the EMG overview. They are OR'd into the decomposition artifact mask at run time, excluding those samples from filter updates and state propagation.
 
-#### Auxiliary Channels
+#### Auxiliary channels
 
 | Element ID | Type | Action |
 |---|---|---|
@@ -152,9 +153,9 @@ Artifact windows are visually shaded on the EMG overview. They are OR'd into the
 
 | Element ID | Type | Action |
 |---|---|---|
-| `startBtn` | Button | "Decompose Signal" — triggers `runDecomposition()` (guarded: disabled if no file or already running) |
+| `startBtn` | Button | "Decompose signal" — triggers `runDecomposition()` (guarded: disabled if no file or already running) |
 
-#### Session Info Form (Settings Panel)
+#### Session info Form (Settings Panel)
 
 | Field ID | Type | Default | Purpose |
 |---|---|---|---|
@@ -175,9 +176,8 @@ Artifact windows are visually shaded on the EMG overview. They are OR'd into the
 | `bidsDeviceModel` | text input | — | Device model |
 | `fsamp` | number input (readonly) | 2048 | Sampling frequency (auto-filled) |
 | `bidsPowerlineFreq` | select (50, 60) | "50" | Powerline frequency |
-| `bidsAutoInfo` | div (auto-detected) | hidden | Auto-detected metadata (muscles, filters, gain) |
 
-#### Decomposition Settings (Settings Panel)
+#### Decomposition settings (Settings Panel)
 
 | Field ID | Type | Default | Purpose |
 |---|---|---|---|
@@ -208,7 +208,7 @@ Artifact windows are visually shaded on the EMG overview. They are OR'd into the
   -> showWorkspace("qc")         switchStage("qc"), which draws the page once, at the next frame:
        renderChannelQC()         channel grid with mini-plots (asks ensureQcTraces)
        refreshVisuals()          EMG overview and aux traces, with the windows
-  -> renderBidsAutoInfo()        shows auto-detected metadata
+  -> prefillHardwareFields()     fills empty hardware fields from file metadata
   -> renderBidsMuscleFields()    creates muscle name inputs
   -> the landing page hides in that frame, after the draw; the grid's traces fill in as they arrive
 
@@ -222,7 +222,7 @@ User reviews channels:
   - fills BIDS form fields
   - configures decomposition parameters
 
-User clicks "Decompose Signal" (#startBtn)
+User clicks "Decompose signal" (#startBtn)
   -> runDecomposition()  [transitions to Stage 3]
 ```
 
@@ -241,7 +241,7 @@ User clicks "Decompose Signal" (#startBtn)
 
 ### Purpose
 
-The decomposition pipeline runs server-side, streaming progress events to the frontend. The run page shows the plan the settings imply before a run, follows the search live while it runs, and reports the result when it finishes. The model behind the page lives in `decomp/live.js` (`RunLive`), its rendering in `view/run-live.js`.
+The decomposition pipeline runs server-side, streaming progress events to the frontend. The run page can only be entered once a run has started (the QC stage's **Decompose signal** starts one); it follows the search live while it runs, and reports the result when it finishes. The model behind the page lives in `decomp/live.js` (`RunLive`), its rendering in `view/run-live.js`.
 
 ### User-Exposed UI
 
@@ -249,8 +249,6 @@ The `#stageRun` container carries `data-mode`: `pre` (no run yet), `live` (a run
 
 | Element ID | Type | Action |
 |---|---|---|
-| `runPlan` | Definition list | The pre-run plan: grids (and kept channels), windows, iterations, the filters |
-| `runStartBtn` | Button | Start the decomposition |
 | `runPhases` | Phase track | Load → Filter → Decompose → Post-process → Save; the active dot bounces, a failed phase turns red |
 | `runCount`, `runCountLabel`, `runCountGrids` | Counter | Units kept so far (per grid), then the summary's final count |
 | `runElapsed`, `runEta` | Clock | Elapsed time, and the time left projected from the search's pace |
@@ -262,12 +260,12 @@ The `#stageRun` container carries `data-mode`: `pre` (no run yet), `live` (a run
 | `runAgainBtn` | Button | Run again with the current settings |
 | `cancelRunBtn` | Button | Cancel the running decomposition (shown while it runs) |
 
-The QC stage's `#startBtn` ("Decompose Signal") starts the run too; the three start buttons share `updateStartAvailability`.
+The QC stage's `#startBtn` ("Decompose signal") starts the run; it and **Run again** share `updateStartAvailability`.
 
 ### Flow
 
 ```
-User clicks "Decompose Signal" / "Start decomposition"
+User clicks "Decompose signal" / "Start decomposition"
   -> runDecomposition()
      1. Guards: isRunning? file? -> early return
      2. setIsRunning(state, true); setParameters(state, buildParams())
@@ -289,7 +287,7 @@ User clicks "Decompose Signal" / "Start decomposition"
      7. Stream NDJSON reader loop:
         - each line -> handleStreamMessage(msg), which folds it into state.runLive
           - msg.stage=="error"      -> failRun() (live.js): live.status="failed", live.error
-          - msg.stage=="cancelled"  -> setRunLive(state, null): the page returns to the plan
+          - msg.stage=="cancelled"  -> setRunLive(state, null), then back to QC if the run page is showing
           - otherwise applyRunEvent(): the event's phase moves the track; decompose
             events (grid, window, iter, outcomes) fill the row's dots and bump
             keptByGrid, then updateRunDots() restyles just the changed dots

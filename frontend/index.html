@@ -20,7 +20,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
       rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@300..700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400..700&display=swap"
     />
     <link rel="stylesheet" href="css/tokens.css" />
     <link rel="stylesheet" href="css/base.css" />
@@ -161,7 +161,7 @@
                 />
               </svg>
             </button>
-            <!-- Session Info -->
+            <!-- Session info -->
             <section class="panel-section collapsed">
               <div class="section-header" role="button" aria-expanded="false">
                 <span class="section-header-main">
@@ -179,7 +179,7 @@
                       d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"
                     />
                   </svg>
-                  <span>Session Info</span>
+                  <span>Session info</span>
                 </span>
               </div>
               <div class="section-content">
@@ -337,16 +337,10 @@
                     <option value="60">60</option>
                   </select>
                 </div>
-
-                <div
-                  id="bidsAutoInfo"
-                  class="auto-info-box hidden"
-                  aria-live="polite"
-                ></div>
               </div>
             </section>
 
-            <!-- Decomposition Settings -->
+            <!-- Decomposition settings -->
             <section class="panel-section collapsed">
               <div class="section-header" role="button" aria-expanded="false">
                 <span class="section-header-main">
@@ -369,7 +363,7 @@
                       d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"
                     />
                   </svg>
-                  <span>Decomposition Settings</span>
+                  <span>Decomposition settings</span>
                 </span>
               </div>
               <div class="section-content">
@@ -419,7 +413,7 @@
               </div>
             </section>
 
-            <!-- Quality Filters -->
+            <!-- Quality filters -->
             <section class="panel-section collapsed">
               <div class="section-header" role="button" aria-expanded="false">
                 <span class="section-header-main">
@@ -437,7 +431,7 @@
                       d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456ZM16.894 20.567 16.5 21.75l-.394-1.183a2.25 2.25 0 0 0-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 0 0 1.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 0 0 1.423 1.423l1.183.394-1.183.394a2.25 2.25 0 0 0-1.423 1.423Z"
                     />
                   </svg>
-                  <span>Quality Filters</span>
+                  <span>Quality filters</span>
                 </span>
               </div>
               <div class="section-content">
@@ -510,7 +504,7 @@
                     id="startBtn"
                     type="button"
                   >
-                    <span>Decompose Signal</span>
+                    <span>Decompose signal</span>
                     <svg
                       xmlns="http://www.w3.org/2000/svg"
                       fill="none"
@@ -529,12 +523,12 @@
                 </div>
                 <div class="split">
                   <div class="chart-card qc-card scroll-card glass">
-                    <div class="chart-title">Grid Channel Quality</div>
+                    <div class="chart-title">EMG channels</div>
                     <div id="qcSection" class="qc-section"></div>
                   </div>
                   <div class="qc-right-column">
                     <div class="chart-card glass">
-                      <div class="chart-title">Average EMG Activity</div>
+                      <div class="chart-title">Average EMG activity</div>
                       <div class="artifact-controls">
                         <span class="artifact-controls-label">
                           Artifact windows
@@ -561,7 +555,7 @@
                       <canvas id="emgCanvas" height="180"></canvas>
                     </div>
                     <div class="chart-card glass">
-                      <div class="chart-title">Auxiliary Channels</div>
+                      <div class="chart-title">Auxiliary channels</div>
                       <div class="form-row slim aux-selector-row">
                         <select id="auxSelector"></select>
                       </div>
@@ -573,20 +567,6 @@
 
               <!-- Run Stage -->
               <div class="stage stage-run" id="stageRun" data-mode="pre">
-                <section class="run-pre" aria-labelledby="runPreTitle">
-                  <div class="chart-title" id="runPreTitle">
-                    Ready to decompose
-                  </div>
-                  <dl class="run-plan" id="runPlan"></dl>
-                  <button
-                    class="start-btn qc-run-btn run-action-btn"
-                    id="runStartBtn"
-                    type="button"
-                  >
-                    Start decomposition
-                  </button>
-                </section>
-
                 <section class="run-live" aria-label="Decomposition progress">
                   <ol class="run-phases" id="runPhases">
                     <li data-phase="load">
@@ -623,7 +603,7 @@
                     hidden
                   ></div>
 
-                  <div class="run-result" id="runResult">
+                  <div class="run-result">
                     <p class="run-save-text" id="runSaveText"></p>
                     <div class="run-result-actions">
                       <button
@@ -730,7 +710,7 @@
                                   d="M12 3c2.755 0 5.455.232 8.083.678.533.09.917.556.917 1.096v1.044a2.25 2.25 0 0 1-.659 1.591l-5.432 5.432a2.25 2.25 0 0 0-.659 1.591v2.927a2.25 2.25 0 0 1-1.244 2.013L9.75 21v-6.568a2.25 2.25 0 0 0-.659-1.591L3.659 7.409A2.25 2.25 0 0 1 3 5.818V4.774c0-.54.384-1.006.917-1.096A48.32 48.32 0 0 1 12 3Z"
                                 />
                               </svg>
-                              <span>Remove Duplicates</span>
+                              <span>Remove duplicates</span>
                             </button>
                             <button
                               class="pill-toggle icon-expand-btn"
@@ -775,7 +755,7 @@
                                   d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456ZM16.894 20.567 16.5 21.75l-.394-1.183a2.25 2.25 0 0 0-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 0 0 1.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 0 0 1.423 1.423l1.183.394-1.183.394a2.25 2.25 0 0 0-1.423 1.423Z"
                                 />
                               </svg>
-                              <span>Remove Outliers</span>
+                              <span>Remove outliers</span>
                             </button>
                             <button
                               class="pill-toggle icon-expand-btn"
@@ -796,7 +776,7 @@
                                   d="M12 9v6m3-3H9m12 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
                                 />
                               </svg>
-                              <span>Add Spike</span>
+                              <span>Add spike</span>
                             </button>
                             <button
                               class="pill-toggle icon-expand-btn"
@@ -818,7 +798,7 @@
                                   d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"
                                 />
                               </svg>
-                              <span>Add Artifact</span>
+                              <span>Add artifact</span>
                             </button>
                             <button
                               class="pill-toggle icon-expand-btn"
@@ -839,7 +819,7 @@
                                   d="M15 12H9m12 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
                                 />
                               </svg>
-                              <span>Delete Spike/Artifact</span>
+                              <span>Delete spike/artifact</span>
                             </button>
                           </div>
                           <div class="edit-toolbar-group">
@@ -862,7 +842,7 @@
                                   d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99"
                                 />
                               </svg>
-                              <span>Update Filter</span>
+                              <span>Update filter</span>
                             </button>
                             <button
                               class="pill-toggle icon-expand-btn"
@@ -961,25 +941,19 @@
                       </div>
                     </div>
                     <p class="hint muted">
-                      Shortcuts: `<`/`>` previous-next MU, `R` remove outliers,
-                      `A` add spikes, `X` add artifact, `D` delete
-                      spikes/artifacts, `Space` update filter, `P` toggle
-                      peel-off, `L` toggle lock spikes, `←`/`→` scroll, `↑`/`↓`
-                      zoom.
+                      Shortcuts: &lt;/&gt; previous-next MU, R remove outliers,
+                      A add spikes, X add artifact, D delete spikes/artifacts,
+                      Space update filter, P toggle peel-off, L toggle lock
+                      spikes, ←/→ scroll, ↑/↓ zoom.
                     </p>
-                    <span
-                      id="editStatus"
-                      class="status-pill"
-                      aria-live="polite"
-                    ></span>
                   </div>
                 </div>
                 <div class="chart-card glass edit-full" id="editDrCard">
-                  <div class="chart-title">Firing Rate (pps)</div>
+                  <div class="chart-title">Firing rate (pps)</div>
                   <canvas id="editDrCanvas" height="280"></canvas>
                 </div>
                 <div class="chart-card glass edit-full" id="editPulseCard">
-                  <div class="chart-title">Pulse Train</div>
+                  <div class="chart-title">Pulse train</div>
                   <canvas id="editPulseCanvas" height="280"></canvas>
                 </div>
                 <canvas

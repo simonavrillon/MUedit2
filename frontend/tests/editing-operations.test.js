@@ -115,7 +115,6 @@ function changeFrame(meta, spikes = []) {
 function testApp(state) {
   const app = createApp({ state, els: {}, api: {} });
   Object.assign(app, {
-    setEditStatus: recorder(),
     setStatus: recorder(),
     renderEditExplorer: recorder(),
     requestRoiEdit: recorder(),
@@ -366,10 +365,7 @@ describe("edits on the server", () => {
     assert.equal(state.edit.canUndo, true);
     assert.deepEqual(state.edit.bookmarkPosition, { muIdx: 0, position: 5 });
     assert.equal(state.edit.editHistory.at(-1).type, "delete_spikes");
-    assert.deepEqual(app.setEditStatus.calls.at(-1), [
-      "ROI applied",
-      "success",
-    ]);
+    assert.deepEqual(app.setStatus.calls.at(-1), ["ROI applied", "success"]);
   });
 
   test("undo asks the server and drops the log entries it took back", async () => {
@@ -393,16 +389,13 @@ describe("edits on the server", () => {
     );
     assert.equal(state.edit.canUndo, false);
     assert.equal(state.edit.selectionPulse, null);
-    assert.deepEqual(app.setEditStatus.calls.at(-1), [
-      "Undo applied",
-      "success",
-    ]);
+    assert.deepEqual(app.setStatus.calls.at(-1), ["Undo applied", "success"]);
   });
 
   test("nothing to undo says so and asks nothing", async () => {
     app.api = fakeApi({});
     await undoEdit(app);
-    assert.deepEqual(app.setEditStatus.calls, [["Nothing to undo", "muted"]]);
+    assert.deepEqual(app.setStatus.calls, [["Nothing to undo", "muted"]]);
     assert.equal(app.api.calls.length, 0);
   });
 
@@ -423,7 +416,7 @@ describe("edits on the server", () => {
     assert.deepEqual(app.api.calls[0], ["duplicate", { token: "tok", mu: 1 }]);
     assert.equal(state.edit.distimes.length, 3);
     assert.equal(state.edit.currentMu, 2);
-    assert.deepEqual(app.setEditStatus.calls.at(-1), [
+    assert.deepEqual(app.setStatus.calls.at(-1), [
       "MU duplicated — now editing MU 3",
       "success",
     ]);
@@ -450,7 +443,7 @@ describe("edits on the server", () => {
     assert.deepEqual(rows(state.edit.artifactTimes), [[], [7]]);
     assert.deepEqual(state.edit.muUids, ["g0_mu1", "g0_mu2"]);
     assert.equal(state.edit.currentMu, 1);
-    assert.deepEqual(app.setEditStatus.calls.at(-1), [
+    assert.deepEqual(app.setStatus.calls.at(-1), [
       "1 duplicate removed",
       "success",
     ]);
@@ -461,7 +454,7 @@ describe("edits on the server", () => {
       "remove-duplicates": changeFrame({ removed_count: 0, dirty: false }),
     });
     await removeDuplicateMus(app);
-    assert.deepEqual(app.setEditStatus.calls.at(-1), [
+    assert.deepEqual(app.setStatus.calls.at(-1), [
       "No duplicates found",
       "muted",
     ]);
@@ -486,7 +479,7 @@ describe("edits on the server", () => {
       [2, 5, 8],
       [1, 4],
     ]);
-    assert.match(app.setEditStatus.calls.at(-1)[0], /mu_index out of range/);
+    assert.match(app.setStatus.calls.at(-1)[0], /mu_index out of range/);
   });
 });
 
@@ -565,7 +558,7 @@ describe("a session left during an edit", () => {
     await removeOutliers(app);
     assert.deepEqual(rows(state.edit.distimes), before);
     assert.match(
-      app.setEditStatus.calls.at(-1)[0],
+      app.setStatus.calls.at(-1)[0],
       /Another decomposition was opened meanwhile/,
     );
     assert.equal(state.edit.busy, false);
@@ -590,7 +583,7 @@ describe("an edit the page gave up on", () => {
     ]);
     assert.deepEqual(state.edit.versions, [5, 5]);
     assert.match(
-      app.setEditStatus.calls.at(-1)[0],
+      app.setStatus.calls.at(-1)[0],
       /Outlier removal failed: Request timed out; the page now shows the session as the server left it/,
     );
     assert.equal(state.edit.busy, false);
@@ -609,7 +602,7 @@ describe("an edit the page gave up on", () => {
     await removeOutliers(app);
     assert.deepEqual(rows(state.edit.distimes), before);
     assert.match(
-      app.setEditStatus.calls.at(-1)[0],
+      app.setStatus.calls.at(-1)[0],
       /Outlier removal failed: Request timed out$/,
     );
   });
@@ -635,7 +628,7 @@ describe("a decomposition that fails to open", () => {
     assert.deepEqual(state.edit, before);
     assert.equal(app.resetEditState.calls.length, 0);
     assert.match(
-      app.setEditStatus.calls.at(-1)[0],
+      app.setStatus.calls.at(-1)[0],
       /Failed to load: not a decomposition/,
     );
   });

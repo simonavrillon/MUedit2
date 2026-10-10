@@ -23,10 +23,8 @@
   background: var(--surface);
   color: var(--mu-3);
   border-radius: var(--radius-sm);
-  font-weight: var(--fw-bold);
+  font-weight: var(--fw-semibold);
   font-size: var(--fs-md);
-  letter-spacing: 0;
-  text-transform: none;
   line-height: normal;
 }
 
@@ -69,8 +67,7 @@
 .artifact-controls-label {
   color: var(--muted);
   font-size: var(--fs-sm);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+  font-weight: var(--fw-semibold);
   margin-right: 2px;
 }
 
@@ -86,7 +83,7 @@
   color: var(--text);
   border-radius: var(--radius-sm);
   font-size: var(--fs-md);
-  font-weight: var(--fw-bold);
+  font-weight: var(--fw-semibold);
   line-height: 1;
   cursor: pointer;
   transition:
@@ -125,7 +122,7 @@
   color: var(--text);
   padding: 8px 14px;
   border-radius: var(--radius-sm);
-  font-weight: var(--fw-bold);
+  font-weight: var(--fw-semibold);
   font-size: var(--fs-md);
   cursor: pointer;
   transition: border-color 0.15s ease;
@@ -157,7 +154,7 @@
   border: 1px solid var(--border);
   background: transparent;
   color: var(--text);
-  font-size: var(--fs-sm);
+  font-size: var(--fs-xs);
   text-align: center;
   padding: 6px 6px 8px;
   border-radius: var(--radius-sm);
@@ -185,7 +182,7 @@
 }
 
 .qc-label {
-  font-weight: var(--fw-bold);
+  font-weight: var(--fw-semibold);
 }
 
 .stage-qc .split {
