@@ -43,14 +43,11 @@ def _bin_reduce(x: FloatArray, size: int, op: Callable[..., FloatArray]) -> Floa
 
 @dataclass
 class MinMaxPyramid:
-    """Per-row min and max of a ``(rows, samples)`` series over bins of each factor.
-
-    ``levels[i]`` is float32 ``(2, rows, ceil(samples / factors[i]))``: minima, then maxima.
-    """
+    """Per-row min and max of a ``(rows, samples)`` series over bins of each factor."""
 
     n_samples: int
     factors: list[int]
-    levels: list[FloatArray]
+    levels: list[FloatArray]  # float32 (2, rows, ceil(samples / factor)): minima, then maxima
 
     @classmethod
     def allocate(cls, store: ArrayStore, name: str, n_rows: int, n_samples: int) -> MinMaxPyramid:
@@ -102,11 +99,7 @@ ENVELOPE_BLOCK = 1 << 22
 
 
 def envelope(read: Callable[[int, int], FloatArray], start: int, end: int, bins: int) -> SeriesView:
-    """``[start, end)`` of one row in ``bins`` bins, reduced from the samples ``read`` returns.
-
-    Exact: each bin covers its own samples only. The row is read a block at a time, so a
-    zoomed-out view of a long recording costs a few megabytes.
-    """
+    """``[start, end)`` of one row in ``bins`` exact bins, read ``ENVELOPE_BLOCK`` samples at a time."""
     span = end - start
     if span <= bins:
         return SeriesView(start, end, 1, samples=np.asarray(read(start, end), np.float32)[None])
@@ -128,11 +121,7 @@ def envelope(read: Callable[[int, int], FloatArray], start: int, end: int, bins:
 def view(
     pyramid: MinMaxPyramid, read: Reader, rows: slice, start: int, end: int, bins: int
 ) -> SeriesView:
-    """``[start, end)`` of ``rows`` in ``bins`` bins, from the coarsest level fine enough for them.
-
-    An output bin takes every level bin it overlaps, so it holds all of its samples and at
-    most one level bin (``≤ span / bins`` samples) of its neighbours on each side.
-    """
+    """``[start, end)`` of ``rows`` in ``bins`` bins, from the coarsest level fine enough for them."""
     span = end - start
     if span <= bins:
         return SeriesView(start, end, 1, samples=np.asarray(read(rows, start, end), np.float32))
@@ -146,7 +135,9 @@ def view(
     else:
         factor, first = 1, start
         mins_src = maxs_src = np.asarray(read(rows, start, end), np.float32)
-    # Output bins span at least ``factor`` samples, so their first level bins strictly increase.
+    # An output bin takes every level bin it overlaps: all of its samples, and at most one level
+    # bin (<= span / bins samples) of each neighbour. Output bins span at least ``factor``
+    # samples, so their first level bins strictly increase.
     edges = start + (np.arange(bins + 1, dtype=np.int64) * span) // bins
     starts = edges[:-1] // factor - first
     mins = np.minimum.reduceat(mins_src, starts, axis=1)

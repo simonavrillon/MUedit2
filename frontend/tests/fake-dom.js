@@ -32,6 +32,7 @@ const CONTEXT_METHODS = [
   "fill",
   "arc",
   "fillText",
+  "setLineDash",
 ];
 
 /** Every call is kept with the fill and stroke styles in effect at the time. */

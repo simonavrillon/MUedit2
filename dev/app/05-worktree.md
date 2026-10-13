@@ -445,6 +445,7 @@ All elements are registered in `dom.js` as `els.*` properties.
 |---|---|---|
 | `toFiniteNumber` | [A] | normalizePreviewPayload |
 | `toSpans` | [A] | signal/qc.js (auto-QC artifact regions) |
+| `toSegments` | [A] | signal/segments.js requestSegmentation (the target's segments) |
 | `normalizePreviewPayload` | [A] | signal/qc.js requestPreview (the raw file's preview) |
 
 ---
@@ -555,6 +556,25 @@ All elements are registered in `dom.js` as `els.*` properties.
 | `requestAutoQc` | [A] | setupQcEvents (qcAutoBtn click) |
 | `createQcTraces` | [A] | qc-stage (`ensureQcTraces`: latest window wins, per grid) |
 | `requestPreview` | [A] | qc-stage.handleRawFilePath: writes nothing until the preview and envelopes have arrived |
+
+---
+
+## Module: `signal/segments.js`
+
+| Function | [A/?] | Called By |
+|---|---|---|
+| `requestSegmentation` | [A] | setupQcEvents (qcSegmentBtn click) |
+| `segmentationChannel` (private) | [A] | requestSegmentation: the aux channel shown alone, else `state.targetIndex` |
+| `toggleSegment` | [A] | qc-renderer (a click on a segment): touching chosen segments merge, a dropped one splits its window |
+| `isSegmentChosen`, `drawnRois`, `isPlaceholder`, `segmentAt`, `segmentGlyph`, `describeWindow` | [A] | qc-renderer (selections, clicks, status) |
+
+---
+
+## Module: `signal/intervals.js`
+
+| Function | [A/?] | Called By |
+|---|---|---|
+| `unionSpans`, `subtractSpan`, `isCovered` | [A] | signal/segments.js (window arithmetic) |
 
 ---
 

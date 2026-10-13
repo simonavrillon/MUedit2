@@ -19,6 +19,13 @@ class QcAutoPayload(BaseModel):
     upload_token: str
 
 
+class SegmentPayload(BaseModel):
+    """Request body for the target segmentation; without ``aux_index`` the target is found by name."""
+
+    upload_token: str
+    aux_index: int | None = None
+
+
 class BidsSaveFields(BaseModel):
     """Where and how a save writes its BIDS files: the session form's fields."""
 

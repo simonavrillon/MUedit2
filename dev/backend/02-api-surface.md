@@ -24,14 +24,24 @@ Signals and decompositions are always opened by server path. `/decompose_stream`
 | Method | Path | Accepts | Returns | Service |
 |---|---|---|---|---|
 | GET | `/health` | — | `{status: "ok"}` | — |
-| POST | `/preview-by-path` | JSON: `PathPayload` | JSON: `{upload_token, grid_names, total_samples, fsamp, channel_means, coordinates, metadata, muscle, auxiliary_names}` + BIDS sidecar metadata and `project` (`config.project_of` of the file's BIDS root) when the file lies in a BIDS dataset | `build_preview_from_path(path)` |
-| POST | `/qc/auto` | JSON: `QcAutoPayload` | JSON: `{bad_channels_per_grid, artifact_regions, artifact_samples, total_samples, fsamp, grid_names}` | `run_auto_qc_on_token(payload)` |
+| POST | `/preview-by-path` | JSON: `PathPayload` | JSON: `{upload_token, grid_names, total_samples, fsamp, channel_means, coordinates, metadata, muscle, auxiliary_names, target_index}` (`target_index`: the aux channel named as a target, or `null`) + BIDS sidecar metadata and `project` (`config.project_of` of the file's BIDS root) when the file lies in a BIDS dataset | `build_preview_from_path(path)` |
+| POST | `/qc/auto` | JSON: `QcAutoPayload` | JSON: `{bad_channels_per_grid, artifact_regions}` (per grid, 0/1 per channel; `[start, end)` sample pairs) | `run_auto_qc_on_token(payload)` |
+| POST | `/qc/segment` | JSON: `SegmentPayload` | JSON: `{target_index, target_name, segments}` | `segment_target_on_token(payload)` |
 
 The preview bandpasses the grid channels once, a few rows at a time, and keeps in the upload's
 session store what the QC stage draws. That is min/max pyramids of the bandpassed EMG, of each
 grid's smoothed mean |EMG| (the overview) and of the aux channels, with levels at bins of 16, 64,
 256, … samples. The bandpassed EMG itself is not stored. `/qc/auto` bandpasses it again into a
 temporary store file.
+
+`/qc/segment` splits the target channel (`aux_index`, or the first aux channel
+`find_target_channel` names as a target) into `segments`, each
+`{start, end, kind, direction, level_start, level_end, level_min, level_max, frequency_hz,
+amplitude, offset, n_cycles, cycles}` with `kind` one of `ramp` | `plateau` | `sinusoid` |
+`irregular` (see [04-io-signal-qc.md](04-io-signal-qc.md#target-segmentation-signalsegmentationpy)).
+Rest is left out, so consecutive segments share their boundary sample unless rest lies between
+them. It is a 400 on `aux_index` when the recording has no aux channel, none is named as a target
+and none was given, the index does not exist, or the target holds no contraction (flat).
 
 ### Series Router (`routes/series.py`)
 
@@ -155,6 +165,12 @@ All models are Pydantic `BaseModel`.
 | Field | Type | Default |
 |---|---|---|
 | `upload_token` | `str` | (required) |
+
+### `SegmentPayload`
+| Field | Type | Default |
+|---|---|---|
+| `upload_token` | `str` | (required) |
+| `aux_index` | `int \| None` | `None` (the channel named as a target) |
 
 ### `BidsSaveFields`
 

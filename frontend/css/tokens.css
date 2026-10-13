@@ -57,6 +57,17 @@
   --plot-roi-stroke: rgba(242, 167, 185, 0.6);
   --plot-artifact-fill: rgba(255, 140, 102, 0.18);
   --plot-artifact-stroke: rgba(255, 140, 102, 0.75);
+  /* Target segments: ramps in --accent, plateaus --mu-2, sinusoids --mu-4,
+     irregular blocks --mu-9; a chosen one turns ROI pink. */
+  --plot-roi-chosen-fill: rgba(242, 167, 185, 0.22);
+  --plot-ramp-fill: rgba(55, 118, 171, 0.14);
+  --plot-ramp-stroke: rgba(55, 118, 171, 0.7);
+  --plot-plateau-fill: rgba(157, 233, 190, 0.1);
+  --plot-plateau-stroke: rgba(157, 233, 190, 0.6);
+  --plot-sinusoid-fill: rgba(231, 193, 255, 0.12);
+  --plot-sinusoid-stroke: rgba(231, 193, 255, 0.6);
+  --plot-irregular-fill: rgba(143, 230, 240, 0.1);
+  --plot-irregular-stroke: rgba(143, 230, 240, 0.6);
   --plot-selection-fill: rgba(195, 155, 242, 0.08);
   --plot-selection-stroke: rgba(195, 155, 242, 0.6);
   --plot-gridline: rgba(255, 255, 255, 0.08);

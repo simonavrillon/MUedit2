@@ -18,6 +18,8 @@ NOTCH_WINDOW_HZ: float = 50.0
 #: Threads that filter rows at once (filtfilt releases the GIL; numpy's FFT does not,
 #: so the notch's threads mostly serialise on it).
 FILTER_THREADS: int = min(4, os.cpu_count() or 1)
+#: Rows filtered together where a whole-grid copy would be too large.
+FILTER_BLOCK_ROWS: int = 8
 #: Working memory the filter threads may hold together.
 FILTER_WORK_BYTES: int = 64 * 1024 * 1024
 #: Bytes per sample one row's filtering holds: its float64 copies and complex spectra.
@@ -36,9 +38,6 @@ def demean(signal: FloatArray) -> FloatArray:
     return signal - mean
 
 
-FILTER_BLOCK_ROWS: int = 8
-
-
 def filter_workers(n_rows: int, n_samples: int) -> int:
     """Threads for filtering ``n_rows`` rows of ``n_samples``, within ``FILTER_WORK_BYTES``."""
     if n_rows < 2 or n_rows * n_samples < _MIN_THREADED_SAMPLES:
@@ -48,16 +47,14 @@ def filter_workers(n_rows: int, n_samples: int) -> int:
 
 
 def map_rows(fn: Callable[[int], T], rows: range, n_samples: int) -> Iterator[T]:
-    """``fn(row)`` for each of ``rows`` (of ``n_samples``), on ``filter_workers`` threads, in order.
-
-    One result per thread at most waits to be consumed. ``fn`` must touch only its own row.
-    """
+    """``fn(row)`` for each of ``rows`` on ``filter_workers`` threads, in order; ``fn`` owns its row."""
     workers = filter_workers(len(rows), n_samples)
     if workers == 1:
         yield from map(fn, rows)
         return
     pool = ThreadPoolExecutor(workers, thread_name_prefix="muedit-filter")
     todo = iter(rows)
+    # One result per thread at most waits to be consumed.
     pending: deque[Future[T]] = deque(pool.submit(fn, row) for row in islice(todo, workers))
     try:
         while pending:
@@ -125,7 +122,7 @@ def _remove_line_interference(x: FloatArray, frad: int, window: int) -> FloatArr
         segment = magnitude[start + 1 : start + window + 1]
         threshold = np.median(segment) + 5 * np.std(segment)
         peaks.append(np.flatnonzero(segment > threshold) + start + 1)
-    half = int(np.floor(frad / 2))
+    half = frad // 2
     tstamp = (np.concatenate(peaks)[:, None] + np.arange(-half, half + 1)).ravel()
     tstamp = tstamp[(tstamp > 0) & (tstamp <= n // 2 + 1)]
 
@@ -140,9 +137,6 @@ def _remove_line_interference(x: FloatArray, frad: int, window: int) -> FloatArr
 
 def notch_signals(signal: FloatArray, fsamp: float) -> FloatArray:
     """FFT-based notch that suppresses mains harmonics without knowing the line frequency."""
-    if signal.size == 0:
-        return signal
-
     filtered = np.array(signal)
     notch_inplace(filtered, fsamp)
     return filtered

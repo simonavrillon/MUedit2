@@ -9,14 +9,8 @@ import numpy as np
 
 from muedit.io.store import ArrayStore
 from muedit.models import BoolArray, FloatArray, IntArray
-from muedit.signal.artifact_mask import (
-    ArtifactMaskConfig,
-    detect_artifact_masks,
-)
-from muedit.signal.channel_qc import (
-    ChannelQCConfig,
-    detect_bad_channels_per_grid,
-)
+from muedit.signal.artifact_mask import ArtifactMaskConfig, detect_artifact_masks
+from muedit.signal.channel_qc import ChannelQCConfig, detect_bad_channels_per_grid
 
 logger = logging.getLogger(__name__)
 
@@ -81,10 +75,7 @@ def run_auto_qc(
         keep=~artifact_mask,
     )
 
-    bad_channel_masks = [
-        np.maximum(p.astype(int), f.astype(int)).astype(bool)
-        for p, f in zip(prelim_bad_masks, final_bad_masks, strict=True)
-    ]
+    bad_channel_masks = [p | f for p, f in zip(prelim_bad_masks, final_bad_masks, strict=True)]
     total_bad = sum(int(m.sum()) for m in bad_channel_masks)
     logger.info(
         "QC stage 2 (bad channels): %d / %d channels (%.2f%%)",
@@ -106,7 +97,7 @@ def _kept_rows(
     rows: list[IntArray] = []
     ch_idx = 0
     for n_ch, bad in zip(grid_channel_counts, bad_channel_masks, strict=True):
-        kept = np.where(~bad)[0]
+        kept = np.flatnonzero(~bad)
         if kept.size == 0:
             kept = np.array([0])
         rows.append(ch_idx + kept)

@@ -4,6 +4,7 @@ import { createEditSlice } from "./state.js";
 /** @typedef {import("./state.js").FileRef} FileRef */
 /** @typedef {import("./state.js").ChannelTrace} ChannelTrace */
 /** @typedef {import("./state.js").Selection} Selection */
+/** @typedef {import("./state.js").TargetSegment} TargetSegment */
 /** @typedef {import("./state.js").EditMode} EditMode */
 /** @typedef {import("./state.js").PulseView} PulseView */
 /** @typedef {import("../api/binary-payloads.js").EditSessionFrame} EditSessionFrame */
@@ -206,6 +207,22 @@ export function setMetadata(state, metadata) {
 export function setAuxData(state, auxiliary, auxiliaryNames) {
   state.auxSeries = auxiliary;
   state.auxNames = auxiliaryNames;
+}
+
+/**
+ * @param {State} state
+ * @param {TargetSegment[]} segments
+ */
+export function setSegments(state, segments) {
+  state.segments = segments;
+}
+
+/**
+ * @param {State} state
+ * @param {number | null | undefined} index
+ */
+export function setTargetIndex(state, index) {
+  state.targetIndex = Number.isInteger(index) ? Number(index) : null;
 }
 
 /**

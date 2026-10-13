@@ -17,7 +17,22 @@ import {
 /** @typedef {import("../state/state.js").ChannelTrace} ChannelTrace */
 /** @typedef {import("../signal/series.js").TraceWindow} TraceWindow */
 /** @typedef {{ left: number, right: number, top: number, bottom: number }} Padding */
-/** @typedef {Span & { yMin?: number, yMax?: number, kind?: string }} Overlay */
+/**
+ * A window drawn over a plot. `kind` picks its colours: an analysis window
+ * (none), an artifact, or a target segment, whose `glyph` and `cycles` ticks
+ * are drawn with it. A segment the windows cover (`chosen`) leaves its fill to
+ * the window; `strong` windows sit over segments and fill more.
+ *
+ * @typedef {Span & {
+ *   yMin?: number,
+ *   yMax?: number,
+ *   kind?: string,
+ *   chosen?: boolean,
+ *   strong?: boolean,
+ *   glyph?: string,
+ *   cycles?: number[],
+ * }} Overlay
+ */
 /** @typedef {HTMLCanvasElement | null | undefined} CanvasRef */
 
 /**
@@ -202,6 +217,45 @@ function drawSelectionRect(ctx, startX, endX, sel, padding, plotHeight) {
   ctx.strokeRect(x, rectTop, width, rectHeight);
 }
 
+const SEGMENT_TICK_PX = 5;
+const SEGMENT_GLYPH_MIN_PX = 12;
+
+/** @type {Record<string, [keyof typeof COLORS, keyof typeof COLORS]>} */
+const SEGMENT_COLORS = {
+  ramp: ["rampFill", "rampStroke"],
+  plateau: ["plateauFill", "plateauStroke"],
+  sinusoid: ["sinusoidFill", "sinusoidStroke"],
+  irregular: ["irregularFill", "irregularStroke"],
+};
+
+/**
+ * Segments are dashed in their kind's colours; windows are pink, stronger over segments.
+ *
+ * @param {Overlay} sel
+ */
+function overlayStyle(sel) {
+  if (sel.kind === "artifact") {
+    return {
+      fill: COLORS.artifactFill,
+      stroke: COLORS.artifactStroke,
+      dashed: false,
+    };
+  }
+  const segment = SEGMENT_COLORS[sel.kind ?? ""];
+  if (segment) {
+    return {
+      fill: COLORS[segment[0]],
+      stroke: COLORS[segment[1]],
+      dashed: true,
+    };
+  }
+  return {
+    fill: sel.strong ? COLORS.roiChosenFill : COLORS.roiFill,
+    stroke: COLORS.roiStroke,
+    dashed: false,
+  };
+}
+
 /**
  * @param {CanvasRenderingContext2D} ctx
  * @param {Overlay[] | null | undefined} selections
@@ -211,15 +265,33 @@ function drawSelectionRect(ctx, startX, endX, sel, padding, plotHeight) {
  */
 export function drawRoiRects(ctx, selections, totalSamples, width, height) {
   if (!selections || !selections.length || !totalSamples) return;
+  const toX = (/** @type {number} */ sample) => (sample / totalSamples) * width;
   selections.forEach((sel) => {
-    const startX = (sel.start / totalSamples) * width;
-    const endX = (sel.end / totalSamples) * width;
-    const isArtifact = sel?.kind === "artifact";
-    ctx.fillStyle = isArtifact ? COLORS.artifactFill : COLORS.roiFill;
-    ctx.fillRect(Math.min(startX, endX), 0, Math.abs(endX - startX), height);
-    ctx.strokeStyle = isArtifact ? COLORS.artifactStroke : COLORS.roiStroke;
+    const x = Math.min(toX(sel.start), toX(sel.end));
+    const w = Math.abs(toX(sel.end) - toX(sel.start));
+    const style = overlayStyle(sel);
+    if (!sel.chosen) {
+      ctx.fillStyle = style.fill;
+      ctx.fillRect(x, 0, w, height);
+    }
+    ctx.strokeStyle = style.stroke;
     ctx.lineWidth = 1;
-    ctx.strokeRect(Math.min(startX, endX), 0, Math.abs(endX - startX), height);
+    ctx.setLineDash(style.dashed ? [3, 3] : []);
+    ctx.strokeRect(x, 0, w, height);
+    ctx.setLineDash([]);
+    (sel.cycles || []).forEach((c) => {
+      ctx.beginPath();
+      ctx.moveTo(toX(c), height - SEGMENT_TICK_PX);
+      ctx.lineTo(toX(c), height);
+      ctx.stroke();
+    });
+    if (sel.glyph && w >= SEGMENT_GLYPH_MIN_PX) {
+      ctx.fillStyle = style.stroke;
+      ctx.font = canvasFont();
+      ctx.textAlign = "center";
+      ctx.fillText(sel.glyph, x + w / 2, 12);
+      ctx.textAlign = "start";
+    }
   });
 }
 

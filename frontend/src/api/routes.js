@@ -9,6 +9,7 @@ export const routes = {
   seriesAux: "/series/aux",
   seriesPulse: "/series/pulse",
   qcAuto: "/qc/auto",
+  qcSegment: "/qc/segment",
   previewByPath: "/preview-by-path",
   decomposeStream: "/decompose_stream",
   decomposeCancel: "/decompose/cancel",

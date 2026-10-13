@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import json
 import re
 import subprocess
@@ -39,6 +40,7 @@ LIVE_ENDPOINTS: list[tuple[str, str]] = [
     ("GET", "/series/overview"),
     ("GET", "/series/aux"),
     ("POST", "/qc/auto"),
+    ("POST", "/qc/segment"),
     ("POST", "/decompose_stream"),
     ("POST", "/decompose/cancel"),
     ("GET", "/series/pulse"),
@@ -109,6 +111,37 @@ def signal_mat(workspace: Path, emg: np.ndarray) -> Path:
         },
     )
     return path
+
+
+@pytest.fixture(scope="module")
+def target_upload(client: TestClient, workspace: Path) -> str:
+    """Upload of a recording whose aux channels are a flat accelerometer and a trapezoid target."""
+    n = int(16 * FSAMP)
+    t = np.arange(n) / FSAMP
+    target = np.interp(t, [0, 2, 5, 11, 14, 16], [0, 0, 20, 20, 0, 0])
+    path = workspace / "synthetic_target.mat"
+    scipy.io.savemat(
+        path,
+        {
+            "signal": {
+                "data": np.random.default_rng(2).normal(0, 1, (N_CHANNELS, n)).astype(np.float32),
+                "fsamp": FSAMP,
+                "gridname": GRID,
+                "muscle": "ta",
+                "auxiliary": np.vstack([np.zeros(n), target]),
+                "auxiliaryname": np.array(["Acc", "Target"], dtype=object),
+            }
+        },
+    )
+    data = _ok(
+        client.post(
+            f"{API}/preview-by-path",
+            json={"path": str(path)},
+            headers={SESSION_HEADER: "fixture-target"},
+        )
+    )
+    assert data["target_index"] == 1
+    return data["upload_token"]
 
 
 @pytest.fixture(scope="module")
@@ -529,22 +562,53 @@ class TestSeries:
 class TestQcAuto:
     def test_shape(self, client: TestClient, upload_token: str) -> None:
         data = _ok(client.post(f"{API}/qc/auto", json={"upload_token": upload_token}))
-        assert set(data) == {
-            "bad_channels_per_grid",
-            "artifact_regions",
-            "artifact_samples",
-            "total_samples",
-            "fsamp",
-            "grid_names",
-        }
+        assert set(data) == {"bad_channels_per_grid", "artifact_regions"}
         assert [len(g) for g in data["bad_channels_per_grid"]] == [N_CHANNELS]
         assert isinstance(data["artifact_regions"], list)
         assert all(len(r) == 2 for r in data["artifact_regions"])
-        assert data["total_samples"] == N_SAMPLES
-        assert data["grid_names"] == [GRID]
 
     def test_bad_token(self, client: TestClient) -> None:
         err = _err(client.post(f"{API}/qc/auto", json={"upload_token": "expired"}), 400)
+        assert err["detail"]["field"] == "upload_token"
+
+
+# ── /qc/segment ──────────────────────────────────────────────────────────────
+
+
+class TestQcSegment:
+    def _segment(self, client: TestClient, token: str, **extra: Any) -> Response:
+        return client.post(f"{API}/qc/segment", json={"upload_token": token, **extra})
+
+    @pytest.mark.parametrize("extra", [{}, {"aux_index": 1}], ids=["by-name", "by-index"])
+    def test_trapezoid_target(
+        self, client: TestClient, target_upload: str, extra: dict[str, Any]
+    ) -> None:
+        data = _ok(self._segment(client, target_upload, **extra))
+        assert (data["target_index"], data["target_name"]) == (1, "Target")
+        segments = data["segments"]
+        assert [(s["kind"], s["direction"]) for s in segments] == [
+            ("ramp", "up"),
+            ("plateau", None),
+            ("ramp", "down"),
+        ]
+        assert all(a["end"] == b["start"] for a, b in itertools.pairwise(segments))
+        assert segments[1]["start"] / FSAMP == pytest.approx(5, abs=0.15)
+
+    def test_preview_without_target_names_none(self, client: TestClient, signal_mat: Path) -> None:
+        data = _ok(client.post(f"{API}/preview-by-path", json={"path": str(signal_mat)}))
+        assert data["target_index"] is None
+
+    def test_no_auxiliary_channels(self, client: TestClient, upload_token: str) -> None:
+        err = _err(self._segment(client, upload_token), 400)
+        assert err["detail"]["field"] == "aux_index"
+
+    @pytest.mark.parametrize("index", [0, 2], ids=["flat-channel", "out-of-range"])
+    def test_rejected_channel(self, client: TestClient, target_upload: str, index: int) -> None:
+        err = _err(self._segment(client, target_upload, aux_index=index), 400)
+        assert err["detail"]["field"] == "aux_index"
+
+    def test_bad_token(self, client: TestClient) -> None:
+        err = _err(self._segment(client, "expired"), 400)
         assert err["detail"]["field"] == "upload_token"
 
 

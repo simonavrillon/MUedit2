@@ -8,10 +8,11 @@ from fastapi import APIRouter, Depends
 
 from muedit.api.common import request_session
 from muedit.api.contracts import success_payload
-from muedit.api.schemas import PathPayload, QcAutoPayload
+from muedit.api.schemas import PathPayload, QcAutoPayload, SegmentPayload
 from muedit.api.services.preview_service import (
     build_preview_from_path,
     run_auto_qc_on_token,
+    segment_target_on_token,
 )
 
 router = APIRouter(prefix="/api/v1", dependencies=[Depends(request_session)])
@@ -35,3 +36,9 @@ def preview_by_path(
 def qc_auto(payload: QcAutoPayload) -> dict[str, Any]:
     """Run automatic QC on the cached signal and return bad channels + artifacts."""
     return success_payload(run_auto_qc_on_token(payload))
+
+
+@router.post("/qc/segment")
+def qc_segment(payload: SegmentPayload) -> dict[str, Any]:
+    """Segment the cached signal's target into windows the user can pick for decomposition."""
+    return success_payload(segment_target_on_token(payload))

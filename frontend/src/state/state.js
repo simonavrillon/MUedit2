@@ -8,6 +8,19 @@
 /** @typedef {{ muIdx: number, position: number }} Bookmark Where the user last edited an MU. */
 /** @typedef {import("../api/binary-payloads.js").SeriesRow} ChannelTrace One row of a viewport: its samples, or their min/max per bin. */
 /** @typedef {import("../api/binary-payloads.js").PulseView} PulseView */
+/** @typedef {"ramp" | "plateau" | "sinusoid" | "irregular"} SegmentKind */
+
+/**
+ * One stretch of the force target, as `/qc/segment` splits it.
+ *
+ * @typedef {object} TargetSegment
+ * @property {number} start
+ * @property {number} end
+ * @property {SegmentKind} kind
+ * @property {"up" | "down" | null} direction Ramps only.
+ * @property {number[]} cycles Sinusoid and irregular blocks: where each cycle starts.
+ * @property {number | null} frequencyHz Sinusoids only.
+ */
 
 /**
  * An edit-log entry; saved into the NPZ and read back on load.
@@ -95,6 +108,8 @@
  * @property {number | null} fsamp
  * @property {ChannelTrace[]} auxSeries Per auxiliary channel, the whole recording.
  * @property {string[]} auxNames
+ * @property {TargetSegment[]} segments The target's segments; the chosen ones are those `rois` cover.
+ * @property {number | null} targetIndex The auxiliary channel holding the target, when one is known.
  * @property {EditSlice} edit
  */
 
@@ -163,5 +178,7 @@ export const state = {
   fsamp: null,
   auxSeries: [],
   auxNames: [],
+  segments: [],
+  targetIndex: null,
   edit: createEditSlice(),
 };

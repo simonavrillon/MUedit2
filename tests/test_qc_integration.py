@@ -10,7 +10,6 @@ import numpy as np
 import pytest
 from starlette.testclient import TestClient
 
-from muedit.api.services.preview_service import _mask_to_regions
 from muedit.decomp.decomposition_file import (
     load_decomposition_signal_context,
     save_decomposition_npz,
@@ -18,6 +17,7 @@ from muedit.decomp.decomposition_file import (
 from muedit.decomp.preprocess import build_manual_artifact_mask, preprocess_step
 from muedit.decomp.types import DecompositionParameters, LoadStepOutput, PreprocessStepOutput
 from muedit.models import SignalImport
+from muedit.signal.artifact_mask import mask_to_intervals
 from muedit.signal.filters import bandpass_signals
 from muedit.signal.qc_pipeline import QCPipelineResult
 
@@ -154,19 +154,19 @@ class TestPreprocessArtifactMask:
         assert np.flatnonzero(prep.discard_channels[1]).tolist() == [3]
 
 
-# ── _mask_to_regions ─────────────────────────────────────────────────────────
+# ── mask_to_intervals ────────────────────────────────────────────────────────
 
 
-def test_mask_to_regions_round_trips() -> None:
+def test_mask_to_intervals_round_trips() -> None:
     mask = np.zeros(100, bool)
     mask[[0, 3, 4, 5, 40, 90, 91, 99]] = True
-    regions = _mask_to_regions(mask)
+    regions = mask_to_intervals(mask).tolist()
     assert regions == [[0, 1], [3, 6], [40, 41], [90, 92], [99, 100]]
     rebuilt = build_manual_artifact_mask([(s, e) for s, e in regions], 100)
     assert rebuilt is not None
     np.testing.assert_array_equal(rebuilt, mask)
-    assert _mask_to_regions(np.zeros(4, bool)) == []
-    assert _mask_to_regions(None) == []
+    assert mask_to_intervals(np.zeros(4, bool)).tolist() == []
+    assert mask_to_intervals(None).tolist() == []
 
 
 # ── POST /api/v1/qc/auto ─────────────────────────────────────────────────────
@@ -204,9 +204,6 @@ class TestQcAutoRoute:
         assert body["meta"]["api_version"] == "v1"
         out = body["data"]
 
-        assert out["fsamp"] == FSAMP
-        assert out["grid_names"] == [GRID, GRID]
-        assert out["total_samples"] == N_SAMPLES
         bad = out["bad_channels_per_grid"]
         assert [len(g) for g in bad] == [N_CHANNELS, N_CHANNELS]
         assert set(bad[0]) <= {0, 1} and set(bad[1]) <= {0, 1}
@@ -215,7 +212,6 @@ class TestQcAutoRoute:
         regions = out["artifact_regions"]
         assert regions, "full-montage transient was not detected"
         assert any(s <= 10_050 < e for s, e in regions)
-        assert out["artifact_samples"] == sum(e - s for s, e in regions)
 
 
 # ── NPZ persistence ──────────────────────────────────────────────────────────

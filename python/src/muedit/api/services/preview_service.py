@@ -20,7 +20,7 @@ from muedit.api.common import (
     require_existing_path,
 )
 from muedit.api.memory import DEFAULT_SESSION
-from muedit.api.schemas import QcAutoPayload
+from muedit.api.schemas import QcAutoPayload, SegmentPayload
 from muedit.api.services.bids_helpers import (
     _infer_bids_root_from_decomp_path,
     read_bids_sidecar_meta,
@@ -38,6 +38,7 @@ from muedit.signal.artifact_mask import mask_to_intervals
 from muedit.signal.filters import for_each_row
 from muedit.signal.grid import format_hdemg_signal
 from muedit.signal.qc_pipeline import run_auto_qc
+from muedit.signal.segmentation import find_target_channel, segment_target
 
 
 def _build_preview_core(filepath: str, session: str = DEFAULT_SESSION) -> dict[str, Any]:
@@ -72,6 +73,7 @@ def _build_preview_core(filepath: str, session: str = DEFAULT_SESSION) -> dict[s
             "metadata": signal.metadata,
             "muscle": signal.muscle,
             "auxiliary_names": signal.auxiliaryname,
+            "target_index": find_target_channel(signal.auxiliaryname),
         }
     )
 
@@ -113,11 +115,6 @@ def build_preview_from_path(filepath: str, session: str = DEFAULT_SESSION) -> di
     return result
 
 
-def _mask_to_regions(mask: np.ndarray | None) -> list[list[int]]:
-    """Convert a boolean sample mask into contiguous ``[start, end)`` ranges."""
-    return mask_to_intervals(mask).tolist()
-
-
 def _bandpassed_grids(
     signal: SignalImport, grid_counts: list[int], emg_types: list[int], store: ArrayStore
 ) -> FloatArray:
@@ -134,17 +131,21 @@ def _bandpassed_grids(
     return store.seal(out)
 
 
+def _missing_upload() -> HTTPException:
+    return HTTPException(
+        status_code=400,
+        detail={
+            "field": "upload_token",
+            "reason": "Missing or expired upload; request /api/v1/preview-by-path first",
+        },
+    )
+
+
 def run_auto_qc_on_token(payload: QcAutoPayload) -> dict[str, Any]:
     """Run the automatic QC pipeline over the upload's grid channels, bandpassed for the run."""
     held = _hold_upload(payload.upload_token)
     if held is None:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "field": "upload_token",
-                "reason": "Missing or expired upload; request /api/v1/preview-by-path first",
-            },
-        )
+        raise _missing_upload()
     try:
         return _auto_qc(held.signal, held.store if held.store is not None else RamStore())
     finally:
@@ -155,7 +156,7 @@ def _auto_qc(signal: SignalImport, store: ArrayStore) -> dict[str, Any]:
     coordinates, _, _, emg_type = format_hdemg_signal(signal.gridname)
     grid_channel_counts = [int(c.shape[0]) for c in coordinates]
     total_declared = sum(grid_channel_counts)
-    n_rows, n_samples = signal.data.shape
+    n_rows = signal.data.shape[0]
     if total_declared > n_rows:
         raise HTTPException(
             status_code=400,
@@ -179,15 +180,41 @@ def _auto_qc(signal: SignalImport, store: ArrayStore) -> dict[str, Any]:
         )
     finally:
         store.discard(data)
-    return make_json_safe(
-        {
-            "bad_channels_per_grid": [
-                np.asarray(m, dtype=int).tolist() for m in result.bad_channel_masks
-            ],
-            "artifact_regions": _mask_to_regions(result.artifact_mask),
-            "artifact_samples": int(np.asarray(result.artifact_mask).sum()),
-            "total_samples": int(n_samples),
-            "fsamp": signal.fsamp,
-            "grid_names": signal.gridname,
+    return {
+        "bad_channels_per_grid": [m.astype(int).tolist() for m in result.bad_channel_masks],
+        "artifact_regions": mask_to_intervals(result.artifact_mask).tolist(),
+    }
+
+
+def _aux_error(reason: str) -> HTTPException:
+    return HTTPException(status_code=400, detail={"field": "aux_index", "reason": reason})
+
+
+def segment_target_on_token(payload: SegmentPayload) -> dict[str, Any]:
+    """Split the upload's target channel into ramps, plateaus, sinusoids and irregular blocks."""
+    held = _hold_upload(payload.upload_token)
+    if held is None:
+        raise _missing_upload()
+    try:
+        signal = held.signal
+        names = signal.auxiliaryname
+        n_aux = signal.auxiliary.shape[0]
+        if n_aux == 0:
+            raise _aux_error("This recording has no auxiliary channels")
+        index = payload.aux_index if payload.aux_index is not None else find_target_channel(names)
+        if index is None:
+            raise _aux_error(
+                "No auxiliary channel is named as a target; show it alone in the auxiliary plot"
+            )
+        if not 0 <= index < n_aux:
+            raise _aux_error(f"Auxiliary channel {index} does not exist")
+        segments = segment_target(np.asarray(signal.auxiliary[index]), signal.fsamp)
+        if not segments:
+            raise _aux_error("The target holds no contraction to segment")
+        return {
+            "target_index": index,
+            "target_name": names[index] if index < len(names) else f"Aux {index + 1}",
+            "segments": [s.to_dict() for s in segments],
         }
-    )
+    finally:
+        held.release()

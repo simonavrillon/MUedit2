@@ -307,11 +307,6 @@ Identifies defective channels across 6 criteria: flat, saturated, noisy, low-SNR
 ### Functions
 
 ```python
-def _detect_bad_channels(data, fsamp, coordinates=None, config=None) -> np.ndarray
-```
-Returns `(n_channels,)` bool mask. Thin wrapper around `_channel_qc_diagnostics(...).mask`.
-
-```python
 def _channel_qc_diagnostics(data, fsamp, coordinates=None, config=None, *, structural_only=False) -> ChannelQCMetrics
 ```
 Full-featured detector returning metrics + reasons. Computes all 6 criteria (only flat and saturated when `structural_only`) and OR-combines them into the mask. Works in float32 with float64 accumulators; the neighbour correlation is accumulated over sample blocks.
@@ -321,12 +316,8 @@ Full-featured detector returning metrics + reasons. Computes all 6 criteria (onl
 | Field | Type | Shape |
 |---|---|---|
 | `mask` | `np.ndarray` | `(n_channels,)` bool |
-| `rms` | `np.ndarray` | `(n_channels,)` |
-| `snr` | `np.ndarray` | `(n_channels,)` dB |
-| `sat_frac` | `np.ndarray` | `(n_channels,)` |
-| `mean_neighbor_corr` | `np.ndarray` | `(n_channels,)` |
-| `max_win_ratio` | `np.ndarray` | `(n_channels,)` |
-| `max_loss_run` | `np.ndarray` | `(n_channels,)` int |
+| `snr` | `np.ndarray` | `(n_channels,)` dB; NaN when not checked (no coordinates, fewer than `snr_min_windows` windows) |
+| `mean_neighbor_corr` | `np.ndarray` | `(n_channels,)`; 1 when not checked |
 | `reasons` | `list[str]` | per-channel reason strings |
 
 ```python
@@ -372,3 +363,56 @@ def detect_artifact_masks(data, fsamp, grid_channel_counts, config=None)
     -> (per_grid_masks, global_mask)
 ```
 Runs per grid. `global_mask` is the logical OR union across all grids.
+
+---
+
+## Target Segmentation (`signal/segmentation.py`)
+
+Splits the force target a participant followed (an auxiliary channel) into the stretches the QC
+page offers as decomposition windows. Levels are fractions of the target's range (p1 to p99).
+
+**Algorithm:** the target is block-averaged to `rate_hz`, smoothed over `smooth_s`, and its slope
+taken as a central difference across the smoothing width (a one-sample gradient turns noise into
+slope). Each sample is labelled rest (flat and below `rest_frac`), plateau (|slope| below
+`plateau_slope`), or ramp up/down. Turning points are the peaks and troughs of prominence
+`turn_prominence`; a chain of them with no rest longer than `min_duration_s` and no plateau longer
+than `min_plateau_s` between them, spanning at least `min_cycles` cycles, is a dynamic block,
+extended by up to a quarter period over the moving samples on either side. (A rest shorter than
+`min_duration_s` does not break a chain — it is folded away later anyway, and the troughs of an
+oscillation that reaches the target's minimum read as one-sample rests.) A block is a `sinusoid`
+when its periods (CV < `period_cv`) and swings (CV < `amplitude_cv`) are regular and a sine fits it
+(R² ≥ `sine_r2`; a regular triangle wave passes), otherwise `irregular`. The fit's frequency is the
+better of two estimates: the median period (robust to a stray turn, but quantized to whole samples)
+and the chain's span, which covers exactly one half period per pair of turns. The fit runs over the
+block, not the segment, so a short ramp folded into the segment cannot drag its R² down. Outside
+the blocks, runs shorter than `min_duration_s` are folded into their longer neighbour. Rest is
+dropped. Corners blur over the smoothing width, so boundaries land within about 0.1 s of the
+target's.
+
+### `SegmentationConfig`
+
+| Field | Default | Purpose |
+|---|---|---|
+| `rate_hz` | `100.0` | Rate the target is analysed at |
+| `smooth_s` | `0.1` | Moving-average width (s) |
+| `rest_frac` | `0.05` | Level below which a flat target is rest |
+| `plateau_slope` | `0.02` | Slope (range/s) below which the target is flat |
+| `min_duration_s` | `0.5` | Shorter ramps and plateaus fold into a neighbour |
+| `min_plateau_s` | `1.0` | A flat stretch this long ends a dynamic block |
+| `turn_prominence` | `0.02` | Prominence of a turning point |
+| `min_cycles` | `2.0` | Cycles a chain of reversals needs to be a block |
+| `period_cv`, `amplitude_cv`, `sine_r2` | `0.15`, `0.2`, `0.9` | Sinusoid tests |
+
+```python
+def segment_target(target, fsamp, config=None) -> list[TargetSegment]
+```
+`TargetSegment`: `start`, `end` (EMG samples), `kind`, `direction` (ramps), `level_start`,
+`level_end`, `level_min`, `level_max` (target units); sinusoids add `frequency_hz`, `amplitude`,
+`offset`, `n_cycles`; both dynamic kinds carry `cycles` (the troughs). An empty, flat or
+non-finite target gives `[]`.
+
+```python
+def find_target_channel(names) -> int | None
+```
+The first name matching `target`, `reference`, `requested` or `original` (OTB4 names the target
+`<track> - Original Path`), unless it also says `performed` or `actual` (the participant's own trace).

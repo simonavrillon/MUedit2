@@ -124,6 +124,16 @@ Discarded channels render in warning color and are excluded downstream. Initial 
 
 Runs the server-side QC pipeline (`run_auto_qc`) and loads the result into the interactive controls: detected bad channels replace the discard masks (click a cell to correct), and detected artifact regions populate the artifact windows list. Nothing is sent to decomposition here — the corrected masks travel with the run request.
 
+#### Segment Target Button
+
+| Element ID | Type | Action |
+|---|---|---|
+| `qcSegmentBtn` | Button | "Segment target" — `requestSegmentation(app)` (`signal/segments.js`) -> `POST /qc/segment`; disabled without aux channels |
+
+Segments the aux channel shown alone in `auxSelector`, else the one the preview named as the target (`state.targetIndex`), and shows it in the aux plot. The segments (`state.segments`) are drawn on the EMG overview and aux canvases under the windows, each with a glyph (`↗` `↘` ramps, `—` plateau, `∿` sinusoid, `≈` irregular) and, for the dynamic kinds, a tick per cycle. A click (a drag under 4 px) toggles the segment under it (`toggleSegment`): `state.rois` stays the one source of truth, a segment is chosen when the windows cover it, chosen segments that touch merge into one window, and dropping one from inside a window splits it (pieces under `MIN_ROI_S` are dropped). Segments apart across rest never merge. `nwindows` follows the window count. Drags keep working as before.
+
+Colours (`css/tokens.css`): ramps `--plot-ramp-*` (from `--accent`), plateaus `--plot-plateau-*` (`--mu-2`), sinusoids `--plot-sinusoid-*` (`--mu-4`), irregular `--plot-irregular-*` (`--mu-9`); unchosen segments are filled with a dashed outline, chosen ones leave the fill to their window, drawn in ROI pink with `--plot-roi-chosen-fill`.
+
 #### EMG Overview Canvas
 
 | Element ID | Type | Action |
@@ -234,6 +244,7 @@ User clicks "Decompose signal" (#startBtn)
 | `GET /series/emg` | On initial render, grid tab switch, ROI change | Fetch QC channel envelopes |
 | `GET /series/overview`, `/series/aux` | After `/preview-by-path` | Fetch the whole-recording overview and aux envelopes |
 | `POST /qc/auto` | On "Automatic QC" button click | Run auto QC: detect bad channels + artifact regions |
+| `POST /qc/segment` | On "Segment target" button click | Split the target into ramps, plateaus, sinusoids and irregular blocks |
 
 ---
 

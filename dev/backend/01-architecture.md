@@ -284,6 +284,7 @@ Methods: `to_dict()`
 | `channel_qc.py` | Bad-channel detection (6 criteria: flat, saturated, noisy, low-SNR, intermittent, contact-loss) |
 | `artifact_mask.py` | Artifact region detection (two-stage robust amplitude detector with local baseline) |
 | `qc_pipeline.py` | `run_auto_qc()` — orchestrates channel QC + artifact detection |
+| `segmentation.py` | `segment_target()` — splits a force target into ramps, plateaus, sinusoids and irregular blocks; `find_target_channel()` |
 
 ### `editing/` — Motor-Unit Editing
 

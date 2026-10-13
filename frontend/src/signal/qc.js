@@ -13,7 +13,9 @@ import {
   setMetadata,
   setMuscle,
   setRois,
+  setSegments,
   setSeriesLength,
+  setTargetIndex,
   setUploadToken,
 } from "../state/actions.js";
 import { getCurrentGrid, roiStart, roiEnd } from "../state/selectors.js";
@@ -83,8 +85,9 @@ export function syncRois(state, nwin) {
  * a cell to correct one) and detected artifacts replace the artifact windows
  * (+/- to correct those). Nothing is sent to the decomposition here — the
  * corrected masks travel with the run request.
+ *
+ * @param {App} app
  */
-/** @param {App} app */
 export async function requestAutoQc(app) {
   const { state, els, api, setStatus, renderChannelQC, refreshVisuals } = app;
 
@@ -93,7 +96,7 @@ export async function requestAutoQc(app) {
     return false;
   }
 
-  if (els?.qcAutoBtn) els.qcAutoBtn.disabled = true;
+  if (els.qcAutoBtn) els.qcAutoBtn.disabled = true;
   setStatus("Running automatic QC...", "muted");
 
   try {
@@ -106,11 +109,7 @@ export async function requestAutoQc(app) {
     setArtifactRegions(state, toSpans(data?.artifact_regions));
     setArtifactMode(state, false);
 
-    const nBad = (state.discardMasks || []).reduce(
-      (sum, grid) =>
-        sum + (grid || []).reduce((acc, v) => acc + (v ? 1 : 0), 0),
-      0,
-    );
+    const nBad = state.discardMasks.flat().filter(Boolean).length;
     const nArtifact = state.artifactRegions.length;
 
     // The channels' traces stand; only which ones are discarded changed.
@@ -125,7 +124,7 @@ export async function requestAutoQc(app) {
     handleError(err, setStatus, "Automatic QC failed");
     return false;
   } finally {
-    if (els?.qcAutoBtn) els.qcAutoBtn.disabled = false;
+    if (els.qcAutoBtn) els.qcAutoBtn.disabled = false;
   }
 }
 
@@ -230,6 +229,8 @@ export async function requestPreview(app, { file, silentFailure = false }) {
     setMetadata(state, data.metadata);
     setMuscle(state, data.muscle);
     setAuxData(state, aux.rows, data.auxiliary_names);
+    setSegments(state, []);
+    setTargetIndex(state, data.target_index);
     setFsamp(state, data.fsamp);
     applyPreviewMetadata(data);
     populateAuxSelector();

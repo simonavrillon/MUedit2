@@ -45,6 +45,37 @@ export function toSpans(regions) {
     .filter((r) => Number.isFinite(r.start) && Number.isFinite(r.end));
 }
 
+export const SEGMENT_KINDS = ["ramp", "plateau", "sinusoid", "irregular"];
+
+/**
+ * The segments of a `/qc/segment` response; one with an unknown kind or bounds is dropped.
+ *
+ * @param {unknown} segments
+ * @returns {import("../state/state.js").TargetSegment[]}
+ */
+export function toSegments(segments) {
+  if (!Array.isArray(segments)) return [];
+  return segments
+    .map((s) => ({
+      start: Number(s?.start),
+      end: Number(s?.end),
+      kind: s?.kind,
+      direction:
+        s?.direction === "up" || s?.direction === "down" ? s.direction : null,
+      cycles: Array.isArray(s?.cycles)
+        ? s.cycles.map(Number).filter(Number.isFinite)
+        : [],
+      frequencyHz: Number.isFinite(s?.frequency_hz) ? s.frequency_hz : null,
+    }))
+    .filter(
+      (s) =>
+        SEGMENT_KINDS.includes(s.kind) &&
+        Number.isFinite(s.start) &&
+        Number.isFinite(s.end) &&
+        s.end > s.start,
+    );
+}
+
 /**
  * @param {unknown} payload
  * @returns {PreviewPayload}

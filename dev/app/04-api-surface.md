@@ -12,6 +12,7 @@ All HTTP endpoints used by the frontend, their payloads, and binary formats.
 | 4 | GET | `/series/emg` | `api.fetchSeries("emg", params)` | `qcStage.ensureQcTraces` | 120s | One min/max envelope per channel of a grid over the ROI (`QC_TRACE_BINS` bins) |
 | 4b | GET | `/series/overview`, `/series/aux` | `api.fetchSeries(kind, params)` | `qcStage.requestPreview` | 120s | Whole-recording envelopes of each grid's mean \|EMG\| and of the aux channels (`OVERVIEW_BINS` bins) |
 | 5 | POST | `/qc/auto` | `api.runAutoQc(payload)` | `qcStage.runAutoQc` | 300s | Run automatic QC: detect bad channels + artifact windows |
+| 5b | POST | `/qc/segment` | `api.segmentTarget(payload)` | `requestSegmentation` (`signal/segments.js`) | 120s | Split the force target into segments the user clicks to decompose |
 | 6 | POST | `/decompose_stream` | `api.decomposeStream(formData)` | `runStage.runDecomposition` | 15min | Main decomposition (streaming NDJSON response); 409 while another run is active |
 | 6b | POST | `/decompose/cancel` | `api.cancelDecomposition()` | `runStage.cancelDecomposition` (Cancel button) | 120s | Stop this tab's run; its stream ends with `cancelled` |
 | 7 | GET | `/series/pulse` | `api.fetchPulse(params)` | the edit canvas, through `createViewFetcher` | 120s | One MU's pulse train over the window on screen, with its discharges there |
@@ -39,6 +40,7 @@ export const routes = {
   seriesAux: "/series/aux",
   seriesPulse: "/series/pulse",
   qcAuto: "/qc/auto",
+  qcSegment: "/qc/segment",
   previewByPath: "/preview-by-path",
   decomposeStream: "/decompose_stream",
   decomposeCancel: "/decompose/cancel",

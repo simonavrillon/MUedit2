@@ -89,11 +89,8 @@ def _moving_median_and_mad(x: FloatArray, width: int) -> tuple[FloatArray, Float
 def _moving_median_and_mad_at(
     x: FloatArray, width: int, idx: IntArray
 ) -> tuple[FloatArray, FloatArray]:
-    """:func:`_moving_median_and_mad` at the columns ``idx`` only, from spans around them.
-
-    Each span reaches ``2 * (width // 2)`` columns past the ones it serves: the deviations'
-    median needs the median that far out, so the values match the whole-row filter.
-    """
+    """:func:`_moving_median_and_mad` at the columns ``idx`` only, from spans around them."""
+    # The deviations' median needs the median this far out, so the values match the whole-row filter.
     reach = 2 * (width // 2)
     cols, inverse = np.unique(idx, return_inverse=True)
     med = np.empty((*x.shape[:-1], cols.size), dtype=x.dtype)
@@ -127,19 +124,21 @@ def _exceeds(
     return out
 
 
+def _n_rows(data: FloatArray, rows: Rows) -> int:
+    """Number of channels ``rows`` selects from ``data``."""
+    return len(range(data.shape[0])[rows]) if isinstance(rows, slice) else len(rows)
+
+
 def _window_maxima(
     data: FloatArray, rows: Rows, win: int, k: int, store: ArrayStore
 ) -> tuple[FloatArray, FloatArray]:
-    """Per-channel moving maximum of ``|data[rows]|`` and its ``k``-th largest value per sample.
-
-    Computed over blocks of samples, each read with ``win`` samples of overlap on both sides
-    so the moving maximum inside the block is the one over the whole row.
-    """
+    """Per-channel moving maximum of ``|data[rows]|`` and its ``k``-th largest value per sample."""
     n_samples = data.shape[1]
-    n_channels = len(range(data.shape[0])[rows]) if isinstance(rows, slice) else len(rows)
+    n_channels = _n_rows(data, rows)
     ch_win = store.allocate("artifact-windows", (n_channels, n_samples), np.float32)
     win_stat = np.empty(n_samples, dtype=np.float32)
     for start, stop in sample_blocks(n_samples, n_channels, np.dtype(np.float32).itemsize):
+        # ``win`` samples of overlap each side: the moving maximum inside matches the whole row's.
         lo, hi = max(0, start - win), min(n_samples, stop + win)
         ch_abs = np.abs(np.asarray(data[rows, lo:hi]).astype(np.float32))
         block = maximum_filter1d(ch_abs, size=win, axis=1, mode="nearest")[
@@ -170,18 +169,12 @@ def _kth_largest(block: FloatArray, k: int) -> FloatArray:
 def _extend_runs(
     confirmed: BoolArray, win_stat: FloatArray, fsamp: float, cfg: ArtifactMaskConfig, bridge: int
 ) -> BoolArray:
-    """Grow each run of ``confirmed`` over the samples of the artifact it starts or ends.
-
-    A run grows, by ``max_extend_s`` at most each way, while ``win_stat`` stays anomalous
-    against its global baseline, above ``extend_ratio`` times its level beside the run and
-    above ``extend_hold_frac`` of its level inside the run. So an artifact longer than the
-    local baseline is masked whole rather than at its edges, while EMG well below the
-    artifact that starts or ends it is not. Dips shorter than ``bridge`` are crossed.
-    """
+    """Grow each run of ``confirmed`` over the artifact it starts or ends, ``max_extend_s`` at most."""
     max_extend = int(round(cfg.max_extend_s * fsamp))
     if max_extend <= 0 or cfg.local_baseline_s is None:
         return confirmed
     n_samples = win_stat.size
+    # Taken over ``bridge`` samples, so a run crosses shorter dips.
     level = maximum_filter1d(win_stat, size=bridge, mode="nearest")
     med, mad = (float(v[0]) for v in _median_and_mad(win_stat))
     sigma = max(_MAD_TO_STD * mad, _SIGMA_FLOOR_FRAC * med)
@@ -192,6 +185,9 @@ def _extend_runs(
         quiet = win_stat[lo:hi][~confirmed[lo:hi]]
         return float(np.median(quiet)) if quiet.size else med
 
+    # A run grows while the level stays anomalous against the global baseline, above
+    # ``extend_ratio`` x its level beside the run and ``extend_hold_frac`` of its level inside:
+    # an artifact longer than the local baseline is masked whole, EMG well below it is not.
     out = confirmed.copy()
     for run_start, run_end in mask_to_intervals(confirmed).tolist():
         hold = max(floor, cfg.extend_hold_frac * float(np.median(level[run_start:run_end])))
@@ -215,17 +211,13 @@ def _detect_artifact_mask(
     rows: Rows | None = None,
     store: ArrayStore | None = None,
 ) -> BoolArray:
-    """Detect a boolean artifact mask for one grid's filtered signal, ``data[rows]``.
-
-    The per-channel window maxima (one grid-size float32 array) go into ``store`` when one
-    is given.
-    """
+    """Artifact mask of one grid's filtered signal, ``data[rows]``; ``store`` takes its working array."""
     cfg = config or ArtifactMaskConfig()
     rows = slice(None) if rows is None else rows
     n_samples = data.shape[1] if data.ndim == 2 else 0
-    n_channels = len(range(data.shape[0])[rows]) if isinstance(rows, slice) else len(rows)
-    if n_channels == 0 or n_samples == 0:
-        return np.zeros(max(n_samples, 0), dtype=bool)
+    n_channels = _n_rows(data, rows) if n_samples else 0
+    if n_channels == 0:
+        return np.zeros(n_samples, dtype=bool)
 
     win = max(1, int(round(fsamp * cfg.win_ms / 1000.0)))
     k = min(max(cfg.min_channels, 1), n_channels)
@@ -248,15 +240,7 @@ def _detect_artifact_mask(
     pad = max(1, int(round(fsamp * cfg.pad_ms / 1000.0)))
     confirmed = binary_closing(confirmed, structure=np.ones(bridge, dtype=bool))
     confirmed = _extend_runs(confirmed, win_stat, fsamp, cfg, bridge)
-    mask = binary_dilation(confirmed, structure=np.ones(pad, dtype=bool))
-
-    logger.debug(
-        "Artifact mask: %d / %d samples (%.2f%%)",
-        int(mask.sum()),
-        n_samples,
-        100.0 * mask.sum() / n_samples,
-    )
-    return mask.astype(bool)
+    return binary_dilation(confirmed, structure=np.ones(pad, dtype=bool))
 
 
 def detect_artifact_masks(
@@ -267,11 +251,7 @@ def detect_artifact_masks(
     grid_rows: list[IntArray] | None = None,
     store: ArrayStore | None = None,
 ) -> tuple[list[BoolArray], BoolArray]:
-    """Detect artifact masks per grid and return per-grid + global masks.
-
-    Grid ``i`` is ``data[grid_rows[i]]`` when rows are given, else the next
-    ``grid_channel_counts[i]`` rows.
-    """
+    """Per-grid artifact masks and their union; grid ``i`` is ``data[grid_rows[i]]`` or its next rows."""
     n_samples = data.shape[1]
     per_grid_masks: list[BoolArray] = []
     global_mask = np.zeros(n_samples, dtype=bool)
@@ -292,16 +272,6 @@ def detect_artifact_masks(
                 n_samples,
                 100.0 * mask.sum() / n_samples,
             )
-
-    total = int(global_mask.sum())
-    if total:
-        logger.info(
-            "Global artifact mask: %d / %d samples (%.2f%%)",
-            total,
-            n_samples,
-            100.0 * total / n_samples,
-        )
-
     return per_grid_masks, global_mask
 
 

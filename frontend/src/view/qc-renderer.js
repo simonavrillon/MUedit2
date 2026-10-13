@@ -9,6 +9,15 @@ import {
 import { seriesPoints, seriesRange } from "../signal/series.js";
 import { gridDimensionsFor } from "../io/grid.js";
 import { pickRoiSlot, syncRois } from "../signal/qc.js";
+import {
+  describeWindow,
+  drawnRois,
+  isPlaceholder,
+  isSegmentChosen,
+  segmentAt,
+  segmentGlyph,
+  toggleSegment,
+} from "../signal/segments.js";
 import { getCurrentGrid } from "../state/selectors.js";
 import {
   addArtifactRegion,
@@ -26,8 +35,9 @@ import {
 /** @typedef {import("./plots.js").Overlay} Overlay */
 
 /**
- * Decomposition ROIs and artifact windows are drawn on the same canvases, so
- * they travel as one selection list; `kind: "artifact"` is what tells
+ * Target segments, decomposition ROIs and artifact windows are drawn on the
+ * same canvases, so they travel as one selection list, in drawing order:
+ * segments under the windows, artifacts on top. `kind` is what tells
  * `drawRoiRects` to switch colour. Drafts are appended so an in-flight drag
  * renders alongside the committed windows.
  *
@@ -35,13 +45,28 @@ import {
  * @returns {Overlay[]}
  */
 export function buildSelections(state) {
-  const rois = state.roiDraft
-    ? [...(state.rois || []), state.roiDraft]
-    : state.rois || [];
+  const segments = (state.segments || []).map((s) => ({
+    start: s.start,
+    end: s.end,
+    kind: s.kind,
+    chosen: isSegmentChosen(state, s),
+    glyph: segmentGlyph(s),
+    cycles: s.cycles,
+  }));
+  const total = state.seriesLength || 0;
+  // A whole-recording placeholder stays faint, or it would hide every segment.
+  const rois = (
+    state.roiDraft ? [...(state.rois || []), state.roiDraft] : state.rois || []
+  ).map((r) =>
+    segments.length > 0 && !isPlaceholder(r, total)
+      ? { start: r.start, end: r.end, strong: true }
+      : r,
+  );
   const artifacts = state.artifactDraft
     ? [...(state.artifactRegions || []), state.artifactDraft]
     : state.artifactRegions || [];
   return [
+    ...segments,
     ...rois,
     ...artifacts.map((a) => ({ start: a.start, end: a.end, kind: "artifact" })),
   ];
@@ -150,6 +175,24 @@ export function enableRoiSelection(app, canvasId) {
     setStatus(`Artifact window added (${n} window${n > 1 ? "s" : ""})`);
   };
 
+  const toggleSegmentAt = (/** @type {number} */ x) => {
+    const idx = segmentAt(state.segments, toSamples(x, x).startSample);
+    if (idx < 0) return;
+    const count = toggleSegment(state, idx);
+    if (els.nwindows) els.nwindows.value = String(Math.max(1, count));
+    app.ensureQcTraces();
+    const seg = state.segments[idx];
+    const holder = drawnRois(state).find(
+      (r) => r.start <= seg.start && r.end >= seg.end,
+    );
+    const total = `${count} window${count === 1 ? "" : "s"}`;
+    setStatus(
+      holder
+        ? `Window ${state.rois.indexOf(holder) + 1}: ${describeWindow(state, holder)} — ${total}`
+        : `Segment removed — ${total}`,
+    );
+  };
+
   canvas.addEventListener("pointerdown", (e) => {
     if (!state.seriesLength) return;
     canvas.setPointerCapture(e.pointerId);
@@ -193,6 +236,7 @@ export function enableRoiSelection(app, canvasId) {
     if (Math.abs(endX - startX) < 4) {
       setRoiDraft(state, null);
       setArtifactDraft(state, null);
+      if (!dragIsArtifact) toggleSegmentAt(endX);
       refreshVisuals();
       return;
     }
@@ -317,6 +361,7 @@ export function drawChannelQC(app) {
  * @param {State} state
  */
 export function populateAuxSelector(els, state) {
+  if (els.qcSegmentBtn) els.qcSegmentBtn.disabled = !state.auxNames.length;
   const sel = els.auxSelector;
   if (!sel) return;
   sel.innerHTML = '<option value="-1">All channels</option>';

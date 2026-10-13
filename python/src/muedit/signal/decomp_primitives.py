@@ -20,10 +20,7 @@ def extend_signal(
     samples_first: bool = False,
     dtype: DTypeLike | None = None,
 ) -> FloatArray:
-    """Delay-embedding channel extension used by convolutive source separation.
-
-    Channels-first output is ``dtype``, or at least float64 when it is not given.
-    """
+    """Delay-embedding channel extension; channels-first output is ``dtype``, else at least float64."""
     if samples_first:
         if exfactor <= 1:
             return signal.copy()
@@ -47,13 +44,10 @@ def extend_signal(
 
 
 def zeroed_matmul(a: FloatArray, b: FloatArray) -> FloatArray:
-    """``a @ b`` (``b`` 2-D) written into a zeroed output.
-
-    Accelerate's float32 ``cblas_sgemv``, which NumPy calls for ``v @ m`` and for a
-    one-row ``(1, k) @ (k, n)``, does not ignore the output's old contents when beta = 0
-    at some column counts: a NaN left in a fresh buffer comes out as NaN. Zeroing the
-    output makes that term exact (0 * 0).
-    """
+    """``a @ b`` (``b`` 2-D) written into a zeroed output."""
+    # Accelerate's float32 cblas_sgemv (NumPy's ``v @ m`` and one-row ``(1, k) @ (k, n)``) reads
+    # the output's old contents at some column counts even with beta = 0, so a NaN left in a
+    # fresh buffer comes out as NaN; a zeroed output makes that term exact.
     out = np.zeros((*a.shape[:-1], b.shape[1]), dtype=np.result_type(a, b))
     return np.matmul(a, b, out=out)
 

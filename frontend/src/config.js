@@ -33,6 +33,15 @@ const COLOR_TOKENS = {
   roiStroke: "--plot-roi-stroke",
   artifactFill: "--plot-artifact-fill",
   artifactStroke: "--plot-artifact-stroke",
+  roiChosenFill: "--plot-roi-chosen-fill",
+  rampFill: "--plot-ramp-fill",
+  rampStroke: "--plot-ramp-stroke",
+  plateauFill: "--plot-plateau-fill",
+  plateauStroke: "--plot-plateau-stroke",
+  sinusoidFill: "--plot-sinusoid-fill",
+  sinusoidStroke: "--plot-sinusoid-stroke",
+  irregularFill: "--plot-irregular-fill",
+  irregularStroke: "--plot-irregular-stroke",
   selectionFill: "--plot-selection-fill",
   selectionStroke: "--plot-selection-stroke",
   gridLineDim: "--plot-gridline",
@@ -83,3 +92,5 @@ export function traceColors() {
 export const OVERVIEW_BINS = 2048;
 /** Bins of each channel's mini trace in the QC grid, a few dozen pixels wide. */
 export const QC_TRACE_BINS = 128;
+/** Shortest window a deselected segment may leave of the window it was cut from. */
+export const MIN_ROI_S = 0.5;

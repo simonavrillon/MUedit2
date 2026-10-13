@@ -46,6 +46,7 @@ export const els = {
   stageEdit: element("stageEdit"),
   emgCanvas: canvas("emgCanvas"),
   qcAutoBtn: button("qcAutoBtn"),
+  qcSegmentBtn: button("qcSegmentBtn"),
   artifactAddBtn: button("artifactAddBtn"),
   artifactRemoveBtn: button("artifactRemoveBtn"),
   artifactCount: element("artifactCount"),

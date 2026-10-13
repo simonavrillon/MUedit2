@@ -75,10 +75,10 @@ Use this to trace what the user can reach.
 |---|---|---|
 | `build_preview_from_path(path)` | App-internal | `POST /preview-by-path` route |
 | `run_auto_qc_on_token(payload)` | App-internal | `POST /qc/auto` route |
+| `segment_target_on_token(payload)` | App-internal | `POST /qc/segment` route |
 | `_build_preview_core(filepath)` | App-internal | Called by `build_preview_from_path` |
 | `_bandpassed_grids(...)` | App-internal | Called by `run_auto_qc_on_token`; a temporary store file |
 | `_decomp_artifact_error(field)` | App-internal | Called by `build_preview_from_path` |
-| `_mask_to_regions(mask)` | App-internal | Called by `run_auto_qc_on_token` |
 
 ### `services/series_service.py`
 
@@ -301,9 +301,8 @@ Use this to trace what the user can reach.
 | `demean()` | User-exposed | `muedit.signal.__init__` |
 | `notch_signals()` | User-exposed | `muedit.signal.__init__`, pipeline |
 | `format_hdemg_signal()` | User-exposed | `muedit.signal.__init__`, pipeline, loaders |
-| `_detect_bad_channels()` | App-internal | Called by QC pipeline (not in `__all__`) |
 | `detect_bad_channels_per_grid()` | App-internal | Called by QC pipeline |
-| `_channel_qc_diagnostics()` | App-internal | Called by `_detect_bad_channels` |
+| `_channel_qc_diagnostics()` | App-internal | Called by `detect_bad_channels_per_grid` |
 | `_detect_artifact_mask()` | App-internal | Called by `detect_artifact_masks` |
 | `detect_artifact_masks()` | App-internal | Called by QC pipeline |
 | `mask_to_intervals()`, `intervals_to_mask()` | App-internal | `.npz` artifact intervals, preview artifact regions |
@@ -318,6 +317,8 @@ Use this to trace what the user can reach.
 | `moving_average_ms()` | App-internal | Called by series service |
 | `get_grid_electrode_metadata()` | App-internal | Called by `export_bids_emg` |
 | `ArtifactMaskConfig` | App-internal | Used by artifact mask functions |
+| `segment_target()`, `SegmentationConfig`, `TargetSegment` | App-internal | Called by `segment_target_on_token` |
+| `find_target_channel()` | App-internal | Called by `_build_preview_core` (`target_index`), `segment_target_on_token` |
 | `ChannelQCConfig` | App-internal | Used by channel QC functions |
 | `ChannelQCMetrics` | App-internal | Returned by `_channel_qc_diagnostics` |
 | `GridSpec` | App-internal | Used by `format_hdemg_signal` |

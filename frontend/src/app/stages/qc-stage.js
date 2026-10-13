@@ -17,6 +17,7 @@ import {
   setCurrentGrid,
 } from "../../state/actions.js";
 import { oncePerFrame } from "../../view/plots.js";
+import { requestSegmentation } from "../../signal/segments.js";
 import { getCurrentGrid } from "../../state/selectors.js";
 
 /** @typedef {import("../context.js").App} App */
@@ -126,6 +127,10 @@ export function setupQcEvents(app) {
   const { els, state } = app;
 
   els.qcAutoBtn?.addEventListener("click", () => void requestAutoQc(app));
+  els.qcSegmentBtn?.addEventListener(
+    "click",
+    () => void requestSegmentation(app),
+  );
   els.artifactAddBtn?.addEventListener("click", () => toggleArtifactMode(app));
   els.artifactRemoveBtn?.addEventListener("click", () =>
     removeLastArtifact(app),

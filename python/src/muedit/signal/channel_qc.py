@@ -8,7 +8,8 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.ndimage import uniform_filter1d
 
-from muedit.models import BoolArray, FloatArray, IntArray
+from muedit.models import BoolArray, FloatArray
+from muedit.signal.artifact_mask import mask_to_intervals
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +19,7 @@ _BLOCK_SAMPLES = 65536
 
 @dataclass
 class ChannelQCConfig:
-    """Tunable parameters for :func:`_detect_bad_channels`."""
+    """Tunable parameters for :func:`_channel_qc_diagnostics`."""
 
     flat_rms_ratio: float = 0.20
     flat_abs_floor: float = 1e-8
@@ -41,26 +42,12 @@ class ChannelQCConfig:
 
 @dataclass
 class ChannelQCMetrics:
-    """Per-channel diagnostic metrics from :func:`_channel_qc_diagnostics`."""
+    """Per-channel bad-channel mask, why each channel was flagged, and two of the metrics behind it."""
 
     mask: BoolArray
-    rms: FloatArray
     snr: FloatArray
-    sat_frac: FloatArray
     mean_neighbor_corr: FloatArray
-    max_win_ratio: FloatArray
-    max_loss_run: IntArray
     reasons: list[str]
-
-
-def _detect_bad_channels(
-    data: FloatArray,
-    fsamp: float,
-    coordinates: FloatArray | None = None,
-    config: ChannelQCConfig | None = None,
-) -> BoolArray:
-    """Detect bad channels in one grid's filtered signal."""
-    return _channel_qc_diagnostics(data, fsamp, coordinates, config).mask
 
 
 def _channel_qc_diagnostics(
@@ -76,14 +63,7 @@ def _channel_qc_diagnostics(
     n_ch = data.shape[0] if data.ndim == 2 else 0
     if data.size == 0 or n_ch == 0:
         return ChannelQCMetrics(
-            mask=np.zeros(0, dtype=bool),
-            rms=np.zeros(0),
-            snr=np.zeros(0),
-            sat_frac=np.zeros(0),
-            mean_neighbor_corr=np.ones(0),
-            max_win_ratio=np.zeros(0),
-            max_loss_run=np.zeros(0, dtype=int),
-            reasons=[],
+            mask=np.zeros(0, dtype=bool), snr=np.zeros(0), mean_neighbor_corr=np.ones(0), reasons=[]
         )
 
     x = np.asarray(data, dtype=np.float32)
@@ -92,9 +72,12 @@ def _channel_qc_diagnostics(
     rms = np.sqrt([np.mean(np.square(row), dtype=np.float64) for row in x])
     med_rms = float(np.median(rms))
 
-    flat = np.zeros(n_ch, dtype=bool)
-    if med_rms >= cfg.flat_abs_floor:
-        flat = rms < cfg.flat_rms_ratio * med_rms
+    # Flatness is relative to the grid: a silent grid has no outlier.
+    flat = (
+        rms < cfg.flat_rms_ratio * med_rms
+        if med_rms >= cfg.flat_abs_floor
+        else np.zeros(n_ch, bool)
+    )
 
     ch_min = x.min(axis=1)
     ch_max = x.max(axis=1)
@@ -113,22 +96,14 @@ def _channel_qc_diagnostics(
     flags = {"flat": flat, "saturated": saturated}
     mean_corr: FloatArray = np.ones(n_ch)
     snr = np.full(n_ch, np.nan)
-    max_win_ratio = np.zeros(n_ch)
-    max_loss_run = np.zeros(n_ch, dtype=int)
 
     if not structural_only:
         noisy = np.zeros(n_ch, dtype=bool)
-        can_check_noisy = coordinates is not None and n_ch > 1 and med_rms >= cfg.noisy_abs_floor
-        if can_check_noisy and coordinates is not None:
+        low_snr = np.zeros(n_ch, dtype=bool)
+        if coordinates is not None and n_ch > 1 and med_rms >= cfg.noisy_abs_floor:
             mean_corr = _mean_neighbor_correlation(x, coordinates, cfg.neighbor_dist)
             noisy = mean_corr < cfg.noisy_corr_threshold
-
-        low_snr = np.zeros(n_ch, dtype=bool)
-        can_check_snr = can_check_noisy and n_samples >= cfg.snr_min_windows * int(
-            fsamp * cfg.snr_win_ms / 1000
-        )
-        if can_check_snr:
-            snr = _estimate_snr(x, fsamp, cfg.snr_win_ms)
+            snr = _estimate_snr(x, fsamp, cfg.snr_win_ms, cfg.snr_min_windows)
             low_snr = (snr < cfg.snr_thr) & (mean_corr < cfg.low_snr_corr_thr)
 
         win_inst = max(1, int(round(fsamp * cfg.instability_win_ms / 1000.0)))
@@ -161,16 +136,10 @@ def _channel_qc_diagnostics(
             for c in range(n_ch):
                 if ch_win_max[c] < cfg.contact_loss_active_frac * grid_peak:
                     continue
-                loss_mask = grid_active & (ch_win[c] < cfg.contact_loss_frac * grid_env)
-                if not loss_mask.any():
-                    continue
-                diff = np.diff(loss_mask.astype(np.int8), prepend=0, append=0)
-                starts = np.where(diff == 1)[0]
-                ends = np.where(diff == -1)[0]
-                runs = ends - starts
-                if runs.size:
-                    max_loss_run[c] = int(runs.max())
-                    contact_loss[c] = max_loss_run[c] >= loss_min_samples
+                loss = mask_to_intervals(
+                    grid_active & (ch_win[c] < cfg.contact_loss_frac * grid_env)
+                )
+                contact_loss[c] = bool(loss.size) and int(np.diff(loss).max()) >= loss_min_samples
 
         flags |= {
             "noisy": noisy,
@@ -201,30 +170,17 @@ def _channel_qc_diagnostics(
             100.0 * n_bad / n_ch,
         )
 
-    return ChannelQCMetrics(
-        mask=mask,
-        rms=rms,
-        snr=snr,
-        sat_frac=sat_frac,
-        mean_neighbor_corr=mean_corr,
-        max_win_ratio=max_win_ratio,
-        max_loss_run=max_loss_run,
-        reasons=reasons,
-    )
+    return ChannelQCMetrics(mask=mask, snr=snr, mean_neighbor_corr=mean_corr, reasons=reasons)
 
 
-def _estimate_snr(
-    data: FloatArray,
-    fsamp: float,
-    win_ms: int,
-) -> FloatArray:
-    """Estimate per-channel SNR (dB) via activity-sparse segmentation."""
+def _estimate_snr(data: FloatArray, fsamp: float, win_ms: int, min_windows: int) -> FloatArray:
+    """Per-channel SNR (dB): the loudest 30 % of windows over the quietest 30 %; NaN on short data."""
     n_ch, n_samples = data.shape
-    win_samples = int(fsamp * win_ms / 1000)
+    win_samples = max(1, int(fsamp * win_ms / 1000))
     n_windows = n_samples // win_samples
     snr = np.full(n_ch, np.nan)
 
-    if n_windows < 4:
+    if n_windows < min_windows:
         return snr
 
     n_rest = max(1, int(0.3 * n_windows))
@@ -315,13 +271,4 @@ def detect_bad_channels_per_grid(
         ).mask
         per_grid_masks.append(mask)
         ch_idx += n_ch
-
-        if mask.any():
-            logger.info(
-                "Grid %d: %d / %d channels flagged",
-                grid_idx,
-                int(mask.sum()),
-                n_ch,
-            )
-
     return per_grid_masks

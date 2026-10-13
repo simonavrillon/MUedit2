@@ -9,7 +9,6 @@ import pytest
 
 from muedit.signal.channel_qc import (
     _channel_qc_diagnostics,
-    _detect_bad_channels,
     detect_bad_channels_per_grid,
 )
 from tests._synthetic_emg import (
@@ -95,11 +94,10 @@ def test_fault_is_flagged_with_reason(inject: Callable[[np.ndarray], None], reas
     diag = _channel_qc_diagnostics(data, FSAMP, grid_coords())
     assert np.flatnonzero(diag.mask).tolist() == [CH]
     assert reason in diag.reasons[CH]
-    np.testing.assert_array_equal(_detect_bad_channels(data, FSAMP, grid_coords()), diag.mask)
 
 
 def test_clean_grid_has_no_flags() -> None:
-    mask = _detect_bad_channels(correlated_emg(), FSAMP, grid_coords())
+    mask = _channel_qc_diagnostics(correlated_emg(), FSAMP, grid_coords()).mask
     assert mask.dtype == bool and mask.shape == (N_CHANNELS,)
     assert not mask.any()
 
@@ -114,13 +112,13 @@ def test_quiet_but_correlated_channel_is_not_low_snr() -> None:
 def test_noisy_check_needs_coordinates() -> None:
     data = correlated_emg()
     _noisy(data)
-    assert not _detect_bad_channels(data, FSAMP, coordinates=None)[CH]
+    assert not _channel_qc_diagnostics(data, FSAMP, coordinates=None).mask[CH]
 
 
 def test_all_flat_grid_is_not_flagged() -> None:
     """Flatness is relative to the grid median; a silent grid has no outlier."""
     data = np.zeros((N_CHANNELS, N_SAMPLES), dtype=np.float32)
-    assert not _detect_bad_channels(data, FSAMP, grid_coords()).any()
+    assert not _channel_qc_diagnostics(data, FSAMP, grid_coords()).mask.any()
 
 
 def test_per_grid_masks_use_grid_local_indices() -> None:
