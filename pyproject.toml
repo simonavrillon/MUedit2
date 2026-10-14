@@ -32,7 +32,6 @@ dependencies = [
   "fastapi>=0.141",
   "starlette>=1.3.1",  # imported directly; floor clears known advisories
   "uvicorn>=0.32",
-  "python-multipart>=0.0.31",  # floor clears known advisories
   "pyedflib>=0.1.36",
   "platformdirs>=4.3",
 ]

@@ -9,8 +9,8 @@ import h5py
 import numpy as np
 import scipy.io
 
-from muedit.io.store import ArrayStore, RamStore, sample_blocks, store_signal
 from muedit.models import SignalImport
+from muedit.storage import ArrayStore, RamStore, sample_blocks, store_signal
 
 
 def _parse_text(value: Any) -> str:

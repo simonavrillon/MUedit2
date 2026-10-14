@@ -14,10 +14,10 @@ from typing import Any
 import numpy as np
 
 from muedit.io._bids_layout import BidsEntities, dataset_root, entity_pairs
-from muedit.io.store import ArrayStore, RamStore
 from muedit.models import SignalImport
 from muedit.signal.grid import format_hdemg_signal, is_known_grid
 from muedit.signal.segmentation import aux_kinds
+from muedit.storage import ArrayStore, RamStore
 
 _GRID_LABEL = re.compile(r"^grid\s*(\d+)$", re.IGNORECASE)
 # Target-phase labels written by MUedit and MUniverse, and by the MUnitQuest tutorials.

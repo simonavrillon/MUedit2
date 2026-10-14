@@ -98,26 +98,28 @@ def _pulse_with_peaks(peaks: dict[int, float], n: int = N_SAMPLES) -> np.ndarray
 class TestAddInRoi:
     """Both add operations share the same peak-picking semantics."""
 
-    def test_adds_peaks_above_threshold_inside_roi(self, op: Callable[..., list[int]]) -> None:
+    def test_adds_peaks_above_threshold_inside_roi(self, op: Callable[..., np.ndarray]) -> None:
         pulse = _pulse_with_peaks({1000: 1.0, 1500: 0.2, 3000: 1.0})
         out = op(pulse, [500], FSAMP, 900, 2000, 0.5)
-        assert out == [500, 1000]
+        assert out.tolist() == [500, 1000]
 
-    def test_roi_bounds_are_inclusive(self, op: Callable[..., list[int]]) -> None:
+    def test_roi_bounds_are_inclusive(self, op: Callable[..., np.ndarray]) -> None:
         pulse = _pulse_with_peaks({1000: 1.0, 2000: 1.0})
-        assert op(pulse, [], FSAMP, 1000, 2000, 0.5) == [1000, 2000]
+        assert op(pulse, [], FSAMP, 1000, 2000, 0.5).tolist() == [1000, 2000]
 
-    def test_no_peak_returns_sorted_unique_input(self, op: Callable[..., list[int]]) -> None:
+    def test_no_peak_returns_sorted_unique_input(self, op: Callable[..., np.ndarray]) -> None:
         pulse = np.zeros(N_SAMPLES)
-        assert op(pulse, [30, 10, 30], FSAMP, 0, 100, 0.5) == [10, 30]
+        assert op(pulse, [30, 10, 30], FSAMP, 0, 100, 0.5).tolist() == [10, 30]
 
-    def test_existing_spike_not_duplicated(self, op: Callable[..., list[int]]) -> None:
+    def test_existing_spike_not_duplicated(self, op: Callable[..., np.ndarray]) -> None:
         pulse = _pulse_with_peaks({1000: 1.0})
-        assert op(pulse, [1000], FSAMP, 0, 2000, 0.5) == [1000]
+        assert op(pulse, [1000], FSAMP, 0, 2000, 0.5).tolist() == [1000]
 
-    def test_refractory_period_keeps_one_of_close_peaks(self, op: Callable[..., list[int]]) -> None:
+    def test_refractory_period_keeps_one_of_close_peaks(
+        self, op: Callable[..., np.ndarray]
+    ) -> None:
         pulse = _pulse_with_peaks({1000: 1.0, 1005: 0.8})
-        assert op(pulse, [], FSAMP, 0, 2000, 0.5) == [1000]
+        assert op(pulse, [], FSAMP, 0, 2000, 0.5).tolist() == [1000]
 
 
 # ── delete_spikes_in_roi / delete_artifacts_in_roi ───────────────────────────
@@ -127,18 +129,18 @@ class TestAddInRoi:
 class TestDeleteInRoi:
     """Both delete operations share the same box semantics."""
 
-    def test_deletes_only_spikes_inside_box(self, op: Callable[..., list[int]]) -> None:
+    def test_deletes_only_spikes_inside_box(self, op: Callable[..., np.ndarray]) -> None:
         pulse = _pulse_with_peaks({100: 0.5, 200: 0.5, 300: 5.0, 900: 0.5})
         out = op(pulse, [100, 200, 300, 900], 150, 400, 0.2, 0.8)
-        assert out == [100, 300, 900]
+        assert out.tolist() == [100, 300, 900]
 
-    def test_y_bounds_order_is_irrelevant(self, op: Callable[..., list[int]]) -> None:
+    def test_y_bounds_order_is_irrelevant(self, op: Callable[..., np.ndarray]) -> None:
         pulse = _pulse_with_peaks({200: 0.5})
-        assert op(pulse, [200], 0, 400, 0.8, 0.2) == []
+        assert op(pulse, [200], 0, 400, 0.8, 0.2).tolist() == []
 
-    def test_x_bounds_are_inclusive(self, op: Callable[..., list[int]]) -> None:
+    def test_x_bounds_are_inclusive(self, op: Callable[..., np.ndarray]) -> None:
         pulse = _pulse_with_peaks({150: 0.5, 400: 0.5})
-        assert op(pulse, [150, 400], 150, 400, 0.2, 0.8) == []
+        assert op(pulse, [150, 400], 150, 400, 0.2, 0.8).tolist() == []
 
 
 # ── delete_high_discharge_rate_spikes_in_roi ─────────────────────────────────
@@ -149,30 +151,32 @@ class TestDeleteHighDischargeRate:
         spikes = [1000, 2000, 2040, 3000]
         pulse = _pulse_with_peaks({1000: 1.0, 2000: 1.0, 2040: 0.3, 3000: 1.0})
         out = delete_high_discharge_rate_spikes_in_roi(pulse, spikes, FSAMP, 1500, 2500, 20.0)
-        assert out == [1000, 2000, 3000]
+        assert out.tolist() == [1000, 2000, 3000]
 
     def test_keeps_stronger_spike_when_left_is_weaker(self) -> None:
         spikes = [2000, 2040]
         pulse = _pulse_with_peaks({2000: 0.3, 2040: 1.0})
         out = delete_high_discharge_rate_spikes_in_roi(pulse, spikes, FSAMP, 0, 5000, 20.0)
-        assert out == [2040]
+        assert out.tolist() == [2040]
 
     def test_pair_midpoint_outside_roi_untouched(self) -> None:
         spikes = [2000, 2040]
         pulse = _pulse_with_peaks({2000: 1.0, 2040: 0.3})
         out = delete_high_discharge_rate_spikes_in_roi(pulse, spikes, FSAMP, 3000, 5000, 20.0)
-        assert out == spikes
+        assert out.tolist() == spikes
 
     def test_rate_below_threshold_untouched(self) -> None:
         spikes = [2000, 2040]
         pulse = _pulse_with_peaks({2000: 1.0, 2040: 0.3})
         out = delete_high_discharge_rate_spikes_in_roi(pulse, spikes, FSAMP, 0, 5000, 60.0)
-        assert out == spikes
+        assert out.tolist() == spikes
 
     def test_fewer_than_two_spikes(self) -> None:
         pulse = np.zeros(10)
-        assert delete_high_discharge_rate_spikes_in_roi(pulse, [5], FSAMP, 0, 10, 1.0) == [5]
-        assert delete_high_discharge_rate_spikes_in_roi(pulse, [], FSAMP, 0, 10, 1.0) == []
+        assert delete_high_discharge_rate_spikes_in_roi(pulse, [5], FSAMP, 0, 10, 1.0).tolist() == [
+            5
+        ]
+        assert delete_high_discharge_rate_spikes_in_roi(pulse, [], FSAMP, 0, 10, 1.0).tolist() == []
 
 
 # ── remove_discharge_rate_outliers ───────────────────────────────────────────
@@ -187,12 +191,12 @@ class TestRemoveDischargeRateOutliers:
         pulse = _pulse_with_peaks(heights)
         out = remove_discharge_rate_outliers(pulse, spikes, FSAMP)
         assert 4020 not in out
-        assert out == list(range(1000, 9001, 200))
+        assert out.tolist() == list(range(1000, 9001, 200))
 
     def test_regular_train_untouched(self) -> None:
         spikes = list(range(1000, 9001, 200))
         pulse = _pulse_with_peaks(dict.fromkeys(spikes, 1.0))
-        assert remove_discharge_rate_outliers(pulse, spikes, FSAMP) == spikes
+        assert remove_discharge_rate_outliers(pulse, spikes, FSAMP).tolist() == spikes
 
     def test_z_factor_controls_sensitivity(self) -> None:
         spikes = [*range(1000, 9001, 200), 4100]
@@ -200,11 +204,11 @@ class TestRemoveDischargeRateOutliers:
         strict = remove_discharge_rate_outliers(pulse, spikes, FSAMP, z_factor=0.5)
         lenient = remove_discharge_rate_outliers(pulse, spikes, FSAMP, z_factor=100.0)
         assert len(strict) < len(spikes)
-        assert lenient == sorted(spikes)
+        assert lenient.tolist() == sorted(spikes)
 
     def test_fewer_than_three_spikes(self) -> None:
         pulse = np.zeros(10)
-        assert remove_discharge_rate_outliers(pulse, [5, 1], FSAMP) == [1, 5]
+        assert remove_discharge_rate_outliers(pulse, [5, 1], FSAMP).tolist() == [1, 5]
 
 
 # ── update_motor_unit_filter_window ──────────────────────────────────────────
@@ -242,8 +246,8 @@ class TestUpdateFilterWindow:
         matched = _match_count(truth, found)
         assert matched == found.size
         assert matched >= 0.75 * truth.size
-        assert updated == sorted(set(updated))
-        assert all(type(x) is int for x in updated)
+        assert updated.tolist() == sorted(set(updated.tolist()))
+        assert updated.dtype == np.int32
 
     def test_spikes_outside_window_preserved(self, synthetic_mu: dict[str, np.ndarray]) -> None:
         _, updated = _update(synthetic_mu)
@@ -297,7 +301,7 @@ class TestUpdateFilterWindow:
         pt_sl, up_sl = _update(synthetic_mu, emg=sliced, emg_offset=VIEW_START)
         assert pt_sl is not None and pt_full is not None
         np.testing.assert_allclose(pt_sl, pt_full)
-        assert up_sl == up_full
+        np.testing.assert_array_equal(up_sl, up_full)
 
     def test_masked_channels_ignored(self, synthetic_mu: dict[str, np.ndarray]) -> None:
         """Channels with ``emg_mask == 1`` do not influence the result."""
@@ -311,7 +315,7 @@ class TestUpdateFilterWindow:
         )
         assert pt_masked is not None and pt_ref is not None
         np.testing.assert_allclose(pt_masked, pt_ref)
-        assert up_masked == up_ref
+        np.testing.assert_array_equal(up_masked, up_ref)
 
     @pytest.mark.parametrize(
         "start,end",
@@ -327,13 +331,13 @@ class TestUpdateFilterWindow:
         spikes = synthetic_mu["target"].tolist()
         pt, updated = _update(synthetic_mu, start=start, end=end)
         assert pt is None
-        assert updated == spikes
+        assert updated.tolist() == spikes
 
     def test_no_spikes_in_window_is_noop(self, synthetic_mu: dict[str, np.ndarray]) -> None:
         spikes = [100, 9900]
         pt, updated = _update(synthetic_mu, spike_times=spikes)
         assert pt is None
-        assert updated == spikes
+        assert updated.tolist() == spikes
 
     def test_peeloff_and_artifact_times_run(self, synthetic_mu: dict[str, np.ndarray]) -> None:
         """Peel-off of the other MU and manual artifact times still recover the target."""

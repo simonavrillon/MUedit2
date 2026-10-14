@@ -15,7 +15,7 @@ from muedit.api.cache import BUDGET
 from muedit.api.errors import register_exception_handlers
 from muedit.api.services.decompose_service import stop_decompositions
 from muedit.editing.edit_log import purge_old_logs
-from muedit.io.store import purge_stale_sessions
+from muedit.storage import purge_stale_sessions
 
 
 @asynccontextmanager

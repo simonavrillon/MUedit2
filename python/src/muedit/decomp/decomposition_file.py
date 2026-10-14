@@ -17,9 +17,16 @@ from numpy.typing import ArrayLike, DTypeLike
 
 from muedit.io.mat import mat73_read, parse_text_list
 from muedit.io.npz import NpzArchive, NpzWriter, RowSource
-from muedit.io.store import ArrayStore, RamStore, copy_into, sample_blocks
-from muedit.models import BoolArray, EditSignalContext, FloatArray, IntArray, LoadedDecomposition
+from muedit.models import (
+    BoolArray,
+    EditSignalContext,
+    FloatArray,
+    IntArray,
+    LoadedDecomposition,
+    spike_array,
+)
 from muedit.signal.artifact_mask import intervals_to_mask, mask_to_intervals
+from muedit.storage import ArrayStore, RamStore, copy_into, sample_blocks
 
 logger = logging.getLogger(__name__)
 
@@ -86,15 +93,6 @@ def unpack_csr(values: np.ndarray, offsets: np.ndarray) -> list[np.ndarray]:
     return [values[int(a) : int(b)] for a, b in pairwise(offsets)]
 
 
-def _clean_spike_times(times: ArrayLike) -> IntArray:
-    """Sorted, unique, non-negative sample indices as int32."""
-    arr = np.asarray(times, dtype=np.int64).reshape(-1)
-    arr = np.unique(arr[arr >= 0])
-    if arr.size and arr[-1] > np.iinfo(np.int32).max:
-        raise ValueError(f"spike time {int(arr[-1])} does not fit in int32")
-    return arr.astype(np.int32)
-
-
 def _json_default(value: Any) -> Any:
     if isinstance(value, np.ndarray):
         return value.tolist()
@@ -131,7 +129,7 @@ def save_decomposition_npz(
     target_segments: Mapping[str, Any] | None = None,
 ) -> None:
     """Save a decomposition in the app's pickle-free, memory-mappable .npz schema v2."""
-    spikes, spike_offsets = pack_csr([_clean_spike_times(d) for d in distimes], np.int32)
+    spikes, spike_offsets = pack_csr([spike_array(d) for d in distimes], np.int32)
     with NpzWriter(out_path) as npz:
         npz.add(SCHEMA_KEY, np.int64(SCHEMA_VERSION))
         npz.add("fsamp", np.float64(fsamp))
@@ -180,29 +178,13 @@ def _bids_meta(meta: Mapping[str, Any]) -> dict[str, Any]:
     return {key: meta[key] for key in LOADER_BIDS_META_KEYS if key in meta}
 
 
-def normalize_distimes(raw: Any) -> list[list[int]]:
-    """Normalize discharge-time payloads into ``list[list[int]]`` format."""
+def normalize_distimes(raw: Any) -> list[IntArray]:
+    """One ``spike_array`` per MU from a list or object array of per-MU payloads."""
     if isinstance(raw, np.ndarray) and raw.dtype == object:
-        return normalize_distimes(raw.tolist())
-    if isinstance(raw, (list, tuple)):
-        result: list[list[int]] = []
-        for item in raw:
-            if item is None:
-                result.append([])
-            else:
-                result.append(sorted(set(_collect_positive_ints(item))))
-        return result
-    return []
-
-
-def _collect_positive_ints(value: Any) -> list[int]:
-    """Flatten one per-MU payload element into a list of non-negative ints."""
-    if isinstance(value, np.ndarray):
-        return [int(v) for v in value.astype(int).flatten().tolist() if int(v) >= 0]
-    if isinstance(value, (list, tuple)):
-        return [int(v) for v in value if int(v) >= 0]
-    v = int(value)
-    return [v] if v >= 0 else []
+        raw = raw.tolist()
+    if not isinstance(raw, (list, tuple)):
+        return []
+    return [spike_array(item) for item in raw]
 
 
 def first_non_none(*values: Any) -> Any:
@@ -213,16 +195,14 @@ def first_non_none(*values: Any) -> Any:
     return None
 
 
-def build_pulse_trains_from_distimes(distimes: list[list[int]], total_samples: int) -> np.ndarray:
+def build_pulse_trains_from_distimes(
+    distimes: Sequence[ArrayLike], total_samples: int
+) -> np.ndarray:
     """Create a binary float32 pulse-train matrix from discharge-time indices."""
-    nmu = len(distimes)
-    pulses = np.zeros((nmu, total_samples), dtype=np.float32)
+    pulses = np.zeros((len(distimes), total_samples), dtype=np.float32)
     for idx, times in enumerate(distimes):
-        if not times:
-            continue
-        t = np.asarray(times, dtype=int)
-        t = t[(t >= 0) & (t < total_samples)]
-        pulses[idx, t] = 1.0
+        t = spike_array(times)
+        pulses[idx, t[t < total_samples]] = 1.0
     return pulses
 
 
@@ -230,12 +210,12 @@ def save_editlog(
     editlog_path: Path,
     mu_uids: list[str],
     edit_history: list[dict[str, Any]],
-    artifact_times: list[list[int]] | None = None,
+    artifact_times: Sequence[IntArray] | None = None,
 ) -> None:
     """Write a JSON editlog sidecar alongside a decomposition artifact."""
     payload: dict[str, Any] = {"mu_uids": mu_uids, "history": edit_history}
     if artifact_times:
-        payload["artifact_times"] = artifact_times
+        payload["artifact_times"] = [np.asarray(a).tolist() for a in artifact_times]
     with editlog_path.open("w", encoding="utf-8") as fh:
         json.dump(payload, fh, indent=2)
 
@@ -477,7 +457,7 @@ def _npz_v2_decomp(data: NpzArchive) -> DecompositionLoad:
     spikes = data.get("spike_times")
     offsets = data.get("spike_offsets")
     distimes = (
-        [row.tolist() for row in unpack_csr(spikes, offsets)]
+        [spike_array(row) for row in unpack_csr(spikes, offsets)]
         if spikes is not None and offsets is not None
         else []
     )
@@ -528,13 +508,8 @@ def _extract_grid_pulse_blocks(raw: Any) -> list[np.ndarray]:
 
 def _extract_grid_distime_blocks(
     raw: Any, expected_grids: int | None = None
-) -> list[list[list[int]]]:
-    """Split per-grid discharge-time cell arrays into nested lists of MU index lists."""
-
-    def _mu_vector(cell: Any) -> list[int]:
-        if cell is None:
-            return []
-        return sorted(set(_collect_positive_ints(cell)))
+) -> list[list[IntArray]]:
+    """Split per-grid discharge-time cell arrays into one list of MU spike arrays per grid."""
 
     if expected_grids == 1 and isinstance(raw, (list, tuple, np.ndarray)):
         if isinstance(raw, np.ndarray) and raw.ndim > 1:
@@ -542,7 +517,7 @@ def _extract_grid_distime_blocks(
         all_mu = normalize_distimes(raw)
         return [all_mu] if all_mu else []
 
-    blocks: list[list[list[int]]] = []
+    blocks: list[list[IntArray]] = []
     if isinstance(raw, np.ndarray) and raw.dtype == object:
         arr = np.asarray(raw, dtype=object)
         if arr.ndim == 2:
@@ -555,19 +530,14 @@ def _extract_grid_distime_blocks(
                 rows = [arr[g, :].tolist() for g in range(arr.shape[0])]
 
             for row in rows:
-                mu_lists: list[list[int]] = []
-                for cell in row:
-                    mu_vec = _mu_vector(cell)
-                    if mu_vec:
-                        mu_lists.append(mu_vec)
+                mu_lists = [mu for mu in map(spike_array, row) if mu.size]
                 if mu_lists:
                     blocks.append(mu_lists)
             return blocks
 
     items = _top_level_cell_items(raw)
     for item in items:
-        mu_lists = normalize_distimes(item)
-        mu_lists = [mu for mu in mu_lists if mu]
+        mu_lists = [mu for mu in normalize_distimes(item) if mu.size]
         if mu_lists:
             blocks.append(mu_lists)
     return blocks
@@ -612,14 +582,14 @@ def _unpack_gridwise_decomposition(
 
     inferred_from_distime: list[int] = []
     if distime_blocks:
-        flat_distimes: list[list[int]] = []
+        flat_distimes: list[IntArray] = []
         if pulse_blocks:
             for g_idx, pblock in enumerate(pulse_blocks):
                 expected_mu = int(pblock.shape[0])
                 mu_lists = distime_blocks[g_idx] if g_idx < len(distime_blocks) else []
                 aligned = list(mu_lists[:expected_mu])
                 if len(aligned) < expected_mu:
-                    aligned.extend([[] for _ in range(expected_mu - len(aligned))])
+                    aligned.extend(spike_array([]) for _ in range(expected_mu - len(aligned)))
                 flat_distimes.extend(aligned)
                 inferred_from_distime.extend([g_idx] * expected_mu)
         else:
@@ -648,19 +618,15 @@ def _infer_total_samples_from_pulse(pulse_trains: Any) -> int | None:
     return None
 
 
-def _distimes_from_pulse_matrix(matrix: np.ndarray) -> list[list[int]]:
+def _distimes_from_pulse_matrix(matrix: np.ndarray) -> list[IntArray]:
     """Derive discharge-time indices from non-zero entries in a pulse matrix."""
-    return [np.flatnonzero(np.asarray(row) != 0).astype(int).tolist() for row in matrix]
+    return [spike_array(np.flatnonzero(np.asarray(row) != 0)) for row in matrix]
 
 
-def _shift_distimes(values: list[list[int]], shift: int, limit: int) -> list[list[int]]:
+def _shift_distimes(values: list[IntArray], shift: int, limit: int) -> list[IntArray]:
     """Shift all discharge times by a constant and clip to [0, limit)."""
-    shifted: list[list[int]] = []
-    for row in values:
-        adj = [int(v) + shift for v in row]
-        adj = [v for v in adj if 0 <= v < limit]
-        shifted.append(sorted(set(adj)))
-    return shifted
+    shifted = [row.astype(np.int64) + shift for row in values]
+    return [spike_array(row[row < limit]) for row in shifted]
 
 
 def _finish_decomposition(
@@ -691,7 +657,7 @@ def _finish_decomposition(
         d.total_samples or (pulse_trains.shape[1] if getattr(pulse_trains, "ndim", 0) == 2 else 0)
     )
     if total_samples <= 0 and distimes:
-        max_spike = max((max(x) for x in distimes if x), default=-1)
+        max_spike = max((int(x[-1]) for x in distimes if x.size), default=-1)
         total_samples = max_spike + 1 if max_spike >= 0 else 0
 
     if one_based and distimes:

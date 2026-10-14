@@ -31,9 +31,6 @@ def _decompose_with_events() -> tuple[Any, list[dict[str, Any]]]:
         rois=None,
         params=_PARAMS,
         discard_overrides=None,
-        bids_root=None,
-        bids_entities=None,
-        bids_metadata=None,
     )
     decomposed = decompose_step(
         prep=prep,

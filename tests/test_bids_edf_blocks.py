@@ -11,7 +11,7 @@ import pyedflib
 import pytest
 
 import muedit.io.bids as bids
-import muedit.io.store as store
+from muedit import storage as store
 from muedit.io.bids import _physical_range, export_bids_emg
 
 FSAMP = 2048  # one data record per second, 2048 samples each

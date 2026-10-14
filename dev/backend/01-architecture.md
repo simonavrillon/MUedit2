@@ -19,7 +19,7 @@
 
 ### Dependencies
 
-`numpy`, `scipy`, `xmltodict`, `pydantic`, `PyYAML`, `h5py`, `fastapi`, `starlette`, `uvicorn`, `python-multipart`, `pyedflib`, `platformdirs`
+`numpy`, `scipy`, `xmltodict`, `pydantic`, `PyYAML`, `h5py`, `fastapi`, `starlette`, `uvicorn`, `pyedflib`, `platformdirs`
 
 Extras: `dev` (`build`, `twine`, `pytest`, `pytest-cov`, `httpx`, `ruff`, `mypy`, `pre-commit`, `types-PyYAML`), `plot` (`matplotlib`, for the CLI's `--manual-roi` only), `notebook` (`jupyterlab`, `ipykernel`), `research` (`optuna`, `matplotlib`). All versions are pinned in `uv.lock`.
 
@@ -79,6 +79,7 @@ cli.run_decomposition_cli(argv)
 ```python
 __all__ = [
     "DecompositionParameters",   # decomp.types
+    "DecompositionResult",       # decomp.types
     "load_signal",               # io.factory
     "register_loader",           # io.factory
     "run_decomposition",         # decomp.pipeline
@@ -92,7 +93,7 @@ does not load SciPy.
 
 | Package | Exports |
 |---|---|
-| `muedit.decomp` | `DecompositionParameters`, `run_decomposition` |
+| `muedit.decomp` | `DecompositionParameters`, `DecompositionResult`, `run_decomposition` |
 | `muedit.io` | `LoaderFn`, `get_loader`, `load_signal`, `register_loader`, `supported_extensions` |
 | `muedit.signal` | `bandpass_signals`, `demean`, `format_hdemg_signal`, `notch_signals`, `run_auto_qc`, `QCPipelineResult` |
 | `muedit.editing` | `FilterUpdateResult`, `SpikeTimes`, `add_artifact_in_roi`, `add_spikes_in_roi`, `delete_artifacts_in_roi`, `delete_high_discharge_rate_spikes_in_roi`, `delete_spikes_in_roi`, `remove_discharge_rate_outliers`, `update_motor_unit_filter_window` |
@@ -162,7 +163,7 @@ Decomposition state loaded from `.npz`/`.mat` for editing. Returned by `load_dec
 | Field | Type | Default |
 |---|---|---|
 | `pulse_trains_full` | `FloatArray` `(n_mu, total_samples)` | empty `(0, 0)` |
-| `distime_all` | `list[list[int]]` | `[]` |
+| `distime_all` | `list[IntArray]` (one `spike_array` per MU) | `[]` |
 | `fsamp` | `float | None` | `None` |
 | `grid_names` | `list[str]` | `[]` |
 | `total_samples` | `int` | `0` |
@@ -171,36 +172,6 @@ Decomposition state loaded from `.npz`/`.mat` for editing. Returned by `load_dec
 | `parameters` | `dict[str, Any]` | `{}` |
 | `muscle` | `list[str]` | `[]` |
 | `sil` | `list[float]` | `[]` |
-
-Methods: `to_dict()`
-
-### `DecompositionSignalExport`
-EMG signal paired with decomposition output (MATLAB-compatible keys).
-
-| Field | Type |
-|---|---|
-| `data` | `np.ndarray` |
-| `fsamp` | `float` |
-| `pulse_t` | `np.ndarray` |
-| `discharge_times` | `list[np.ndarray]` |
-
-Methods: `to_dict()` — emits keys `"PulseT"`, `"Dischargetimes"` for MATLAB compatibility.
-
-### `DecompositionExport`
-Full decomposition output with SIL scores and frontend preview.
-
-| Field | Type |
-|---|---|
-| `signal` | `DecompositionSignalExport` |
-| `parameters` | `dict[str, Any]` |
-| `grid_names` | `list[str]` |
-| `sil` | `list[float]` |
-| `discard_channels` | `list[np.ndarray]` |
-| `coordinates` | `list[np.ndarray]` |
-| `mu_grid_index` | `list[int]` |
-| `preview` | `dict[str, Any]` |
-
-Methods: `to_dict()`
 
 ---
 
@@ -240,6 +211,7 @@ Methods: `to_dict()`
 | `cli.py` | `muedit api` / `muedit decompose` entry points |
 | `paths.py` | Per-user cache and log folders (`platformdirs`), the checkout root, the frontend folder |
 | `app_log.py` | The server's rotating log file, shared with its spawned workers |
+| `storage.py` | `SessionStore`: a folder of memory-mapped `.npy` files per upload, run or edit session; `RamStore` on the heap. Below `io`, `signal` and `decomp`, so none of them import each other for it |
 
 ### `decomp/` — Decomposition Engine
 
@@ -269,7 +241,6 @@ Methods: `to_dict()`
 | `mat.py` | MATLAB .mat v5 (scipy) + v7.3 (h5py/HDF5) loader |
 | `_otb.py` | OT Bioelettronica OTB+ and OTB4 archive loaders |
 | `npz.py` | `NpzWriter` (aligned, uncompressed, written row block by row block), `NpzArchive` (one open, members memory-mapped), the restricted unpickler for legacy files |
-| `store.py` | `SessionStore`: a folder of memory-mapped `.npy` files per upload, run or edit session; `RamStore` on the heap |
 
 ### `signal/` — Signal Processing
 

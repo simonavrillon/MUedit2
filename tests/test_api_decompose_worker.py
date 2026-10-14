@@ -19,6 +19,7 @@ import scipy.io
 from starlette.testclient import TestClient
 
 from muedit.api import cache
+from muedit.api.schemas import DecomposePayload
 from muedit.api.services import decompose_service
 from muedit.api.services.decompose_service import (
     active_run,
@@ -26,8 +27,9 @@ from muedit.api.services.decompose_service import (
     start_decomposition,
 )
 from muedit.api.services.decompose_worker import RunJob
-from muedit.io.store import sessions_dir
+from muedit.decomp.types import DecompositionParameters
 from muedit.models import resident_nbytes
+from muedit.storage import sessions_dir
 from tests._platform import deleted
 from tests._synthetic_emg import motor_unit_emg
 
@@ -104,11 +106,11 @@ def _upload(client: TestClient, recording: Path, session: str) -> str:
 
 
 def _run(
-    client: TestClient, token: str, session: str, params: dict[str, Any], **form: str
+    client: TestClient, token: str, session: str, params: dict[str, Any], **fields: Any
 ) -> list[dict[str, Any]]:
     resp = client.post(
         f"{API}/decompose_stream",
-        data={"upload_token": token, "params": json.dumps(params), **form},
+        json={"upload_token": token, "params": params, **fields},
         headers={SESSION_HEADER: session},
     )
     assert resp.status_code == 200, resp.text
@@ -154,7 +156,7 @@ class TestWorkerProcess:
         self, client: TestClient, recording: Path
     ) -> None:
         token = _upload(client, recording, "files")
-        done = _run(client, token, "files", QUICK, full_preview="true")[-1]
+        done = _run(client, token, "files", QUICK, full_preview=True)[-1]
         entry = cache._RUN_RESULTS.get(done["preview"]["run_result_token"])
         assert entry is not None and entry.store is not None
         assert resident_nbytes(entry.pulse_trains) == 0
@@ -165,9 +167,7 @@ class TestWorkerProcess:
     ) -> None:
         signal = cache._get_upload_signal(_upload(client, recording, "locations"))
         assert signal is not None
-        job = RunJob(
-            run_path="x", signal=signal, params_raw=None, duration=None, persist_output=False
-        )
+        job = RunJob(run_path="x", signal=signal, params=DecompositionParameters())
         assert len(ForkingPickler.dumps(job)) < 16 * 1024 < signal.data.nbytes
 
     def test_a_crashed_worker_is_an_error_event(
@@ -210,7 +210,7 @@ class TestOneRunAtATime:
         run_folder = first.run.store.path
         resp = client.post(
             f"{API}/decompose_stream",
-            data={"upload_token": token, "params": json.dumps(QUICK)},
+            json={"upload_token": token, "params": QUICK},
             headers={SESSION_HEADER: "tab-b"},
         )
         assert resp.status_code == 409
@@ -256,11 +256,9 @@ class TestOneRunAtATime:
 
 class TestStreamEnd:
     def _start(self, client: TestClient, recording: Path, session: str) -> Any:
-        return start_decomposition(
-            _upload(client, recording, session),
-            {"params_raw": json.dumps(SLOW), "duration": None, "persist_output": False},
-            session=session,
-        )
+        token = _upload(client, recording, session)
+        payload = DecomposePayload.model_validate({"upload_token": token, "params": SLOW})
+        return start_decomposition(payload, session=session)
 
     def test_a_client_that_leaves_cancels_the_run(
         self, client: TestClient, recording: Path

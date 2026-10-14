@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 import scipy.io
 
-from muedit.api.schemas import EditOpPayload, QcAutoPayload
+from muedit.api.schemas import FilterUpdatePayload, QcAutoPayload
 from muedit.api.services import editing_service, preview_service
 from muedit.api.services.series_service import series_frame
 from muedit.decomp.core import decompose_step
@@ -23,7 +23,7 @@ from muedit.decomp.preprocess import load_step, preprocess_step
 from muedit.decomp.types import DEFAULT_NBEXTCHAN, DecompositionParameters
 from muedit.io.bids import export_bids_emg
 from muedit.io.factory import load_signal
-from muedit.io.store import SessionStore
+from muedit.storage import SessionStore
 from tests._report import record
 from tests._synthetic_emg import FSAMP, N_CHANNELS, motor_unit_emg
 
@@ -181,9 +181,6 @@ def prepared(mat_path: Path, upload_token: str, run_store: SessionStore) -> Any:
         rois=None,
         params=DecompositionParameters(niter=NITER),
         discard_overrides=None,
-        bids_root=None,
-        bids_entities=None,
-        bids_metadata=None,
         store=run_store,
     )
     return loaded, prep
@@ -217,18 +214,18 @@ def post_windowed(prepared: Any, decomposed: Any, run_store: SessionStore) -> An
 @pytest.fixture(scope="session")
 def saved_decomposition(mat_path: Path, tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
     """A saved decomposition (NPZ with embedded EMG) for the edit stages."""
-    result, save_path = run_decomposition(
+    result = run_decomposition(
         str(mat_path),
         roi=ROI,
         params=DecompositionParameters(niter=NITER),
         save_npz=True,
     )
-    distimes = result["signal"]["Dischargetimes"]
+    assert result.save_path is not None
     return {
-        "npz": Path(save_path),
-        "distimes": distimes,
-        "mu_grid_index": result["mu_grid_index"],
-        "fsamp": float(result["signal"]["fsamp"]),
+        "npz": Path(result.save_path),
+        "distimes": result.discharge_times,
+        "mu_grid_index": result.mu_grid_index,
+        "fsamp": result.fsamp,
     }
 
 
@@ -290,9 +287,6 @@ def test_preprocess_stage(mat_path: Path, upload_token: str, run_store: SessionS
             rois=None,
             params=DecompositionParameters(niter=NITER),
             discard_overrides=None,
-            bids_root=None,
-            bids_entities=None,
-            bids_metadata=None,
             store=run_store,
         )
 
@@ -415,7 +409,7 @@ def test_update_filter_stage(saved_decomposition: dict[str, Any]) -> None:
     # Open the edit session exactly as the edit stage does.
     opened = editing_service.open_edit_session(str(saved["npz"]))
     meta, _ = unpack_frame(bytes(opened.body))
-    payload = EditOpPayload(
+    payload = FilterUpdatePayload(
         token=meta["token"],
         mu=0,
         view_start=view_start,

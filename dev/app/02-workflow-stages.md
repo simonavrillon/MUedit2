@@ -284,16 +284,12 @@ User clicks "Decompose signal" / "Start decomposition"
      2. setIsRunning(state, true); setParameters(state, buildParams())
      3. setRunLive(state, createRunLive(now)); setRunResultToken(state, "")
      4. switchStage("run"); renderRunStage(); a 1s clock renders runElapsed/runEta
-     5. Build FormData:
-        - upload_token (required)
-        - params (JSON)
-        - persist_output = "false"
-        - discard_channels (JSON)
-        - rois (JSON)
-        - artifact_regions (JSON)
-        - project, bids_entities, bids_export = "true"
-        - full_preview = "true"
-     6. api.decomposeStream(formData, 15min timeout)
+     5. buildRunPayload(token): a JSON body
+        - upload_token (required), params
+        - discard_channels, rois, artifact_regions, target_index (null when unset)
+        - project, bids_entities, bids_export = true
+        - full_preview = true
+     6. api.decomposeStream(payload, 15min timeout)
         - sent through withUpload: on an upload_token ApiError, POST
           /preview-by-path with state.file.path to mint a fresh token, then
           retry once (masks/ROIs are kept)

@@ -10,7 +10,6 @@ import numpy as np
 from scipy.linalg import eigh, inv
 
 from muedit.decomp.types import ContrastFunc
-from muedit.io.store import ArrayStore, RamStore
 from muedit.models import BoolArray, FloatArray, IntArray
 from muedit.signal.decomp_primitives import (
     DECOMP_MIN_ISI_SEC,
@@ -23,6 +22,7 @@ from muedit.signal.decomp_primitives import (
     zeroed_matmul,
 )
 from muedit.signal.streaming import SampleSource, StreamedExtender, extend_mask
+from muedit.storage import ArrayStore, RamStore
 
 logger = logging.getLogger(__name__)
 

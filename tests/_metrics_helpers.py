@@ -6,6 +6,7 @@ from typing import Any
 
 import numpy as np
 
+from muedit.decomp.types import DecompositionResult
 from muedit.models import SignalImport
 
 #: ``(detected_index, reference_index, precision, sensitivity, roa, lag)``.
@@ -143,9 +144,9 @@ def active_reference_count(gt_spike_times: list[np.ndarray], roi: tuple[int, int
     return sum(1 for s in restrict_reference_to_roi(gt_spike_times, roi) if s.size > 0)
 
 
-def discharge_times(result: dict[str, Any]) -> list[np.ndarray]:
+def discharge_times(result: DecompositionResult) -> list[np.ndarray]:
     """Extract the per-MU discharge-time arrays from a ``run_decomposition`` result."""
-    return [np.asarray(d) for d in result["signal"]["Dischargetimes"]]
+    return [np.asarray(d) for d in result.discharge_times]
 
 
 def build_signal(sim: dict[str, Any]) -> SignalImport:

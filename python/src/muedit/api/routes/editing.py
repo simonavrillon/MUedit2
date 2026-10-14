@@ -5,12 +5,14 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import Response
+from pydantic import ValidationError
 
 from muedit.api.common import request_session
 from muedit.api.contracts import success_payload
 from muedit.api.schemas import (
-    EditOpPayload,
+    EDIT_OPS,
     EditPrepareGridPayload,
     EditRecoverPayload,
     EditSavePayload,
@@ -26,11 +28,10 @@ from muedit.api.services.editing_service import (
     save_edit_session,
     save_edits,
 )
-from muedit.editing.session import EditSession
 
 router = APIRouter(prefix="/api/v1", dependencies=[Depends(request_session)])
 
-_OP_PATTERN = "^(" + "|".join(EditSession.OPS) + ")$"
+_OP_PATTERN = "^(" + "|".join(EDIT_OPS) + ")$"
 
 
 @router.post("/edit/session/open")
@@ -78,11 +79,17 @@ def save_session_endpoint(
 
 @router.post("/edit/ops/{op}")
 def edit_op_endpoint(
-    payload: EditOpPayload,
+    body: dict[str, Any],
     op: str = Path(..., pattern=_OP_PATTERN),
     session: str = Depends(request_session),
 ) -> Response:
-    """Apply one edit to a session (MUB1: what changed, and the changed MUs' discharge times)."""
+    """Apply one edit, its body checked against ``EDIT_OPS[op]`` (MUB1: what changed)."""
+    try:
+        payload = EDIT_OPS[op].model_validate(body)
+    except ValidationError as exc:
+        raise RequestValidationError(
+            [{**err, "loc": ("body", *err["loc"])} for err in exc.errors(include_url=False)]
+        ) from exc
     return apply_edit(op, payload, session)
 
 

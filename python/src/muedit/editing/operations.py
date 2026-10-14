@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Any, Protocol, TypeAlias
+from collections.abc import Sequence
+from typing import TypeAlias
 
 import numpy as np
+from numpy.typing import ArrayLike
 
 from muedit.decomp.algorithm import (
     extend_signal,
@@ -19,7 +21,7 @@ from muedit.decomp.types import (
     DEFAULT_PEEL_OFF_WIN_SEC,
     ComputeDtype,
 )
-from muedit.models import BoolArray, FloatArray, IntArray
+from muedit.models import BoolArray, FloatArray, IntArray, spike_array
 from muedit.signal.decomp_primitives import (
     POSTPROC_MIN_ISI_SEC,
     find_refractory_peaks,
@@ -27,31 +29,118 @@ from muedit.signal.decomp_primitives import (
     split_by_amplitude,
 )
 from muedit.signal.filters import bandpass_signals
+from muedit.signal.streaming import extend_mask
 
-SpikeTimes: TypeAlias = list[int]
+SpikeTimes: TypeAlias = IntArray
+"""Discharge times: sorted, unique, non-negative int32 sample indices (see ``spike_array``)."""
 FilterUpdateResult: TypeAlias = tuple[FloatArray | None, SpikeTimes]
 
+#: Samples around an original spike searched for its peak when ``lock_spikes`` is set.
+_LOCK_RADIUS = 10
 
-class PulseValues(Protocol):
-    """A pulse train read one sample at a time: an array, or a lookup into a stored one."""
 
-    def __len__(self) -> int: ...
+def _values_at(pulse: FloatArray, times: IntArray) -> FloatArray:
+    """``pulse`` at ``times``, 0 where a time falls outside it."""
+    out = np.zeros(times.shape, dtype=np.float64)
+    ok = (times >= 0) & (times < len(pulse))
+    out[ok] = pulse[times[ok]]
+    return out
 
-    def __getitem__(self, index: int, /) -> Any: ...
+
+def _in_window(times: IntArray, lo: int, hi: int) -> IntArray:
+    """``times`` inside ``[lo, hi)``, shifted to start at ``lo``."""
+    return times[(times >= lo) & (times < hi)] - lo
+
+
+def _whitened_window(
+    window_emg: FloatArray,
+    edge: int,
+    nbextchan: int,
+    artifact_mask: BoolArray | None,
+    compute_dtype: ComputeDtype,
+) -> FloatArray:
+    """The window extended and whitened; PCA skips the padded ends, the edges and artifacts."""
+    ex_factor = max(1, int(round(nbextchan / max(window_emg.shape[0], 1))))
+    e_sig = extend_signal(window_emg, ex_factor, dtype=compute_dtype)
+    win_len = window_emg.shape[1]
+    pca_keep = np.zeros(e_sig.shape[1], dtype=bool)
+    pca_keep[max(edge, ex_factor - 1) : win_len - edge] = True
+    if artifact_mask is not None:
+        clean = pca_keep.copy()  # the padded tail is never kept, so the mask stops at win_len
+        clean[:win_len] &= ~extend_mask(artifact_mask, ex_factor)
+        if np.count_nonzero(clean) > e_sig.shape[0]:
+            pca_keep = clean
+    pca_cols = np.flatnonzero(pca_keep) if pca_keep.any() else None
+    eigenvectors, eigenvalues_diag = pca_extended_signal(e_sig, pca_cols)
+    w_sig, _ = whiten_extended_signal(e_sig, eigenvectors, eigenvalues_diag, inplace=True)
+    return w_sig
+
+
+def _realign(spikes: IntArray, peaks: IntArray, edge: int, n: int) -> IntArray:
+    """Each spike moved to the nearest of ``peaks`` within ``_LOCK_RADIUS`` and the edges."""
+    lo = np.maximum(edge, spikes - _LOCK_RADIUS)
+    hi = np.minimum(n - edge, spikes + _LOCK_RADIUS + 1)
+    j = np.searchsorted(peaks, spikes)
+    left = peaks[np.maximum(j - 1, 0)]
+    right = peaks[np.minimum(j, peaks.size - 1)]
+    left_ok = (j > 0) & (left >= lo) & (left < hi)
+    right_ok = (j < peaks.size) & (right >= lo) & (right < hi)
+    # On a tie the earlier peak wins.
+    take_left = left_ok & (~right_ok | (spikes - left <= right - spikes))
+    return np.where(take_left, left, np.where(right_ok, right, spikes))
+
+
+def _window_pulse_train(
+    w_sig: FloatArray, local: IntArray, win_len: int, edge: int, win_mask: BoolArray | None
+) -> FloatArray:
+    """The pulse train of the filter averaged over ``local``, zero at the edges and artifacts."""
+    mu_filter = np.sum(w_sig[:, local], axis=1, dtype=np.float64)
+    norm = float(np.linalg.norm(mu_filter))
+    if norm > 0.0:
+        mu_filter /= norm
+    pt: FloatArray = vec_mat(mu_filter, w_sig).astype(np.float64)[:win_len]
+    pt[:edge] = 0
+    pt[-edge:] = 0
+    pt = signed_square(pt)
+    if win_mask is not None:
+        pt[win_mask] = 0.0
+    return pt
+
+
+def _detect_in_window(
+    pt: FloatArray,
+    fsamp: float,
+    local: IntArray,
+    edge: int,
+    win_mask: BoolArray | None,
+    lock_spikes: bool,
+) -> IntArray | None:
+    """The window's discharges in ``pt``, or None when its peaks do not split in two."""
+    peaks = find_refractory_peaks(pt, fsamp, min_isi_sec=POSTPROC_MIN_ISI_SEC)
+    if peaks.size <= 2:
+        return None
+    found, centroids, labels = split_by_amplitude(pt, peaks, missing="warn")
+    if len(np.unique(labels)) < 2:
+        return None
+    if win_mask is not None:
+        found = found[~win_mask[found]]
+    if lock_spikes:
+        found = np.union1d(_realign(local, peaks, edge, pt.size), found)
+    return found[pt[found] <= 3 * centroids[int(np.argmax(centroids))]]
 
 
 def _recompute_spikes_in_window(
     emg: FloatArray,
-    spike_times: SpikeTimes,
+    spike_times: ArrayLike,
     fsamp: float,
     start: int,
     end: int,
     nbextchan: int,
-    peeloff_spike_times: list[SpikeTimes] | None = None,
+    peeloff_spike_times: Sequence[ArrayLike] | None = None,
     peeloff_win: float = DEFAULT_PEEL_OFF_WIN_SEC,
     emg_offset: int = 0,
     use_peeloff: bool = False,
-    artifact_times: SpikeTimes | None = None,
+    artifact_times: ArrayLike | None = None,
     lock_spikes: bool = False,
     artifact_mask: BoolArray | None = None,
     bandpass: bool = True,
@@ -61,136 +150,54 @@ def _recompute_spikes_in_window(
 
     The extended and whitened window is ``compute_dtype``; the pulse train and detection are float64.
     """
-    if emg.size == 0 or start >= end:
-        return None, spike_times
-
+    spikes = spike_array(spike_times)
     edge = int(round(0.1 * fsamp))
     win_len = end - start
-    if win_len <= 2 * edge:
-        return None, spike_times
+    slice_start, slice_end = start - emg_offset, end - emg_offset
+    if emg.size == 0 or win_len <= 2 * edge or slice_start < 0 or slice_end > emg.shape[1]:
+        return None, spikes
+    local = _in_window(spikes, start + edge, end - edge) + edge
+    if local.size == 0:
+        return None, spikes
 
-    slice_start = start - emg_offset
-    slice_end = end - emg_offset
-    if slice_start < 0 or slice_end > emg.shape[1]:
-        return None, spike_times
     window_emg = emg[:, slice_start:slice_end]
     if bandpass:
         window_emg = bandpass_signals(window_emg, fsamp)
-
-    spikes_arr = np.asarray(spike_times, dtype=int)
-    spikes1 = spikes_arr[(spikes_arr >= start + edge) & (spikes_arr < end - edge)]
-    if spikes1.size == 0:
-        return None, spike_times
-
-    spikes2 = spikes1 - start
-    ex_factor = int(round(nbextchan / max(window_emg.shape[0], 1)))
-    ex_factor = max(1, ex_factor)
-    e_sig = extend_signal(window_emg, ex_factor, dtype=compute_dtype)
-
-    win_artifact_mask: BoolArray | None = None
+    win_mask = None
     if artifact_mask is not None:
         wm = artifact_mask[start:end]
-        if wm.size == (end - start) and wm.any():
-            win_artifact_mask = wm
+        win_mask = wm if wm.size == win_len and wm.any() else None
+    w_sig = _whitened_window(window_emg, edge, nbextchan, win_mask, compute_dtype)
 
-    # PCA sees only the columns spikes are taken from: past the zero-padded ends of the
-    # extension and the bandpass transient at the view edges.
-    pca_keep = np.zeros(e_sig.shape[1], dtype=bool)
-    pca_keep[max(edge, ex_factor - 1) : win_len - edge] = True
-    if win_artifact_mask is not None:
-        n_win = win_artifact_mask.size
-        win_mask_ext = np.zeros(n_win + ex_factor - 1, dtype=bool)
-        for m in range(ex_factor):
-            win_mask_ext[m : m + n_win] |= win_artifact_mask
-        clean = pca_keep & ~win_mask_ext
-        if np.count_nonzero(clean) > e_sig.shape[0]:
-            pca_keep = clean
-    pca_cols = np.flatnonzero(pca_keep) if pca_keep.any() else None
-    eigenvectors, eigenvalues_diag = pca_extended_signal(e_sig, pca_cols)
-    w_sig, _ = whiten_extended_signal(e_sig, eigenvectors, eigenvalues_diag, inplace=True)
+    subtracted = list(peeloff_spike_times or []) if use_peeloff else []
+    if artifact_times is not None:
+        subtracted.append(artifact_times)
+    for times in subtracted:
+        inside = _in_window(spike_array(times), start + edge, end - edge) + edge
+        if inside.size:
+            subtract_mu_waveforms(w_sig, inside, fsamp, peeloff_win)
 
-    if use_peeloff and peeloff_spike_times:
-        for other_spikes in peeloff_spike_times:
-            local_spikes = np.asarray(other_spikes, dtype=int) - start
-            local_spikes = local_spikes[(local_spikes >= edge) & (local_spikes < (win_len - edge))]
-            if local_spikes.size > 0:
-                subtract_mu_waveforms(w_sig, local_spikes, fsamp, peeloff_win)
-
-    if artifact_times:
-        local_artifacts = np.asarray(artifact_times, dtype=int) - start
-        local_artifacts = local_artifacts[
-            (local_artifacts >= edge) & (local_artifacts < (win_len - edge))
-        ]
-        if local_artifacts.size > 0:
-            subtract_mu_waveforms(w_sig, local_artifacts, fsamp, peeloff_win)
-
-    mu_filters = np.sum(w_sig[:, spikes2], axis=1, dtype=np.float64)
-    norm = float(np.linalg.norm(mu_filters))
-    if norm > 0.0:
-        mu_filters = mu_filters / norm
-
-    pt: FloatArray = vec_mat(mu_filters, w_sig).astype(np.float64)
-    pt = pt[: window_emg.shape[1]]
-    pt[:edge] = 0
-    pt[-edge:] = 0
-    pt = signed_square(pt)
-
-    if win_artifact_mask is not None:
-        pt[win_artifact_mask] = 0.0
-
-    peaks = find_refractory_peaks(pt, fsamp, min_isi_sec=POSTPROC_MIN_ISI_SEC)
-    if peaks.size <= 2:
-        return None, spike_times
-    spikes_new, centroids, labels = split_by_amplitude(pt, peaks, missing="warn")
-    if len(np.unique(labels)) < 2:
-        return None, spike_times
-    idx2 = int(np.argmax(centroids))
-
-    if win_artifact_mask is not None and len(spikes_new) > 0:
-        spikes_new = spikes_new[~win_artifact_mask[spikes_new]]
-
-    if lock_spikes and spikes1.size > 0:
-        # Realign original spikes to their exact peak positions within ±10 samples
-        realigned_spikes = []
-        for orig_spike in spikes1:
-            local_pos = int(orig_spike - start)
-            search_start = max(edge, local_pos - 10)
-            search_end = min(len(pt) - edge, local_pos + 11)
-            local_peaks_in_range = peaks[(peaks >= search_start) & (peaks < search_end)]
-            if local_peaks_in_range.size > 0:
-                nearest_peak = local_peaks_in_range[
-                    np.argmin(np.abs(local_peaks_in_range - local_pos))
-                ]
-                realigned_spikes.append(int(nearest_peak))
-            else:
-                realigned_spikes.append(local_pos)
-        # Merge realigned original spikes with newly detected spikes
-        merged_spikes = sorted(set(realigned_spikes) | set(spikes_new.tolist()))
-        spikes_new = np.array(merged_spikes, dtype=int)
-
-    spikes_new = spikes_new[pt[spikes_new] <= 3 * centroids[idx2]]
-    spikes_new = spikes_new.astype(int)
-
-    updated = [s for s in spike_times if s < start + edge or s >= end - edge]
-    updated.extend((spikes_new + start).tolist())
-    updated = sorted({int(x) for x in updated if x >= 0})
-
-    return pt, updated
+    pt = _window_pulse_train(w_sig, local, win_len, edge, win_mask)
+    found = _detect_in_window(pt, fsamp, local, edge, win_mask, lock_spikes)
+    if found is None:
+        return None, spikes
+    outside = spikes[(spikes < start + edge) | (spikes >= end - edge)]
+    return pt, spike_array(np.concatenate([outside, found + start]))
 
 
 def update_motor_unit_filter_window(
     emg: FloatArray,
     emg_mask: IntArray,
-    spike_times: SpikeTimes,
+    spike_times: ArrayLike,
     fsamp: float,
     start: int,
     end: int,
     nbextchan: int = DEFAULT_NBEXTCHAN,
-    peeloff_spike_times: list[SpikeTimes] | None = None,
+    peeloff_spike_times: Sequence[ArrayLike] | None = None,
     peeloff_win: float = DEFAULT_PEEL_OFF_WIN_SEC,
     emg_offset: int = 0,
     use_peeloff: bool = False,
-    artifact_times: SpikeTimes | None = None,
+    artifact_times: ArrayLike | None = None,
     lock_spikes: bool = False,
     artifact_mask: BoolArray | None = None,
     bandpass: bool = True,
@@ -201,7 +208,7 @@ def update_motor_unit_filter_window(
     if 0 <= slice_start < slice_end <= emg.shape[1]:
         emg, emg_offset = emg[:, slice_start:slice_end], start
     emg_sel = np.asarray(emg[emg_mask == 0, :] if emg_mask.size else emg, dtype=float)
-    pt, updated = _recompute_spikes_in_window(
+    return _recompute_spikes_in_window(
         emg_sel,
         spike_times,
         fsamp,
@@ -218,160 +225,101 @@ def update_motor_unit_filter_window(
         bandpass=bandpass,
         compute_dtype=compute_dtype,
     )
-    return pt, updated
 
 
 def add_spikes_in_roi(
     pulse: FloatArray,
-    spike_times: SpikeTimes,
+    spike_times: ArrayLike,
     fsamp: float,
     x_start: int,
     x_end: int,
     y_min: float,
 ) -> SpikeTimes:
-    """Add spikes inside a rectangular ROI using a peak-height threshold."""
-    temp = pulse.copy()
-    mask = (np.arange(len(temp)) >= x_start) & (np.arange(len(temp)) <= x_end)
-    temp[~mask] = 0
-    peaks = find_refractory_peaks(temp, fsamp, min_isi_sec=POSTPROC_MIN_ISI_SEC, height=y_min)
-    if peaks.size == 0:
-        return sorted({int(x) for x in spike_times})
-    updated = list(spike_times) + peaks.astype(int).tolist()
-    return sorted({int(x) for x in updated})
+    """Add the peaks above ``y_min`` inside ``[x_start, x_end]``."""
+    lo, hi = max(0, x_start), max(0, x_end + 1)
+    roi = np.zeros_like(pulse)
+    roi[lo:hi] = pulse[lo:hi]
+    peaks = find_refractory_peaks(roi, fsamp, min_isi_sec=POSTPROC_MIN_ISI_SEC, height=y_min)
+    return spike_array(np.concatenate([spike_array(spike_times), peaks]))
 
 
 def add_artifact_in_roi(
     pulse: FloatArray,
-    artifact_times: SpikeTimes,
+    artifact_times: ArrayLike,
     fsamp: float,
     x_start: int,
     x_end: int,
     y_min: float,
 ) -> SpikeTimes:
-    """Add an artifact peak inside a rectangular ROI."""
-    temp = pulse.copy()
-    mask = (np.arange(len(temp)) >= x_start) & (np.arange(len(temp)) <= x_end)
-    temp[~mask] = 0
-    peaks = find_refractory_peaks(temp, fsamp, min_isi_sec=POSTPROC_MIN_ISI_SEC, height=y_min)
-    if peaks.size == 0:
-        return sorted({int(x) for x in artifact_times})
-    updated = list(artifact_times) + peaks.astype(int).tolist()
-    return sorted({int(x) for x in updated})
+    """Add the artifact peaks above ``y_min`` inside ``[x_start, x_end]``."""
+    return add_spikes_in_roi(pulse, artifact_times, fsamp, x_start, x_end, y_min)
 
 
 def delete_spikes_in_roi(
     pulse: FloatArray,
-    spike_times: SpikeTimes,
+    spike_times: ArrayLike,
     x_start: int,
     x_end: int,
     y_min: float,
     y_max: float,
 ) -> SpikeTimes:
-    """Delete spikes inside ROI when amplitude is within the selected range."""
-    updated = []
-    ordered = sorted(spike_times)
-    low = min(y_min, y_max)
-    high = max(y_min, y_max) + 1
-    for t in ordered:
-        if t < x_start or t > x_end:
-            updated.append(int(t))
-            continue
-        val = pulse[t] if 0 <= t < len(pulse) else 0
-        in_box = low <= val <= high
-        if in_box:
-            continue
-        updated.append(int(t))
-    return sorted({int(x) for x in updated})
+    """Delete the spikes inside ``[x_start, x_end]`` whose amplitude is within ``[y_min, y_max]``."""
+    times = spike_array(spike_times)
+    values = _values_at(pulse, times)
+    low, high = min(y_min, y_max), max(y_min, y_max) + 1
+    in_box = (times >= x_start) & (times <= x_end) & (values >= low) & (values <= high)
+    return times[~in_box]
 
 
 def delete_artifacts_in_roi(
     pulse: FloatArray,
-    artifact_times: SpikeTimes,
+    artifact_times: ArrayLike,
     x_start: int,
     x_end: int,
     y_min: float,
     y_max: float,
 ) -> SpikeTimes:
-    """Delete artifacts inside ROI when amplitude is within the selected range."""
-    updated = []
-    ordered = sorted(artifact_times)
-    low = min(y_min, y_max)
-    high = max(y_min, y_max) + 1
-    for t in ordered:
-        if t < x_start or t > x_end:
-            updated.append(int(t))
-            continue
-        val = pulse[t] if 0 <= t < len(pulse) else 0
-        in_box = low <= val <= high
-        if in_box:
-            continue
-        updated.append(int(t))
-    return sorted({int(x) for x in updated if x >= 0})
+    """Delete the artifacts inside ``[x_start, x_end]`` whose amplitude is within ``[y_min, y_max]``."""
+    return delete_spikes_in_roi(pulse, artifact_times, x_start, x_end, y_min, y_max)
+
+
+def _drop_weaker(pulse: FloatArray, ordered: IntArray, pairs: IntArray) -> SpikeTimes:
+    """``ordered`` without the lower-amplitude spike of each pair ``(pairs[k], pairs[k] + 1)``."""
+    values = _values_at(pulse, ordered)
+    drop = np.where(values[pairs] < values[pairs + 1], pairs, pairs + 1)
+    keep = np.ones(ordered.size, dtype=bool)
+    keep[drop] = False
+    return ordered[keep]
 
 
 def delete_high_discharge_rate_spikes_in_roi(
-    pulse: PulseValues,
-    spike_times: SpikeTimes,
+    pulse: FloatArray,
+    spike_times: ArrayLike,
     fsamp: float,
     x_start: int,
     x_end: int,
     y_min: float,
 ) -> SpikeTimes:
-    """Delete one spike from high-rate pairs within an ROI."""
-    ordered = sorted({int(x) for x in spike_times})
-    if len(ordered) < 2:
+    """Delete one spike of each pair faster than ``y_min`` Hz whose midpoint is in the ROI."""
+    ordered = spike_array(spike_times)
+    if ordered.size < 2:
         return ordered
-    dist = np.array(ordered, dtype=int)
-    isi = np.diff(dist)
-    dr = fsamp / isi
-    mids = dist[1:] - (isi // 2)
-
-    deletions = set()
-    for i in range(len(dr)):
-        mid = mids[i]
-        if mid < x_start or mid > x_end:
-            continue
-        if dr[i] <= y_min:
-            continue
-        left = ordered[i]
-        right = ordered[i + 1]
-        left_val = pulse[left] if 0 <= left < len(pulse) else 0
-        right_val = pulse[right] if 0 <= right < len(pulse) else 0
-        deletions.add(i if left_val < right_val else i + 1)
-
-    return [t for j, t in enumerate(ordered) if j not in deletions]
+    isi = np.diff(ordered)
+    mids = ordered[1:] - isi // 2
+    fast = (mids >= x_start) & (mids <= x_end) & (fsamp / isi > y_min)
+    return _drop_weaker(pulse, ordered, np.flatnonzero(fast))
 
 
 def remove_discharge_rate_outliers(
-    pulse: PulseValues,
-    spike_times: SpikeTimes,
+    pulse: FloatArray,
+    spike_times: ArrayLike,
     fsamp: float,
     z_factor: float = 3.0,
 ) -> SpikeTimes:
-    """Remove spikes belonging to discharge-rate outlier pairs."""
-    ordered = sorted({int(x) for x in spike_times})
-    if len(ordered) < 3:
+    """Delete one spike of each pair whose discharge rate is above mean + ``z_factor`` × std."""
+    ordered = spike_array(spike_times)
+    if ordered.size < 3:
         return ordered
-
-    dr = []
-    for i in range(len(ordered) - 1):
-        isi = ordered[i + 1] - ordered[i]
-        dr.append(fsamp / isi)
-
-    mean = float(np.mean(dr))
-    std = float(np.std(dr))
-    threshold = mean + z_factor * std
-
-    deletions = set()
-    for i in range(len(ordered) - 1):
-        isi = ordered[i + 1] - ordered[i]
-        rate = fsamp / isi
-        if rate <= threshold:
-            continue
-        left = ordered[i]
-        right = ordered[i + 1]
-        left_val = pulse[left] if 0 <= left < len(pulse) else 0
-        right_val = pulse[right] if 0 <= right < len(pulse) else 0
-        deletions.add(i if left_val < right_val else i + 1)
-
-    return [spike for idx, spike in enumerate(ordered) if idx not in deletions]
+    rate = fsamp / np.diff(ordered)
+    threshold = rate.mean() + z_factor * rate.std()
+    return _drop_weaker(pulse, ordered, np.flatnonzero(rate > threshold))

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any
 
@@ -16,15 +16,15 @@ from muedit.io.bids import (
     export_bids_emg,
     export_bids_events,
     resolve_bids_emg_path,
-    write_bids_dataset_description,
+    write_participant,
 )
 from muedit.io.factory import load_signal
-from muedit.io.store import ArrayStore, RamStore
-from muedit.models import BoolArray, FloatArray, IntArray, SignalImport
+from muedit.models import BoolArray, FloatArray, SignalImport
 from muedit.signal.filters import FILTER_BLOCK_ROWS, bandpass_inplace, notch_inplace
 from muedit.signal.grid import format_hdemg_signal
 from muedit.signal.qc_pipeline import run_auto_qc
 from muedit.signal.segmentation import SegmentationConfig, segment_target
+from muedit.storage import ArrayStore, RamStore
 
 logger = logging.getLogger(__name__)
 
@@ -193,110 +193,6 @@ def _apply_grid_bandpass_filters(
         ch_idx += n_channels_grid
 
 
-def _export_raw_emg_bids(
-    bids_root: str | None,
-    bids_entities: dict[str, Any] | None,
-    bids_metadata: dict[str, Any] | None,
-    data: FloatArray,
-    fsamp: float,
-    grid_names: list[str],
-    coordinates: list[FloatArray],
-    discard_channels: list[IntArray],
-    ied: list[float],
-    loader_meta: dict[str, Any],
-    derived_bids_metadata: dict[str, Any],
-    default_target_muscle: str | None,
-    signal: SignalImport,
-    target_segments: dict[str, Any] | None = None,
-) -> None:
-    """Export the raw (unfiltered) EMG, its sidecars and its events to a BIDS-compatible layout."""
-    if not bids_root:
-        return
-
-    entities = bids_entities or {}
-    target_muscle = entities.get("target_muscle") or default_target_muscle
-    emg_meta: dict[str, Any] = {}
-    emg_meta.update(derived_bids_metadata)
-    if bids_metadata:
-        emg_meta.update(bids_metadata)
-
-    skip_existing = bool(loader_meta.get("bids_emg_path"))
-    if skip_existing:
-        logger.info(
-            "Source is already BIDS (%s); exporting only missing files.",
-            loader_meta.get("bids_emg_path"),
-        )
-
-    out = export_bids_emg(
-        data,
-        fsamp,
-        grid_names,
-        coordinates,
-        discard_channels,
-        Path(bids_root),
-        ied=ied,
-        subject=entities.get("subject", "01"),
-        task=entities.get("task", "task"),
-        run=entities.get("run"),
-        session=entities.get("session"),
-        acquisition=entities.get("acquisition"),
-        recording=entities.get("recording"),
-        emg_json_extra=emg_meta,
-        powerline_freq=float(entities.get("powerline_freq") or 50.0),
-        placement_scheme=entities.get("placement_scheme")
-        or loader_meta.get("placement_scheme")
-        or "Other",
-        placement_scheme_description=entities.get("placement_scheme_description")
-        or loader_meta.get("placement_scheme_description"),
-        reference_location=entities.get("reference_location")
-        or loader_meta.get("reference_location"),
-        ground_location=entities.get("ground_location") or loader_meta.get("ground_location"),
-        units=entities.get("units") or loader_meta.get("units") or "uV",
-        target_muscle=target_muscle,
-        file_format=entities.get("file_format", "edf"),
-        hardware_filters=loader_meta.get("hardware_filters", "n/a"),
-        gain=loader_meta.get("gains"),
-        low_cutoff=loader_meta.get("emg_hpf"),
-        high_cutoff=loader_meta.get("emg_lpf"),
-        aux_data=signal.auxiliary,
-        aux_names=signal.auxiliaryname,
-        aux_gain=loader_meta.get("aux_gains"),
-        aux_low_cutoff=loader_meta.get("aux_hpf"),
-        aux_high_cutoff=loader_meta.get("aux_lpf"),
-        aux_units=loader_meta.get("aux_units"),
-        aux_kinds=loader_meta.get("aux_kinds"),
-        grid_labels=loader_meta.get("grid_labels"),
-        manufacturer=entities.get("manufacturer") or loader_meta.get("manufacturer"),
-        manufacturers_model_name=entities.get("manufacturers_model_name")
-        or loader_meta.get("device_name"),
-        task_description=entities.get("task_description"),
-        software_versions=loader_meta.get("software_versions"),
-        skip_existing=skip_existing,
-    )
-
-    # The events are refreshed even when the source is already BIDS: they are merged, not skipped.
-    export_bids_events(
-        out["edf"], fsamp, aux_data=signal.auxiliary, target_segments=target_segments
-    )
-
-    participant_meta = entities.get("participant_meta") or {}
-    age_raw = participant_meta.get("age")
-    try:
-        write_bids_dataset_description(
-            Path(bids_root),
-            subject=entities.get("subject", "01"),
-            age=(
-                int(age_raw)
-                if age_raw is not None and str(age_raw).strip() not in ("", "n/a", "None")
-                else None
-            ),
-            sex=participant_meta.get("sex") or None,
-            handedness=participant_meta.get("handedness") or None,
-        )
-    except Exception:  # noqa: BLE001
-        logger.warning("Failed to write participants.tsv", exc_info=True)
-
-
 def load_step(
     filepath: str,
     file_label: str | None,
@@ -373,14 +269,11 @@ def preprocess_step(
     rois: list[tuple[int, int]] | None,
     params: DecompositionParameters,
     discard_overrides: list[list[int]] | None,
-    bids_root: str | None,
-    bids_entities: dict[str, Any] | None,
-    bids_metadata: dict[str, Any] | None,
     artifact_regions: list[tuple[int, int]] | None = None,
     store: ArrayStore | None = None,
     target_index: int | None = None,
 ) -> PreprocessStepOutput:
-    """Apply channel formatting, filtering, ROI selection, and optional BIDS raw export.
+    """Apply channel formatting, filtering, ROI selection and, if asked, automatic QC.
 
     The filtered copy (``params.compute_dtype``) is allocated in ``store`` (the run's T1
     folder), so every later step reads windows and batches from the memory-mapped file.
@@ -407,46 +300,9 @@ def preprocess_step(
             f"({', '.join(grid_names)}) but the signal has only {data.shape[0]} "
             f"channels. Check that the grid name matches the recording."
         )
+    declared_discard = list(discard_channels)
     _apply_grid_notch_filters(data, loaded.fsamp, grid_names, coordinates)
     _apply_grid_bandpass_filters(data, loaded.fsamp, grid_names, coordinates, emg_type)
-
-    muscles = loaded.signal.muscle
-    loader_meta = loaded.signal.metadata
-    default_target_muscle = next((m for m in muscles if m.strip()), None)
-    derived_bids_metadata: dict[str, Any] = {}
-    if any(muscles):
-        derived_bids_metadata["Muscles"] = muscles
-    target_segments = _target_segments(loaded.signal, target_index)
-
-    _export_raw_emg_bids(
-        bids_root=bids_root,
-        bids_entities=bids_entities,
-        bids_metadata=bids_metadata,
-        data=loaded.data,  # unfiltered: ``data`` above is filtered in place
-        fsamp=loaded.fsamp,
-        grid_names=grid_names,
-        coordinates=coordinates,
-        discard_channels=discard_channels,
-        ied=ied,
-        loader_meta=loader_meta,
-        derived_bids_metadata=derived_bids_metadata,
-        default_target_muscle=default_target_muscle,
-        signal=loaded.signal,
-        target_segments=target_segments,
-    )
-
-    if bids_root:
-        entities = bids_entities or {}
-        entity_label = BidsEntities(
-            subject=entities.get("subject", "01"),
-            session=entities.get("session"),
-            task=entities.get("task", "task"),
-            acquisition=entities.get("acquisition"),
-            run=entities.get("run"),
-            recording=entities.get("recording"),
-        ).label
-        loader_meta["bids_entity_label"] = entity_label
-        loader_meta["bids_emg_path"] = str(resolve_bids_emg_path(Path(bids_root), entity_label))
 
     roi_list = _resolve_roi_list(
         data, loaded.fsamp, duration, manual_roi, roi, rois, params.nwindows
@@ -499,12 +355,104 @@ def preprocess_step(
         coordinates=coordinates,
         ied=ied,
         discard_channels=discard_channels,
-        muscles=muscles,
-        loader_meta=loader_meta,
+        muscles=loaded.signal.muscle,
+        loader_meta=loaded.signal.metadata,
         roi_list=roi_list,
         ngrid=ngrid,
         coordinates_plateau=_build_coordinates_plateau(ngrid, roi_list),
         artifact_mask=artifact_mask,
         bad_channel_masks=bad_channel_masks,
-        target_segments=target_segments,
+        target_segments=_target_segments(loaded.signal, target_index),
+        declared_discard_channels=declared_discard,
+    )
+
+
+def bids_export_step(
+    loaded: LoadStepOutput,
+    prep: PreprocessStepOutput,
+    bids_root: str,
+    bids_entities: dict[str, Any] | None,
+    bids_metadata: dict[str, Any] | None,
+) -> PreprocessStepOutput:
+    """Export the raw EMG, its sidecars and events to ``bids_root``; the run then saves there too."""
+    entities = bids_entities or {}
+    loader_meta = prep.loader_meta
+    emg_meta: dict[str, Any] = {"Muscles": prep.muscles} if any(prep.muscles) else {}
+    emg_meta.update(bids_metadata or {})
+    skip_existing = bool(loader_meta.get("bids_emg_path"))
+    if skip_existing:
+        logger.info(
+            "Source is already BIDS (%s); exporting only missing files.",
+            loader_meta.get("bids_emg_path"),
+        )
+
+    signal = loaded.signal
+    out = export_bids_emg(
+        loaded.data,  # unfiltered
+        loaded.fsamp,
+        prep.grid_names,
+        prep.coordinates,
+        prep.declared_discard_channels,
+        Path(bids_root),
+        ied=prep.ied,
+        subject=entities.get("subject", "01"),
+        task=entities.get("task", "task"),
+        run=entities.get("run"),
+        session=entities.get("session"),
+        acquisition=entities.get("acquisition"),
+        recording=entities.get("recording"),
+        emg_json_extra=emg_meta,
+        powerline_freq=float(entities.get("powerline_freq") or 50.0),
+        placement_scheme=entities.get("placement_scheme")
+        or loader_meta.get("placement_scheme")
+        or "Other",
+        placement_scheme_description=entities.get("placement_scheme_description")
+        or loader_meta.get("placement_scheme_description"),
+        reference_location=entities.get("reference_location")
+        or loader_meta.get("reference_location"),
+        ground_location=entities.get("ground_location") or loader_meta.get("ground_location"),
+        units=entities.get("units") or loader_meta.get("units") or "uV",
+        target_muscle=entities.get("target_muscle")
+        or next((m for m in prep.muscles if m.strip()), None),
+        file_format=entities.get("file_format", "edf"),
+        hardware_filters=loader_meta.get("hardware_filters", "n/a"),
+        gain=loader_meta.get("gains"),
+        low_cutoff=loader_meta.get("emg_hpf"),
+        high_cutoff=loader_meta.get("emg_lpf"),
+        aux_data=signal.auxiliary,
+        aux_names=signal.auxiliaryname,
+        aux_gain=loader_meta.get("aux_gains"),
+        aux_low_cutoff=loader_meta.get("aux_hpf"),
+        aux_high_cutoff=loader_meta.get("aux_lpf"),
+        aux_units=loader_meta.get("aux_units"),
+        aux_kinds=loader_meta.get("aux_kinds"),
+        grid_labels=loader_meta.get("grid_labels"),
+        manufacturer=entities.get("manufacturer") or loader_meta.get("manufacturer"),
+        manufacturers_model_name=entities.get("manufacturers_model_name")
+        or loader_meta.get("device_name"),
+        task_description=entities.get("task_description"),
+        software_versions=loader_meta.get("software_versions"),
+        skip_existing=skip_existing,
+    )
+    # The events are refreshed even when the source is already BIDS: they are merged, not skipped.
+    export_bids_events(
+        out["edf"], loaded.fsamp, aux_data=signal.auxiliary, target_segments=prep.target_segments
+    )
+    write_participant(
+        Path(bids_root), entities.get("subject", "01"), entities.get("participant_meta")
+    )
+
+    label = BidsEntities(
+        subject=entities.get("subject", "01"),
+        session=entities.get("session"),
+        task=entities.get("task", "task"),
+        acquisition=entities.get("acquisition"),
+        run=entities.get("run"),
+        recording=entities.get("recording"),
+    ).label
+    emg_path = resolve_bids_emg_path(Path(bids_root), label)
+    # export_step saves the .npz in this file's derivatives.
+    return replace(
+        prep,
+        loader_meta={**loader_meta, "bids_entity_label": label, "bids_emg_path": str(emg_path)},
     )

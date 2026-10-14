@@ -27,10 +27,10 @@ from muedit.decomp.preview import abs_means
 from muedit.decomp.types import (
     POSTPROCESS_MODES,
     DecompositionParameters,
+    DecompositionResult,
     PostprocessMode,
     PreprocessStepOutput,
 )
-from muedit.io.store import SessionStore
 from muedit.models import SignalImport, resident_nbytes
 from muedit.signal.decomp_primitives import extend_signal
 from muedit.signal.filters import (
@@ -40,6 +40,7 @@ from muedit.signal.filters import (
     notch_signals,
 )
 from muedit.signal.streaming import RowSelection, StreamedExtender, extend_mask
+from muedit.storage import SessionStore
 from tests._platform import MAPPED_FILES_STAY
 from tests._synthetic_emg import FSAMP, motor_unit_emg
 
@@ -175,6 +176,7 @@ def test_window_without_edges_drops_the_zero_padded_columns() -> None:
         coordinates=[np.zeros((64, 2))],
         ied=[8.0],
         discard_channels=[np.zeros(64, dtype=int)],
+        declared_discard_channels=[np.zeros(64, dtype=int)],
         muscles=[],
         loader_meta={},
         roi_list=[(start, end)],
@@ -298,9 +300,6 @@ def store_prep(synthetic_signal: SignalImport) -> dict[str, object]:
             rois=None,
             params=_STORE_PARAMS,
             discard_overrides=None,
-            bids_root=None,
-            bids_entities=None,
-            bids_metadata=None,
             store=store,
         )
 
@@ -355,8 +354,8 @@ def test_pulse_trains_in_the_store_match_the_heap(store_prep: dict, mode: Postpr
 def test_run_in_a_store_matches_the_heap_run(
     synthetic_signal: SignalImport, tmp_path: Path
 ) -> None:
-    def run(store: SessionStore | None) -> dict:
-        result, _ = run_decomposition(
+    def run(store: SessionStore | None) -> DecompositionResult:
+        return run_decomposition(
             str(tmp_path / "synthetic.mat"),
             params=_STORE_PARAMS,
             save_npz=False,
@@ -365,17 +364,14 @@ def test_run_in_a_store_matches_the_heap_run(
             preloaded_signal=synthetic_signal,
             store=store,
         )
-        return result
 
     heap = run(None)
     store = SessionStore.create("run")
     stored = run(store)
-    np.testing.assert_array_equal(stored["signal"]["PulseT"], heap["signal"]["PulseT"])
-    for got, want in zip(
-        stored["signal"]["Dischargetimes"], heap["signal"]["Dischargetimes"], strict=True
-    ):
+    np.testing.assert_array_equal(stored.pulse_trains, heap.pulse_trains)
+    for got, want in zip(stored.discharge_times, heap.discharge_times, strict=True):
         np.testing.assert_array_equal(got, want)
-    assert resident_nbytes(stored["preview"]["pulse_trains_full"]) == 0
+    assert resident_nbytes(stored.preview["pulse_trains_full"]) == 0
     # Only the kept pulse trains outlive the run: the filtered EMG and the
     # pre-dedup matrix were deleted.
     assert MAPPED_FILES_STAY or _store_files(store) == ["pulse_trains"]

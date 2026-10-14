@@ -44,7 +44,7 @@ class TestProjects:
         with TestClient(app) as client:
             r = client.post(
                 f"{API}/decompose_stream",
-                data={"bids_export": "true", "project": "../outside"},
+                json={"upload_token": "t", "bids_export": True, "project": "../outside"},
             )
         assert r.status_code == 400
         assert r.json()["error"]["detail"]["field"] == "project"

@@ -15,6 +15,7 @@ from starlette.testclient import TestClient
 
 from muedit.api import cache
 from muedit.api.binary import FRAME_MEDIA_TYPE, unpack_frame
+from muedit.api.schemas import EDIT_OPS
 from muedit.decomp.decomposition_file import save_decomposition_npz, unpack_csr
 from muedit.decomp.preprocess import preprocess_step
 from muedit.decomp.types import DecompositionParameters, LoadStepOutput
@@ -27,8 +28,8 @@ from muedit.editing.operations import (
     update_motor_unit_filter_window,
 )
 from muedit.editing.session import EditError, EditSession
-from muedit.io.store import SessionStore
 from muedit.models import EditSignalContext, SignalImport
+from muedit.storage import SessionStore
 from tests._platform import deleted
 from tests.test_editing_operations import (
     EDGE,
@@ -101,13 +102,13 @@ class TestParity:
         before = edit.spikes[1].tolist()
         expected = add_spikes_in_roi(pulse[1].astype(float), before, FSAMP, *roi, 0.6)
         edit.apply("add-spikes", {"mu": 1, "x_start": roi[0], "x_end": roi[1], "y_min": 0.6})
-        assert edit.spikes[1].tolist() == expected
+        assert edit.spikes[1].tolist() == expected.tolist()
         assert edit.spikes[1].dtype == np.int32
 
     def test_add_artifact(self, edit: EditSession, pulse: np.ndarray) -> None:
         expected = add_artifact_in_roi(pulse[0].astype(float), [], FSAMP, 2000, 4000, 0.6)
         edit.apply("add-artifact", {"mu": 0, "x_start": 2000, "x_end": 4000, "y_min": 0.6})
-        assert edit.artifacts[0].tolist() == expected
+        assert edit.artifacts[0].tolist() == expected.tolist()
 
     def test_delete_spikes(self, edit: EditSession, pulse: np.ndarray) -> None:
         before = edit.spikes[2].tolist()
@@ -115,7 +116,7 @@ class TestParity:
         edit.apply(
             "delete-spikes", {"mu": 2, "x_start": 1000, "x_end": 6000, "y_min": 0.0, "y_max": 0.15}
         )
-        assert edit.spikes[2].tolist() == expected
+        assert edit.spikes[2].tolist() == expected.tolist()
         assert edit.history[-1]["type"] == "delete_spikes"
 
     def test_remove_outliers(self, edit: EditSession, pulse: np.ndarray) -> None:
@@ -123,7 +124,7 @@ class TestParity:
         before = edit.spikes[0].tolist()
         expected = remove_discharge_rate_outliers(pulse[0].astype(float), before, FSAMP)
         change = edit.apply("remove-outliers", {"mu": 0})
-        assert edit.spikes[0].tolist() == expected
+        assert edit.spikes[0].tolist() == expected.tolist()
         assert change.info["removed_count"] == len(before) - len(expected)
 
     def test_drawn_trains_without_pulse(self) -> None:
@@ -171,9 +172,6 @@ def _decomposition_filtered(ctx: EditSignalContext) -> np.ndarray:
         rois=None,
         params=DecompositionParameters(),
         discard_overrides=None,
-        bids_root=None,
-        bids_entities=None,
-        bids_metadata=None,
     )
     return np.asarray(prep.data)
 
@@ -212,7 +210,7 @@ class TestUpdateFilter:
             )
             assert pt is not None
             edit.apply("update-filter", {"mu": 0, "view_start": VIEW_START, "view_end": VIEW_END})
-            assert edit.spikes[0].tolist() == expected
+            assert edit.spikes[0].tolist() == expected.tolist()
             row = edit.values(0, 0, N_SAMPLES)
             np.testing.assert_array_equal(
                 row[VIEW_START + EDGE : VIEW_END - EDGE],
@@ -453,6 +451,9 @@ class TestUndo:
         finally:
             edit.close()
 
+    def test_every_op_has_a_request_model(self) -> None:
+        assert set(EDIT_OPS) == set(EditSession.OPS)
+
     def test_unknown_op_and_bad_args_are_edit_errors(self, edit: EditSession) -> None:
         with pytest.raises(EditError, match="Unknown"):
             edit.apply("explode", {})
@@ -654,6 +655,12 @@ class TestSessionApi:
         resp = api.post(f"{API}/edit/ops/flag", json={"token": token, "mu": 9})
         assert resp.status_code == 400
         resp = api.post(f"{API}/edit/ops/explode", json={"token": token})
+        assert resp.status_code == 422
+        # Each op's body is checked before the session sees it.
+        resp = api.post(f"{API}/edit/ops/add-spikes", json={"token": token, "mu": 0, "x_end": 9})
+        assert resp.status_code == 422
+        assert resp.json()["error"]["detail"][0]["loc"] == ["body", "x_start"]
+        resp = api.post(f"{API}/edit/ops/flag", json={"token": token, "mu": "first"})
         assert resp.status_code == 422
         resp = api.post(f"{API}/edit/ops/flag", json={"token": "gone", "mu": 0})
         assert resp.status_code == 400
@@ -916,4 +923,4 @@ class TestSessionApi:
 def test_delete_in_roi_matches_on_a_drawn_pulse() -> None:
     """The ROI helpers the session calls still work on a plain array."""
     pulse = _pulse_with_peaks({100: 0.5, 200: 0.5, 300: 0.5}, n=1000)
-    assert delete_spikes_in_roi(pulse, [100, 200], 150, 400, 0.2, 0.8) == [100]
+    assert delete_spikes_in_roi(pulse, [100, 200], 150, 400, 0.2, 0.8).tolist() == [100]

@@ -15,8 +15,8 @@ from muedit.io.loaders import (
     load_otb4,
     load_otb_plus,
 )
-from muedit.io.store import ArrayStore, store_signal
 from muedit.models import SignalImport
+from muedit.storage import ArrayStore, store_signal
 
 LoaderFn = Callable[..., SignalImport | dict[str, Any]]
 

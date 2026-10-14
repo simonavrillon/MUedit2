@@ -13,8 +13,8 @@ from muedit.api import cache
 from muedit.api.memory import SESSION_IDLE_SEC
 from muedit.api.services.series_service import build_signal_views
 from muedit.editing.session import EditSession
-from muedit.io.store import RamStore, SessionStore
 from muedit.models import IntArray, SignalImport
+from muedit.storage import RamStore, SessionStore
 from tests._platform import deleted
 
 

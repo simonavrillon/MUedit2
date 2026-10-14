@@ -110,20 +110,20 @@ Response: MUB1 frame, decoded by decodeSeriesFrame into
   bin's max and min.
 ```
 
-### POST /decompose_stream (FormData)
+### POST /decompose_stream (JSON)
 
 ```
-Request FormData:
+Request body (buildRunPayload):
   upload_token: string           (required; from /preview-by-path)
-  params: string                 (JSON.stringify of buildDecomposeParams)
-  persist_output: "false"
-  discard_channels: string       (JSON.stringify of state.discardMasks, if any)
-  rois: string                   (JSON.stringify of state.rois, if any)
-  artifact_regions: string      (JSON.stringify of state.artifactRegions, if any)
-  project: string                 (BIDS project name, if set)
-  bids_entities: string          (JSON.stringify of collectBidsEntities, if any)
-  bids_export: "true"
-  full_preview: "true"
+  params: object                 (buildDecomposeParams)
+  discard_channels: number[][] | null   (state.discardMasks)
+  rois: Span[] | null                   (state.rois, {start, end})
+  artifact_regions: Span[] | null       (state.artifactRegions)
+  target_index: number | null           (the segmented target, when segments exist)
+  project: string | null                (BIDS project name)
+  bids_entities: object | null          (collectBidsEntities)
+  bids_export: true
+  full_preview: true
 
 Response: NDJSON stream (one JSON object per line):
   { pct: number, message: string, stage?: string,

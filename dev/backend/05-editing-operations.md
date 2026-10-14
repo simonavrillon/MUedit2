@@ -34,15 +34,19 @@ Decomposition Algorithm (decomp/algorithm.py)
 ### Type Aliases
 
 ```python
-SpikeTimes: TypeAlias = list[int]
+SpikeTimes: TypeAlias = IntArray  # sorted, unique, non-negative int32 (models.spike_array)
 FilterUpdateResult: TypeAlias = tuple[np.ndarray | None, SpikeTimes]
 ```
+
+Every operation takes discharge times as anything array-like, normalizes them with
+`spike_array`, and returns a new `SpikeTimes` array; the operations are vectorized (no
+per-spike Python loops).
 
 ---
 
 ## Operation Catalog
 
-Every operation is `POST /edit/ops/{op}` with an `EditOpPayload`, dispatched by
+Every operation is `POST /edit/ops/{op}` with the op's model in `api.schemas.EDIT_OPS`, dispatched by
 `EditSession.apply(op, args)`. Each one records an undo step and, except `undo` itself, a history
 entry of the given type.
 
@@ -122,7 +126,7 @@ def update_motor_unit_filter_window(
     start: int,                   # window start sample
     end: int,                     # window end sample
     nbextchan: int = DEFAULT_NBEXTCHAN,    # target extended channels (1000)
-    peeloff_spike_times: list[SpikeTimes] | None = None,  # other MUs' spikes for peel-off
+    peeloff_spike_times: Sequence[SpikeTimes] | None = None,  # other MUs' spikes for peel-off
     peeloff_win: float = DEFAULT_PEEL_OFF_WIN_SEC,       # 0.025 s
     emg_offset: int = 0,          # offset of emg array within full signal
     use_peeloff: bool = False,    # enable peel-off of other MUs
@@ -267,7 +271,7 @@ Same logic as `delete_spikes_in_roi` but for `artifact_times`.
 
 ```python
 def delete_high_discharge_rate_spikes_in_roi(
-    pulse: PulseValues,
+    pulse: FloatArray,
     spike_times: SpikeTimes,
     fsamp: float,
     x_start: int,
@@ -275,12 +279,11 @@ def delete_high_discharge_rate_spikes_in_roi(
     y_min: float,    # max discharge rate (Hz)
 ) -> SpikeTimes
 ```
-For each consecutive spike pair whose midpoint falls in the ROI and whose discharge rate (`fsamp / ISI`) exceeds `y_min`, deletes the lower-amplitude spike of the pair. Returns the pruned spike list.
+For each consecutive spike pair whose midpoint falls in the ROI and whose discharge rate (`fsamp / ISI`) exceeds `y_min`, deletes the lower-amplitude spike of the pair. Returns the pruned spikes.
 
 Library API only: no edit-session operation runs it (the app has no gesture for it).
 
-`PulseValues` is anything indexable by sample: the session passes `_PulseLookup`, which reads
-single samples of the stored train instead of loading it.
+`pulse` is read only at the spike times; a sample outside it counts as 0.
 
 ---
 
@@ -288,13 +291,13 @@ single samples of the stored train instead of loading it.
 
 ```python
 def remove_discharge_rate_outliers(
-    pulse: PulseValues,
+    pulse: FloatArray,
     spike_times: SpikeTimes,
     fsamp: float,
     z_factor: float = 3.0,
 ) -> SpikeTimes
 ```
-Global discharge-rate outlier removal (no ROI). Computes per-pair discharge rates, sets threshold = `mean + z_factor * std`, and for each pair exceeding the threshold deletes the lower-amplitude spike. Requires >= 3 spikes. Returns the pruned list; the change carries `removed_count`.
+Global discharge-rate outlier removal (no ROI). Computes per-pair discharge rates, sets threshold = `mean + z_factor * std`, and for each pair exceeding the threshold deletes the lower-amplitude spike. Requires >= 3 spikes. Returns the pruned spikes; the change carries `removed_count`.
 
 `z_factor` stays at `3.0`; the API does not expose it.
 

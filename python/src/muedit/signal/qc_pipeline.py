@@ -7,10 +7,10 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from muedit.io.store import ArrayStore
 from muedit.models import BoolArray, FloatArray, IntArray
 from muedit.signal.artifact_mask import ArtifactMaskConfig, detect_artifact_masks
 from muedit.signal.channel_qc import ChannelQCConfig, detect_bad_channels_per_grid
+from muedit.storage import ArrayStore
 
 logger = logging.getLogger(__name__)
 

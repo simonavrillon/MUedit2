@@ -10,10 +10,10 @@ import numpy as np
 
 from muedit.decomp.core import decompose_step
 from muedit.decomp.postprocess import export_step, postprocess_step
-from muedit.decomp.preprocess import load_step, preprocess_step
-from muedit.decomp.types import DecompositionParameters
-from muedit.io.store import ArrayStore, RamStore, copy_into
+from muedit.decomp.preprocess import bids_export_step, load_step, preprocess_step
+from muedit.decomp.types import DecompositionParameters, DecompositionResult
 from muedit.models import FloatArray, SignalImport, resident_nbytes
+from muedit.storage import ArrayStore, RamStore, copy_into
 
 
 def run_decomposition(
@@ -35,8 +35,8 @@ def run_decomposition(
     artifact_regions: list[tuple[int, int]] | None = None,
     store: ArrayStore | None = None,
     target_index: int | None = None,
-) -> tuple[dict[str, Any], str]:
-    """Execute the full load → preprocess → decompose → postprocess pipeline.
+) -> DecompositionResult:
+    """Execute the full load → preprocess → (BIDS export) → decompose → postprocess pipeline.
 
     With ``store`` (the run's T1 folder), the filtered EMG and the pulse trains are
     memory-mapped files there; the filtered file is deleted once the run is exported.
@@ -55,13 +55,14 @@ def run_decomposition(
         rois=rois,
         params=params,
         discard_overrides=discard_overrides,
-        bids_root=bids_root,
-        bids_entities=bids_entities,
-        bids_metadata=bids_metadata,
         artifact_regions=artifact_regions,
         store=store,
         target_index=target_index,
     )
+    if bids_root:
+        preprocessed = bids_export_step(
+            loaded, preprocessed, bids_root, bids_entities, bids_metadata
+        )
     # A file saved outside a BIDS dataset embeds the raw EMG; BIDS has its own copy.
     raw_emg = _raw_emg_for_file(loaded.data, store) if save_npz and not bids_root else None
     # Only the filtered copy is needed from here on; let the raw samples go.
@@ -79,7 +80,7 @@ def run_decomposition(
         progress_cb=progress_cb,
         store=store,
     )
-    exported = export_step(
+    result = export_step(
         loaded=loaded,
         prep=preprocessed,
         post=postprocessed,
@@ -93,7 +94,7 @@ def run_decomposition(
         store.discard(preprocessed.data)
         if raw_emg is not None:
             store.discard(raw_emg)
-    return exported
+    return result
 
 
 def _raw_emg_for_file(data: FloatArray, store: ArrayStore | None) -> FloatArray:

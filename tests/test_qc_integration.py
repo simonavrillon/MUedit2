@@ -63,9 +63,6 @@ def _preprocess(data: np.ndarray, grids: list[str], **kwargs: Any) -> Preprocess
         rois=None,
         params=params,
         discard_overrides=kwargs.pop("discard_overrides", None),
-        bids_root=None,
-        bids_entities=None,
-        bids_metadata=None,
         **kwargs,
     )
 

@@ -11,9 +11,10 @@ run_decomposition(filepath, ...)
   │
   ├─ 1. load_step()           → LoadStepOutput
   ├─ 2. preprocess_step()     → PreprocessStepOutput
+  ├─ 2b. bids_export_step()   → PreprocessStepOutput (only with bids_root)
   ├─ 3. decompose_step()      → DecomposeStepOutput
   ├─ 4. postprocess_step()    → PostprocessStepOutput
-  └─ 5. export_step()         → (result_dict, save_path)
+  └─ 5. export_step()         → DecompositionResult
 ```
 
 ### `run_decomposition()` — Full signature
@@ -36,8 +37,26 @@ def run_decomposition(
     include_full_preview: bool = False,
     preloaded_signal: SignalImport | None = None,
     artifact_regions: list[tuple[int, int]] | None = None,
-) -> tuple[dict[str, Any], str]
+    store: ArrayStore | None = None,
+    target_index: int | None = None,
+) -> DecompositionResult
 ```
+
+### `DecompositionResult` (types.py)
+
+| Field | Type | Description |
+|---|---|---|
+| `fsamp` | `float` | Sampling frequency |
+| `grid_names` | `list[str]` | One per grid |
+| `pulse_trains` | `FloatArray` | `(n_mu, n_samples)` |
+| `discharge_times` | `list[IntArray]` | Sorted sample indices per MU |
+| `mu_grid_index` | `list[int]` | Grid of each MU |
+| `sil` | `list[float]` | SIL of each MU |
+| `discard_channels` | `list[IntArray]` | 0/1 per channel, per grid (auto-QC bad channels included) |
+| `parameters` | `dict[str, Any]` | `asdict(DecompositionParameters)` |
+| `preview` | `dict[str, Any]` | `build_preview_payload()`: what the run page draws |
+| `adaptive_losses` | `dict[int, Any]` | Adaptive post-processing losses per window |
+| `save_path` | `str \| None` | The `.npz` written, when `save_npz` |
 
 ---
 
@@ -149,7 +168,7 @@ Loads input signal from disk via `load_signal(filepath)` or copies a preloaded `
 
 ```python
 def preprocess_step(loaded, duration, manual_roi, roi, rois, params, discard_overrides,
-                    bids_root, bids_entities, bids_metadata, artifact_regions=None) -> PreprocessStepOutput
+                    artifact_regions=None, store=None, target_index=None) -> PreprocessStepOutput
 ```
 
 Steps in order:
@@ -159,10 +178,20 @@ Steps in order:
 3. Validate channel count
 4. Apply per-grid notch filters (`notch_signals()`)
 5. Apply per-grid bandpass filters (`bandpass_signals()`) with grid-specific EMG type
-6. Export raw EMG to BIDS (if `bids_root` provided)
-7. Resolve ROI list (explicit `rois`, single `roi`, interactive `manual_roi`, `duration`, or full signal). If `nwindows > 1` and single ROI resolved, split into `nwindows` equal sub-windows.
-8. Build `coordinates_plateau` (legacy flat format: `[s0, e0, s1, e1, ...]`)
-9. If `auto_mask_artifacts`: run `run_auto_qc()` to detect artifact mask and bad channels — OR bad channels into `discard_channels`. User-drawn `artifact_regions` (if provided) are rasterized via `build_manual_artifact_mask` and OR'd into the artifact mask.
+6. Resolve ROI list (explicit `rois`, single `roi`, interactive `manual_roi`, `duration`, or full signal). If `nwindows > 1` and single ROI resolved, split into `nwindows` equal sub-windows.
+7. Build `coordinates_plateau` (legacy flat format: `[s0, e0, s1, e1, ...]`)
+8. If `auto_mask_artifacts`: run `run_auto_qc()` to detect artifact mask and bad channels — OR bad channels into `discard_channels` (`declared_discard_channels` keeps them as they were before). User-drawn `artifact_regions` (if provided) are rasterized via `build_manual_artifact_mask` and OR'd into the artifact mask.
+
+## Stage 2b: BIDS export (`preprocess.py: bids_export_step`)
+
+```python
+def bids_export_step(loaded, prep, bids_root, bids_entities, bids_metadata) -> PreprocessStepOutput
+```
+
+Runs only with `bids_root`. Writes the raw (unfiltered) EMG, its sidecars and `events.tsv`, and the
+participant row; `channels.tsv` marks `prep.declared_discard_channels`. Returns `prep` with
+`bids_entity_label` and `bids_emg_path` in a new `loader_meta` (the caller's signal metadata is not
+changed), which `export_step` reads to save the decomposition in the dataset's derivatives.
 
 ### Helper functions (private)
 
@@ -173,7 +202,6 @@ Steps in order:
 | `_build_coordinates_plateau(ngrid, roi_list)` | Flattens per-grid ROI into legacy format |
 | `_apply_grid_notch_filters(data, fsamp, grid_names, coordinates)` | Per-grid notch filtering (in-place) |
 | `_apply_grid_bandpass_filters(data, fsamp, grid_names, coordinates, emg_type)` | Per-grid bandpass filtering (in-place) |
-| `_export_raw_emg_bids(...)` | Exports raw unfiltered EMG + sidecars to BIDS layout |
 | `build_manual_artifact_mask(artifact_regions, n_samples)` | Rasterize user-drawn `(start, end)` ranges into a boolean mask |
 
 ---
@@ -295,17 +323,14 @@ Steps:
 
 ```python
 def export_step(loaded, prep, post, params, include_full_preview, save_npz, raw_emg,
-               progress_cb) -> (result_dict, save_path)
+               progress_cb) -> DecompositionResult
 ```
 
 Steps:
 
-1. Resolve save path (BIDS derivatives layout or sibling to input file)
-2. Build preview payload via `build_preview_payload()`
-3. Construct `DecompositionExport` model and call `.to_dict()`
-4. Attach `adaptive_losses` to result dict
-5. If `save_npz`: save the schema v2 NPZ with sil, sil_by_window, rois, adaptive_losses and the artifact mask; with `raw_emg` (the pipeline passes it when not exporting BIDS), also the raw EMG, discard_channels and coordinates
-6. Emit `"done"` progress callback with summary + preview
+1. Build preview payload via `build_preview_payload()`
+2. If `save_npz`: resolve the save path (BIDS derivatives layout or sibling to input file) and save the schema v2 NPZ with sil, sil_by_window, rois, adaptive_losses and the artifact mask; with `raw_emg` (the pipeline passes it when not exporting BIDS), also the raw EMG, discard_channels and coordinates
+3. Return the `DecompositionResult`; `save_path` is set only when the file was written
 
 ---
 
@@ -371,7 +396,7 @@ def load_decomposition_signal_context(filepath: str, store: ArrayStore | None = 
 
 | Function | Description |
 |---|---|
-| `normalize_distimes(raw) -> list[list[int]]` | Normalize discharge-time payloads (sorted, deduplicated, non-negative) |
+| `normalize_distimes(raw) -> list[IntArray]` | One `spike_array` per MU (sorted, deduplicated, non-negative int32) |
 | `build_pulse_trains_from_distimes(distimes, total_samples) -> np.ndarray` | Binary float32 `(n_mu, total_samples)` pulse matrix from discharge indices |
 | `save_editlog(path, mu_uids, edit_history, artifact_times)` | Write JSON editlog sidecar |
 | `first_non_none(*values)` | Return first non-None argument |
@@ -379,8 +404,8 @@ def load_decomposition_signal_context(filepath: str, store: ArrayStore | None = 
 | `_mat5_decomp(mat)` / `_mat73_decomp(h5f) -> DecompositionLoad` | Read MATLAB MAT (scipy v5 or HDF5 v7.3, without the EMG samples) |
 | `_parse_mu_grid_index(raw) -> list[int]` | Normalize MU-to-grid assignment |
 | `_unpack_gridwise_decomposition(pulse_trains, distime_raw, mu_grid_index) -> (pulse, distime, mu_grid_index)` | Stack per-grid blocks |
-| `_distimes_from_pulse_matrix(matrix) -> list[list[int]]` | Derive discharge times from pulse matrix non-zero entries |
-| `_shift_distimes(values, shift, limit) -> list[list[int]]` | Shift all discharge times by constant, clip to `[0, limit)` |
+| `_distimes_from_pulse_matrix(matrix) -> list[IntArray]` | Derive discharge times from pulse matrix non-zero entries |
+| `_shift_distimes(values, shift, limit) -> list[IntArray]` | Shift all discharge times by constant, clip to `[0, limit)` |
 
 ### `DecompositionLoad` (NamedTuple)
 

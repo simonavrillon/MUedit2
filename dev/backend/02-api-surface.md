@@ -69,7 +69,7 @@ changes with every edit of the MU, so the client caches frames by it.
 
 | Method | Path | Accepts | Returns | Service |
 |---|---|---|---|---|
-| POST | `/decompose_stream` | form fields: `upload_token` (required; 400 with `field: upload_token` when missing or expired), `params`, `duration`, `persist_output`, `roi_start: int`, `roi_end: int`, `rois` (JSON str), `discard_channels`, `bids_export: bool`, `project: str`, `bids_entities` (JSON str), `bids_metadata` (JSON str), `full_preview`, `artifact_regions` (JSON str) | `StreamingResponse` NDJSON (`application/x-ndjson`); 409 while another run is active | `start_decomposition()` + `decomposition_event_stream()` |
+| POST | `/decompose_stream` | JSON: `DecomposePayload` (422 before any run starts when a field is missing or invalid; 400 with `field: upload_token` when the token expired, `field: project` for a project that is not a folder name) | `StreamingResponse` NDJSON (`application/x-ndjson`); 409 while another run is active | `start_decomposition()` + `decomposition_event_stream()` |
 | POST | `/decompose/cancel` | — (the session header names the run) | JSON: `{cancelled: bool}`; false when this session has no run | `cancel_decomposition(session)` |
 
 The server runs one decomposition at a time, in a worker process started with `spawn`
@@ -102,7 +102,7 @@ fetches pulse trains through `/series/pulse`.
 |---|---|---|---|---|
 | POST | `/edit/session/open` | JSON: `PathPayload` (a `.npz` or `.mat` decomposition) | MUB1 state frame | `open_edit_session(path, session)` |
 | GET | `/edit/session` | query: `token` | MUB1 state frame; the calling tab takes the session over (a reloaded page) | `edit_session_state(token, session)` |
-| POST | `/edit/ops/{op}` | JSON: `EditOpPayload`; `op` is one of `EditSession.OPS` | MUB1 change frame | `apply_edit(op, payload, session)` |
+| POST | `/edit/ops/{op}` | JSON: the op's model in `EDIT_OPS` (422 for a missing or mistyped field) | MUB1 change frame | `apply_edit(op, payload, session)` |
 | POST | `/edit/session/recover` | JSON: `EditRecoverPayload` | MUB1 state frame with `recovered_edits` | `recover_edits(payload, session)` |
 | POST | `/edit/session/prepare-grid` | JSON: `EditPrepareGridPayload` | `{grid}` once the grid's EMG is filtered | `prepare_edit_grid(payload, session)` |
 | POST | `/edit/session/save` | JSON: `EditSessionSavePayload` | JSON: save result + the per-MU fields | `save_edit_session(payload, session)` |
@@ -217,23 +217,38 @@ The session form's fields, shared by both saves.
 | `token` | `str` | (required) |
 | `apply` | `bool` | `True` (false drops the unsaved edits) |
 
-### `EditOpPayload`
+### `DecomposePayload`
 
-Each operation reads the fields it takes; unset fields are not passed.
-
-| Field | Type | Used by |
+| Field | Type | Default |
 |---|---|---|
-| `token` | `str` | all (required) |
-| `mu` | `int \| None` | every per-MU operation |
-| `x_start`, `x_end` | `int \| None` | `add-spikes`, `add-artifact`, `delete-spikes` |
-| `y_min` | `float \| None` | `add-spikes`, `add-artifact` (peak height), `delete-spikes` |
-| `y_max` | `float \| None` | `delete-spikes` |
-| `view_start`, `view_end` | `int \| None` | `update-filter` |
-| `use_peeloff`, `lock_spikes` | `bool \| None` | `update-filter` |
-| `project` | `str \| None` | `update-filter` (where to read the BIDS EMG) |
-| `nbextchan` | `int \| None` | `update-filter` (default 1000) |
-| `peel_off_win` | `float \| None` | `update-filter` (default 0.025 s) |
-| `flag` | `bool \| None` | `flag` (omitted: flag) |
+| `upload_token` | `str` | (required) |
+| `params` | `DecompositionParameters` (overrides; unknown keys ignored, `0`/`1` accepted for booleans) | the defaults |
+| `persist_output` | `bool` | `False` (also save the `.npz` next to the source) |
+| `full_preview` | `bool` | `False` (keep the full pulse trains for the explorer and the save) |
+| `rois` | `list[Span] \| None` | `None` (the whole recording) |
+| `artifact_regions` | `list[Span] \| None` | `None` |
+| `discard_channels` | `list[list[int]] \| None` | `None` (per grid, per channel: 1 = discarded) |
+| `target_index` | `int \| None` | `None` (the segmented auxiliary channel) |
+| `bids_export` | `bool` | `False` |
+| `project` | `str \| None` | `None` |
+| `bids_entities`, `bids_metadata` | `dict[str, Any] \| None` | `None` |
+
+`Span` is `{start: int, end: int}`. A model validator checks `params.adapt_batch_ms > 0`, and
+`<= edges_sec * 1000` with `use_adaptive`.
+
+### Edit operations (`EDIT_OPS`)
+
+Each `op` has its own model; every model carries `token: str`. Fields the request leaves out are
+not passed, so the session method's defaults apply.
+
+| `op` | Model | Fields |
+|---|---|---|
+| `add-spikes`, `add-artifact` | `RoiAddPayload` | `mu`, `x_start`, `x_end`, `y_min: float \| None` |
+| `delete-spikes` | `RoiDeletePayload` | as `RoiAddPayload`, plus `y_max: float \| None` |
+| `update-filter` | `FilterUpdatePayload` | `mu`, `view_start`, `view_end`, `use_peeloff=False`, `lock_spikes=False`, `project`, `nbextchan=1000`, `peel_off_win=0.025` |
+| `flag` | `FlagPayload` | `mu`, `flag=True` |
+| `remove-outliers`, `reset`, `duplicate` | `MuOpPayload` | `mu` |
+| `remove-duplicates`, `undo` | `EditOpPayload` | — |
 
 ---
 
@@ -332,7 +347,7 @@ Uploads are stored once (a copy, or the store the loader wrote). Reads return `r
 the arrays are shared with the cache but not writable, and lists and metadata dicts are fresh
 copies.
 
-### Session stores (`io/store.py`)
+### Session stores (`storage.py`)
 
 A `SessionStore` is a folder of `.npy` files under `<cache dir>/sessions/`, one per upload, run or
 edit session, holding its full-length arrays as memory maps. `close()` deletes the folder (after
@@ -360,11 +375,5 @@ heap stand-in used when no store is given.
 
 | Function | Signature | Description |
 |---|---|---|
-| `parse_json` | `(raw, field_name) -> Any` | Parse JSON form field, 400 on failure |
-| `parse_discard_channels` | `(raw) -> list[list[int]] \| None` | Parse channel discard overrides |
-| `parse_rois` | `(raw) -> list[tuple[int,int]] \| None` | Parse ROI payload |
-| `parse_json_object` | `(raw, field_name) -> dict \| None` | Parse and validate JSON object |
-| `build_params` | `(raw) -> DecompositionParameters` | Build decomp params from JSON override |
 | `make_json_safe` | `(value) -> Any` | Convert numpy to JSON-serializable |
 | `parse_entity_label` | `(file_label) -> str` | Derive BIDS entity label from filename |
-| `summarize_result` | `(result, save_path, persisted) -> dict` | Build compact decomposition summary |

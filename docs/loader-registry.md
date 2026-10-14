@@ -37,7 +37,7 @@ Loader dispatch is registry-based in `python/src/muedit/io/factory.py`:
      so the shared type coercion applies. A plain `dict` with the same keys also works;
      `load_signal` converts it with `SignalImport.from_mapping(...)`.
    - Optional keyword `store: ArrayStore`: allocate the full-length arrays with
-     `store.allocate(...)` and fill them block by block (`io.store.sample_blocks`), so a long
+     `store.allocate(...)` and fill them block by block (`muedit.storage.sample_blocks`), so a long
      recording never sits whole on the heap. A loader without `store` still works: its result
      is copied into the store afterwards.
 

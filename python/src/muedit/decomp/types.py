@@ -92,6 +92,9 @@ class PreprocessStepOutput:
     coordinates: list[FloatArray]
     ied: list[float]
     discard_channels: list[IntArray]
+    #: ``discard_channels`` before automatic QC adds the bad channels it finds: what the grid
+    #: catalogue and the request declare, and what the BIDS export marks in ``channels.tsv``.
+    declared_discard_channels: list[IntArray]
     muscles: list[str]
     loader_meta: dict[str, Any]
     roi_list: list[tuple[int, int]]
@@ -124,3 +127,20 @@ class PostprocessStepOutput:
     sil_by_window: dict[int, list[float]]
     sil: list[float]
     adaptive_losses: dict[int, Any]
+
+
+@dataclass
+class DecompositionResult:
+    """What ``run_decomposition`` returns; every per-MU field has one entry per motor unit."""
+
+    fsamp: float
+    grid_names: list[str]
+    pulse_trains: FloatArray  # (n_mu, n_samples)
+    discharge_times: list[IntArray]  # sorted sample indices per MU
+    mu_grid_index: list[int]
+    sil: list[float]
+    discard_channels: list[IntArray]
+    parameters: dict[str, Any]
+    preview: dict[str, Any]  # build_preview_payload: what the app's run page draws
+    adaptive_losses: dict[int, Any]
+    save_path: str | None  # the .npz written, when the run saved one

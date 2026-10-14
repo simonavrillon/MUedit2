@@ -12,12 +12,13 @@ import h5py
 import numpy as np
 import pytest
 
+from muedit import storage as store
 from muedit.decomp import decomposition_file as df
 from muedit.editing import operations
 from muedit.editing.session import EditSession
-from muedit.io import npz, store
+from muedit.io import npz
 from muedit.io.npz import LegacyPickleError, NpzArchive
-from muedit.io.store import SessionStore
+from muedit.storage import SessionStore
 
 FSAMP = 2048.0
 N_CH = 5
@@ -88,7 +89,7 @@ class TestSchemaV2:
         path = tmp_path / "d.npz"
         _save_v2(path, sil=[0.91, 0.8, 0.95], rois=[(0, 1000), (1500, 3000)])
         loaded = df.load_decomposition_file(str(path))
-        assert loaded.distime_all == [[10, 20, 30], [], [2999]]
+        assert [d.tolist() for d in loaded.distime_all] == [[10, 20, 30], [], [2999]]
         assert loaded.pulse_trains_full.dtype == np.float32
         np.testing.assert_array_equal(loaded.pulse_trains_full, _pulse().astype(np.float32))
         assert loaded.fsamp == FSAMP
@@ -229,7 +230,11 @@ class TestSchemaV2:
         _save_v2(path)
         with pytest.raises(ValueError, match="could not convert"):
             _save_v2(path, emg_data=np.array([["x"]], dtype=object))  # fails mid-write
-        assert df.load_decomposition_file(str(path)).distime_all == [[10, 20, 30], [], [2999]]
+        assert [d.tolist() for d in df.load_decomposition_file(str(path)).distime_all] == [
+            [10, 20, 30],
+            [],
+            [2999],
+        ]
         assert [p.name for p in tmp_path.iterdir()] == ["d.npz"]
 
     def test_pulse_rows_are_read_a_block_at_a_time(
@@ -255,7 +260,11 @@ class TestSchemaV2:
         _save_v2(path)
         with pytest.raises(ValueError, match="rows 0:3 read as"):
             _save_v2(path, pulse_trains=npz.RowSource((3, T), lambda a, b: np.zeros((b - a, 5))))
-        assert df.load_decomposition_file(str(path)).distime_all == [[10, 20, 30], [], [2999]]
+        assert [d.tolist() for d in df.load_decomposition_file(str(path)).distime_all] == [
+            [10, 20, 30],
+            [],
+            [2999],
+        ]
 
     def test_newer_schema_is_refused(self, tmp_path: Path) -> None:
         path = tmp_path / "d.npz"
@@ -270,7 +279,7 @@ class TestLegacyV1:
         path = tmp_path / "d.npz"
         _save_v1(path, sil=np.array([0.9, 0.8, 0.95]))
         loaded = df.load_decomposition_file(str(path))
-        assert loaded.distime_all == [[10, 20, 30], [], [2999]]
+        assert [d.tolist() for d in loaded.distime_all] == [[10, 20, 30], [], [2999]]
         np.testing.assert_array_equal(loaded.pulse_trains_full, _pulse())
         assert loaded.grid_names == GRIDS
         assert loaded.muscle == ["TA", "GM"]

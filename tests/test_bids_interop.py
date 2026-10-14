@@ -18,10 +18,10 @@ from muedit.io._bids_reader import (
     read_channels_summary,
 )
 from muedit.io.bids import export_bids_emg
-from muedit.io.store import RamStore
 from muedit.models import SignalImport
 from muedit.signal import grid
 from muedit.signal.grid import GridSpec
+from muedit.storage import RamStore
 
 FIXTURE = Path(__file__).parent / "bids_fixtures" / "munitquest"
 SUB01 = "sub-01/emg/sub-01_task-isometric30percentMVC_run-01"

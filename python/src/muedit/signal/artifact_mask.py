@@ -9,8 +9,8 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.ndimage import binary_closing, binary_dilation, maximum_filter1d, median_filter
 
-from muedit.io.store import ArrayStore, RamStore, sample_blocks
 from muedit.models import BoolArray, FloatArray, IntArray
+from muedit.storage import ArrayStore, RamStore, sample_blocks
 
 logger = logging.getLogger(__name__)
 

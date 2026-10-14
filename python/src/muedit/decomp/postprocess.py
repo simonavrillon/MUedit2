@@ -25,15 +25,16 @@ from muedit.decomp.preview import build_preview_payload
 from muedit.decomp.types import (
     DecomposeStepOutput,
     DecompositionParameters,
+    DecompositionResult,
     LoadStepOutput,
     PostprocessStepOutput,
     PreprocessStepOutput,
 )
 from muedit.io._bids_layout import BidsEntities, dataset_root
-from muedit.io.store import ArrayStore
-from muedit.models import DecompositionExport, DecompositionSignalExport, FloatArray, IntArray
+from muedit.models import FloatArray, IntArray
 from muedit.signal.filters import demean
 from muedit.signal.streaming import RowSelection
+from muedit.storage import ArrayStore
 
 logger = logging.getLogger(__name__)
 
@@ -289,12 +290,10 @@ def export_step(
     save_npz: bool,
     raw_emg: FloatArray | None,
     progress_cb: Callable[[str, dict[str, Any]], None] | None,
-) -> tuple[dict[str, Any], str]:
-    """Build export payloads and optionally persist the default NPZ artifact, with ``raw_emg``."""
+) -> DecompositionResult:
+    """Build the run's result and preview, and optionally save the ``.npz``, with ``raw_emg``."""
     if progress_cb:
         progress_cb("progress", {"message": "Writing output", "pct": 98, "phase": "export"})
-    save_path = str(_decomp_path(loaded.full_path, prep.loader_meta))
-
     preview = build_preview_payload(
         data=prep.data,
         fsamp=prep.fsamp,
@@ -309,25 +308,9 @@ def export_step(
         muscles=prep.muscles,
         include_full_preview=include_full_preview,
     )
-    export_payload = DecompositionExport(
-        signal=DecompositionSignalExport(
-            data=prep.data,
-            fsamp=prep.fsamp,
-            pulse_t=post.pulse_t,
-            discharge_times=post.distime,
-        ),
-        parameters=asdict(params),
-        grid_names=prep.grid_names,
-        sil=post.sil,
-        discard_channels=prep.discard_channels,
-        coordinates=prep.coordinates,
-        mu_grid_index=post.mu_grid_index,
-        preview=preview,
-    )
-    result = export_payload.to_dict()
-    result["adaptive_losses"] = post.adaptive_losses
-
+    save_path = None
     if save_npz:
+        save_path = str(_decomp_path(loaded.full_path, prep.loader_meta))
         with_emg = raw_emg is not None
         save_decomposition_npz(
             save_path,
@@ -352,20 +335,16 @@ def export_step(
         )
         logger.info("Saved to %s", save_path)
 
-    if progress_cb:
-        progress_cb(
-            "done",
-            {
-                "message": "Decomposition complete",
-                "pct": 100,
-                "summary": {
-                    "fsamp": prep.fsamp,
-                    "grid_names": prep.grid_names,
-                    "mu_count": len(post.distime),
-                    "parameters": asdict(params),
-                },
-                "preview": result["preview"],
-            },
-        )
-
-    return result, save_path
+    return DecompositionResult(
+        fsamp=prep.fsamp,
+        grid_names=prep.grid_names,
+        pulse_trains=post.pulse_t,
+        discharge_times=post.distime,
+        mu_grid_index=post.mu_grid_index,
+        sil=post.sil,
+        discard_channels=prep.discard_channels,
+        parameters=asdict(params),
+        preview=preview,
+        adaptive_losses=post.adaptive_losses,
+        save_path=save_path,
+    )

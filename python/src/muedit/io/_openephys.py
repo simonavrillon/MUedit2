@@ -18,10 +18,10 @@ from muedit.io._intan import (
     _as_list,
     _read_grid_sidecar,
 )
-from muedit.io.store import ArrayStore, RamStore, sample_blocks
 from muedit.models import SignalImport
 from muedit.signal.grid import format_hdemg_signal
 from muedit.signal.segmentation import aux_kinds
+from muedit.storage import ArrayStore, RamStore, sample_blocks
 
 _OEBIN = "structure.oebin"
 

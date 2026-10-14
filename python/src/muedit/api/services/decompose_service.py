@@ -24,21 +24,16 @@ from muedit.api.cache import (
     _hold_upload,
     _store_run_result,
 )
-from muedit.api.common import (
-    make_json_safe,
-    parse_discard_channels,
-    parse_json_object,
-    parse_rois,
-)
+from muedit.api.common import bids_root_for, make_json_safe
 from muedit.api.memory import DEFAULT_SESSION
+from muedit.api.schemas import DecomposePayload, Span
 from muedit.api.services.decompose_worker import (
     RESULT_STAGE,
     RunJob,
     child_main,
 )
-from muedit.editing.session import spike_array
-from muedit.io.store import SessionStore
-from muedit.models import IntArray
+from muedit.models import IntArray, spike_array
+from muedit.storage import SessionStore
 
 logger = logging.getLogger(__name__)
 
@@ -249,23 +244,20 @@ def active_run() -> _Run | None:
         return _SLOT.run
 
 
-def start_decomposition(
-    upload_token: str | None,
-    options: dict[str, Any],
-    *,
-    session: str = DEFAULT_SESSION,
-) -> _Run:
-    """Start a run on the upload behind ``upload_token``; 409 while another one runs.
+def _spans(spans: list[Span] | None) -> list[tuple[int, int]] | None:
+    return None if spans is None else [(s.start, s.end) for s in spans]
 
-    ``options`` are the ``RunJob`` fields other than the run path and the signal.
-    """
+
+def start_decomposition(payload: DecomposePayload, *, session: str = DEFAULT_SESSION) -> _Run:
+    """Start a run on the upload behind ``payload.upload_token``; 409 while another one runs."""
+    bids_root = str(bids_root_for(payload.project)) if payload.bids_export else None
     with _SLOT.lock:
         if _SLOT.run is not None:
             raise HTTPException(
                 status_code=409,
                 detail="A decomposition is already running; wait for it to finish or cancel it",
             )
-        held = _hold_upload(upload_token)
+        held = _hold_upload(payload.upload_token)
         if held is None:
             raise HTTPException(
                 status_code=400,
@@ -275,7 +267,20 @@ def start_decomposition(
                 },
             )
         run_path = held.source_path or str(Path(tempfile.gettempdir()) / "muedit_cached_input")
-        job = RunJob(run_path=run_path, signal=held.signal, **options)
+        job = RunJob(
+            run_path=run_path,
+            signal=held.signal,
+            params=payload.params,
+            persist_output=payload.persist_output,
+            rois=_spans(payload.rois),
+            discard_channels=payload.discard_channels,
+            bids_root=bids_root,
+            bids_entities=payload.bids_entities,
+            bids_metadata=payload.bids_metadata,
+            include_full_preview=payload.full_preview,
+            artifact_regions=_spans(payload.artifact_regions),
+            target_index=payload.target_index,
+        )
         run = _Run(job, session, held)
         _SLOT.run = run
     try:
@@ -324,35 +329,3 @@ async def decomposition_event_stream(
     finally:
         if not ended:
             run.cancel()
-
-
-def parse_stream_options(
-    *,
-    roi_start: int | None,
-    roi_end: int | None,
-    rois: str | None,
-    discard_channels: str | None,
-    bids_entities: str | None,
-    bids_metadata: str | None,
-    artifact_regions: str | None = None,
-) -> tuple[
-    tuple[int, int] | None,
-    list[tuple[int, int]] | None,
-    list[list[int]] | None,
-    dict | None,
-    dict | None,
-    list[tuple[int, int]] | None,
-]:
-    """Parse optional stream route form inputs into typed decomposition options."""
-    roi = None
-    if roi_start is not None and roi_end is not None:
-        roi = (int(roi_start), int(roi_end))
-
-    return (
-        roi,
-        parse_rois(rois),
-        parse_discard_channels(discard_channels),
-        parse_json_object(bids_entities, "bids_entities"),
-        parse_json_object(bids_metadata, "bids_metadata"),
-        parse_rois(artifact_regions, "artifact_regions"),
-    )

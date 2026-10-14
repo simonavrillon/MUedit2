@@ -12,10 +12,10 @@ from typing import Any
 
 import numpy as np
 
-from muedit.io.store import ArrayStore, RamStore, sample_blocks
 from muedit.models import SignalImport
 from muedit.signal.grid import format_hdemg_signal
 from muedit.signal.segmentation import aux_kinds
+from muedit.storage import ArrayStore, RamStore, sample_blocks
 
 _RHD_MAGIC = 0xC6912702
 

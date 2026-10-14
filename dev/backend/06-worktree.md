@@ -98,7 +98,6 @@ Use this to trace what the user can reach.
 | `decomposition_event_stream(run, is_disconnected)` | App-internal | `POST /decompose_stream` route; cancels the run when the client goes away |
 | `cancel_decomposition(session)` | App-internal | `POST /decompose/cancel`, `POST /session/close` |
 | `stop_decompositions()` | App-internal | App lifespan shutdown |
-| `parse_stream_options(...)` | App-internal | Called by decompose_stream route |
 | `_Run` | App-internal | One run: its worker process and the supervisor thread relaying events |
 
 ### `services/decompose_worker.py`
@@ -151,7 +150,8 @@ Use this to trace what the user can reach.
 | `EditSessionSavePayload` | User-exposed | `POST /edit/session/save` |
 | `EditRecoverPayload` | User-exposed | `POST /edit/session/recover` |
 | `EditPrepareGridPayload` | User-exposed | `POST /edit/session/prepare-grid` |
-| `EditOpPayload` | User-exposed | `POST /edit/ops/{op}` |
+| `DecomposePayload`, `Span` | User-exposed | `POST /decompose_stream` |
+| `EDIT_OPS` and its models (`RoiAddPayload`, `RoiDeletePayload`, `FilterUpdatePayload`, `FlagPayload`, `MuOpPayload`, `EditOpPayload`) | User-exposed | `POST /edit/ops/{op}` |
 
 ### Other API modules
 
@@ -173,17 +173,10 @@ Use this to trace what the user can reach.
 | `config.resolve_bids_root()` | App-internal | Called through `common.bids_root_for()` and the edit session |
 | `config.project_of()` | App-internal | Called by preview and edit services |
 | `common.bids_root_for()` | App-internal | Called by the decompose route and the edit saves (400 on a bad project) |
-| `common.build_params()` | App-internal | Called by decompose service |
 | `common.make_json_safe()` | App-internal | Called by many services |
-| `common.parse_json()` | App-internal | Called by route handlers |
-| `common.parse_discard_channels()` | App-internal | Called by decompose routes |
-| `common.parse_rois()` | App-internal | Called by decompose routes |
-| `common.parse_json_object()` | App-internal | Called by decompose routes |
 | `common.parse_entity_label()` | App-internal | Called by editing services |
 | `common.request_session()` | App-internal | Router dependency: the `X-MUedit-Session` header, made the active session |
-| `common.summarize_result()` | App-internal | Called by decompose service |
 | `common.require_existing_path()` | App-internal | Called by preview/editing route handlers |
-| `common._coerce_param_value()` | App-internal | Called by `build_params` |
 | `cache.BUDGET` | App-internal | The one `MemoryBudget`; swept by the app lifespan |
 | `cache.close_session()` | App-internal | Called by `POST /session/close` |
 | `cache._release_upload()` | App-internal | Called by the preview service before the next load |
@@ -211,8 +204,10 @@ Use this to trace what the user can reach.
 |---|---|---|
 | `run_decomposition()` | User-exposed | `muedit.__init__`, CLI, API `/decompose_stream` |
 | `DecompositionParameters` | User-exposed | `muedit.__init__`, `muedit.decomp.__init__` |
+| `DecompositionResult` | User-exposed | Returned by `run_decomposition`; `muedit.__init__`, `muedit.decomp.__init__` |
 | `load_step()` | App-internal | Called by `run_decomposition` |
 | `preprocess_step()` | App-internal | Called by `run_decomposition` |
+| `bids_export_step()` | App-internal | Called by `run_decomposition` when it is given a `bids_root` |
 | `decompose_step()` | App-internal | Called by `run_decomposition` |
 | `postprocess_step()` | App-internal | Called by `run_decomposition` |
 | `export_step()` | App-internal | Called by `run_decomposition` |
@@ -271,7 +266,7 @@ Use this to trace what the user can reach.
 | `resolve_bids_emg_path()` | App-internal | Called by `_bids_reader`, `preprocess` |
 | `select_grid_channels()` | App-internal | Called by `load_bids_emg_grid` |
 | `NpzWriter`, `NpzArchive`, `RowSource` (`io/npz.py`) | App-internal | Called by `decomposition_file` and the saves (rows written as they are read) |
-| `SessionStore`, `RamStore`, `ArrayStore` (`io/store.py`) | App-internal | Where loaders, runs and edit sessions put full-length arrays |
+| `SessionStore`, `RamStore`, `ArrayStore` (`storage.py`) | App-internal | Where loaders, runs and edit sessions put full-length arrays |
 | `copy_into()`, `store_signal()`, `sample_blocks()` | App-internal | Block-by-block copies into a store |
 | `purge_stale_sessions()` | App-internal | Called by the app lifespan at startup |
 | `store_usage()` | App-internal | Called by `/debug/memory` |
@@ -329,7 +324,7 @@ Use this to trace what the user can reach.
 | `FilterUpdateResult` | User-exposed | `muedit.editing.__init__` (type alias) |
 | `_recompute_spikes_in_window()` | App-internal | Called by `update_motor_unit_filter_window` |
 | `EditSession` (`session.py`) | App-internal | Built by `open_edit_session`; every edit operation, undo, saves |
-| `EditError`, `Change`, `spike_array()` | App-internal | Refused edit (400), what an edit changed, sorted int32 spikes |
+| `EditError`, `Change` | App-internal | Refused edit (400), what an edit changed |
 | `EditLog`, `find_recoverable()`, `purge_old_logs()` (`edit_log.py`) | App-internal | Per-session operation log; recovery on reopen; startup cleanup |
 
 ---
@@ -357,10 +352,9 @@ Use this to trace what the user can reach.
 |---|---|---|
 | `SignalImport` | User-exposed | Returned by `load_signal`; used by `decomp`, `cache`, API services |
 | `FloatArray`, `IntArray`, `BoolArray` | App-internal | Array annotations in `signal`, `decomp`, `editing` |
+| `spike_array()` | App-internal | Discharge times as sorted, unique, non-negative int32: the one normalizer for loads, edits and saves |
 | `EditSignalContext` | App-internal | Built by `decomp.decomposition_file`; held by the `EditSession` |
 | `LoadedDecomposition` | App-internal | Used by `decomp.decomposition_file` |
-| `DecompositionSignalExport` | App-internal | Used by `decomp.postprocess.export_step` |
-| `DecompositionExport` | App-internal | Used by `decomp.postprocess.export_step` |
 | `_as_2d_float_array()` | App-internal | Called by `SignalImport.from_mapping` |
 | `_as_name_list()` | App-internal | Called by `SignalImport.build` for gridname/muscle coercion |
 | `_ensure_channel_matrix()` | App-internal | Called by `SignalImport.from_mapping` |

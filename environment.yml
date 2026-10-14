@@ -25,7 +25,6 @@ dependencies:
   # Web server
   - fastapi=0.115.5
   - uvicorn=0.32.0
-  - python-multipart=0.0.12
   # Notebooks (utilities under notebooks/)
   - jupyterlab=4.2.5
   - ipykernel=6.29.5

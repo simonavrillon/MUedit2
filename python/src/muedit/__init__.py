@@ -8,11 +8,12 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from muedit.decomp.pipeline import run_decomposition
-    from muedit.decomp.types import DecompositionParameters
+    from muedit.decomp.types import DecompositionParameters, DecompositionResult
     from muedit.io.factory import load_signal, register_loader
 
 __all__ = [
     "DecompositionParameters",
+    "DecompositionResult",
     "load_signal",
     "register_loader",
     "run_decomposition",
@@ -21,6 +22,7 @@ __all__ = [
 # Imported on first use, so ``import muedit`` alone does not load SciPy.
 _LAZY = {
     "DecompositionParameters": "muedit.decomp.types",
+    "DecompositionResult": "muedit.decomp.types",
     "load_signal": "muedit.io.factory",
     "register_loader": "muedit.io.factory",
     "run_decomposition": "muedit.decomp.pipeline",

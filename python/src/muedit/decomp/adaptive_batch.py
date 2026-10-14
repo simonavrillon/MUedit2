@@ -10,13 +10,13 @@ import numpy as np
 
 from muedit.adapt_decomp.adaptation import AdaptiveDecomp, BatchSink, Calibration
 from muedit.adapt_decomp.config import Config
-from muedit.io.store import ArrayStore, RamStore
 from muedit.models import BoolArray, FloatArray, IntArray
 from muedit.signal.decomp_primitives import (
     enforce_refractory,
     signed_square,
 )
 from muedit.signal.streaming import SampleSource, StreamedExtender, extend_mask
+from muedit.storage import ArrayStore, RamStore
 
 _DEFAULT_CONFIG = Config()
 

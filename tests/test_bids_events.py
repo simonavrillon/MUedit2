@@ -13,13 +13,13 @@ import pytest
 from muedit.api.schemas import BidsSaveFields
 from muedit.api.services.editing_service import _save, _SaveRequest
 from muedit.decomp.decomposition_file import load_decomposition
-from muedit.decomp.preprocess import _target_segments, preprocess_step
+from muedit.decomp.preprocess import _target_segments, bids_export_step, preprocess_step
 from muedit.decomp.types import DecompositionParameters, LoadStepOutput
 from muedit.io._bids_reader import load_bids_signal
 from muedit.io.bids import export_bids_emg, export_bids_events
-from muedit.io.store import RamStore
 from muedit.models import EditSignalContext, SignalImport
 from muedit.signal.grid import format_hdemg_signal
+from muedit.storage import RamStore
 
 FSAMP = 2000.0
 GRIDS = ["HD08MM1305"]
@@ -354,21 +354,21 @@ def test_a_run_writes_the_events_and_keeps_the_segments(tmp_path: Path) -> None:
         ["%MVC", "V"],
     )
     sig.metadata["aux_kinds"] = ["target", "digital"]
+    loaded = LoadStepOutput(
+        full_path="synthetic", filename="synthetic", signal=sig, data=sig.data, fsamp=FSAMP
+    )
     prep = preprocess_step(
-        loaded=LoadStepOutput(
-            full_path="synthetic", filename="synthetic", signal=sig, data=sig.data, fsamp=FSAMP
-        ),
+        loaded=loaded,
         duration=None,
         manual_roi=False,
         roi=None,
         rois=None,
         params=DecompositionParameters(),
         discard_overrides=None,
-        bids_root=str(tmp_path),
-        bids_entities={"subject": "01", "task": "ramp", "placement_scheme_description": PLACEMENT},
-        bids_metadata=None,
         target_index=0,
     )
+    entities = {"subject": "01", "task": "ramp", "placement_scheme_description": PLACEMENT}
+    bids_export_step(loaded, prep, str(tmp_path), entities, None)
     assert prep.target_segments is not None
     assert prep.target_segments["target_name"] == "Force - Original Path"
     assert [s["kind"] for s in prep.target_segments["segments"]] == ["ramp", "plateau", "ramp"]

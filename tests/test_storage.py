@@ -1,4 +1,4 @@
-"""T1 session store (``muedit.io.store``) and the loaders that write into it."""
+"""T1 session store (``muedit.storage``) and the loaders that write into it."""
 
 from __future__ import annotations
 
@@ -16,10 +16,11 @@ import numpy as np
 import pytest
 import scipy.io
 
-from muedit.io import factory, store
+from muedit import storage as store
+from muedit.io import factory
 from muedit.io._otb import _fit_trace, _read_feedback_traces, _read_sip, _Trace
-from muedit.io.store import RamStore, SessionStore
 from muedit.models import SignalImport, resident_nbytes
+from muedit.storage import RamStore, SessionStore
 from tests._platform import deleted
 from tests.test_io_intan import (
     _GRID,

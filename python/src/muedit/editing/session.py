@@ -23,18 +23,16 @@ import numpy as np
 from muedit.decomp.types import DEFAULT_NBEXTCHAN, DEFAULT_PEEL_OFF_WIN_SEC
 from muedit.editing.edit_log import EditLog, RecoverableLog
 from muedit.editing.operations import (
-    add_artifact_in_roi,
     add_spikes_in_roi,
-    delete_artifacts_in_roi,
     delete_spikes_in_roi,
     remove_discharge_rate_outliers,
     update_motor_unit_filter_window,
 )
 from muedit.io.npz import RowSource
-from muedit.io.store import SessionStore, copy_into
-from muedit.models import EditSignalContext, FloatArray, IntArray, resident_nbytes
+from muedit.models import EditSignalContext, FloatArray, IntArray, resident_nbytes, spike_array
 from muedit.signal.filters import emg_filter_inplace, for_each_row
 from muedit.signal.grid import format_hdemg_signal
+from muedit.storage import SessionStore, copy_into
 
 logger = logging.getLogger(__name__)
 
@@ -58,12 +56,6 @@ DuplicateFinder = Callable[[list[IntArray], list[int]], list[int]]
 
 class EditError(ValueError):
     """An edit that cannot be applied: a bad index or window, or no EMG to refit on."""
-
-
-def spike_array(values: Any) -> IntArray:
-    """Sorted, unique, non-negative sample indices as int32."""
-    arr = np.asarray(values if values is not None else [], dtype=np.int64).reshape(-1)
-    return np.unique(arr[arr >= 0]).astype(np.int32)
 
 
 def timestamp() -> str:
@@ -311,22 +303,10 @@ class EditSession:
     def apply(self, op: str, args: dict[str, Any]) -> Change:
         """Run one operation by name and record it in the log."""
         with self.lock:
-            handlers: dict[str, Callable[..., Change]] = {
-                "add-spikes": self.add_spikes,
-                "add-artifact": self.add_artifact,
-                "delete-spikes": self.delete_spikes,
-                "remove-outliers": self.remove_outliers,
-                "update-filter": self.update_filter,
-                "flag": self.flag,
-                "reset": self.reset,
-                "duplicate": self.duplicate,
-                "remove-duplicates": self.remove_duplicates,
-                "undo": self.undo,
-            }
-            handler = handlers.get(op)
-            if handler is None:
+            if op not in self.OPS:
                 raise EditError(f"Unknown edit operation {op!r}")
-            try:
+            handler: Callable[..., Change] = getattr(self, op.replace("-", "_"))
+            try:  # a replayed log's arguments come unchecked
                 inspect.signature(handler).bind(**args)
             except TypeError as exc:
                 raise EditError(f"Invalid arguments for {op}: {exc}") from exc
@@ -375,9 +355,9 @@ class EditSession:
         if hi >= lo:
             # One zero sample on each side keeps peak picking as it is on the whole train.
             w_lo, w_hi = max(0, lo - 1), min(self.total_samples, hi + 2)
-            find = add_artifact_in_roi if artifacts else add_spikes_in_roi
-            found = find(self._window(mu, w_lo, w_hi), [], self.fsamp, lo - w_lo, hi - w_lo, height)
-            peaks = np.asarray(found, dtype=np.int64) + w_lo
+            window = self._window(mu, w_lo, w_hi)
+            found = add_spikes_in_roi(window, [], self.fsamp, lo - w_lo, hi - w_lo, height)
+            peaks = found.astype(np.int64) + w_lo
         if artifacts:
             before = self.artifacts[mu]
             self.artifacts[mu] = spike_array(np.concatenate([before, peaks]))
@@ -411,10 +391,8 @@ class EditSession:
 
         def delete(times: IntArray) -> IntArray:
             inside = (times >= lo) & (times < hi)
-            kept = delete_spikes_in_roi(
-                window, (times[inside] - lo).tolist(), x0 - lo, x1 - lo, low, high
-            )
-            return spike_array(np.concatenate([times[~inside], np.asarray(kept, int) + lo]))
+            kept = delete_spikes_in_roi(window, times[inside] - lo, x0 - lo, x1 - lo, low, high)
+            return spike_array(np.concatenate([times[~inside], kept + lo]))
 
         before = self.spikes[mu]
         self.spikes[mu] = delete(before)
@@ -422,22 +400,10 @@ class EditSession:
         if removed:
             self._entry("delete_spikes", mu, spikes_removed=removed)
         artifacts_before = self.artifacts[mu]
-        if artifacts_before.size:
-            inside = (artifacts_before >= lo) & (artifacts_before < hi)
-            kept = delete_artifacts_in_roi(
-                window,
-                (artifacts_before[inside] - lo).tolist(),
-                x0 - lo,
-                x1 - lo,
-                low,
-                high,
-            )
-            self.artifacts[mu] = spike_array(
-                np.concatenate([artifacts_before[~inside], np.asarray(kept, int) + lo])
-            )
-            _, gone = _diff(artifacts_before, self.artifacts[mu])
-            if gone:
-                self._entry("delete_artifact", mu, artifacts_removed=gone)
+        self.artifacts[mu] = delete(artifacts_before)
+        _, gone = _diff(artifacts_before, self.artifacts[mu])
+        if gone:
+            self._entry("delete_artifact", mu, artifacts_removed=gone)
         self.flagged[mu] = False
         self._touch(mu)
         return Change([mu], start)
@@ -449,8 +415,8 @@ class EditSession:
         start = len(self.history)
         self._begin("remove_outliers", mu)
         before = self.spikes[mu]
-        kept = remove_discharge_rate_outliers(_PulseLookup(self, mu), before.tolist(), self.fsamp)
-        self.spikes[mu] = spike_array(kept)
+        pulse = self.values(mu, 0, self.total_samples)
+        self.spikes[mu] = remove_discharge_rate_outliers(pulse, before, self.fsamp)
         _, removed = _diff(before, self.spikes[mu])
         if removed:
             self._entry("remove_outliers", mu, spikes_removed=removed)
@@ -481,14 +447,14 @@ class EditSession:
         start = len(self.history)
         step = self._begin("update_filter", mu)
         others = [
-            self.spikes[i].tolist()
+            self.spikes[i]
             for i in range(self.n_mu)
             if i != mu and self.mu_grid_index[i] == grid and not self.flagged[i]
         ]
         pt, updated = update_motor_unit_filter_window(
             emg,
             emg_mask,
-            self.spikes[mu].tolist(),
+            self.spikes[mu],
             fsamp,
             view_start,
             view_end,
@@ -496,7 +462,7 @@ class EditSession:
             peeloff_spike_times=others,
             peeloff_win=peel_off_win if peel_off_win > 0 else DEFAULT_PEEL_OFF_WIN_SEC,
             use_peeloff=bool(use_peeloff),
-            artifact_times=self.artifacts[mu].tolist() or None,
+            artifact_times=self.artifacts[mu],
             lock_spikes=bool(lock_spikes),
             artifact_mask=self.signal.artifact_mask if self.signal is not None else None,
             bandpass=False,  # filtered as the decomposition was, by _grid_emg
@@ -511,7 +477,7 @@ class EditSession:
                     step.patch = (seg_start, self._patch_copy(row[seg_start:seg_end]))
                 row[seg_start:seg_end] = pt[edge : edge + (seg_end - seg_start)]
         before = self.spikes[mu]
-        self.spikes[mu] = spike_array(updated)
+        self.spikes[mu] = updated
         added, removed = _diff(before, self.spikes[mu])
         self._entry(
             "update_filter",
@@ -814,29 +780,6 @@ def _mapped_from(arr: np.ndarray, path: str) -> bool:
     """Whether ``arr`` is a memory map of the file at ``path``."""
     filename = getattr(arr, "filename", None)
     return filename is not None and Path(filename).resolve() == Path(path).resolve()
-
-
-class _PulseLookup:
-    """The MU's pulse train read one sample at a time, for the edits that only look up spikes."""
-
-    def __init__(self, session: EditSession, mu: int) -> None:
-        self._session = session
-        self._mu = mu
-
-    def __len__(self) -> int:
-        return self._session.total_samples
-
-    def __getitem__(self, t: int) -> float:
-        session, t = self._session, int(t)
-        if not 0 <= t < session.total_samples:
-            return 0.0
-        ref = session.rows[self._mu]
-        if ref is None:
-            spikes = session.spikes[self._mu]
-            i = int(np.searchsorted(spikes, t))
-            return 1.0 if i < spikes.size and spikes[i] == t else 0.0
-        key, row = ref
-        return float(session.arrays[key][row, t])
 
 
 def _discard_mask(cell: Any, n_ch: int) -> IntArray:

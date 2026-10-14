@@ -132,46 +132,31 @@ export async function runDecomposition(app) {
     CLOCK_TICK_MS,
   );
 
-  const buildRunFormData = (/** @type {string} */ token) => {
-    const formData = new FormData();
-    formData.append("upload_token", token);
-
-    formData.append("params", JSON.stringify(buildParams()));
-    formData.append("persist_output", "false");
-    if (state.discardMasks.length) {
-      formData.append("discard_channels", JSON.stringify(state.discardMasks));
-    }
-    if (state.rois.length) {
-      formData.append("rois", JSON.stringify(state.rois));
-    }
-    if (state.artifactRegions.length) {
-      formData.append(
-        "artifact_regions",
-        JSON.stringify(state.artifactRegions),
-      );
-    }
-    // The backend segments the same channel again to write the target's events.
-    if (state.segments.length && state.targetIndex !== null) {
-      formData.append("target_index", String(state.targetIndex));
-    }
-
-    const project = getBidsProject();
-    if (project) {
-      formData.append("project", project);
-    }
+  const buildRunPayload = (/** @type {string} */ token) => {
     const bidsEntities = collectBidsEntities();
-    if (Object.keys(bidsEntities).length) {
-      formData.append("bids_entities", JSON.stringify(bidsEntities));
-    }
-
-    formData.append("bids_export", "true");
-    formData.append("full_preview", "true");
-    return formData;
+    return {
+      upload_token: token,
+      params: buildParams(),
+      discard_channels: state.discardMasks.length ? state.discardMasks : null,
+      rois: state.rois.length ? state.rois : null,
+      artifact_regions: state.artifactRegions.length
+        ? state.artifactRegions
+        : null,
+      // The backend segments the same channel again to write the target's events.
+      target_index:
+        state.segments.length && state.targetIndex !== null
+          ? state.targetIndex
+          : null,
+      project: getBidsProject() || null,
+      bids_entities: Object.keys(bidsEntities).length ? bidsEntities : null,
+      bids_export: true,
+      full_preview: true,
+    };
   };
 
   try {
     const response = await withUpload(app, (token) =>
-      api.decomposeStream(buildRunFormData(token), RUN_START_TIMEOUT_MS),
+      api.decomposeStream(buildRunPayload(token), RUN_START_TIMEOUT_MS),
     );
     // A reloaded file reported itself on the status line.
     setStatus("Running decomposition...", "muted");

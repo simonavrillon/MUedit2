@@ -148,8 +148,8 @@ describe("decomposition upload-token recovery", () => {
     const sentTokens = [];
     const previewPaths = [];
     const api = {
-      decomposeStream: async (formData) => {
-        sentTokens.push(formData.get("upload_token"));
+      decomposeStream: async (payload) => {
+        sentTokens.push(payload.upload_token);
         if (sentTokens.length === 1) throw missingUpload();
         return { body: streamBody() };
       },

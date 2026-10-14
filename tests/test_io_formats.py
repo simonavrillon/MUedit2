@@ -13,9 +13,9 @@ import pytest
 
 from muedit.io import load_signal
 from muedit.io.bids import export_bids_emg
-from muedit.io.store import SessionStore
 from muedit.models import SignalImport, resident_nbytes
 from muedit.signal.grid import format_hdemg_signal
+from muedit.storage import SessionStore
 
 # Not a whole number of seconds at any fixture's sample rate: EDF/BDF stores
 # whole data records, so only a ragged count proves the reader trims the padding.

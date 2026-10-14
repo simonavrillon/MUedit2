@@ -182,10 +182,7 @@ def upload_token(client: TestClient, signal_mat: Path) -> str:
 def stream_events(client: TestClient, upload_token: str) -> list[dict[str, Any]]:
     resp = client.post(
         f"{API}/decompose_stream",
-        data={
-            "upload_token": upload_token,
-            "params": json.dumps({"niter": 5, "nbextchan": 200}),
-        },
+        json={"upload_token": upload_token, "params": {"niter": 5, "nbextchan": 200}},
     )
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("application/x-ndjson")
@@ -218,10 +215,10 @@ def mu_run(client: TestClient, workspace: Path) -> dict[str, Any]:
     token = _ok(resp)["upload_token"]
     resp = client.post(
         f"{API}/decompose_stream",
-        data={
+        json={
             "upload_token": token,
-            "params": json.dumps({"niter": 10, "nbextchan": 400}),
-            "full_preview": "true",
+            "params": {"niter": 10, "nbextchan": 400},
+            "full_preview": True,
         },
         headers={SESSION_HEADER: "fixture-mu-run"},
     )
@@ -657,29 +654,37 @@ class TestDecomposeStream:
     def test_artifact_regions_accepted(self, client: TestClient, upload_token: str) -> None:
         resp = client.post(
             f"{API}/decompose_stream",
-            data={
+            json={
                 "upload_token": upload_token,
-                "params": json.dumps({"niter": 2, "nbextchan": 200}),
-                "artifact_regions": json.dumps([[100, 400]]),
+                "params": {"niter": 2, "nbextchan": 200},
+                "artifact_regions": [{"start": 100, "end": 400}],
             },
         )
         assert json.loads(resp.text.splitlines()[-1])["stage"] == "done"
 
-    def test_bad_params_streams_error_event(self, client: TestClient, upload_token: str) -> None:
-        resp = client.post(
-            f"{API}/decompose_stream",
-            data={
-                "upload_token": upload_token,
-                "params": "[1, 2]",
-            },
-        )
-        assert resp.status_code == 200
-        last = json.loads(resp.text.splitlines()[-1])
-        assert last["stage"] == "error"
-        assert {"message", "detail", "pct"} <= set(last)
+    @pytest.mark.parametrize(
+        ("body", "loc"),
+        [
+            ({"params": [1, 2]}, ["body", "params"]),
+            ({"params": {"contrast_func": "skwe"}}, ["body", "params", "contrast_func"]),
+            ({"rois": [[100, 400]]}, ["body", "rois", 0]),
+        ],
+        ids=["params-not-an-object", "unknown-contrast", "roi-not-a-span"],
+    )
+    def test_bad_body_is_422_before_any_run(
+        self, client: TestClient, upload_token: str, body: dict[str, Any], loc: list[Any]
+    ) -> None:
+        resp = client.post(f"{API}/decompose_stream", json={"upload_token": upload_token, **body})
+        err = _err(resp, 422, "validation_error")
+        assert err["detail"][0]["loc"] == loc
 
-    def test_missing_token_is_400(self, client: TestClient) -> None:
-        err = _err(client.post(f"{API}/decompose_stream", data={"params": "{}"}), 400)
+    def test_missing_token_is_422(self, client: TestClient) -> None:
+        resp = client.post(f"{API}/decompose_stream", json={"params": {}})
+        err = _err(resp, 422, "validation_error")
+        assert err["detail"][0]["loc"] == ["body", "upload_token"]
+
+    def test_expired_token_is_400(self, client: TestClient) -> None:
+        err = _err(client.post(f"{API}/decompose_stream", json={"upload_token": "gone"}), 400)
         assert err["detail"]["field"] == "upload_token"
 
     def test_persisted_output_lands_next_to_source(
@@ -687,10 +692,10 @@ class TestDecomposeStream:
     ) -> None:
         resp = client.post(
             f"{API}/decompose_stream",
-            data={
+            json={
                 "upload_token": upload_token,
-                "params": json.dumps({"niter": 2, "nbextchan": 200}),
-                "persist_output": "true",
+                "params": {"niter": 2, "nbextchan": 200},
+                "persist_output": True,
             },
         )
         done = json.loads(resp.text.splitlines()[-1])
@@ -829,7 +834,7 @@ class TestEditSave:
                     "grid_names": [GRID],
                     "project": "smoke",
                     "file_label": decomp_npz.name,
-                    "artifact_regions": [[10, 20], {"start": 30, "end": 40}, "junk"],
+                    "artifact_regions": [{"start": 10, "end": 20}, {"start": 30, "end": 40}],
                 },
             )
         )

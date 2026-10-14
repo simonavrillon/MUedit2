@@ -10,8 +10,8 @@ import pytest
 
 from muedit.io import get_loader, load_signal
 from muedit.io._openephys import load_openephys
-from muedit.io.store import SessionStore
 from muedit.models import resident_nbytes
+from muedit.storage import SessionStore
 
 _N_EMG = 64
 _N_ADC = 2

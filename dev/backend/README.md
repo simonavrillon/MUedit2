@@ -39,7 +39,8 @@ python/src/muedit/
 ├── cli.py                                   CLI entry point (api serve, decompose)
 ├── paths.py                                 Per-user cache/log folders, checkout, frontend
 ├── app_log.py                               Server log file, shared with spawned workers
-├── models.py                                SignalImport, LoadedDecomposition, DecompositionExport
+├── models.py                                SignalImport, LoadedDecomposition, spike_array
+├── storage.py                               Session stores: full-length arrays as memory-mapped .npy files
 │
 ├── api/
 │   ├── app_factory.py                       FastAPI app construction, Host and token checks, frontend mount
@@ -89,8 +90,7 @@ python/src/muedit/
 │   ├── _openephys.py                         Open Ephys binary-format loader
 │   ├── mat.py                                MATLAB .mat v5 + v7.3 (HDF5) loader
 │   ├── _otb.py                               OT Bioelettronica OTB+ and OTB4 loaders
-│   ├── npz.py                                Aligned .npz writer, memory-mapping reader, legacy unpickler
-│   └── store.py                              Session stores: full-length arrays as memory-mapped .npy files
+│   └── npz.py                                Aligned .npz writer, memory-mapping reader, legacy unpickler
 │
 ├── signal/
 │   ├── filters.py                            demean, bandpass, notch (whole or in place, by row block)

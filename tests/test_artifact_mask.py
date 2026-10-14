@@ -233,7 +233,7 @@ def _artifacted_grid() -> np.ndarray:
 def test_blocks_of_samples_give_the_whole_grid_mask(
     block_bytes: int | None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from muedit.io import store
+    from muedit import storage as store
 
     if block_bytes is not None:
         monkeypatch.setattr(store, "BLOCK_BYTES", block_bytes)

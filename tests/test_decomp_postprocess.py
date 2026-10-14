@@ -75,9 +75,6 @@ def postprocess_variants(
         rois=None,
         params=base,
         discard_overrides=None,
-        bids_root=None,
-        bids_entities=None,
-        bids_metadata=None,
     )
     decomposed: DecomposeStepOutput = decompose_step(
         prep=prep, params=base, rng=rng, progress_cb=None

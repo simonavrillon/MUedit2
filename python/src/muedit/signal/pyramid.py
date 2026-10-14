@@ -7,8 +7,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from muedit.io.store import ArrayStore
 from muedit.models import FloatArray, resident_nbytes
+from muedit.storage import ArrayStore
 
 #: Samples per bin of the finest level; each level above has ``LEVEL_RATIO`` times more.
 BASE_FACTOR = 16

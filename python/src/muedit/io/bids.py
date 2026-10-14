@@ -7,11 +7,12 @@ import json
 import logging
 import math
 import unicodedata
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+from numpy.typing import ArrayLike
 
 logger = logging.getLogger(__name__)
 
@@ -25,9 +26,9 @@ from muedit.io._bids_reader import (
     read_tsv,
     resolve_bids_emg_path,
 )
-from muedit.io.store import BLOCK_BYTES, sample_blocks
 from muedit.signal.grid import get_grid_electrode_metadata
 from muedit.signal.segmentation import aux_kinds as classify_aux
+from muedit.storage import BLOCK_BYTES, sample_blocks
 
 __all__ = [
     "BidsEntities",
@@ -39,6 +40,7 @@ __all__ = [
     "read_bids_emg_grid",
     "resolve_bids_emg_path",
     "write_bids_dataset_description",
+    "write_participant",
 ]
 
 
@@ -813,6 +815,24 @@ def write_bids_dataset_description(
     _write_tsv(parts_tsv_path, header, [[r.get(h, "n/a") for h in header] for r in existing])
 
 
+def write_participant(
+    bids_root: Path, subject: str, participant_meta: Mapping[str, Any] | None
+) -> None:
+    """``write_bids_dataset_description`` from the session form's participant fields; failures are logged."""
+    meta = participant_meta or {}
+    age = "" if meta.get("age") is None else str(meta["age"]).strip()
+    try:
+        write_bids_dataset_description(
+            bids_root,
+            subject=subject,
+            age=int(age) if age not in ("", "n/a", "None") else None,
+            sex=meta.get("sex") or None,
+            handedness=meta.get("handedness") or None,
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning("Failed to write participants.tsv", exc_info=True)
+
+
 def _write_derivative_description(deriv_root: Path, pipeline_name: str) -> None:
     """Write or update the derivative dataset's description, keeping keys someone else added."""
     path = deriv_root / "dataset_description.json"
@@ -853,7 +873,7 @@ def _write_description_row(deriv_root: Path, desc: str, text: str) -> None:
 
 
 def export_bids_mu_derivatives(
-    distimes: list[list[int]],
+    distimes: Sequence[ArrayLike],
     fsamp: float,
     bids_root: Path,
     entities: str,
@@ -885,7 +905,7 @@ def export_bids_mu_derivatives(
         uid = mu_uids[idx] if mu_uids and idx < len(mu_uids) else str(idx)
         grid = mu_grid_index[idx] if mu_grid_index and idx < len(mu_grid_index) else None
         group = labels[grid] if grid is not None and 0 <= grid < len(labels) else "n/a"
-        spikes.extend((int(sample), idx, uid, group) for sample in spike_samples)
+        spikes.extend((int(t), idx, uid, group) for t in np.asarray(spike_samples).reshape(-1))
     spikes.sort()  # by sample, then by unit, as BIDS wants events sorted by onset
     rows = [
         [f"{sample / fsamp:.6f}", "0", str(sample), uid, "motor-unit-spike", group]

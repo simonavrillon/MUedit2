@@ -12,7 +12,6 @@ from muedit.api.memory import (
     default_budget_bytes,
 )
 from muedit.editing.session import EditSession
-from muedit.io.store import SessionStore
 from muedit.models import (
     FloatArray,
     IntArray,
@@ -20,6 +19,7 @@ from muedit.models import (
     resident_nbytes,
 )
 from muedit.signal.pyramid import MinMaxPyramid
+from muedit.storage import SessionStore
 
 
 @dataclass

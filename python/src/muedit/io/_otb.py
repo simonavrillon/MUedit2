@@ -16,9 +16,9 @@ from typing import Any
 import numpy as np
 import xmltodict
 
-from muedit.io.store import ArrayStore, RamStore, sample_blocks
 from muedit.models import SignalImport
 from muedit.signal.grid import format_hdemg_signal
+from muedit.storage import ArrayStore, RamStore, sample_blocks
 
 logger = logging.getLogger(__name__)
 

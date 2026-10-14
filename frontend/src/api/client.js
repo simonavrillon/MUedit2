@@ -137,13 +137,19 @@ export function createApiClient({ apiFetch, apiJson, API_BASE, sessionId }) {
     },
 
     /**
-     * @param {FormData} formData
+     * Start a run; the response streams its events as NDJSON.
+     *
+     * @param {JsonObject} payload
      * @param {number} [timeoutMs]
      */
-    decomposeStream(formData, timeoutMs) {
+    decomposeStream(payload, timeoutMs) {
       return apiFetch(
         `${API_BASE}${routes.decomposeStream}`,
-        { method: "POST", headers: {}, body: formData },
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        },
         timeoutMs,
       );
     },

@@ -145,9 +145,6 @@ def _prepare(
         rois=None,
         params=params,
         discard_overrides=None,
-        bids_root=None,
-        bids_entities=None,
-        bids_metadata=None,
         artifact_regions=artifact_regions,
     )
 

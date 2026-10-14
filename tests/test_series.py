@@ -7,11 +7,11 @@ import pytest
 
 from muedit.api.services.series_service import build_signal_views
 from muedit.decomp.preview import abs_means
-from muedit.io.store import RamStore, SessionStore
 from muedit.models import SignalImport
 from muedit.signal.downsample import PREVIEW_MOVING_AVG_MS, moving_average_ms
 from muedit.signal.filters import bandpass_signals
 from muedit.signal.pyramid import MinMaxPyramid, pyramid_factors, view
+from muedit.storage import RamStore, SessionStore
 from tests._platform import deleted
 
 FSAMP = 2048.0

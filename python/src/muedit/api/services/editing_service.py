@@ -61,7 +61,7 @@ from muedit.decomp.postprocess import dedup_survivors
 from muedit.decomp.preprocess import build_manual_artifact_mask
 from muedit.decomp.types import DecompositionParameters
 from muedit.editing.edit_log import EditLog, find_recoverable
-from muedit.editing.session import Change, EditError, EditSession, spike_array, timestamp
+from muedit.editing.session import Change, EditError, EditSession, timestamp
 from muedit.io._bids_reader import (
     read_channels_summary,
     read_sidecar_meta,
@@ -74,10 +74,9 @@ from muedit.io.bids import (
     export_bids_events,
     export_bids_mu_derivatives,
     read_bids_emg_grid,
-    write_bids_dataset_description,
+    write_participant,
 )
 from muedit.io.npz import RowSource
-from muedit.io.store import SessionStore, copy_into
 from muedit.models import (
     BoolArray,
     EditSignalContext,
@@ -85,7 +84,9 @@ from muedit.models import (
     IntArray,
     LoadedDecomposition,
     resident_nbytes,
+    spike_array,
 )
+from muedit.storage import SessionStore, copy_into
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +112,7 @@ def _dedup(
         duplicatesbgrids=_coerce_bool_param(parameters.get("duplicatesbgrids", True)),
     )
     kept, _ = dedup_survivors(
-        [np.asarray(d, dtype=int) for d in distimes],
+        distimes,
         mu_grid_index,
         max(mu_grid_index, default=0) + 1,
         params,
@@ -408,7 +409,7 @@ class _SaveRequest:
     mu_grid_index: list[int]
     mu_uids: list[str]
     edit_history: list[dict[str, Any]]
-    artifact_times: list[list[int]]
+    artifact_times: list[IntArray]
     fsamp: float
     total_samples: int
     grid_names: list[str]
@@ -510,62 +511,41 @@ def _export_bids_emg(
         return None, "The BIDS EMG export failed; see the server log."
 
 
-def _save(req: _SaveRequest) -> tuple[dict[str, Any], list[int], list[dict[str, Any]]]:
-    """Write the edited decomposition and its BIDS files.
-
-    Returns the response, the indices of the MUs the file keeps, and the log entries
-    for the MUs dropped on save.
-    """
-    form = req.form
-    distimes = list(req.distimes)
-    fsamp = req.fsamp
-    mu_grid_index = list(req.mu_grid_index)
-    expected_grid_count = (max(mu_grid_index) + 1) if mu_grid_index else 1
-    grid_names = _pad_grid_names(req.grid_names, expected_grid_count, [])
-    parameters = dict(req.parameters)
-    muscle_names = _normalize_muscle_names(form.muscle or form.muscle_names)
-    if muscle_names and not parameters.get("target_muscle"):
-        parameters["target_muscle"] = muscle_names if len(muscle_names) > 1 else muscle_names[0]
-
-    mu_uids = list(req.mu_uids)
-    artifact_times = [list(row) for row in req.artifact_times]
-    artifact_times.extend([] for _ in range(len(distimes) - len(artifact_times)))
+def _kept_mus(
+    req: _SaveRequest, parameters: dict[str, Any]
+) -> tuple[list[int], list[dict[str, Any]]]:
+    """The request's MUs the file keeps, in order, and the log entries for those it drops."""
+    kept = list(range(len(req.distimes)))
     entries: list[dict[str, Any]] = []
+    # Unset (None) form fields leave both steps on.
+    if req.form.remove_flagged is not False and kept:
+        flagged = _normalize_flagged(req.flagged, len(kept))
+        dropped = [i for i in kept if flagged[i]]
+        kept = [i for i in kept if not flagged[i]]
+        if dropped:
+            entries.append(_save_removal_entry("remove_flagged", [req.mu_uids[i] for i in dropped]))
+    if req.form.remove_duplicates is not False and len(kept) > 1 and req.fsamp > 0:
+        survivors = _dedup(
+            [req.distimes[i] for i in kept],
+            [req.mu_grid_index[i] for i in kept],
+            parameters,
+            req.fsamp,
+            req.total_samples,
+        )
+        survived = set(survivors)
+        dropped = [i for j, i in enumerate(kept) if j not in survived]
+        kept = [kept[j] for j in survivors]
+        if dropped:
+            entries.append(
+                _save_removal_entry("remove_duplicates", [req.mu_uids[i] for i in dropped])
+            )
+    return kept, entries
 
-    # Schema declares these as bool | None; default to True when unspecified.
-    remove_flagged = True if form.remove_flagged is None else form.remove_flagged
-    remove_duplicates = True if form.remove_duplicates is None else form.remove_duplicates
 
-    # Indices into the request's MUs that survive the save, in saved order.
-    kept_mus = list(range(len(distimes)))
-
-    def keep(indices: list[int]) -> None:
-        nonlocal distimes, mu_grid_index, mu_uids, artifact_times, kept_mus
-        distimes = [distimes[i] for i in indices]
-        mu_grid_index = [mu_grid_index[i] for i in indices]
-        mu_uids = [mu_uids[i] for i in indices]
-        artifact_times = [artifact_times[i] for i in indices]
-        kept_mus = [kept_mus[i] for i in indices]
-
-    if remove_flagged and distimes:
-        flagged = _normalize_flagged(req.flagged, len(distimes))
-        removed_uids = [mu_uids[i] for i in range(len(distimes)) if flagged[i]]
-        keep([i for i in range(len(distimes)) if not flagged[i]])
-        if removed_uids:
-            entries.append(_save_removal_entry("remove_flagged", removed_uids))
-
-    if remove_duplicates and len(distimes) > 1 and fsamp and fsamp > 0:
-        kept_idx = _dedup(distimes, mu_grid_index, parameters, fsamp, req.total_samples)
-        kept_set = set(kept_idx)
-        removed_uids = [uid for i, uid in enumerate(mu_uids) if i not in kept_set]
-        keep(kept_idx)
-        if removed_uids:
-            entries.append(_save_removal_entry("remove_duplicates", removed_uids))
-    edit_history = [*req.edit_history, *entries]
-
-    bids_root = req.bids_root if req.bids_root is not None else bids_root_for(form.project)
-    file_label = form.file_label or ""
-    entity_label = form.entity_label or parse_entity_label(file_label)
+def _save_target(req: _SaveRequest) -> tuple[Path, str, Path]:
+    """The BIDS dataset, the recording's entity label, and the ``_edited.npz`` path in its derivatives."""
+    bids_root = req.bids_root if req.bids_root is not None else bids_root_for(req.form.project)
+    entity_label = req.form.entity_label or parse_entity_label(req.form.file_label or "")
     try:
         entities = BidsEntities.parse(entity_label)
     except ValueError as exc:
@@ -574,62 +554,78 @@ def _save(req: _SaveRequest) -> tuple[dict[str, Any], list[int], list[dict[str, 
         ) from exc
     decomp_dir = entities.derivative_dir(bids_root, "decomp")
     decomp_dir.mkdir(parents=True, exist_ok=True)
-    out_path = decomp_dir / f"{entity_label}_edited.npz"
+    return bids_root, entity_label, decomp_dir / f"{entity_label}_edited.npz"
 
+
+def _export_mu_derivatives(
+    req: _SaveRequest, kept: list[int], bids_root: Path, entity_label: str
+) -> dict[str, str] | None:
+    """Best-effort discharge-time derivatives of the kept MUs: their paths, or None."""
+    if not kept or req.fsamp <= 0:
+        return None
+    try:
+        paths = export_bids_mu_derivatives(
+            distimes=[req.distimes[i] for i in kept],
+            fsamp=req.fsamp,
+            bids_root=bids_root,
+            entities=entity_label,
+            mu_uids=[req.mu_uids[i] for i in kept],
+            mu_grid_index=[req.mu_grid_index[i] for i in kept],
+            grid_labels=(req.signal.loader_meta if req.signal else {}).get("grid_labels"),
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning("BIDS derivatives export failed", exc_info=True)
+        return None
+    return {k: str(v) for k, v in paths.items()}
+
+
+def _save(req: _SaveRequest) -> tuple[dict[str, Any], list[int], list[dict[str, Any]]]:
+    """Write the edited decomposition and its BIDS files.
+
+    Returns the response, the indices of the MUs the file keeps, and the log entries
+    for the MUs dropped on save.
+    """
+    form = req.form
+    grid_names = _pad_grid_names(req.grid_names, max(req.mu_grid_index, default=0) + 1, [])
+    parameters = dict(req.parameters)
+    muscle_names = _normalize_muscle_names(form.muscle or form.muscle_names)
+    if muscle_names and not parameters.get("target_muscle"):
+        parameters["target_muscle"] = muscle_names if len(muscle_names) > 1 else muscle_names[0]
+
+    kept, entries = _kept_mus(req, parameters)
+    mu_uids = [req.mu_uids[i] for i in kept]
+    edit_history = [*req.edit_history, *entries]
+    artifacts = [
+        req.artifact_times[i] if i < len(req.artifact_times) else spike_array([]) for i in kept
+    ]
+
+    bids_root, entity_label, out_path = _save_target(req)
     if req.before_write is not None:
         req.before_write(out_path)
     save_decomposition_npz(
         out_path,
-        pulse_trains=req.pulse(kept_mus),
-        distimes=distimes,
-        fsamp=fsamp,
+        pulse_trains=req.pulse(kept),
+        distimes=[req.distimes[i] for i in kept],
+        fsamp=req.fsamp,
         grid_names=grid_names,
-        mu_grid_index=mu_grid_index,
+        mu_grid_index=[req.mu_grid_index[i] for i in kept],
         muscles=muscle_names,
         parameters=parameters,
         total_samples=req.total_samples,
         artifact_mask=req.artifact_mask,
         target_segments=req.signal.target_segments if req.signal is not None else None,
     )
-    save_editlog(out_path.with_suffix(".json"), mu_uids, edit_history, artifact_times or None)
+    save_editlog(out_path.with_suffix(".json"), mu_uids, edit_history, artifacts or None)
+    write_participant(bids_root, BidsEntities.parse(entity_label).subject, form.participant_meta)
 
-    participant_meta = form.participant_meta or {}
-    try:
-        write_bids_dataset_description(
-            bids_root,
-            subject=entities.subject,
-            age=int(participant_meta["age"])
-            if participant_meta.get("age") not in (None, "", "n/a")
-            else None,
-            sex=participant_meta.get("sex") or None,
-            handedness=participant_meta.get("handedness") or None,
-        )
-    except Exception:  # noqa: BLE001
-        logger.warning("Failed to write participants.tsv", exc_info=True)
-
-    deriv_paths: dict[str, str] | None = None
-    if distimes and fsamp and fsamp > 0:
-        try:
-            deriv_result = export_bids_mu_derivatives(
-                distimes=[np.asarray(d).tolist() for d in distimes],
-                fsamp=fsamp,
-                bids_root=bids_root,
-                entities=entity_label,
-                mu_uids=mu_uids,
-                mu_grid_index=mu_grid_index,
-                grid_labels=(req.signal.loader_meta if req.signal else {}).get("grid_labels"),
-            )
-            deriv_paths = {k: str(v) for k, v in deriv_result.items()}
-        except Exception:  # noqa: BLE001, S110
-            pass  # derivatives export is best-effort; never block the primary save
-
+    deriv_paths = _export_mu_derivatives(req, kept, bids_root, entity_label)
     bids_paths, bids_error = _export_bids_emg(
-        req.signal, bids_root, entity_label, fsamp, grid_names, muscle_names, form
+        req.signal, bids_root, entity_label, req.fsamp, grid_names, muscle_names, form
     )
     result: dict[str, Any] = {
         "saved": True,
         "path": str(out_path),
-        "kept_indices": kept_mus,
+        "kept_indices": kept,
         "mu_uids": mu_uids,
         "edit_history": edit_history,
     }
@@ -639,7 +635,7 @@ def _save(req: _SaveRequest) -> tuple[dict[str, Any], list[int], list[dict[str, 
         result["bids_emg_error"] = bids_error
     if deriv_paths:
         result["bids_deriv_paths"] = deriv_paths
-    return result, kept_mus, entries
+    return result, kept, entries
 
 
 def save_edit_session(
@@ -658,7 +654,7 @@ def save_edit_session(
             mu_grid_index=edit.mu_grid_index,
             mu_uids=edit.mu_uids,
             edit_history=edit.history,
-            artifact_times=[a.tolist() for a in edit.artifacts],
+            artifact_times=edit.artifacts,
             fsamp=edit.fsamp,
             total_samples=edit.total_samples,
             grid_names=list(meta.get("grid_names") or []),
@@ -687,7 +683,7 @@ def save_edits(payload: EditSavePayload) -> dict[str, Any]:
     """Save a run: discharge times from the request, else from the stored run, and its pulse trains."""
     run = _get_run_result_entry(payload.run_result_token)
     if payload.distimes:
-        distimes = [spike_array(d) for d in normalize_distimes(payload.distimes)]
+        distimes = normalize_distimes(payload.distimes)
     elif run is not None:
         distimes = list(run.spikes)
     else:
@@ -717,19 +713,7 @@ def save_edits(payload: EditSavePayload) -> dict[str, Any]:
         return RowSource((len(kept), matrix.shape[1]), lambda a, b: matrix[kept[a:b]])
 
     mu_grid_index = _normalize_mu_grid_index(payload.mu_grid_index, len(distimes))
-    regions: list[tuple[int, int]] = []
-    for row in payload.artifact_regions or []:
-        pair: tuple[Any, Any] | None = None
-        if isinstance(row, (list, tuple)) and len(row) == 2:
-            pair = (row[0], row[1])
-        elif isinstance(row, dict) and "start" in row and "end" in row:
-            pair = (row["start"], row["end"])
-        if pair is None:
-            continue
-        try:
-            regions.append((int(pair[0]), int(pair[1])))
-        except (TypeError, ValueError):
-            continue
+    regions = [(r.start, r.end) for r in payload.artifact_regions or []]
 
     req = _SaveRequest(
         distimes=distimes,

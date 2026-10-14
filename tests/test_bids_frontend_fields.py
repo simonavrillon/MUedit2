@@ -13,7 +13,7 @@ import pyedflib
 import pytest
 from starlette.testclient import TestClient
 
-from muedit.decomp.preprocess import preprocess_step
+from muedit.decomp.preprocess import bids_export_step, preprocess_step
 from muedit.decomp.types import DecompositionParameters, LoadStepOutput
 from muedit.io import load_signal
 from muedit.models import EditSignalContext, SignalImport
@@ -172,7 +172,7 @@ def edit_token(otb4_signal: SignalImport) -> str:
     """Open an edit session on the raw signal, as the session-open route does for a file."""
     from muedit.api.cache import _store_edit_session
     from muedit.editing.session import EditSession
-    from muedit.io.store import SessionStore
+    from muedit.storage import SessionStore
 
     sig = otb4_signal
     coordinates, ied, discard_channels, _ = format_hdemg_signal(sig.gridname)
@@ -225,7 +225,7 @@ def test_decompose_bids_export_before_decomposition_writes_all_frontend_fields(
         data=sig.data,
         fsamp=float(sig.fsamp),
     )
-    preprocess_step(
+    prep = preprocess_step(
         loaded=loaded,
         duration=None,
         manual_roi=False,
@@ -233,10 +233,8 @@ def test_decompose_bids_export_before_decomposition_writes_all_frontend_fields(
         rois=None,
         params=DecompositionParameters(),
         discard_overrides=None,
-        bids_root=str(tmp_path),
-        bids_entities=entities,
-        bids_metadata=None,
     )
+    bids_export_step(loaded, prep, str(tmp_path), entities, None)
 
     emg_json = _read_emg_json(tmp_path)
     assert emg_json["TaskName"] == entities["task"]
@@ -279,7 +277,7 @@ def test_decompose_bids_export_labels_the_loader_units(
         data=sig.data,
         fsamp=float(sig.fsamp),
     )
-    preprocess_step(
+    prep = preprocess_step(
         loaded=loaded,
         duration=None,
         manual_roi=False,
@@ -287,10 +285,8 @@ def test_decompose_bids_export_labels_the_loader_units(
         rois=None,
         params=DecompositionParameters(),
         discard_overrides=None,
-        bids_root=str(tmp_path),
-        bids_entities=_frontend_decompose_bids_entities(),
-        bids_metadata=None,
     )
+    bids_export_step(loaded, prep, str(tmp_path), _frontend_decompose_bids_entities(), None)
 
     emg_units = {r["units"] for r in _read_channels(tmp_path) if r["type"] == "EMG"}
     assert emg_units == {"mV"}

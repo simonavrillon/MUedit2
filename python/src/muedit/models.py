@@ -23,6 +23,15 @@ BoolArray: TypeAlias = NDArray[np.bool_]
 """Boolean masks: artifact samples, bad channels."""
 
 
+def spike_array(values: Any) -> IntArray:
+    """Discharge times as sorted, unique, non-negative int32 sample indices."""
+    arr = np.asarray(values if values is not None else [], dtype=np.int64).reshape(-1)
+    arr = np.unique(arr[arr >= 0])
+    if arr.size and arr[-1] > np.iinfo(np.int32).max:
+        raise ValueError(f"spike time {int(arr[-1])} does not fit in int32")
+    return arr.astype(np.int32)
+
+
 def _as_2d_float_array(value: Any) -> FloatArray:
     """Cast value to a 2-D float array, reshaping 1-D input to (1, n).
 
@@ -249,7 +258,7 @@ class LoadedDecomposition:
     """Decomposition state loaded from a .npz or .mat file for the interactive editing stage."""
 
     pulse_trains_full: FloatArray = field(default_factory=lambda: np.zeros((0, 0)))  # (n_mu, T)
-    distime_all: list[list[int]] = field(default_factory=list)
+    distime_all: list[IntArray] = field(default_factory=list)  # one spike_array per MU
     fsamp: float | None = None
     grid_names: list[str] = field(default_factory=list)
     total_samples: int = 0
@@ -258,68 +267,3 @@ class LoadedDecomposition:
     parameters: dict[str, Any] = field(default_factory=dict)
     muscle: list[str] = field(default_factory=list)
     sil: list[float] = field(default_factory=list)
-
-    def to_dict(self) -> dict[str, Any]:
-        """Serialise to a JSON-safe dictionary."""
-        return {
-            "pulse_trains_full": self.pulse_trains_full,
-            "distime_all": self.distime_all,
-            "fsamp": self.fsamp,
-            "grid_names": list(self.grid_names),
-            "total_samples": int(self.total_samples),
-            "mu_grid_index": [int(x) for x in self.mu_grid_index],
-            "rois": [(int(s), int(e)) for s, e in self.rois],
-            "parameters": dict(self.parameters),
-            "muscle": list(self.muscle),
-            "sil": [float(x) for x in self.sil],
-        }
-
-
-@dataclass
-class DecompositionSignalExport:
-    """EMG signal paired with its decomposition output."""
-
-    data: FloatArray
-    fsamp: float
-    pulse_t: FloatArray
-    discharge_times: list[IntArray]
-
-    def to_dict(self) -> dict[str, Any]:
-        """Serialise to a dictionary using MATLAB-compatible key names."""
-        n_mu = len(self.discharge_times)
-        distime_obj = np.empty(n_mu, dtype=object)
-        for i, d in enumerate(self.discharge_times):
-            distime_obj[i] = np.asarray(d)
-        return {
-            "data": self.data,
-            "fsamp": float(self.fsamp),
-            "PulseT": self.pulse_t,
-            "Dischargetimes": distime_obj,
-        }
-
-
-@dataclass
-class DecompositionExport:
-    """Full decomposition output including per-grid SIL scores and a frontend preview payload."""
-
-    signal: DecompositionSignalExport
-    parameters: dict[str, Any]
-    grid_names: list[str]
-    sil: list[float]
-    discard_channels: list[IntArray]
-    coordinates: list[FloatArray]
-    mu_grid_index: list[int]
-    preview: dict[str, Any]
-
-    def to_dict(self) -> dict[str, Any]:
-        """Serialise to a JSON-safe dictionary."""
-        return {
-            "signal": self.signal.to_dict(),
-            "parameters": dict(self.parameters),
-            "grid_names": list(self.grid_names),
-            "sil": self.sil,
-            "discard_channels": self.discard_channels,
-            "coordinates": self.coordinates,
-            "mu_grid_index": [int(x) for x in self.mu_grid_index],
-            "preview": self.preview,
-        }

@@ -15,7 +15,7 @@ from muedit.api.memory import (
     session_id_or_default,
 )
 from muedit.api.services.decompose_service import cancel_decomposition
-from muedit.io.store import store_usage
+from muedit.storage import store_usage
 
 router = APIRouter(prefix="/api/v1")
 

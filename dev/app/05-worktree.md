@@ -252,14 +252,14 @@ All elements are registered in `dom.js` as `els.*` properties.
 
 | Function | [A/?] | Called By |
 |---|---|---|
-| `getBidsProject` | [A] | runDecomposition (FormData), withBidsSaveFields, the Project field's input listener |
+| `getBidsProject` | [A] | runDecomposition (buildRunPayload), withBidsSaveFields, the Project field's input listener |
 | `setBidsProject` | [A] | setBidsEntitiesInput, showEditSession (the file's project), resetEditState (empty): the field and `state.edit.project` together |
 | `resetSessionForm` | [A] | qc-stage.handleRawFilePath (the entity fields back to their defaults) |
 | `getBidsMuscleNames` | [A] | autoSaveRunDecomposition, saveEditedFile, readSessionForm |
 | `setUploadLoading` | [A] | import-stage, qc.js requestPreview, loadDecompositionForEdit |
 | `readSessionForm` (private) | [A] | collectBidsEntities, withBidsSaveFields (one reading of the form, labels cleaned as in BIDS, so a run's export and its save agree) |
 | `withBidsSaveFields` | [A] | persistNpzBySaveTarget, saveEditedFile |
-| `collectBidsEntities` | [A] | runDecomposition (FormData) |
+| `collectBidsEntities` | [A] | runDecomposition (buildRunPayload) |
 | `setBidsEntitiesInput` | [A] | import-stage (BDF/EDF entity label) |
 | `applyPreviewMetadata` | [A] | qc.js requestPreview |
 | `applySessionInfoFromDecomposition` | [A] | loadDecompositionForEdit |
