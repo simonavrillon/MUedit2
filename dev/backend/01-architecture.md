@@ -223,7 +223,6 @@ Methods: `to_dict()`
 | `services/decompose_service.py` | One run at a time (409), cancel, worker supervision, NDJSON streaming, binary preview |
 | `services/decompose_worker.py` | Run body, executed in a `spawn` worker process |
 | `services/editing_service.py` | Opens edit sessions, applies edits, recovers unsaved edits, both saves + BIDS export |
-| `services/bids_helpers.py` | BIDS sidecar parsing, entity label resolution |
 | `services/edit_helpers.py` | Payload normalization helpers for edits |
 | `schemas.py` | Pydantic request models (7 models) |
 | `contracts.py` | `success_payload()` response envelope |
@@ -264,6 +263,7 @@ Methods: `to_dict()`
 | `loaders.py` | Thin re-export of all 6 format loaders |
 | `bids.py` | BIDS EMG export (EDF/BDF + sidecars + derivatives) |
 | `_bids_reader.py` | BIDS EMG reading via pyedflib + channels.tsv |
+| `_bids_layout.py` | `BidsEntities`: BIDS file names, folders and dataset root |
 | `_intan.py` | Intan RHD loader (3 save layouts: traditional, per-channel, per-signal-type) |
 | `_openephys.py` | Open Ephys binary-format loader (`structure.oebin` + `continuous.dat`) |
 | `mat.py` | MATLAB .mat v5 (scipy) + v7.3 (h5py/HDF5) loader |

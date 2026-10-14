@@ -204,6 +204,7 @@ def test_bids_export_round_trip(recording: tuple[Format, SignalImport], tmp_path
         subject="01",
         task="stairs",
         session="pre",
+        placement_scheme_description="Grid over the muscle belly, located by palpation.",
         manufacturer=md.get("manufacturer"),
         manufacturers_model_name=md.get("manufacturers_model_name"),
         powerline_freq=md.get("powerline_freq", 50.0),

@@ -1,0 +1,6 @@
+onset	duration	sample	mvc_level	event_type	description
+5.0	0.0	10240	0.0	muscle_on	Start of voluntary contraction
+5.0	5.0	10240	0.0	linear_ramp	Ramp up to 30% MVC at 6% MVC/s
+10.0	20.0	20480	30.0	steady_hold	Steady isometric contraction at 30% MVC
+30.0	5.0	61440	30.0	linear_ramp	Ramp down from 30% MVC at 6% MVC/s
+35.0	0.0	71680	0.0	muscle_off	End of voluntary contraction

@@ -28,8 +28,25 @@ describe("session form", () => {
       task: "mvc",
       acquisition: "ramp",
       powerline_freq: 50,
-      placement_scheme: "ChannelSpecific",
+      placement_scheme: "Other",
     });
+  });
+
+  test("reference and ground locations travel with a run and a save", () => {
+    const session = serviceWith({
+      bidsReferenceLocation: "wet band around the ankle",
+      bidsGroundLocation: "wet band around the wrist",
+    });
+    const run = session.collectBidsEntities();
+    const saved = session.withBidsSaveFields({});
+    for (const fields of [run, saved]) {
+      assert.equal(fields.reference_location, "wet band around the ankle");
+      assert.equal(fields.ground_location, "wet band around the wrist");
+    }
+    assert.equal(
+      serviceWith({}).withBidsSaveFields({}).reference_location,
+      null,
+    );
   });
 
   test("a run and a save clean the labels the same way", () => {
@@ -167,6 +184,36 @@ describe("required session fields", () => {
     assert.equal(section.classes.has("collapsed"), false);
     assert.equal(section.header.getAttribute("aria-expanded"), "true");
     assert.ok(els.bidsProject.focused);
+  });
+
+  test("the Other scheme needs a placement description", () => {
+    const { session, els } = formWith({
+      ...filled,
+      bidsPlacementScheme: "Other",
+      bidsPlacementDescription: "",
+    });
+    assert.equal(session.checkSessionForm(), false);
+    assert.equal(session.checkPlacementForm(), false);
+    assert.equal(
+      els.bidsPlacementDescription.getAttribute("aria-invalid"),
+      "true",
+    );
+    els.bidsPlacementDescription.value = "centred on the muscle belly";
+    assert.equal(session.checkPlacementForm(), true);
+    assert.equal(
+      els.bidsPlacementDescription.getAttribute("aria-invalid"),
+      null,
+    );
+  });
+
+  test("other schemes leave the description optional", () => {
+    const { session } = formWith({
+      ...filled,
+      bidsPlacementScheme: "Measured",
+      bidsPlacementDescription: "",
+    });
+    assert.equal(session.checkSessionForm(), true);
+    assert.equal(session.checkPlacementForm(), true);
   });
 });
 

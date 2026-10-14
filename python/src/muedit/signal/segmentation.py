@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import itertools
 import re
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
@@ -14,6 +15,9 @@ from scipy.signal import find_peaks
 from muedit.models import FloatArray, IntArray
 
 SegmentKind = Literal["ramp", "plateau", "sinusoid", "irregular"]
+# What an auxiliary channel carries: a trigger line, the force target shown to the
+# participant, the participant's own trace, or any other analog signal.
+AuxKind = Literal["analog", "digital", "target", "performed"]
 
 _REST, _PLATEAU, _UP, _DOWN, _DYNAMIC = range(5)
 
@@ -63,12 +67,26 @@ class TargetSegment:
         return asdict(self)
 
 
-def find_target_channel(names: list[str]) -> int | None:
-    """Index of the first auxiliary channel named as a target, or ``None``."""
+def aux_kinds(names: list[str], digital: list[bool] | None = None) -> list[AuxKind]:
+    """Kind of each auxiliary channel: digital when ``digital`` says so, else target or performed by name."""
+    kinds: list[AuxKind] = []
     for idx, name in enumerate(names):
-        if _TARGET_NAME.search(name) and not _PERFORMED_NAME.search(name):
-            return idx
-    return None
+        if digital is not None and idx < len(digital) and digital[idx]:
+            kinds.append("digital")
+        elif _PERFORMED_NAME.search(name):
+            kinds.append("performed")
+        elif _TARGET_NAME.search(name):
+            kinds.append("target")
+        else:
+            kinds.append("analog")
+    return kinds
+
+
+def find_target_channel(names: list[str], kinds: Sequence[str] | None = None) -> int | None:
+    """Index of the first auxiliary channel that is a target, or ``None``."""
+    if kinds is None or len(kinds) != len(names):
+        kinds = list(aux_kinds(names))
+    return next((idx for idx, kind in enumerate(kinds) if kind == "target"), None)
 
 
 def _block_mean(x: FloatArray, step: int) -> FloatArray:

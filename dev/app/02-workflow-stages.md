@@ -130,7 +130,7 @@ Runs the server-side QC pipeline (`run_auto_qc`) and loads the result into the i
 |---|---|---|
 | `qcSegmentBtn` | Button | "Segment target" — `requestSegmentation(app)` (`signal/segments.js`) -> `POST /qc/segment`; disabled without aux channels |
 
-Segments the aux channel shown alone in `auxSelector`, else the one the preview named as the target (`state.targetIndex`), and shows it in the aux plot. The segments (`state.segments`) are drawn on the EMG overview and aux canvases under the windows, each with a glyph (`↗` `↘` ramps, `—` plateau, `∿` sinusoid, `≈` irregular) and, for the dynamic kinds, a tick per cycle. A click (a drag under 4 px) toggles the segment under it (`toggleSegment`): `state.rois` stays the one source of truth, a segment is chosen when the windows cover it, chosen segments that touch merge into one window, and dropping one from inside a window splits it (pieces under `MIN_ROI_S` are dropped). Segments apart across rest never merge. `nwindows` follows the window count. Drags keep working as before.
+Segments the aux channel shown alone in `auxSelector`, else the one the preview named as the target (`state.targetIndex`), and shows it in the aux plot. The segments (`state.segments`) are drawn on the EMG overview and aux canvases under the windows, each with a glyph (`↗` `↘` ramps, `—` plateau, `∿` sinusoid, `≈` irregular) and, for the dynamic kinds, a tick per cycle. A click (a drag under 4 px) toggles the segment under it (`toggleSegment`): `state.rois` stays the one source of truth, a segment is chosen when the windows cover it, chosen segments that touch merge into one window, and dropping one from inside a window splits it (pieces under `MIN_ROI_S` are dropped). Segments apart across rest never merge. `nwindows` follows the window count. Drags keep working as before. When segments exist, the run sends `target_index` (`decomp/run.js`): the backend segments that channel again with the default settings (`preprocess._target_segments`, deterministic, so the same segments), writes them to the raw `*_events.tsv` and keeps them in the decomposition file (`target_segments`).
 
 Colours (`css/tokens.css`): ramps `--plot-ramp-*` (from `--accent`), plateaus `--plot-plateau-*` (`--mu-2`), sinusoids `--plot-sinusoid-*` (`--mu-4`), irregular `--plot-irregular-*` (`--mu-9`); unchosen segments are filled with a dashed outline, chosen ones leave the fill to their window, drawn in ROI pink with `--plot-roi-chosen-fill`.
 
@@ -180,8 +180,10 @@ Artifact windows are visually shaded on the EMG overview. They are OR'd into the
 | `bidsParticipantSex` | select (n/a, M, F, O) | "" | Participant sex |
 | `bidsParticipantHandedness` | select (n/a, right, left, ambidextrous) | "" | Participant handedness |
 | `bidsMuscleContainer` | dynamic div | — | Muscle name inputs (one per grid) |
-| `bidsPlacementScheme` | select (ChannelSpecific, Measured, Other) | "ChannelSpecific" | Electrode placement scheme |
-| `bidsPlacementDescription` | text input | — | Placement description (hidden unless scheme=Other) |
+| `bidsPlacementScheme` | select (Other, Measured, ChannelSpecific) | "Other" | Electrode placement scheme |
+| `bidsPlacementDescription` | text input | — | Placement description; required (run and save) when scheme=Other, hidden otherwise |
+| `bidsReferenceLocation` | text input | — | Where the reference electrode `R1` sits (`EMGReference`, `channels.json` `reference` levels) |
+| `bidsGroundLocation` | text input | — | Where the ground electrode sits (`EMGGround`) |
 | `bidsManufacturer` | text input | — | Hardware manufacturer |
 | `bidsDeviceModel` | text input | — | Device model |
 | `fsamp` | number input (readonly) | 2048 | Sampling frequency (auto-filled) |

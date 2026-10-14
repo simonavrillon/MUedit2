@@ -394,6 +394,10 @@ export async function saveEditedFile(app) {
     setStatus("Load a decomposition first", "error");
     return;
   }
+  if (!app.checkPlacementForm()) {
+    setStatus("Describe how the electrodes were placed before saving", "error");
+    return;
+  }
   const token = state.edit.token;
   const filename = state.edit.filename || "decomposition";
   return editAction(app, {
@@ -414,12 +418,15 @@ export async function saveEditedFile(app) {
       applyEditSave(state, saved);
       app.refreshEditModeButtons();
       app.setStatus("Saved", "success");
-      return [
-        saved.path
-          ? `Edited decomposition saved to ${saved.path}`
-          : "Edited decomposition saved",
-        "success",
-      ];
+      const where = saved.path
+        ? `Edited decomposition saved to ${saved.path}`
+        : "Edited decomposition saved";
+      if (saved.bids_emg_error)
+        return [
+          `${where}; BIDS EMG not written: ${saved.bids_emg_error}`,
+          "error",
+        ];
+      return [where, "success"];
     },
   });
 }

@@ -96,8 +96,10 @@ export function createFileSessionService(app) {
       powerlineFreq: Number(text(els.bidsPowerlineFreq)) || 50,
       manufacturer: text(els.bidsManufacturer),
       deviceModel: text(els.bidsDeviceModel),
-      placementScheme: text(els.bidsPlacementScheme) || "ChannelSpecific",
+      placementScheme: text(els.bidsPlacementScheme) || "Other",
       placementDescription: text(els.bidsPlacementDescription),
+      referenceLocation: text(els.bidsReferenceLocation),
+      groundLocation: text(els.bidsGroundLocation),
     };
   }
 
@@ -118,6 +120,8 @@ export function createFileSessionService(app) {
       manufacturers_model_name: form.deviceModel,
       placement_scheme: form.placementScheme,
       placement_scheme_description: form.placementDescription,
+      reference_location: form.referenceLocation,
+      ground_location: form.groundLocation,
       participant_meta: form.participantMeta,
     };
     return Object.fromEntries(
@@ -210,12 +214,35 @@ export function createFileSessionService(app) {
       els.bidsParticipantHandedness,
       els.bidsManufacturer,
       els.bidsDeviceModel,
+      ...placementFields(),
     ].filter((field) => !!field);
+  }
+
+  /** The placement fields BIDS requires: a description when the scheme is Other. */
+  function placementFields() {
+    const scheme = els.bidsPlacementScheme?.value.trim() || "Other";
+    return scheme === "Other" && els.bidsPlacementDescription
+      ? [els.bidsPlacementDescription]
+      : [];
   }
 
   /** @type {FileSessionService["checkSessionForm"]} */
   function checkSessionForm() {
-    const fields = requiredSessionFields();
+    return markMissing(requiredSessionFields());
+  }
+
+  /** @type {FileSessionService["checkPlacementForm"]} */
+  function checkPlacementForm() {
+    return markMissing(placementFields());
+  }
+
+  /**
+   * Whether every field in `fields` is filled; if not, mark the empty ones
+   * and open the panel on the first.
+   *
+   * @param {(HTMLInputElement | HTMLSelectElement)[]} fields
+   */
+  function markMissing(fields) {
     const missing = fields.filter((field) => !field.value.trim());
     for (const field of fields) {
       if (missing.includes(field)) field.setAttribute("aria-invalid", "true");
@@ -255,6 +282,8 @@ export function createFileSessionService(app) {
       manufacturers_model_name: form.deviceModel || null,
       placement_scheme: form.placementScheme,
       placement_scheme_description: form.placementDescription || null,
+      reference_location: form.referenceLocation || null,
+      ground_location: form.groundLocation || null,
     };
   }
 
@@ -276,6 +305,7 @@ export function createFileSessionService(app) {
     getBidsMuscleNames,
     collectBidsEntities,
     checkSessionForm,
+    checkPlacementForm,
     setBidsEntitiesInput,
     applyPreviewMetadata,
     applySessionInfoFromDecomposition,

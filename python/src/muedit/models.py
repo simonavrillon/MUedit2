@@ -212,6 +212,8 @@ class EditSignalContext:
     loader_meta: dict[str, Any] = field(default_factory=dict)
     # Schema v1 .npz files embed the EMG already notch- and bandpass-filtered, not raw.
     prefiltered: bool = False
+    # The target's segments the run decomposed with (target channel, units, settings, segments).
+    target_segments: dict[str, Any] | None = None
 
     def readonly_view(self) -> EditSignalContext:
         """Share the arrays read-only; lists and metadata are independent copies."""
@@ -227,6 +229,7 @@ class EditSignalContext:
             artifact_mask=_readonly(self.artifact_mask) if self.artifact_mask is not None else None,
             loader_meta=dict(self.loader_meta),
             prefiltered=self.prefiltered,
+            target_segments=self.target_segments,
         )
 
     @property

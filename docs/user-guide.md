@@ -38,7 +38,7 @@ Click the folder icon in the landing page to browse.
 
 **Open Ephys recordings:** point to `structure.oebin` or the recording directory that holds it. The loader reads the continuous stream with ephys channels: the ephys channels become the EMG data (in mV), and the stream's ADC/AUX channels and any TTL lines with edges become auxiliary channels. structure.oebin does not record the electrode array, so grid identity comes from a `muedit_grids.json` sidecar in the recording, experiment or Record Node folder (the nearest one wins, so one sidecar beside `settings.xml` covers every recording), or defaults to one grid per headstage listed in the Record Node's `settings.xml`: `MYOMNP-1x32` for a 32-channel headstage, `INTAN64-1305` per 64 channels otherwise. A single grid name is repeated to cover all channels. Hardware filter cutoffs are read from the Record Node's `settings.xml`.
 
-**BIDS recordings:** point to either the `*_emg.bdf/.edf` file or the `emg/` directory. MUedit reads all grids and auxiliary channels defined in the `*_channels.tsv` sidecar automatically.
+**BIDS recordings:** point to either the `*_emg.bdf/.edf` file or the `emg/` directory. MUedit reads all grids and auxiliary channels defined in the `*_channels.tsv` sidecar automatically. Each grid's model must be in the grid catalogue (see [Adding a grid](loader-registry.md#adding-a-grid-to-_grid_catalog)) and named in the `grid_name` column of `*_channels.tsv` or in `ElectrodeManufacturersModelName` of `*_emg.json`; MUedit's own exports already do this. A dataset from another tool may need both before it loads. When the recording's `*_events.tsv` lists the target's phases — written by MUedit, MUniverse (`linear_isometric_ramp`, `steady_isometric`) or the MUnitQuest tutorials (`linear_ramp`, `steady_hold`) — the QC page draws them as segments straight away, ready to click as windows, without **Segment target**.
 
 Once the file loads the app moves to the QC stage.
 
@@ -87,14 +87,18 @@ Open the panel with the button on the rail on the left. It contains three collap
 
 The panel also holds **participant** (age, sex, handedness) and
 **acquisition/hardware** metadata (manufacturer, device model, powerline
-frequency, placement scheme). These are written to the BIDS
+frequency, placement scheme and description, where the reference and ground
+electrodes sit). These are written to the BIDS
 `participants.tsv` and `_emg.json` sidecars on save, and pre-filled from those
 files (or from auto-detected loader metadata) when you reopen a recording.
 Electrode details (type, material, inter-electrode distance) are derived
 automatically from the grid model name and do not need to be entered.
 
 A decomposition will not start until Project, Subject, Session, Task, every
-Muscle, Age, Sex, Handedness, Manufacturer and Device model are filled in.
+Muscle, Age, Sex, Handedness, Manufacturer and Device model are filled in,
+and — with the default placement scheme, Other — the placement description,
+which BIDS requires for that scheme. Saving an edited decomposition asks for
+that description too.
 Starting with any of them empty opens the panel on the first missing field's
 section and marks the empty fields in red; each mark clears as you fill its
 field. Acquisition and Run stay optional.
@@ -213,7 +217,7 @@ derivatives pipeline:
 
 The `.npz` contains the corrected spike times, and the pulse trains when they are known. The `.json` sidecar contains a full edit history (every add, delete, filter update, and flag action, with timestamps) that is preserved across successive save-reload-edit cycles.
 
-Each save also refreshes the **BIDS events file** (`<entity>_desc-decomposition_events.tsv`, with a companion `.json`): a standards-compliant representation of the motor-unit discharges, with one row per spike (onset, sample index, and unit ID). It is regenerated from the current edits every time you save, so it always reflects the latest corrected spike trains. Saving additionally upserts the subject row in `participants.tsv`; see [saved-files.md](saved-files.md) for the full file list.
+Each save also refreshes the **BIDS events file** (`<entity>_desc-decomposition_events.tsv`, with a companion `.json`): a standards-compliant representation of the motor-unit discharges, with one row per discharge, sorted by time (onset, sample index, unit ID and the grid the unit came from), in the column layout MUniverse uses. It is regenerated from the current edits every time you save, so it always reflects the latest corrected spike trains. Saving additionally upserts the subject row in `participants.tsv`; see [saved-files.md](saved-files.md) for the full file list.
 
 Flagged MUs are removed on save. Duplicate MUs are also removed on save, with the same rules as the decomposition (within each grid, then across grids unless `duplicatesbgrids` is false): pairs whose lag-corrected spike overlap exceeds the **Duplicates thresh** setting (default 0.3) are considered duplicates, and only the one with the lowest inter-spike interval variability is kept. An MU copied with **Duplicate MU** is therefore removed on save unless you have edited it enough to fall below the threshold. The edit history records every MU removed on save (`remove_flagged` and `remove_duplicates` entries with `on_save: true`), and the editor drops them too so it matches the saved file. You can also trigger deduplication at any point during editing using the **Remove duplicates** button.
 

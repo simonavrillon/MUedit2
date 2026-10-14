@@ -1,0 +1,30 @@
+{
+  "TaskName": "isometric30percentMVC",
+  "Manufacturer": "OTBioelettronica",
+  "ManufacturersModelName": "Quattrocento",
+  "SamplingFrequency": 2048,
+  "Gain": 150,
+  "PowerLineFrequency": 50,
+  "RecordingType": "continuous",
+  "SoftwareFilters": {
+    "HighPassFilter": {
+      "HalfAmplitudeCutOffHz": 10
+    },
+    "LowPassFilter": {
+      "HalfAmplitudeCutOffHz": 900
+    }
+  },
+  "HardwareFilters": {
+    "HighPassFilter": {
+      "HalfAmplitudeCutOffHz": 10
+    },
+    "LowPassFilter": {
+      "HalfAmplitudeCutOffHz": 900
+    }
+  },
+  "EMGReference": "monopolar",
+  "EMGPlacementScheme": "Measured",
+  "EMGChannelCount": 13,
+  "TaskDescription": "Isometric knee extension at 90 deg of hip flexion and 60 deg of knee flexion. Concurrent HD-sEMG (3×4 grid) and intramuscular (single wire) recordings from the right vastus lateralis. Participants matched force profiles displayed on a screen.",
+  "Instructions": "Sit upright in the dynamometer chair. Keep your thigh flat on the seat and follow the force trace on the screen."
+}

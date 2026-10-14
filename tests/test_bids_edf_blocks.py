@@ -30,6 +30,7 @@ def _export(tmp_path: Path, data: np.ndarray, aux: np.ndarray | None, fmt: str |
         [np.zeros(N_EMG, dtype=int)],
         tmp_path,
         start_time=START,
+        placement_scheme_description="Grid over the muscle belly, located by palpation.",
         aux_data=aux,
         aux_names=AUX_NAMES if aux is not None else None,
         **kwargs,
@@ -59,7 +60,7 @@ def _reference(path: Path, data: np.ndarray, aux: np.ndarray | None, fmt: str) -
         headers.append(
             {
                 "label": labels[i],
-                "dimension": "uV" if i < N_EMG else "a.u.",
+                "dimension": "uV" if i < N_EMG else "",
                 "sample_frequency": FSAMP,
                 "physical_min": lo,
                 "physical_max": hi,

@@ -13,6 +13,7 @@ from muedit.api import config
 from muedit.api.cache import BUDGET
 from muedit.api.memory import DEFAULT_SESSION, session_id_or_default
 from muedit.decomp.types import ComputeDtype, ContrastFunc, DecompositionParameters
+from muedit.io._bids_layout import dataset_root
 
 
 def request_session(x_muedit_session: str | None = Header(None)) -> str:
@@ -32,6 +33,17 @@ def bids_root_for(project: str | None) -> Path:
         raise HTTPException(
             status_code=400, detail={"field": "project", "reason": str(exc)}
         ) from exc
+
+
+def dataset_root_of(filepath: str) -> Path | None:
+    """The BIDS dataset a file sits in, else the default project folder above it, else ``None``."""
+    if not filepath:
+        return None
+    path = Path(filepath).expanduser().resolve()
+    root = dataset_root(path)
+    if root is None:
+        root = next((p for p in path.parents if p.name.lower() == config.DEFAULT_PROJECT), None)
+    return root
 
 
 def parse_json(raw: str | None, field_name: str) -> Any:

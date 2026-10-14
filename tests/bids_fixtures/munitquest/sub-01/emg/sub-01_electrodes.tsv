@@ -1,0 +1,15 @@
+name	x	y	z	coordinate_system	type	material	impedance	group
+E1	0	0	0	grid1	EMG	Ag/AgCl	n/a	grid1
+E2	8	0	0	grid1	EMG	Ag/AgCl	n/a	grid1
+E3	16	0	0	grid1	EMG	Ag/AgCl	n/a	grid1
+E4	24	0	0	grid1	EMG	Ag/AgCl	n/a	grid1
+E5	0	8	0	grid1	EMG	Ag/AgCl	n/a	grid1
+E6	8	8	0	grid1	EMG	Ag/AgCl	n/a	grid1
+E7	16	8	0	grid1	EMG	Ag/AgCl	n/a	grid1
+E8	24	8	0	grid1	EMG	Ag/AgCl	n/a	grid1
+E9	0	16	0	grid1	EMG	Ag/AgCl	n/a	grid1
+E10	8	16	0	grid1	EMG	Ag/AgCl	n/a	grid1
+E11	16	16	0	grid1	EMG	Ag/AgCl	n/a	grid1
+E12	24	16	0	grid1	EMG	Ag/AgCl	n/a	grid1
+E_im	12	8	12	grid1	EMG	stainless steel	n/a	intramuscular
+R1	370	0	0	thigh	REF	Ag/AgCl	n/a	n/a

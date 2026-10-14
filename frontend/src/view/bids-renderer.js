@@ -82,11 +82,10 @@ export function applySessionInfoToDom(els, payload) {
   // from a previously loaded file don't bleed into the new one. The Project
   // field is the caller's: it comes with the edit session's project.
   resetBidsEntityDefaults(els);
-  if (els.bidsPlacementScheme)
-    els.bidsPlacementScheme.value = "ChannelSpecific";
+  if (els.bidsPlacementScheme) els.bidsPlacementScheme.value = "Other";
   if (els.bidsPlacementDescription) els.bidsPlacementDescription.value = "";
-  if (els.bidsPlacementDescRow)
-    els.bidsPlacementDescRow.classList.add("hidden");
+  if (els.bidsReferenceLocation) els.bidsReferenceLocation.value = "";
+  if (els.bidsGroundLocation) els.bidsGroundLocation.value = "";
   if (els.bidsPowerlineFreq) els.bidsPowerlineFreq.value = "50";
   if (els.bidsManufacturer) els.bidsManufacturer.value = "";
   if (els.bidsDeviceModel) els.bidsDeviceModel.value = "";
@@ -123,8 +122,15 @@ export function applySessionInfoToDom(els, payload) {
     els.bidsPowerlineFreq.value = String(payload.bids.powerlineFreq);
   if (els.bidsPlacementScheme && payload.bids?.placementScheme)
     els.bidsPlacementScheme.value = payload.bids.placementScheme;
-  if (els.bidsPlacementDescription && payload.bids?.placementDescription) {
+  if (els.bidsPlacementDescription && payload.bids?.placementDescription)
     els.bidsPlacementDescription.value = payload.bids.placementDescription;
-    els.bidsPlacementDescRow?.classList.remove("hidden");
-  }
+  if (els.bidsReferenceLocation && payload.bids?.referenceLocation)
+    els.bidsReferenceLocation.value = payload.bids.referenceLocation;
+  if (els.bidsGroundLocation && payload.bids?.groundLocation)
+    els.bidsGroundLocation.value = payload.bids.groundLocation;
+  // The description row shows with the Other scheme, which requires it.
+  els.bidsPlacementDescRow?.classList.toggle(
+    "hidden",
+    (els.bidsPlacementScheme?.value || "Other") !== "Other",
+  );
 }

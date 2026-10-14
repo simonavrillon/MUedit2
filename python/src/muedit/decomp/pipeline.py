@@ -34,6 +34,7 @@ def run_decomposition(
     preloaded_signal: SignalImport | None = None,
     artifact_regions: list[tuple[int, int]] | None = None,
     store: ArrayStore | None = None,
+    target_index: int | None = None,
 ) -> tuple[dict[str, Any], str]:
     """Execute the full load → preprocess → decompose → postprocess pipeline.
 
@@ -59,6 +60,7 @@ def run_decomposition(
         bids_metadata=bids_metadata,
         artifact_regions=artifact_regions,
         store=store,
+        target_index=target_index,
     )
     # A file saved outside a BIDS dataset embeds the raw EMG; BIDS has its own copy.
     raw_emg = _raw_emg_for_file(loaded.data, store) if save_npz and not bids_root else None

@@ -26,6 +26,7 @@ from muedit.api.cache import (
 )
 from muedit.api.common import (
     bids_root_for,
+    dataset_root_of,
     make_json_safe,
     parse_entity_label,
     require_existing_path,
@@ -38,14 +39,6 @@ from muedit.api.schemas import (
     EditRecoverPayload,
     EditSavePayload,
     EditSessionSavePayload,
-)
-from muedit.api.services.bids_helpers import (
-    _infer_bids_root_from_decomp_path,
-    _parse_all_bids_entities,
-    _parse_subject_session_from_entity_label,
-    _read_bids_channels_sidecar,
-    _read_bids_grid,
-    read_bids_sidecar_meta,
 )
 from muedit.api.services.edit_helpers import (
     _coerce_bool_param,
@@ -69,9 +62,18 @@ from muedit.decomp.preprocess import build_manual_artifact_mask
 from muedit.decomp.types import DecompositionParameters
 from muedit.editing.edit_log import EditLog, find_recoverable
 from muedit.editing.session import Change, EditError, EditSession, spike_array, timestamp
+from muedit.io._bids_reader import (
+    read_channels_summary,
+    read_sidecar_meta,
+    resolve_bids_channels_tsv,
+)
 from muedit.io.bids import (
+    BidsEntities,
+    BidsFieldError,
     export_bids_emg,
+    export_bids_events,
     export_bids_mu_derivatives,
+    read_bids_emg_grid,
     write_bids_dataset_description,
 )
 from muedit.io.npz import RowSource
@@ -137,32 +139,24 @@ class _FileExtras:
 def _file_extras(filepath: str, file_label: str, decomp: LoadedDecomposition) -> _FileExtras:
     """Read the BIDS sidecars and ``.json`` edit log next to a decomposition; updates ``decomp``."""
     extras = _FileExtras()
-    bids_root = _infer_bids_root_from_decomp_path(filepath)
+    bids_root = dataset_root_of(filepath)
     if bids_root is not None:
         extras.bids_root = bids_root
         extras.project = config.project_of(bids_root)
         try:
             entity_label = parse_entity_label(file_label)
-            subject, bids_session = _parse_subject_session_from_entity_label(entity_label)
-            emg_dir = bids_root / f"sub-{subject}"
-            if bids_session:
-                emg_dir = emg_dir / f"ses-{bids_session}"
-            emg_dir = emg_dir / "emg"
-            channels_path = emg_dir / f"{entity_label}_channels.tsv"
-            if not channels_path.exists():
-                channels_path = emg_dir / f"{entity_label}_emg_channels.tsv"  # backward compat
-            if channels_path.exists():
-                grid_names, muscles, fsamp = _read_bids_channels_sidecar(channels_path)
-                expected_count = _expected_grid_count(decomp)
-                if grid_names:
-                    decomp.grid_names = _pad_grid_names(
-                        grid_names, expected_count, decomp.grid_names
-                    )
-                if muscles:
-                    decomp.muscle = muscles
-                if fsamp and fsamp > 0:
-                    decomp.fsamp = fsamp
-            extras.sidecar_meta = read_bids_sidecar_meta(bids_root, entity_label)
+            extras.sidecar_meta = read_sidecar_meta(bids_root, entity_label)
+            emg_dir = BidsEntities.parse(entity_label).emg_dir(bids_root)
+            channels_tsv = resolve_bids_channels_tsv(emg_dir, entity_label)
+            grid_names, muscles, fsamp = read_channels_summary(channels_tsv)
+            if grid_names:
+                decomp.grid_names = _pad_grid_names(
+                    grid_names, _expected_grid_count(decomp), decomp.grid_names
+                )
+            if muscles:
+                decomp.muscle = muscles
+            if fsamp and fsamp > 0:
+                decomp.fsamp = fsamp
         except (ValueError, OSError, csv.Error, KeyError):
             pass  # best-effort; I/O and parse errors are non-fatal
 
@@ -218,7 +212,7 @@ def _new_session(
         project: str | None, grid: int, into: SessionStore
     ) -> tuple[FloatArray, float, IntArray] | None:
         try:
-            return _read_bids_grid(_dataset_root(edit, project), entity_label, grid, into)
+            return read_bids_emg_grid(_dataset_root(edit, project), entity_label, grid, into)
         except (ValueError, FileNotFoundError):
             return None
 
@@ -446,12 +440,13 @@ def _export_bids_emg(
     grid_names: list[str],
     muscle_names: list[str],
     form: BidsSaveFields,
-) -> dict[str, str] | None:
-    """Best-effort BIDS EMG export of the raw EMG a decomposition file embeds."""
+) -> tuple[dict[str, str] | None, str | None]:
+    """Best-effort BIDS EMG export of the raw EMG a decomposition file embeds: its paths, or why not."""
     if ctx is None or ctx.data.size == 0 or ctx.prefiltered:
-        return None  # no raw EMG: a mask-only context, or a v1 .npz holding filtered EMG
+        # No raw EMG: a mask-only context, or a v1 .npz holding filtered EMG.
+        return None, None
 
-    entities = _parse_all_bids_entities(entity_label)
+    entities = BidsEntities.parse(entity_label)
     try:
         meta = ctx.loader_meta
         paths = export_bids_emg(
@@ -462,12 +457,12 @@ def _export_bids_emg(
             discard_channels=ctx.emgmask,
             bids_root=bids_root,
             ied=ctx.ied,
-            subject=entities["sub"] or "01",
-            task=entities["task"] or "task",
-            run=entities["run"],
-            session=entities["ses"],
-            acquisition=entities["acq"],
-            recording=entities["recording"],
+            subject=entities.subject,
+            task=entities.task or "task",
+            run=entities.run,
+            session=entities.session,
+            acquisition=entities.acquisition,
+            recording=entities.recording,
             target_muscle=muscle_names
             if len(muscle_names) > 1
             else (muscle_names[0] if muscle_names else None),
@@ -477,8 +472,11 @@ def _export_bids_emg(
             manufacturer=form.manufacturer or meta.get("manufacturer"),
             manufacturers_model_name=form.manufacturers_model_name or meta.get("device_name"),
             powerline_freq=float(form.powerline_freq or 0) or meta.get("powerline_freq") or 50.0,
-            placement_scheme=form.placement_scheme or "ChannelSpecific",
-            placement_scheme_description=form.placement_scheme_description or None,
+            placement_scheme=form.placement_scheme or meta.get("placement_scheme") or "Other",
+            placement_scheme_description=form.placement_scheme_description
+            or meta.get("placement_scheme_description"),
+            reference_location=form.reference_location or meta.get("reference_location"),
+            ground_location=form.ground_location or meta.get("ground_location"),
             task_description=form.task_description or None,
             software_versions=form.software_versions or None,
             # Loader-only fields — taken directly from ctx
@@ -491,12 +489,25 @@ def _export_bids_emg(
             aux_low_cutoff=meta.get("aux_hpf"),
             aux_high_cutoff=meta.get("aux_lpf"),
             aux_units=meta.get("aux_units"),
+            aux_kinds=meta.get("aux_kinds"),
+            grid_labels=meta.get("grid_labels"),
             recording_type=meta.get("recording_type") or "continuous",
             software_filters=meta.get("software_filters"),
         )
-        return {k: str(v) for k, v in paths.items()}
+        events = export_bids_events(
+            paths["edf"],
+            float(fsamp or ctx.fsamp),
+            aux_data=ctx.aux_data,
+            target_segments=ctx.target_segments,
+        )
+        if events is not None:
+            paths["events_tsv"] = events
+        return {k: str(v) for k, v in paths.items()}, None
+    except BidsFieldError as exc:
+        return None, str(exc)  # the save itself goes on
     except Exception:  # noqa: BLE001
-        return None  # never block the primary save on BIDS export error
+        logger.warning("BIDS EMG export failed", exc_info=True)
+        return None, "The BIDS EMG export failed; see the server log."
 
 
 def _save(req: _SaveRequest) -> tuple[dict[str, Any], list[int], list[dict[str, Any]]]:
@@ -555,11 +566,13 @@ def _save(req: _SaveRequest) -> tuple[dict[str, Any], list[int], list[dict[str, 
     bids_root = req.bids_root if req.bids_root is not None else bids_root_for(form.project)
     file_label = form.file_label or ""
     entity_label = form.entity_label or parse_entity_label(file_label)
-    subject, bids_session = _parse_subject_session_from_entity_label(entity_label)
-    decomp_dir = bids_root / "derivatives" / "muedit" / f"sub-{subject}"
-    if bids_session:
-        decomp_dir = decomp_dir / f"ses-{bids_session}"
-    decomp_dir = decomp_dir / "decomp"
+    try:
+        entities = BidsEntities.parse(entity_label)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400, detail={"field": "entity_label", "reason": str(exc)}
+        ) from exc
+    decomp_dir = entities.derivative_dir(bids_root, "decomp")
     decomp_dir.mkdir(parents=True, exist_ok=True)
     out_path = decomp_dir / f"{entity_label}_edited.npz"
 
@@ -576,6 +589,7 @@ def _save(req: _SaveRequest) -> tuple[dict[str, Any], list[int], list[dict[str, 
         parameters=parameters,
         total_samples=req.total_samples,
         artifact_mask=req.artifact_mask,
+        target_segments=req.signal.target_segments if req.signal is not None else None,
     )
     save_editlog(out_path.with_suffix(".json"), mu_uids, edit_history, artifact_times or None)
 
@@ -583,7 +597,7 @@ def _save(req: _SaveRequest) -> tuple[dict[str, Any], list[int], list[dict[str, 
     try:
         write_bids_dataset_description(
             bids_root,
-            subject=subject,
+            subject=entities.subject,
             age=int(participant_meta["age"])
             if participant_meta.get("age") not in (None, "", "n/a")
             else None,
@@ -602,12 +616,14 @@ def _save(req: _SaveRequest) -> tuple[dict[str, Any], list[int], list[dict[str, 
                 bids_root=bids_root,
                 entities=entity_label,
                 mu_uids=mu_uids,
+                mu_grid_index=mu_grid_index,
+                grid_labels=(req.signal.loader_meta if req.signal else {}).get("grid_labels"),
             )
             deriv_paths = {k: str(v) for k, v in deriv_result.items()}
         except Exception:  # noqa: BLE001, S110
             pass  # derivatives export is best-effort; never block the primary save
 
-    bids_paths = _export_bids_emg(
+    bids_paths, bids_error = _export_bids_emg(
         req.signal, bids_root, entity_label, fsamp, grid_names, muscle_names, form
     )
     result: dict[str, Any] = {
@@ -619,6 +635,8 @@ def _save(req: _SaveRequest) -> tuple[dict[str, Any], list[int], list[dict[str, 
     }
     if bids_paths:
         result["bids_emg_paths"] = bids_paths
+    if bids_error:
+        result["bids_emg_error"] = bids_error
     if deriv_paths:
         result["bids_deriv_paths"] = deriv_paths
     return result, kept_mus, entries

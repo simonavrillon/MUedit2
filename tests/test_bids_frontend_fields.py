@@ -31,6 +31,8 @@ FRONTEND_BIDS_INPUTS: dict[str, Any] = {
     "manufacturers_model_name": "Quattrocento",
     "placement_scheme": "Other",
     "placement_scheme_description": "Custom template placement",
+    "reference_location": "Wet band around the ankle",
+    "ground_location": "Wet band around the wrist",
     "task_description": "Stair climbing",
     "participant_age": "34",
     "participant_sex": "M",
@@ -52,6 +54,8 @@ def _frontend_decompose_bids_entities() -> dict[str, Any]:
         "manufacturers_model_name": FRONTEND_BIDS_INPUTS["manufacturers_model_name"],
         "placement_scheme": FRONTEND_BIDS_INPUTS["placement_scheme"],
         "placement_scheme_description": FRONTEND_BIDS_INPUTS["placement_scheme_description"],
+        "reference_location": FRONTEND_BIDS_INPUTS["reference_location"],
+        "ground_location": FRONTEND_BIDS_INPUTS["ground_location"],
         "task_description": FRONTEND_BIDS_INPUTS["task_description"],
         "participant_meta": {
             "age": FRONTEND_BIDS_INPUTS["participant_age"],
@@ -91,6 +95,8 @@ def _frontend_edit_save_payload(*, token: str, project: str) -> dict[str, Any]:
         "manufacturers_model_name": FRONTEND_BIDS_INPUTS["manufacturers_model_name"],
         "placement_scheme": FRONTEND_BIDS_INPUTS["placement_scheme"],
         "placement_scheme_description": FRONTEND_BIDS_INPUTS["placement_scheme_description"],
+        "reference_location": FRONTEND_BIDS_INPUTS["reference_location"],
+        "ground_location": FRONTEND_BIDS_INPUTS["ground_location"],
         "task_description": FRONTEND_BIDS_INPUTS["task_description"],
         "remove_flagged": False,
         "remove_duplicates": False,
@@ -246,6 +252,8 @@ def test_decompose_bids_export_before_decomposition_writes_all_frontend_fields(
     assert emg_json["ManufacturersModelName"] == entities["manufacturers_model_name"]
     assert emg_json["EMGPlacementScheme"] == entities["placement_scheme"]
     assert emg_json["EMGPlacementSchemeDescription"] == entities["placement_scheme_description"]
+    assert emg_json["EMGReference"] == entities["reference_location"]
+    assert emg_json["EMGGround"] == entities["ground_location"]
     assert emg_json["TaskDescription"] == entities["task_description"]
 
     channels = _read_channels(tmp_path)
@@ -324,6 +332,8 @@ def test_edit_save_route_writes_all_frontend_bids_fields(
     assert emg_json["ManufacturersModelName"] == inputs["manufacturers_model_name"]
     assert emg_json["EMGPlacementScheme"] == inputs["placement_scheme"]
     assert emg_json["EMGPlacementSchemeDescription"] == inputs["placement_scheme_description"]
+    assert emg_json["EMGReference"] == inputs["reference_location"]
+    assert emg_json["EMGGround"] == inputs["ground_location"]
     assert emg_json["TaskDescription"] == inputs["task_description"]
     assert emg_json["SoftwareVersions"] == inputs["software_versions"]
 

@@ -1,0 +1,11 @@
+{
+  "EMGCoordinateSystem": "Other",
+  "EMGCoordinateUnits": "mm",
+  "EMGCoordinateSystemDescription": "3x4 grid over right vastus lateralis. Origin at electrode E1 (top-left corner). x-axis points distally, y-axis points laterally. For intramuscular entries, z represents insertion depth positive into the muscle.",
+  "ParentCoordinateSystem": "thigh",
+  "AnchorElectrode": "E1",
+  "AnchorCoordinates": [
+    55,
+    175
+  ]
+}

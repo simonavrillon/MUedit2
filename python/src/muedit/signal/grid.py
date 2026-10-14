@@ -272,6 +272,11 @@ def _find_spec(grid_name: str) -> GridSpec | None:
     return None
 
 
+def is_known_grid(grid_name: str) -> bool:
+    """Whether :func:`format_hdemg_signal` can lay out *grid_name*."""
+    return _find_spec(grid_name or "") is not None
+
+
 def format_hdemg_signal(
     grid_names: list[str],
     discard_overrides: list[list[int]] | None = None,

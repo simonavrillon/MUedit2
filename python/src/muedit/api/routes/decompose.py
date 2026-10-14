@@ -36,6 +36,7 @@ async def decompose_stream(
     full_preview: bool = Form(False),
     upload_token: str | None = Form(None),
     artifact_regions: str | None = Form(None),
+    target_index: int | None = Form(None),
     session: str = Depends(request_session),
 ) -> StreamingResponse:
     """Run decomposition and stream stage/progress events as NDJSON; 409 while another runs."""
@@ -69,6 +70,7 @@ async def decompose_stream(
             "bids_metadata": bids_metadata_obj,
             "include_full_preview": full_preview,
             "artifact_regions": artifact_region_list,
+            "target_index": target_index,
         },
         session=session,
     )

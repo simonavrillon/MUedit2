@@ -55,10 +55,15 @@ def _emg(n_rows: int, n_samples: int, dtype: type = np.float64) -> np.ndarray:
 
 @pytest.mark.parametrize("n_samples", [20_480, 20_481, 61_440, 7, 1])
 def test_notch_matches_the_reference(n_samples: int) -> None:
+    # The one-sided FFT rounds differently from the two-sided one; a bin flagged or missed
+    # differently would move the output by far more than this.
     x = _emg(1, n_samples)[0]
     frad, window = _notch_params(FSAMP, n_samples)
-    np.testing.assert_array_equal(
-        _remove_line_interference(x, frad, window), _reference_line_interference(x, frad, window)
+    np.testing.assert_allclose(
+        _remove_line_interference(x, frad, window),
+        _reference_line_interference(x, frad, window),
+        rtol=0,
+        atol=1e-9,
     )
 
 

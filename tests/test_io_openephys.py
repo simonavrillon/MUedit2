@@ -135,6 +135,7 @@ def test_ttl_edges_become_step_lines(record_node: Path) -> None:
     sig = load_openephys(str(_recording(record_node)))
 
     assert sig.auxiliaryname == ["ADC1", "ADC2", "TTL1", "TTL3"]
+    assert sig.metadata["aux_kinds"] == ["analog", "analog", "digital", "digital"]
     line1 = np.zeros(_N_SAMPLES, np.float32)
     line1[1000:2500] = 1
     line3 = np.zeros(_N_SAMPLES, np.float32)

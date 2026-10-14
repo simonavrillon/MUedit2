@@ -294,17 +294,33 @@
                 <div class="form-row">
                   <label for="bidsPlacementScheme">Scheme</label>
                   <select id="bidsPlacementScheme">
-                    <option value="ChannelSpecific">Channel-specific</option>
+                    <option value="Other" selected>Other</option>
                     <option value="Measured">Measured</option>
-                    <option value="Other">Other</option>
+                    <option value="ChannelSpecific">Channel-specific</option>
                   </select>
                 </div>
-                <div class="form-row hidden" id="bidsPlacementDescRow">
+                <div class="form-row" id="bidsPlacementDescRow">
                   <label for="bidsPlacementDescription">Description</label>
                   <input
                     type="text"
                     id="bidsPlacementDescription"
-                    placeholder="Describe placement method"
+                    placeholder="e.g. centred on the muscle belly, found by palpation"
+                  />
+                </div>
+                <div class="form-row">
+                  <label for="bidsReferenceLocation">Reference</label>
+                  <input
+                    type="text"
+                    id="bidsReferenceLocation"
+                    placeholder="e.g. wet band around the ankle"
+                  />
+                </div>
+                <div class="form-row">
+                  <label for="bidsGroundLocation">Ground</label>
+                  <input
+                    type="text"
+                    id="bidsGroundLocation"
+                    placeholder="e.g. wet band around the wrist"
                   />
                 </div>
 

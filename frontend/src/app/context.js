@@ -68,6 +68,7 @@
  * @property {() => string[]} getBidsMuscleNames
  * @property {() => JsonObject} collectBidsEntities
  * @property {() => boolean} checkSessionForm Whether every required session field is filled; if not, mark the empty ones and open the panel on them.
+ * @property {() => boolean} checkPlacementForm Whether the placement fields BIDS requires are filled; if not, mark them and open the panel on them.
  * @property {(entities: Partial<BidsEntities> & { project?: string }) => void} setBidsEntitiesInput
  * @property {(data: JsonObject) => void} applyPreviewMetadata
  * @property {(file: FileRef | null, data?: JsonObject) => void} applySessionInfoFromDecomposition

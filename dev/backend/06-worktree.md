@@ -127,19 +127,6 @@ Use this to trace what the user can reach.
 | `_export_bids_emg(...)` | App-internal | Called by `_save` |
 | `_dataset_root(edit, project)` | App-internal | Where a session save writes and a refit reads BIDS EMG |
 
-### `services/bids_helpers.py`
-
-| Symbol | Category | Reachable via |
-|---|---|---|
-| `read_bids_sidecar_meta(root, entity_label)` | App-internal | Called by the preview service and `_file_extras` |
-| `_read_bids_grid(...)` | App-internal | Called by the edit session's first refit of a grid |
-| `_parse_all_bids_entities(entity_label)` | App-internal | Called by editing services |
-| `_parse_subject_session_from_entity_label(label)` | App-internal | Called by `read_bids_sidecar_meta` |
-| `_infer_bids_root_from_decomp_path(filepath)` | App-internal | Called by editing services |
-| `_normalize_bids_meta_value(value)` | App-internal | Called by `read_bids_sidecar_meta` |
-| `_grid_sort_key(group)` | App-internal | Called by `_read_bids_channels_sidecar` |
-| `_read_bids_channels_sidecar(path)` | App-internal | Called by `_file_extras` |
-
 ### `services/edit_helpers.py`
 
 | Symbol | Category | Reachable via |
@@ -277,10 +264,11 @@ Use this to trace what the user can reach.
 | `export_bids_emg()` | App-internal | Called by `preprocess._export_raw_emg_bids`, editing service |
 | `write_bids_dataset_description()` | App-internal | Called by `preprocess`, editing service |
 | `export_bids_mu_derivatives()` | App-internal | Called by editing service |
-| `build_entities()` | App-internal | Called by `export_bids_emg` |
+| `BidsEntities`, `dataset_root()` (`io/_bids_layout.py`) | App-internal | Every BIDS file name and folder: reader, exporters, run and edit saves, `api.common.dataset_root_of` |
+| `read_channels_summary()`, `read_sidecar_meta()` | App-internal | Called by the preview service and `_file_extras` |
 | `load_bids_emg_grid()` | App-internal | Windowed grid read (sample window) |
-| `read_bids_emg_grid()` | App-internal | Called by `bids_helpers._read_bids_grid` |
-| `resolve_bids_emg_path()` | App-internal | Called by `_bids_reader`, `bids_helpers` |
+| `read_bids_emg_grid()` | App-internal | Called by the edit session's first refit of a grid |
+| `resolve_bids_emg_path()` | App-internal | Called by `_bids_reader`, `preprocess` |
 | `select_grid_channels()` | App-internal | Called by `load_bids_emg_grid` |
 | `NpzWriter`, `NpzArchive`, `RowSource` (`io/npz.py`) | App-internal | Called by `decomposition_file` and the saves (rows written as they are read) |
 | `SessionStore`, `RamStore`, `ArrayStore` (`io/store.py`) | App-internal | Where loaders, runs and edit sessions put full-length arrays |

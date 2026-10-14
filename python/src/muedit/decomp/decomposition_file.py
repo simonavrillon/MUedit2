@@ -40,6 +40,8 @@ LOADER_BIDS_META_KEYS: tuple[str, ...] = (
     "aux_hpf",
     "aux_lpf",
     "aux_units",
+    "aux_kinds",
+    "grid_labels",
     "hardware_filters",
     "units",
     "recording_type",
@@ -126,6 +128,7 @@ def save_decomposition_npz(
     discard_channels: Sequence[IntArray] | None = None,
     coordinates: Sequence[FloatArray] | None = None,
     loader_meta: Mapping[str, Any] | None = None,
+    target_segments: Mapping[str, Any] | None = None,
 ) -> None:
     """Save a decomposition in the app's pickle-free, memory-mappable .npz schema v2."""
     spikes, spike_offsets = pack_csr([_clean_spike_times(d) for d in distimes], np.int32)
@@ -168,6 +171,8 @@ def save_decomposition_npz(
             npz.add("coordinate_offsets", offsets)
         if loader_meta is not None:
             npz.add("loader_meta", _json_array(_bids_meta(loader_meta)))
+        if target_segments is not None:
+            npz.add("target_segments", _json_array(dict(target_segments)))
 
 
 def _bids_meta(meta: Mapping[str, Any]) -> dict[str, Any]:
@@ -843,7 +848,11 @@ def _npz_signal_context(
 
     artifact_mask: BoolArray | None = None
     loader_meta: dict[str, Any] = {}
+    target_segments: dict[str, Any] | None = None
     if v2:
+        stored_segments = _json_member(data, "target_segments", None)
+        if isinstance(stored_segments, dict):
+            target_segments = stored_segments
         grid_names = [str(g) for g in _json_member(data, "grid_names", [])]
         stored_meta = _json_member(data, "loader_meta", {})
         if isinstance(stored_meta, dict):
@@ -870,7 +879,7 @@ def _npz_signal_context(
         if mask_raw is not None:
             artifact_mask = np.asarray(mask_raw, dtype=bool)
 
-    if emg is None and artifact_mask is None:
+    if emg is None and artifact_mask is None and target_segments is None:
         return None
 
     return EditSignalContext(
@@ -882,6 +891,7 @@ def _npz_signal_context(
         artifact_mask=artifact_mask,
         loader_meta=loader_meta,
         prefiltered=emg is not None and not v2,
+        target_segments=target_segments,
     )
 
 

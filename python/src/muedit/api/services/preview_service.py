@@ -15,22 +15,20 @@ from muedit.api.cache import (
     _store_upload_signal,
 )
 from muedit.api.common import (
+    dataset_root_of,
     make_json_safe,
     parse_entity_label,
     require_existing_path,
 )
 from muedit.api.memory import DEFAULT_SESSION
 from muedit.api.schemas import QcAutoPayload, SegmentPayload
-from muedit.api.services.bids_helpers import (
-    _infer_bids_root_from_decomp_path,
-    read_bids_sidecar_meta,
-)
 from muedit.api.services.series_service import (
     bandpassed_row,
     build_signal_views,
     grid_emg_type,
     grid_rows,
 )
+from muedit.io._bids_reader import read_sidecar_meta
 from muedit.io.factory import get_loader, load_signal
 from muedit.io.store import ArrayStore, RamStore, SessionStore
 from muedit.models import FloatArray, SignalImport
@@ -73,7 +71,10 @@ def _build_preview_core(filepath: str, session: str = DEFAULT_SESSION) -> dict[s
             "metadata": signal.metadata,
             "muscle": signal.muscle,
             "auxiliary_names": signal.auxiliaryname,
-            "target_index": find_target_channel(signal.auxiliaryname),
+            "segments": signal.metadata.get("segments") or [],
+            "target_index": find_target_channel(
+                signal.auxiliaryname, signal.metadata.get("aux_kinds")
+            ),
         }
     )
 
@@ -104,11 +105,11 @@ def build_preview_from_path(filepath: str, session: str = DEFAULT_SESSION) -> di
 
     # Best-effort: enrich with participant and hardware info from BIDS sidecars.
     try:
-        bids_root = _infer_bids_root_from_decomp_path(filepath)
+        bids_root = dataset_root_of(filepath)
         if bids_root is not None:
             result["project"] = config.project_of(bids_root)
             entity_label = parse_entity_label(Path(filepath).name)
-            result.update(read_bids_sidecar_meta(bids_root, entity_label))
+            result.update(read_sidecar_meta(bids_root, entity_label))
     except Exception:  # noqa: BLE001, S110
         pass  # best-effort; never block the preview on sidecar errors
 
@@ -201,7 +202,11 @@ def segment_target_on_token(payload: SegmentPayload) -> dict[str, Any]:
         n_aux = signal.auxiliary.shape[0]
         if n_aux == 0:
             raise _aux_error("This recording has no auxiliary channels")
-        index = payload.aux_index if payload.aux_index is not None else find_target_channel(names)
+        index = (
+            payload.aux_index
+            if payload.aux_index is not None
+            else find_target_channel(names, signal.metadata.get("aux_kinds"))
+        )
         if index is None:
             raise _aux_error(
                 "No auxiliary channel is named as a target; show it alone in the auxiliary plot"

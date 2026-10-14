@@ -99,6 +99,7 @@ class PreprocessStepOutput:
     coordinates_plateau: list[int]
     artifact_mask: BoolArray | None = None
     bad_channel_masks: list[BoolArray] | None = None
+    target_segments: dict[str, Any] | None = None  # see preprocess._target_segments
 
 
 @dataclass

@@ -1,0 +1,11 @@
+{
+  "EMGCoordinateSystem": "Other",
+  "EMGCoordinateUnits": "mm",
+  "EMGCoordinateSystemDescription": "3x3 grid over distal right tibialis anterior. Origin at electrode E10 (top-left corner). x-axis points distally, y-axis points laterally.",
+  "ParentCoordinateSystem": "lowerLeg",
+  "AnchorElectrode": "E10",
+  "AnchorCoordinates": [
+    25,
+    150
+  ]
+}

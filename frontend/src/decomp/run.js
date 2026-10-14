@@ -150,6 +150,10 @@ export async function runDecomposition(app) {
         JSON.stringify(state.artifactRegions),
       );
     }
+    // The backend segments the same channel again to write the target's events.
+    if (state.segments.length && state.targetIndex !== null) {
+      formData.append("target_index", String(state.targetIndex));
+    }
 
     const project = getBidsProject();
     if (project) {

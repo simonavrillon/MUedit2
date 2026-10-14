@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -11,8 +12,9 @@ import numpy as np
 
 from muedit.decomp.types import DecompositionParameters, LoadStepOutput, PreprocessStepOutput
 from muedit.io.bids import (
-    build_entities,
+    BidsEntities,
     export_bids_emg,
+    export_bids_events,
     resolve_bids_emg_path,
     write_bids_dataset_description,
 )
@@ -22,6 +24,7 @@ from muedit.models import BoolArray, FloatArray, IntArray, SignalImport
 from muedit.signal.filters import FILTER_BLOCK_ROWS, bandpass_inplace, notch_inplace
 from muedit.signal.grid import format_hdemg_signal
 from muedit.signal.qc_pipeline import run_auto_qc
+from muedit.signal.segmentation import SegmentationConfig, segment_target
 
 logger = logging.getLogger(__name__)
 
@@ -204,8 +207,9 @@ def _export_raw_emg_bids(
     derived_bids_metadata: dict[str, Any],
     default_target_muscle: str | None,
     signal: SignalImport,
+    target_segments: dict[str, Any] | None = None,
 ) -> None:
-    """Export the raw (unfiltered) EMG and sidecars to a BIDS-compatible layout."""
+    """Export the raw (unfiltered) EMG, its sidecars and its events to a BIDS-compatible layout."""
     if not bids_root:
         return
 
@@ -223,7 +227,7 @@ def _export_raw_emg_bids(
             loader_meta.get("bids_emg_path"),
         )
 
-    export_bids_emg(
+    out = export_bids_emg(
         data,
         fsamp,
         grid_names,
@@ -239,9 +243,14 @@ def _export_raw_emg_bids(
         recording=entities.get("recording"),
         emg_json_extra=emg_meta,
         powerline_freq=float(entities.get("powerline_freq") or 50.0),
-        placement_scheme=entities.get("placement_scheme") or "ChannelSpecific",
-        placement_scheme_description=entities.get("placement_scheme_description"),
-        reference_description=entities.get("reference", "ChannelSpecific"),
+        placement_scheme=entities.get("placement_scheme")
+        or loader_meta.get("placement_scheme")
+        or "Other",
+        placement_scheme_description=entities.get("placement_scheme_description")
+        or loader_meta.get("placement_scheme_description"),
+        reference_location=entities.get("reference_location")
+        or loader_meta.get("reference_location"),
+        ground_location=entities.get("ground_location") or loader_meta.get("ground_location"),
         units=entities.get("units") or loader_meta.get("units") or "uV",
         target_muscle=target_muscle,
         file_format=entities.get("file_format", "edf"),
@@ -255,12 +264,19 @@ def _export_raw_emg_bids(
         aux_low_cutoff=loader_meta.get("aux_hpf"),
         aux_high_cutoff=loader_meta.get("aux_lpf"),
         aux_units=loader_meta.get("aux_units"),
+        aux_kinds=loader_meta.get("aux_kinds"),
+        grid_labels=loader_meta.get("grid_labels"),
         manufacturer=entities.get("manufacturer") or loader_meta.get("manufacturer"),
         manufacturers_model_name=entities.get("manufacturers_model_name")
         or loader_meta.get("device_name"),
         task_description=entities.get("task_description"),
         software_versions=loader_meta.get("software_versions"),
         skip_existing=skip_existing,
+    )
+
+    # The events are refreshed even when the source is already BIDS: they are merged, not skipped.
+    export_bids_events(
+        out["edf"], fsamp, aux_data=signal.auxiliary, target_segments=target_segments
     )
 
     participant_meta = entities.get("participant_meta") or {}
@@ -327,6 +343,28 @@ def build_manual_artifact_mask(
     return mask if mask.any() else None
 
 
+def _target_segments(signal: SignalImport, target_index: int | None) -> dict[str, Any] | None:
+    """The segments of the auxiliary channel the user segmented, or ``None``."""
+    n_aux = signal.auxiliary.shape[0] if signal.auxiliary.ndim == 2 else 0
+    if target_index is None or not 0 <= target_index < n_aux:
+        return None
+    # Deterministic: the default settings give the segments the QC page showed.
+    segments = segment_target(np.asarray(signal.auxiliary[target_index]), signal.fsamp)
+    if not segments:
+        return None
+    units = signal.metadata.get("aux_units")
+    if isinstance(units, list):
+        units = units[target_index] if target_index < len(units) else None
+    names = signal.auxiliaryname
+    return {
+        "target_index": target_index,
+        "target_name": names[target_index] if target_index < len(names) else "",
+        "target_units": units,
+        "config": asdict(SegmentationConfig()),
+        "segments": [segment.to_dict() for segment in segments],
+    }
+
+
 def preprocess_step(
     loaded: LoadStepOutput,
     duration: float | None,
@@ -340,6 +378,7 @@ def preprocess_step(
     bids_metadata: dict[str, Any] | None,
     artifact_regions: list[tuple[int, int]] | None = None,
     store: ArrayStore | None = None,
+    target_index: int | None = None,
 ) -> PreprocessStepOutput:
     """Apply channel formatting, filtering, ROI selection, and optional BIDS raw export.
 
@@ -377,6 +416,7 @@ def preprocess_step(
     derived_bids_metadata: dict[str, Any] = {}
     if any(muscles):
         derived_bids_metadata["Muscles"] = muscles
+    target_segments = _target_segments(loaded.signal, target_index)
 
     _export_raw_emg_bids(
         bids_root=bids_root,
@@ -392,18 +432,19 @@ def preprocess_step(
         derived_bids_metadata=derived_bids_metadata,
         default_target_muscle=default_target_muscle,
         signal=loaded.signal,
+        target_segments=target_segments,
     )
 
     if bids_root:
         entities = bids_entities or {}
-        entity_label = build_entities(
+        entity_label = BidsEntities(
             subject=entities.get("subject", "01"),
-            task=entities.get("task", "task"),
-            run=entities.get("run"),
             session=entities.get("session"),
+            task=entities.get("task", "task"),
             acquisition=entities.get("acquisition"),
+            run=entities.get("run"),
             recording=entities.get("recording"),
-        )
+        ).label
         loader_meta["bids_entity_label"] = entity_label
         loader_meta["bids_emg_path"] = str(resolve_bids_emg_path(Path(bids_root), entity_label))
 
@@ -465,4 +506,5 @@ def preprocess_step(
         coordinates_plateau=_build_coordinates_plateau(ngrid, roi_list),
         artifact_mask=artifact_mask,
         bad_channel_masks=bad_channel_masks,
+        target_segments=target_segments,
     )

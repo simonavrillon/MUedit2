@@ -20,7 +20,11 @@ import {
 } from "../state/actions.js";
 import { getCurrentGrid, roiStart, roiEnd } from "../state/selectors.js";
 import { handleError } from "../app/services/error-service.js";
-import { normalizePreviewPayload, toSpans } from "../api/payloads.js";
+import {
+  normalizePreviewPayload,
+  toSegments,
+  toSpans,
+} from "../api/payloads.js";
 import { createViewFetcher } from "../app/services/view-fetcher.js";
 import { withUpload } from "../app/services/upload.js";
 import { beginRawPreviewTransition } from "../state/transitions.js";
@@ -229,7 +233,8 @@ export async function requestPreview(app, { file, silentFailure = false }) {
     setMetadata(state, data.metadata);
     setMuscle(state, data.muscle);
     setAuxData(state, aux.rows, data.auxiliary_names);
-    setSegments(state, []);
+    // A BIDS recording brings the target phases its events.tsv lists.
+    setSegments(state, toSegments(data.segments));
     setTargetIndex(state, data.target_index);
     setFsamp(state, data.fsamp);
     applyPreviewMetadata(data);

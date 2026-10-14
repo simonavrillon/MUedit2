@@ -109,9 +109,13 @@ Accepts a `.bdf`/`.edf` file path or directory containing one. Reads:
 - `*_channels.tsv` -> per-grid channel grouping, bad-channel masks, filter/gain values, auxiliary channels
 - EDF/BDF signal data via `pyedflib.EdfReader`
 
-Groups channels by BIDS `group` column (e.g. `Grid1`, `Grid2`), reads all signals, vstacks EMG grids, extracts auxiliary (non-EMG) channels, calls `format_hdemg_signal(grid_names)` for coordinates/IEDs/discard-vectors.
+Groups channels by BIDS `group` column (e.g. `Grid1`, `Grid2`), reads all signals, vstacks EMG grids, extracts auxiliary (non-EMG) channels, calls `format_hdemg_signal(grid_names)` for coordinates/IEDs/discard-vectors. A grid's model comes from `grid_name`, else `ElectrodeManufacturersModelName`, and must be in `_GRID_CATALOG`; otherwise the load fails naming the group (no layout is built from `electrodes.tsv`).
 
-Key functions: `resolve_bids_emg_path`, `resolve_bids_channels_tsv`, `select_grid_channels`, `load_bids_emg_grid(root, entity_label, grid_index, read_start, read_n) -> (data, fsamp, bad_mask)`.
+Key functions: `resolve_bids_emg_path`, `resolve_bids_channels_tsv(emg_dir, entity_label)`, `select_grid_channels`, `load_bids_emg_grid(root, entity_label, grid_index, read_start, read_n) -> (data, fsamp, bad_mask)`, `read_channels_summary(channels_tsv) -> (grid_names, muscles, fsamp)` and `read_sidecar_meta(root, entity_label)` (the participant and hardware fields the session form shows).
+
+### BIDS Layout (`_bids_layout.py`)
+
+The one place that knows where files sit in a dataset. `BidsEntities.parse(label)` reads a label or file stem (a label without `sub-<label>` raises `ValueError`); `.label` writes it back in BIDS order; `.emg_dir(root)` is `sub-X[/ses-Y]/emg`; `.derivative_dir(root, datatype, pipeline="muedit")` is `derivatives/<pipeline>/sub-X[/ses-Y]/<datatype>`. `dataset_root(path)` is the parent of a file's nearest `sub-` folder, stepping over `derivatives/<pipeline>`, or `None` outside a dataset.
 
 ### BIDS EMG Export (`bids.py`)
 
@@ -129,11 +133,10 @@ Supports extensive parameters: subject, task, run, session, acquisition, recordi
 #### `write_bids_dataset_description(bids_root, *, subject, age, sex, handedness) -> None`
 Creates/updates `dataset_description.json`, `participants.tsv`, `participants.json`, `.bidsignore`. Idempotent.
 
-#### `export_bids_mu_derivatives(distimes, fsamp, bids_root, entities, pipeline_name, desc, mu_uids) -> dict[str, Path]`
-Writes motor unit spike times as BIDS derivatives `events.tsv` + `events.json` under `derivatives/<pipeline_name>/`. Each spike -> one row with `onset`, `duration`, `sample`, `unit_id`, `description`.
+#### `export_bids_mu_derivatives(distimes, fsamp, bids_root, entities, pipeline_name, desc, mu_uids, mu_grid_index, grid_labels) -> dict[str, Path]`
+Writes motor unit discharge times as BIDS derivatives `events.tsv` + `events.json` under `derivatives/<pipeline_name>/`. Each discharge -> one row with `onset`, `duration`, `sample`, `unit_id`, `event_type` (`motor-unit-spike`), `group` (the unit's grid, as in the raw `channels.tsv`), sorted by onset. Also writes or merges the derivative `dataset_description.json` (`GeneratedBy` with the MUedit version, `DatasetLinks` `raw` → `../../`, `SourceDatasets` `bids:raw:`) and the `desc-<desc>` row of `descriptions.tsv`.
 
-#### `build_entities(subject, task, run, session, acquisition, recording) -> str`
-Builds BIDS entity prefix string (e.g. `sub-01_ses-01_task-force_run-01`).
+File names and folders come from `BidsEntities` (see BIDS Layout above).
 
 ---
 
@@ -156,7 +159,7 @@ Zero-phase Butterworth bandpass via `filtfilt`:
 ```python
 def notch_signals(signal: np.ndarray, fsamp: float) -> np.ndarray
 ```
-FFT-based notch suppressing mains harmonics without knowing the line frequency. Per-channel: compute FFT, scan frequency bins in `NOTCH_WINDOW_HZ` (50 Hz) segments, flag bins exceeding median+5sigma, remove interference band, reconstruct with Hermitian symmetry.
+FFT-based notch suppressing mains harmonics without knowing the line frequency. Per-channel: compute the one-sided FFT (`scipy.fft.rfft`, which releases the GIL so the filter threads run in parallel), scan frequency bins in `NOTCH_WINDOW_HZ` (50 Hz) segments, flag bins exceeding median+5sigma, remove the interference band, reconstruct with `irfft`.
 
 ### Downsample (`downsample.py`)
 

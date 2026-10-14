@@ -154,6 +154,7 @@ def test_layouts_agree_on_auxiliary_and_digital(synthetic_layouts: dict[str, Pat
     for name, path in synthetic_layouts.items():
         sig = load_intan(str(path), grid_names=_GRID)
         assert sig.auxiliaryname == ["A-AUX1", "B-AUX1", "DIGITAL-IN-01"], name
+        assert sig.metadata["aux_kinds"] == ["analog", "analog", "digital"], name
         np.testing.assert_array_equal(sig.auxiliary[2], digital[0], err_msg=name)
         scaled = (aux[0] * 37.4e-6).astype(np.float32)
         if name == "per_channel":

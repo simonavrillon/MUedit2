@@ -15,6 +15,7 @@ import numpy as np
 from muedit.io.store import ArrayStore, RamStore, sample_blocks
 from muedit.models import SignalImport
 from muedit.signal.grid import format_hdemg_signal
+from muedit.signal.segmentation import aux_kinds
 
 _RHD_MAGIC = 0xC6912702
 
@@ -532,8 +533,8 @@ def _write_stream(
 
 def _scale_auxiliary(
     streams: dict[int, _Stream], header: _IntanHeader, n_samples: int, store: ArrayStore
-) -> tuple[np.ndarray, list[str]]:
-    """Write every non-amplifier stream in physical units into ``store``, and label it."""
+) -> tuple[np.ndarray, list[str], list[bool]]:
+    """Write every non-amplifier stream in physical units into ``store``; name each row and flag the digital ones."""
     adc_step = _ADC_STEP_V.get(header.eval_board_mode, _ADC_STEP_DEFAULT)
     adc_offset = _ADC_OFFSET.get(header.eval_board_mode, 0)
     scaling: dict[int, tuple[float, float]] = {
@@ -545,6 +546,9 @@ def _scale_auxiliary(
     }
     present = [t for t in scaling if t in streams]
     names = [c.custom_name for t in present for c in header.enabled_channels(t)]
+    digital = [
+        t in (_DIGITAL_IN, _DIGITAL_OUT) for t in present for _ in header.enabled_channels(t)
+    ]
     auxiliary = store.allocate(
         "aux", (sum(streams[t].n_rows for t in present), n_samples), np.float32
     )
@@ -556,7 +560,7 @@ def _scale_auxiliary(
             auxiliary[row : row + stream.n_rows], stream, n_samples, offset=offset, step=step
         )
         row += stream.n_rows
-    return store.seal(auxiliary), names
+    return store.seal(auxiliary), names, digital
 
 
 def _read_grid_sidecar(sidecar: Path) -> tuple[list[str], list[str]]:
@@ -664,7 +668,7 @@ def load_intan(
         step=_AMP_STEP_MV,
     )
     data = store.seal(data)
-    auxiliary, aux_names = _scale_auxiliary(streams, header, n_samples, store)
+    auxiliary, aux_names, aux_digital = _scale_auxiliary(streams, header, n_samples, store)
 
     resolved_grids, resolved_muscles = _resolve_grids(
         rec, ports, channels_per_port, grid_names, muscles
@@ -707,6 +711,7 @@ def load_intan(
         "aux_lpf": ["n/a"] * len(aux_names),
         "units": "mV",
         "aux_units": "V",
+        "aux_kinds": aux_kinds(aux_names, aux_digital),
         "recording_type": "continuous",
         "software_filters": "n/a",
         "powerline_freq": header.notch_hz or 50.0,

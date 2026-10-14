@@ -182,8 +182,7 @@ screen, and when the user picks a grid; it runs outside the session lock, so edi
 refit sent meanwhile waits for the same filtering under the grid's own lock. The refit then runs
 with `bandpass=False`. The raw
 EMG comes from:
-- **BIDS**: the whole grid read channel by channel into the store (`_read_bids_grid` →
-  `io.bids.read_bids_emg_grid`)
+- **BIDS**: the whole grid read channel by channel into the store (`io.bids.read_bids_emg_grid`)
 - **the decomposition file**: its embedded EMG (a v2 `.npz` member mapped in place, or `.mat`);
   a `prefiltered` context (schema v1 `.npz`) went through these filters before it was saved and
   is used as is
@@ -417,15 +416,13 @@ discharge times sent, is a 400.
 
 ---
 
-## Service Helpers (`services/bids_helpers.py`)
+## BIDS Files of a Session
 
-| Function | Description |
-|---|---|
-| `_read_bids_grid(bids_root, entity_label, grid_index, store)` | Reads a BIDS EMG grid over the whole recording into `store` (float32, writable); returns `(emg, fsamp, emg_mask)` |
-| `_parse_all_bids_entities(entity_label)` | Extracts BIDS key-value pairs (sub, ses, task, acq, run, recording) |
-| `_parse_subject_session_from_entity_label(entity_label)` | Extracts subject + optional session |
-| `_infer_bids_root_from_decomp_path(filepath)` | Infers BIDS root from decomposition file path (derivatives/muedit/, sub-X/, muedit_out) |
-| `read_bids_sidecar_meta(bids_root, entity_label)` | Reads participant + hardware metadata from BIDS sidecars |
+`api.common.dataset_root_of(filepath)` finds the dataset an opened file sits in
+(`io._bids_layout.dataset_root`, else the default project folder above it). Folders come from
+`io._bids_layout.BidsEntities`; a save whose `entity_label` has no `sub-<label>` is a 400 on
+`entity_label`. The session form's participant and hardware fields come from
+`io._bids_reader.read_sidecar_meta`, and the grid models and muscles from `read_channels_summary`.
 
 The edit session keeps the BIDS root it inferred from the opened file (`EditSession.bids_root`)
 and the project that root lies in under `DATA_ROOT` (`meta["project"]`, `""` outside it).

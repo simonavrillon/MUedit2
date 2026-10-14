@@ -39,6 +39,7 @@ class RunJob:
     bids_metadata: dict[str, Any] | None = None
     include_full_preview: bool = False
     artifact_regions: list[tuple[int, int]] | None = None
+    target_index: int | None = None  # the auxiliary channel the user segmented
 
 
 def execute(job: RunJob, store: ArrayStore, send: Send) -> None:
@@ -69,6 +70,7 @@ def execute(job: RunJob, store: ArrayStore, send: Send) -> None:
             preloaded_signal=job.signal,
             artifact_regions=job.artifact_regions,
             store=store,
+            target_index=job.target_index,
         )
         summary = make_json_safe(summarize_result(result, save_path, job.persist_output))
     except Exception as exc:  # noqa: BLE001

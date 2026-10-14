@@ -21,6 +21,7 @@ from muedit.io._intan import (
 from muedit.io.store import ArrayStore, RamStore, sample_blocks
 from muedit.models import SignalImport
 from muedit.signal.grid import format_hdemg_signal
+from muedit.signal.segmentation import aux_kinds
 
 _OEBIN = "structure.oebin"
 
@@ -386,6 +387,7 @@ def load_openephys(
         "aux_lpf": ["n/a"] * len(aux_names),
         "units": "mV",
         "aux_units": "V",
+        "aux_kinds": aux_kinds(aux_names, [False] * len(aux_rows) + [True] * len(rec.ttl)),
         "recording_type": "continuous",
         "software_filters": "n/a",
         "powerline_freq": 50.0,

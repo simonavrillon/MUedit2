@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import importlib.metadata
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -31,3 +32,11 @@ def __getattr__(name: str) -> Any:
     if module is None:
         raise AttributeError(f"module 'muedit' has no attribute {name!r}")
     return getattr(importlib.import_module(module), name)
+
+
+def installed_version() -> str | None:
+    """The installed MUedit version, or ``None`` when the package metadata is missing."""
+    try:
+        return importlib.metadata.version("muedit")
+    except importlib.metadata.PackageNotFoundError:
+        return None

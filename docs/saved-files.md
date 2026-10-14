@@ -89,6 +89,8 @@ tree and dataset-level files at the dataset root.
         <entity>_emg.json
         <entity>_channels.tsv
         <entity>_channels.json
+        <entity>_events.tsv                        # trigger pulses and target phases, when there are any
+        <entity>_events.json
         sub-<subject>[_ses-<session>]_electrodes.tsv              # one per session (all grids)
         sub-<subject>[_ses-<session>]_space-<grid>_coordsystem.json  # one per distinct grid space
 ```
@@ -117,6 +119,35 @@ tree and dataset-level files at the dataset root.
 > in `_channels.tsv` (e.g. `Quaternions`, `Quaternions_2`) since BIDS requires
 > unique channel `name` values. These changes make the export pass the
 > schema-based `bids-validator` with no errors.
+
+**Events.** `<entity>_events.tsv` lists, sorted by onset:
+
+- one `ttl` row per pulse of each `TRIG` channel (`onset` at the rising edge, `duration`
+  while high, `value` = line number, `channel` = its name in `_channels.tsv`). A line with
+  more than 50 rising edges per second is a clock and is left out (noted in the JSON);
+- when you pressed **Segment target** before the run, the target's phases in MUniverse's
+  vocabulary: `muscle_on`/`muscle_off` around each contraction, `linear_isometric_ramp`
+  (`direction`), `steady_isometric`, `sinusoid` (`frequency_hz`, `amplitude`, `n_cycles`, and
+  one `cycle` row per trough), `irregular`, with `level_start`/`level_end` in the target's
+  units and, for a target in % MVC, `mvc_level`/`mvc_rate`.
+
+The category is in `event_type` (as MUniverse writes it; MNE-BIDS, which reads
+`trial_type`, shows these events as `n/a`). A `source` column says what wrote each row
+(`ttl`, `target_segmentation`); its levels in the JSON record the MUedit version, the
+segmented channel and the segmentation settings. A re-export replaces only the rows of the
+sources it was given and keeps any other row (yours, or another tool's). When the file
+already lists the task phases from another tool (rows without `source`, e.g. a MUniverse
+dataset), MUedit adds no phase rows of its own.
+
+Opening a BIDS recording reads these phases back (`segments_from_events` in
+`io/_bids_reader.py`, also an `events.tsv` inherited from the subject or session folder) and
+draws them on the QC page. A ramp without `direction`, levels or `mvc_rate` takes its
+direction from its neighbour: down after a plateau, up otherwise. Other events (`ttl`,
+`cycle`, task events) are not drawn.
+
+`tests/test_bids_validator.py` runs the official validator (`jsr:@bids/validator@3.0.2`) on a
+full MUedit export (two grids, target and trigger lines, events, motor unit derivatives) and
+asserts no errors; it is skipped when `deno` is not installed.
 
 Entity label pattern:
 
@@ -165,10 +196,16 @@ Best-effort BIDS-facing side outputs (failures never block the primary save):
 <bids_root>/dataset_description.json                                   # created if missing
 <bids_root>/participants.tsv | participants.json                      # subject row upserted from the form
 <bids_root>/sub-<subject>/[ses-<session>/]emg/<entity>_*              # raw EMG sidecars re-exported (see §2)
+<bids_root>/derivatives/muedit/dataset_description.json              # GeneratedBy (MUedit version), links to the raw dataset
+<bids_root>/derivatives/muedit/descriptions.tsv                      # what desc-decomposition means
 <bids_root>/derivatives/muedit/sub-<subject>/[ses-<session>/]emg/
-    <entity>_desc-decomposition_events.tsv                            # one row per MU spike (onset, duration, sample, unit_id, description)
+    <entity>_desc-decomposition_events.tsv                            # one row per MU discharge, sorted by onset (onset, duration, sample, unit_id, event_type, group)
     <entity>_desc-decomposition_events.json
 ```
+
+The events columns follow the MUniverse format (`onset`, `duration`, `sample`, `unit_id`,
+`event_type` = `motor-unit-spike`); `group` adds the grid each unit came from, as the `group`
+of its channels in the raw `*_channels.tsv`.
 
 The `events.tsv` derivative is the BIDS-facing representation of motor-unit
 spike times; the authoritative artefact remains the `_edited.npz` above.
@@ -303,6 +340,7 @@ Each array's data starts on a 64-byte boundary, so large arrays (`pulse_trains`,
 | `discard_channels`, `discard_channel_offsets` | uint8, int64 | Per grid, 1 = discarded channel |
 | `coordinates`, `coordinate_offsets` | float32 `(n, 2)`, int64 | Per grid, electrode coordinates |
 | `loader_meta` | unicode, `()` | JSON object: what the loader recorded about `emg_data` for its BIDS export (`units`, gains, hardware filters, device) |
+| `target_segments` | unicode, `()` | JSON object: the segmented target (`target_index`, `target_name`, `target_units`, `config`, `segments`), when the run had one; carried into every edited save |
 
 Reading one in Python:
 

@@ -57,7 +57,6 @@ python/src/muedit/
 │   │   ├── decompose_service.py              One run at a time, cancel, NDJSON streaming
 │   │   ├── decompose_worker.py               Run body, executed in a spawned worker process
 │   │   ├── editing_service.py                Edit sessions: open, apply, recover, save + BIDS save
-│   │   ├── bids_helpers.py                   BIDS sidecar parsing + entity resolution
 │   │   └── edit_helpers.py                   Normalization helpers for edit payloads
 │   ├── schemas.py                            Pydantic request models
 │   ├── contracts.py                          Response envelope
@@ -84,6 +83,8 @@ python/src/muedit/
 │   ├── loaders.py                            Loader re-export facade
 │   ├── bids.py                               BIDS EMG export (EDF/BDF + sidecars + derivatives)
 │   ├── _bids_reader.py                       BIDS EMG reading (pyedflib + channels.tsv)
+│   ├── _bids_layout.py                       BidsEntities: BIDS file names, folders and dataset root
+│   ├── _bids_events.py                       events.tsv: trigger pulses + target segments, merged
 │   ├── _intan.py                             Intan RHD loader (3 save layouts)
 │   ├── _openephys.py                         Open Ephys binary-format loader
 │   ├── mat.py                                MATLAB .mat v5 + v7.3 (HDF5) loader

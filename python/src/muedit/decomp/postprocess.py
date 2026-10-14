@@ -29,6 +29,7 @@ from muedit.decomp.types import (
     PostprocessStepOutput,
     PreprocessStepOutput,
 )
+from muedit.io._bids_layout import BidsEntities, dataset_root
 from muedit.io.store import ArrayStore
 from muedit.models import DecompositionExport, DecompositionSignalExport, FloatArray, IntArray
 from muedit.signal.filters import demean
@@ -263,6 +264,22 @@ def postprocess_step(
     )
 
 
+def _decomp_path(full_path: str, loader_meta: dict[str, Any]) -> Path:
+    """Where a run's ``.npz`` goes: MUedit's derivatives of a BIDS recording, else beside the input."""
+    emg_path, label = loader_meta.get("bids_emg_path"), loader_meta.get("bids_entity_label")
+    root = dataset_root(Path(emg_path).resolve()) if emg_path and label else None
+    if root is not None:
+        try:
+            folder = BidsEntities.parse(str(label)).derivative_dir(root, "decomp")
+        except ValueError:
+            pass  # a file in a sub- folder whose name is no BIDS label
+        else:
+            folder.mkdir(parents=True, exist_ok=True)
+            return folder / f"{label}_decomp.npz"
+    source = Path(full_path)
+    return source.with_name(source.stem + "_decomp.npz")
+
+
 def export_step(
     loaded: LoadStepOutput,
     prep: PreprocessStepOutput,
@@ -276,39 +293,7 @@ def export_step(
     """Build export payloads and optionally persist the default NPZ artifact, with ``raw_emg``."""
     if progress_cb:
         progress_cb("progress", {"message": "Writing output", "pct": 98, "phase": "export"})
-    bids_entity_label = prep.loader_meta.get("bids_entity_label")
-    bids_emg_path = prep.loader_meta.get("bids_emg_path")
-    if bids_entity_label and bids_emg_path:
-        _emg_parts = list(Path(bids_emg_path).resolve().parts)
-        _dir_parts = _emg_parts[:-1]  # exclude the filename
-        _sub_idx = next(
-            (
-                i
-                for i in range(len(_dir_parts) - 1, -1, -1)
-                if _dir_parts[i].lower().startswith("sub-")
-            ),
-            -1,
-        )
-        if _sub_idx > 0:
-            _bids_rt = Path(*_emg_parts[:_sub_idx])
-            _subj = _emg_parts[_sub_idx][4:]
-            _sess = None
-            for _tok in str(bids_entity_label).split("_"):
-                if _tok.startswith("ses-") and len(_tok) > 4:
-                    _sess = _tok[4:]
-                    break
-            decomp_dir = _bids_rt / "derivatives" / "muedit" / f"sub-{_subj}"
-            if _sess:
-                decomp_dir = decomp_dir / f"ses-{_sess}"
-            decomp_dir = decomp_dir / "decomp"
-        else:
-            decomp_dir = Path(bids_emg_path).parent.parent / "decomp"
-        decomp_dir.mkdir(parents=True, exist_ok=True)
-        save_path = str(decomp_dir / f"{bids_entity_label}_decomp.npz")
-    else:
-        save_path = str(
-            Path(loaded.full_path).with_name(Path(loaded.full_path).stem + "_decomp.npz")
-        )
+    save_path = str(_decomp_path(loaded.full_path, prep.loader_meta))
 
     preview = build_preview_payload(
         data=prep.data,
@@ -363,6 +348,7 @@ def export_step(
             discard_channels=prep.discard_channels if with_emg else None,
             coordinates=prep.coordinates if with_emg else None,
             loader_meta=prep.loader_meta if with_emg else None,
+            target_segments=prep.target_segments,
         )
         logger.info("Saved to %s", save_path)
 

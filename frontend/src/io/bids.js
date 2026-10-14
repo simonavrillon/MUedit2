@@ -173,6 +173,8 @@ export function buildSessionInfoFromDecomposition(file, data, deps) {
       powerlineFreq: data?.powerline_freq ?? "",
       placementScheme: data?.placement_scheme ?? "",
       placementDescription: data?.placement_scheme_description ?? "",
+      referenceLocation: data?.reference_location ?? "",
+      groundLocation: data?.ground_location ?? "",
       softwareVersions: data?.software_versions ?? null,
     },
   };

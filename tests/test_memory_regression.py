@@ -389,6 +389,7 @@ def test_bids_export_stage(prepared: Any, tmp_path: Path) -> None:
             prep.coordinates,
             prep.discard_channels,
             tmp_path,
+            placement_scheme_description="Grid over the muscle belly, located by palpation.",
         )
     )
     _check("bids_export", peak)

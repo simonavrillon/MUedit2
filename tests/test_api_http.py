@@ -763,6 +763,20 @@ class TestEditSession:
         spikes = arrays["spikes"]
         assert spikes.tolist() == sorted(spikes.tolist())
 
+    def test_session_save_says_why_bids_was_skipped(
+        self, client: TestClient, edit_token: str
+    ) -> None:
+        data = _ok(
+            client.post(
+                f"{API}/edit/session/save",
+                json={"token": edit_token, "project": "smoke", "remove_duplicates": False},
+                headers={SESSION_HEADER: "fixture-edit"},
+            )
+        )
+        assert data["saved"] is True
+        assert "bids_emg_paths" not in data
+        assert "placement description" in data["bids_emg_error"]
+
     def test_open_unsupported_format_is_400(self, client: TestClient, workspace: Path) -> None:
         path = workspace / "recording.otb4"
         path.write_bytes(b"")
@@ -775,12 +789,20 @@ class TestEditSession:
         data = _ok(
             client.post(
                 f"{API}/edit/session/save",
-                json={"token": edit_token, "project": "smoke", "remove_duplicates": False},
+                json={
+                    "token": edit_token,
+                    "project": "smoke",
+                    "remove_duplicates": False,
+                    "placement_scheme_description": "Grid over the muscle belly, located by palpation.",
+                },
                 headers={SESSION_HEADER: "fixture-edit"},
             )
         )
         assert data["saved"] is True
-        assert {"path", "bids_emg_paths"} <= set(data)
+        assert {"path", "bids_emg_paths", "bids_deriv_paths"} <= set(data)
+        events = Path(data["bids_deriv_paths"]["events_tsv"])
+        header = events.read_text(encoding="utf-8").splitlines()[0].split("\t")
+        assert header == ["onset", "duration", "sample", "unit_id", "event_type", "group"]
         out = Path(data["path"])
         assert out.is_relative_to(workspace / "smoke")
         with np.load(out) as z:
@@ -842,6 +864,7 @@ class TestEditSave:
                     "mu_grid_index": preview["mu_grid_index"],
                     "project": "smoke",
                     "file_label": "motor_units_decomposition.npz",
+                    "entity_label": "sub-01_task-mu",
                     "run_result_token": token,
                 },
             )
@@ -867,6 +890,7 @@ class TestEditSave:
                     "fsamp": FSAMP,
                     "project": "smoke",
                     "file_label": "motor_units_run.npz",
+                    "entity_label": "sub-01_task-mu",
                 },
             )
         )
@@ -894,6 +918,29 @@ class TestEditSave:
             400,
         )
         assert err["detail"]["field"] == "run_result_token"
+        after = set(derivatives.rglob("*.npz")) if derivatives.exists() else set()
+        assert after == before
+
+    def test_save_without_a_subject_is_400_and_writes_nothing(
+        self, client: TestClient, workspace: Path
+    ) -> None:
+        # Before, a label without sub-<label> was saved under sub-01, over that subject's files.
+        derivatives = workspace / "smoke" / "derivatives"
+        before = set(derivatives.rglob("*.npz")) if derivatives.exists() else set()
+        err = _err(
+            client.post(
+                f"{API}/edit/save",
+                json={
+                    "distimes": [[100, 200]],
+                    "total_samples": N_SAMPLES,
+                    "fsamp": FSAMP,
+                    "project": "smoke",
+                    "file_label": "no_subject.npz",
+                },
+            ),
+            400,
+        )
+        assert err["detail"]["field"] == "entity_label"
         after = set(derivatives.rglob("*.npz")) if derivatives.exists() else set()
         assert after == before
 

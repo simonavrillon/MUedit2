@@ -72,6 +72,8 @@ export const els = {
   bidsPlacementScheme: select("bidsPlacementScheme"),
   bidsPlacementDescription: input("bidsPlacementDescription"),
   bidsPlacementDescRow: element("bidsPlacementDescRow"),
+  bidsReferenceLocation: input("bidsReferenceLocation"),
+  bidsGroundLocation: input("bidsGroundLocation"),
   bidsPowerlineFreq: select("bidsPowerlineFreq"),
   bidsManufacturer: input("bidsManufacturer"),
   bidsDeviceModel: input("bidsDeviceModel"),

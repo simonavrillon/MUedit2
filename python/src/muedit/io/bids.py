@@ -15,18 +15,25 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+from muedit import installed_version
+from muedit.io._bids_events import export_bids_events
+from muedit.io._bids_layout import BidsEntities
 from muedit.io._bids_reader import (
     _ensure_pyedflib,
     load_bids_emg_grid,
     read_bids_emg_grid,
+    read_tsv,
     resolve_bids_emg_path,
 )
 from muedit.io.store import BLOCK_BYTES, sample_blocks
 from muedit.signal.grid import get_grid_electrode_metadata
+from muedit.signal.segmentation import aux_kinds as classify_aux
 
 __all__ = [
-    "build_entities",
+    "BidsEntities",
+    "BidsFieldError",
     "export_bids_emg",
+    "export_bids_events",
     "export_bids_mu_derivatives",
     "load_bids_emg_grid",
     "read_bids_emg_grid",
@@ -36,28 +43,13 @@ __all__ = [
 
 
 _EDF_LABEL_LEN = 16
+# Every EMG channel is monopolar against one reference electrode, named here.
+_REFERENCE = "R1"
+_CODE_URL = "https://github.com/simonavrillon/MUedit2"
 
 
-def build_entities(
-    subject: str,
-    task: str,
-    run: str | None = None,
-    session: str | None = None,
-    acquisition: str | None = None,
-    recording: str | None = None,
-) -> str:
-    """Build the BIDS entity prefix used for EMG file basenames."""
-    parts: list[str] = [f"sub-{subject}"]
-    if session:
-        parts.append(f"ses-{session}")
-    parts.append(f"task-{task}")
-    if acquisition:
-        parts.append(f"acq-{acquisition}")
-    if run:
-        parts.append(f"run-{run}")
-    if recording:
-        parts.append(f"recording-{recording}")
-    return "_".join(parts)
+class BidsFieldError(ValueError):
+    """A value given for the export that BIDS cannot take; the message says what to change."""
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -86,13 +78,30 @@ def _fmt_hz(val: Any) -> str:
     return s or "0"
 
 
-def _first_numeric(val: Any) -> float | None:
-    """Return the first numeric entry of a scalar/list, or None if there is none."""
+def _shared_cutoff(val: Any, n_channels: int) -> float | str | None:
+    """The cutoff every EMG channel shares, ``None`` when none is known, ``"n/a"`` when they differ."""
     if isinstance(val, (int, float)):
         return float(val)
-    if isinstance(val, list):
-        return next((float(v) for v in val if isinstance(v, (int, float))), None)
-    return None
+    rows = val[:n_channels] if isinstance(val, list) else []
+    numbers = [float(v) for v in rows if isinstance(v, (int, float))]
+    if not numbers:
+        return None
+    return numbers[0] if len(numbers) == n_channels and len(set(numbers)) == 1 else "n/a"
+
+
+def _group_labels(grid_labels: list[str] | None, n_grids: int) -> list[str]:
+    """The ``group`` of each grid: the source's labels when there is one per grid, else ``Grid<n>``."""
+    if grid_labels and len(grid_labels) == n_grids and all(grid_labels):
+        return [str(label) for label in grid_labels]
+    return [f"Grid{i + 1}" for i in range(n_grids)]
+
+
+def _aux_unit_list(aux_units: str | list[str | None] | None, n_aux: int) -> list[str]:
+    """One unit per aux row: a shared unit, or a per-row list padded with ``"n/a"``."""
+    if isinstance(aux_units, list):
+        units = [(str(u).strip() or "n/a") if u is not None else "n/a" for u in aux_units[:n_aux]]
+        return units + ["n/a"] * (n_aux - len(units))
+    return [aux_units or "n/a"] * n_aux
 
 
 def _truncate_physical(val: float) -> float:
@@ -187,9 +196,10 @@ def export_bids_emg(
     recording: str | None = None,
     emg_json_extra: dict[str, Any] | None = None,
     powerline_freq: float = 50.0,
-    placement_scheme: str = "ChannelSpecific",
+    placement_scheme: str = "Other",
     placement_scheme_description: str | None = None,
-    reference_description: str = "ChannelSpecific",
+    reference_location: str | None = None,
+    ground_location: str | None = None,
     units: str = "uV",
     target_muscle: str | list[str] | None = None,
     file_format: str = "edf",
@@ -203,7 +213,9 @@ def export_bids_emg(
     aux_gain: list[float] | None = None,
     aux_low_cutoff: list[float] | None = None,
     aux_high_cutoff: list[float] | None = None,
-    aux_units: str | None = None,
+    aux_units: str | list[str | None] | None = None,
+    aux_kinds: list[str] | None = None,
+    grid_labels: list[str] | None = None,
     manufacturer: str | None = None,
     manufacturers_model_name: str | None = None,
     task_description: str | None = None,
@@ -231,14 +243,24 @@ def export_bids_emg(
 
     fmt = file_format.lower()
     if fmt not in ("edf", "bdf"):
-        raise ValueError("file_format must be 'edf' or 'bdf'")
+        raise BidsFieldError("file_format must be 'edf' or 'bdf'")
 
-    entities = build_entities(subject, task, run, session, acquisition, recording)
-    session_prefix = f"sub-{subject}" + (f"_ses-{session}" if session else "")
-    base_dir = bids_root / f"sub-{subject}"
-    if session:
-        base_dir = base_dir / f"ses-{session}"
-    emg_dir = base_dir / "emg"
+    names = BidsEntities(subject, session, task, acquisition, run, recording)
+    entities = names.label
+    # electrodes.tsv and coordsystem.json describe every task of the session.
+    session_prefix = BidsEntities(subject, session).label
+    emg_dir = names.emg_dir(bids_root)
+    json_path = emg_dir / f"{entities}_emg.json"
+
+    # Checked only when the sidecar will be written: an existing one is never rewritten.
+    extra = emg_json_extra or {}
+    scheme = extra.get("EMGPlacementScheme", placement_scheme)
+    description = extra.get("EMGPlacementSchemeDescription", placement_scheme_description)
+    if not json_path.exists() and scheme == "Other" and not str(description or "").strip():
+        raise BidsFieldError(
+            "EMGPlacementScheme 'Other' requires a placement description "
+            "(EMGPlacementSchemeDescription): describe how the electrodes were placed."
+        )
     emg_dir.mkdir(parents=True, exist_ok=True)
 
     suffix = f"{entities}_emg"
@@ -252,7 +274,6 @@ def export_bids_emg(
     digital_min = -8388608 if use_bdf else -32768
     digital_max = 8388607 if use_bdf else 32767
     edf_path = emg_dir / f"{suffix}.{fmt}"
-    json_path = emg_dir / f"{suffix}.json"
     channels_tsv = emg_dir / f"{entities}_channels.tsv"
 
     n_channels, n_samples = data.shape
@@ -286,12 +307,22 @@ def export_bids_emg(
         return labels
 
     aux_labels = _unique_labels(aux_names, n_aux)
-    aux_descriptions = [
-        (aux_names[i] if aux_names and i < len(aux_names) and aux_names[i] else "")
-        or "Auxiliary Channel"
-        for i in range(n_aux)
+    given_names = list(aux_names or [])[:n_aux]
+    given_names += [""] * (n_aux - len(given_names))
+    aux_descriptions = [name or "Auxiliary Channel" for name in given_names]
+    aux_unit_list = _aux_unit_list(aux_units, n_aux)
+    aux_kind_list = (
+        list(aux_kinds)
+        if aux_kinds is not None and len(aux_kinds) == n_aux
+        else list(
+            classify_aux([n or label for n, label in zip(given_names, aux_labels, strict=True)])
+        )
+    )
+    # A trigger line holds 0/1 states, whatever unit the loader gave its stream.
+    aux_unit_list = [
+        "n/a" if kind == "digital" else unit
+        for kind, unit in zip(aux_kind_list, aux_unit_list, strict=True)
     ]
-    resolved_aux_units = aux_units or "a.u."
 
     if skip_existing and edf_path.exists():
         logger.info("BIDS export: %s already exists, skipping signal re-encode", edf_path.name)
@@ -310,7 +341,9 @@ def export_bids_emg(
             for idx in range(n_total_channels):
                 if idx >= n_channels:
                     ch_name = aux_labels[idx - n_channels]
-                    ch_units = resolved_aux_units
+                    # EDF leaves an unknown physical dimension blank; channels.tsv says n/a.
+                    aux_unit = aux_unit_list[idx - n_channels]
+                    ch_units = "" if aux_unit == "n/a" else aux_unit
                 else:
                     ch_name = f"Ch{idx + 1:02d}"
                     ch_units = units
@@ -335,6 +368,7 @@ def export_bids_emg(
             if writer is not None:
                 writer.close()
 
+    group_labels = _group_labels(grid_labels, len(grid_names))
     rows = []
     ied_values: list[float | None] = (
         [None] * len(grid_names) if ied is None else [float(x) for x in ied]
@@ -373,8 +407,8 @@ def export_bids_emg(
                     "ElectroMyoGraphy",
                     fsamp,
                     electrode_name,
-                    reference_description,
-                    f"Grid{g_idx + 1}",
+                    _REFERENCE,
+                    group_labels[g_idx],
                     (
                         target_muscle[g_idx]
                         if isinstance(target_muscle, list) and g_idx < len(target_muscle)
@@ -410,17 +444,22 @@ def export_bids_emg(
             )
         ch_idx += n_grid_ch
 
+    n_trig = 0
     if n_aux > 0:
         for i in range(n_aux):
             name = aux_labels[i]
             upper_name = name.upper()
-            ctype = "TRIG" if "TRIG" in upper_name or "SYNC" in upper_name else "MISC"
+            is_trigger = (
+                aux_kind_list[i] == "digital" or "TRIG" in upper_name or "SYNC" in upper_name
+            )
+            ctype = "TRIG" if is_trigger else "MISC"
+            n_trig += ctype == "TRIG"
 
             rows.append(
                 [
                     name,
                     ctype,
-                    resolved_aux_units,
+                    aux_unit_list[i],
                     aux_descriptions[i],
                     fsamp,
                     "n/a",
@@ -480,6 +519,13 @@ def export_bids_emg(
             "group": {
                 "Description": "Identifier for the electrode grid or array this channel belongs to.",
             },
+            "reference": {
+                "Description": "Reference electrode of the channel; n/a for auxiliary channels.",
+                "Levels": {
+                    _REFERENCE: "Monopolar reference electrode"
+                    + (f": {reference_location.strip()}" if reference_location else "")
+                },
+            },
             "target_muscle": {
                 "Description": "Anatomical target of the electrode grid.",
             },
@@ -536,7 +582,7 @@ def export_bids_emg(
                     el_meta["ElectrodeType"],
                     el_meta["ElectrodeMaterial"],
                     "n/a",
-                    f"Grid{g_idx + 1}",
+                    group_labels[g_idx],
                 ]
             )
             electrode_counter += 1
@@ -556,7 +602,7 @@ def export_bids_emg(
         seen_spaces.add(space_label)
         coordsys_path = emg_dir / f"{session_prefix}_space-{space_label}_coordsystem.json"
         grid_ied = ied_values[g_idx] if ied_values and g_idx < len(ied_values) else None
-        coord_units = "mm" if grid_ied else "a.u."
+        coord_units = "mm" if grid_ied else "n/a"
         _write_json_if_missing(
             coordsys_path,
             {
@@ -588,17 +634,23 @@ def export_bids_emg(
             return raw
         return "n/a"
 
-    first_hpf = _first_numeric(low_cutoff)
-    first_lpf = _first_numeric(high_cutoff)
+    hpf = _shared_cutoff(low_cutoff, n_channels)
+    lpf = _shared_cutoff(high_cutoff, n_channels)
+    # Differing cutoffs stay per channel in channels.tsv; one sidecar value would misstate them.
+    sidecar_filters = (
+        "n/a"
+        if isinstance(hpf, str) or isinstance(lpf, str)
+        else _build_hardware_filters(hpf, lpf, hardware_filters)
+    )
 
     emg_json: dict[str, Any] = {
         "TaskName": task,
-        "EMGReference": reference_description,
+        "EMGReference": (reference_location or "").strip() or _REFERENCE,
         "SamplingFrequency": fsamp,
         "PowerLineFrequency": powerline_freq,
         "RecordingType": recording_type,
         "EMGPlacementScheme": placement_scheme,
-        "HardwareFilters": _build_hardware_filters(first_hpf, first_lpf, hardware_filters),
+        "HardwareFilters": sidecar_filters,
         "SoftwareFilters": software_filters if software_filters is not None else "n/a",
     }
 
@@ -652,13 +704,14 @@ def export_bids_emg(
     if emg_json_extra:
         emg_json.update(emg_json_extra)
 
-    if placement_scheme == "Other" and placement_scheme_description:
+    if placement_scheme_description:
         emg_json["EMGPlacementSchemeDescription"] = placement_scheme_description
+    if ground_location:
+        emg_json["EMGGround"] = ground_location.strip()
 
     emg_json["EMGChannelCount"] = n_channels
-    n_misc = len(aux_names) if aux_names else 0
-    if n_misc:
-        emg_json["MISCChannelCount"] = n_misc
+    if n_trig:
+        emg_json["TriggerChannelCount"] = n_trig
     emg_json["RecordingDuration"] = float(n_samples / fsamp)
 
     _write_json_if_missing(json_path, emg_json)
@@ -760,6 +813,45 @@ def write_bids_dataset_description(
     _write_tsv(parts_tsv_path, header, [[r.get(h, "n/a") for h in header] for r in existing])
 
 
+def _write_derivative_description(deriv_root: Path, pipeline_name: str) -> None:
+    """Write or update the derivative dataset's description, keeping keys someone else added."""
+    path = deriv_root / "dataset_description.json"
+    existing: dict[str, Any] = {}
+    if path.exists():
+        with path.open("r", encoding="utf-8") as f:
+            existing = json.load(f)
+    generated: dict[str, Any] = {"Name": "MUedit", "CodeURL": _CODE_URL}
+    version = installed_version()
+    if version:
+        generated["Version"] = version
+    others = [
+        entry
+        for entry in existing.get("GeneratedBy", [])
+        if isinstance(entry, dict) and entry.get("Name") not in ("MUedit", pipeline_name)
+    ]
+    _write_json(
+        path,
+        {
+            "Name": pipeline_name,
+            **existing,
+            "BIDSVersion": "1.11.1",
+            "DatasetType": "derivative",
+            "GeneratedBy": [generated, *others],
+            # The raw dataset two levels up, named "raw" for BIDS URIs such as bids:raw:sub-01/...
+            "DatasetLinks": {**existing.get("DatasetLinks", {}), "raw": "../../"},
+            "SourceDatasets": [{"URL": "bids:raw:"}],
+        },
+    )
+
+
+def _write_description_row(deriv_root: Path, desc: str, text: str) -> None:
+    """Record what ``desc-<desc>`` means in the derivative root's ``descriptions.tsv``."""
+    path = deriv_root / "descriptions.tsv"
+    described = {r["desc_id"]: r["description"] for r in read_tsv(path)[1]} if path.exists() else {}
+    described[f"desc-{desc}"] = text
+    _write_tsv(path, ["desc_id", "description"], sorted(described.items()))
+
+
 def export_bids_mu_derivatives(
     distimes: list[list[int]],
     fsamp: float,
@@ -768,64 +860,65 @@ def export_bids_mu_derivatives(
     pipeline_name: str = "muedit",
     desc: str = "decomposition",
     mu_uids: list[str] | None = None,
+    mu_grid_index: list[int] | None = None,
+    grid_labels: list[str] | None = None,
 ) -> dict[str, Path]:
-    """Export motor unit spike times as BIDS derivatives events.tsv."""
-    subject, session = None, None
-    for part in entities.split("_"):
-        if part.startswith("sub-"):
-            subject = part[4:]
-        elif part.startswith("ses-"):
-            session = part[4:]
-    if not subject:
-        raise ValueError(f"Cannot parse subject from entities: {entities}")
-
+    """Export motor unit discharge times as a BIDS derivative ``events.tsv``, one row per discharge."""
+    deriv_emg_dir = BidsEntities.parse(entities).derivative_dir(bids_root, "emg", pipeline_name)
     deriv_root = bids_root / "derivatives" / pipeline_name
-    deriv_desc_path = deriv_root / "dataset_description.json"
-    if not deriv_desc_path.exists():
-        _write_json(
-            deriv_desc_path,
-            {
-                "Name": pipeline_name,
-                "BIDSVersion": "1.11.1",
-                "DatasetType": "derivative",
-                "GeneratedBy": [{"Name": pipeline_name}],
-            },
-        )
+    _write_derivative_description(deriv_root, pipeline_name)
+    _write_description_row(
+        deriv_root,
+        desc,
+        "Motor unit discharge times saved by MUedit after editing: one row per discharge, "
+        "unit_id names the motor unit and group the grid it was decomposed from.",
+    )
 
-    deriv_emg_dir = deriv_root / f"sub-{subject}"
-    if session:
-        deriv_emg_dir = deriv_emg_dir / f"ses-{session}"
-    deriv_emg_dir = deriv_emg_dir / "emg"
     deriv_emg_dir.mkdir(parents=True, exist_ok=True)
 
     events_tsv = deriv_emg_dir / f"{entities}_desc-{desc}_events.tsv"
 
-    spike_rows = []
+    n_grids = max(max(mu_grid_index or [], default=-1) + 1, len(grid_labels or []))
+    labels = _group_labels(grid_labels, n_grids)
+    spikes: list[tuple[int, int, str, str]] = []
     for idx, spike_samples in enumerate(distimes):
         uid = mu_uids[idx] if mu_uids and idx < len(mu_uids) else str(idx)
-        for sample in sorted(spike_samples):
-            onset = sample / fsamp
-            spike_rows.append([f"{onset:.6f}", "0.0", str(sample), uid, "motor-unit-spike"])
-
-    _write_tsv(events_tsv, ["onset", "duration", "sample", "unit_id", "description"], spike_rows)
+        grid = mu_grid_index[idx] if mu_grid_index and idx < len(mu_grid_index) else None
+        group = labels[grid] if grid is not None and 0 <= grid < len(labels) else "n/a"
+        spikes.extend((int(sample), idx, uid, group) for sample in spike_samples)
+    spikes.sort()  # by sample, then by unit, as BIDS wants events sorted by onset
+    rows = [
+        [f"{sample / fsamp:.6f}", "0", str(sample), uid, "motor-unit-spike", group]
+        for sample, _, uid, group in spikes
+    ]
+    _write_tsv(events_tsv, ["onset", "duration", "sample", "unit_id", "event_type", "group"], rows)
 
     events_json = events_tsv.with_suffix(".json")
     _write_json(
         events_json,
         {
             "onset": {
-                "Description": "Time of spike onset relative to recording start.",
+                "Description": "Time of the discharge from the first sample of the recording.",
                 "Units": "s",
             },
-            "duration": {"Description": "Duration of the spike event.", "Units": "s"},
+            "duration": {"Description": "A discharge is an impulse.", "Units": "s"},
             "sample": {
-                "Description": "Sample index of spike onset at the recording sampling frequency.",
+                "Description": "Sample index of the discharge (zero-based) at the recording's "
+                "sampling frequency.",
                 "Units": "samples",
             },
             "unit_id": {
-                "Description": "Unique identifier of the motor unit, matching the mu_uid in the MUedit2 editlog."
+                "Description": "Identifier of the motor unit, matching the mu_uid in the MUedit "
+                "edit log."
             },
-            "description": {"Description": "Event type label."},
+            "event_type": {
+                "Description": "Event category.",
+                "Levels": {"motor-unit-spike": "Motor unit discharge"},
+            },
+            "group": {
+                "Description": "The grid the motor unit was decomposed from: the group of its "
+                "channels in the raw *_channels.tsv."
+            },
         },
     )
 

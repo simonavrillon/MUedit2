@@ -3,19 +3,25 @@
 from __future__ import annotations
 
 import itertools
+from collections.abc import Sequence
 
 import numpy as np
 import pytest
 from scipy.signal import butter, sosfiltfilt
 
-from muedit.signal.segmentation import TargetSegment, find_target_channel, segment_target
+from muedit.signal.segmentation import (
+    TargetSegment,
+    aux_kinds,
+    find_target_channel,
+    segment_target,
+)
 
 FSAMP = 2048.0
 # Corners blur over the smoothing width (0.1 s each side).
 TOL_S = 0.15
 
 
-def _piecewise(points: list[tuple[float, float]]) -> np.ndarray:
+def _piecewise(points: Sequence[tuple[float, float]]) -> np.ndarray:
     """A target through ``(seconds, level)`` points, linear between them."""
     t, v = zip(*points, strict=True)
     return np.interp(np.arange(int(t[-1] * FSAMP)) / FSAMP, t, v)
@@ -208,3 +214,16 @@ def test_degenerate_targets_give_no_segments(target: np.ndarray) -> None:
 )
 def test_find_target_channel(names: list[str], expected: int | None) -> None:
     assert find_target_channel(names) == expected
+
+
+def test_aux_kinds_from_the_loader_and_the_names() -> None:
+    names = ["Force - Original Path", "Force - Performed Path", "Torque", "TTL1"]
+    kinds = aux_kinds(names, [False, False, False, True])
+    assert kinds == ["target", "performed", "analog", "digital"]
+    assert aux_kinds(names) == ["target", "performed", "analog", "analog"]
+
+
+def test_a_trigger_line_is_never_the_target() -> None:
+    names = ["Target TTL", "Force - Original Path"]
+    assert find_target_channel(names) == 0
+    assert find_target_channel(names, aux_kinds(names, [True, False])) == 1

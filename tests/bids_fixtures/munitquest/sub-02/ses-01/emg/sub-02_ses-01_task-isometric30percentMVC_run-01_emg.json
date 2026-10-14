@@ -1,0 +1,30 @@
+{
+  "TaskName": "isometric30percentMVC",
+  "Manufacturer": "OTBioelettronica",
+  "ManufacturersModelName": "Quattrocento",
+  "SamplingFrequency": 2048,
+  "Gain": 150,
+  "PowerLineFrequency": 50,
+  "RecordingType": "continuous",
+  "SoftwareFilters": {
+    "HighPassFilter": {
+      "HalfAmplitudeCutOffHz": 10
+    },
+    "LowPassFilter": {
+      "HalfAmplitudeCutOffHz": 900
+    }
+  },
+  "HardwareFilters": {
+    "HighPassFilter": {
+      "HalfAmplitudeCutOffHz": 10
+    },
+    "LowPassFilter": {
+      "HalfAmplitudeCutOffHz": 900
+    }
+  },
+  "EMGReference": "monopolar",
+  "EMGPlacementScheme": "Measured",
+  "EMGChannelCount": 18,
+  "TaskDescription": "Isometric dorsiflexion at fixed ankle angle (90 deg). Two simultaneous 3x3 grids over proximal and distal right tibialis anterior. Participants matched force profiles displayed on a screen.",
+  "Instructions": "Sit with your leg relaxed. Keep your ankle at 90 degrees and follow the force trace on the screen as accurately as you can."
+}

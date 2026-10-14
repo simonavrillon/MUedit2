@@ -40,6 +40,8 @@ class BidsSaveFields(BaseModel):
     manufacturers_model_name: str | None = None
     placement_scheme: str | None = None
     placement_scheme_description: str | None = None
+    reference_location: str | None = None
+    ground_location: str | None = None
     task_description: str | None = None
     software_versions: str | None = None
     remove_flagged: bool | None = None

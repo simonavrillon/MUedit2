@@ -48,7 +48,9 @@ All elements are registered in `dom.js` as `els.*` properties.
 | `bidsMuscleContainer` | [U] | Muscle name inputs container (dynamic) |
 | `bidsPlacementScheme` | [U] | Placement scheme select |
 | `bidsPlacementDescription` | [U] | Placement description input |
-| `bidsPlacementDescRow` | [U] | Placement description row (hidden by default) |
+| `bidsPlacementDescRow` | [U] | Placement description row (shown with the Other scheme, the default) |
+| `bidsReferenceLocation` | [U] | Reference electrode location input |
+| `bidsGroundLocation` | [U] | Ground electrode location input |
 | `bidsManufacturer` | [U] | Manufacturer input |
 | `bidsDeviceModel` | [U] | Device model input |
 | `fsamp` | [U] | Sampling frequency (readonly) |

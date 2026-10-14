@@ -1,0 +1,15 @@
+name	type	units	signal_electrode	reference	group	target_muscle	low_cutoff	high_cutoff
+EMG001	EMG	uV	E1	R1	grid1	right vastus lateralis	10	900
+EMG002	EMG	uV	E2	R1	grid1	right vastus lateralis	10	900
+EMG003	EMG	uV	E3	R1	grid1	right vastus lateralis	10	900
+EMG004	EMG	uV	E4	R1	grid1	right vastus lateralis	10	900
+EMG005	EMG	uV	E5	R1	grid1	right vastus lateralis	10	900
+EMG006	EMG	uV	E6	R1	grid1	right vastus lateralis	10	900
+EMG007	EMG	uV	E7	R1	grid1	right vastus lateralis	10	900
+EMG008	EMG	uV	E8	R1	grid1	right vastus lateralis	10	900
+EMG009	EMG	uV	E9	R1	grid1	right vastus lateralis	10	900
+EMG010	EMG	uV	E10	R1	grid1	right vastus lateralis	10	900
+EMG011	EMG	uV	E11	R1	grid1	right vastus lateralis	10	900
+EMG012	EMG	uV	E12	R1	grid1	right vastus lateralis	10	900
+EMG013	EMG	uV	E_im	R1	intramuscular	right vastus lateralis	10	900
+Torque	MISC	Nm	n/a	n/a	n/a	n/a	n/a	n/a

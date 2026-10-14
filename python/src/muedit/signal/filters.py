@@ -10,13 +10,13 @@ from itertools import islice
 from typing import TypeVar
 
 import numpy as np
+from scipy.fft import irfft, rfft
 from scipy.signal import butter, filtfilt
 
-from muedit.models import FloatArray, IntArray
+from muedit.models import FloatArray
 
 NOTCH_WINDOW_HZ: float = 50.0
-#: Threads that filter rows at once (filtfilt releases the GIL; numpy's FFT does not,
-#: so the notch's threads mostly serialise on it).
+#: Threads that filter rows at once (filtfilt and scipy's FFT release the GIL).
 FILTER_THREADS: int = min(4, os.cpu_count() or 1)
 #: Rows filtered together where a whole-grid copy would be too large.
 FILTER_BLOCK_ROWS: int = 8
@@ -113,26 +113,25 @@ def _notch_params(fsamp: float, n_samples: int) -> tuple[int, int]:
 def _remove_line_interference(x: FloatArray, frad: int, window: int) -> FloatArray:
     """Remove interference from a single-channel signal, computed in float64."""
     x = np.asarray(x, dtype=np.float64)  # a float32 FFT would run in single precision
-    fsignal = np.fft.fft(x)
-    n = len(fsignal)
-    magnitude = np.abs(fsignal)
-
-    peaks: list[IntArray] = [np.zeros(0, dtype=int)]
-    for start in range(0, n - window, window):
-        segment = magnitude[start + 1 : start + window + 1]
-        threshold = np.median(segment) + 5 * np.std(segment)
-        peaks.append(np.flatnonzero(segment > threshold) + start + 1)
+    n = x.size
+    spectrum = rfft(x)
+    magnitude = np.abs(spectrum)
     half = frad // 2
-    tstamp = (np.concatenate(peaks)[:, None] + np.arange(-half, half + 1)).ravel()
-    tstamp = tstamp[(tstamp > 0) & (tstamp <= n // 2 + 1)]
 
-    fcorrec = np.zeros_like(fsignal)
-    fcorrec[tstamp] = fsignal[tstamp]
-    # Mirror bins 1 .. ceil(n/2) - n%2 onto the negative frequencies, so the correction is real.
-    mirrored = np.arange(1, int(np.ceil(n / 2)) - n % 2 + 1)
-    fcorrec[n - mirrored] = np.conj(fcorrec[mirrored])
+    # The thresholds come from segments of the two-sided magnitude. A segment starting more
+    # than ``half`` bins past Nyquist only flags bins that are dropped, so it is not scanned.
+    n_segments = min(len(range(0, n - window, window)), (n // 2 + half - 1) // window + 1)
+    two_sided = np.concatenate([magnitude, magnitude[1 : n - n // 2][::-1]])
+    segments = two_sided[1 : n_segments * window + 1].reshape(n_segments, window)
+    threshold = np.median(segments, axis=1) + 5 * np.std(segments, axis=1)
+    rows, cols = np.nonzero(segments > threshold[:, None])
+    peaks = rows * window + cols + 1
+    tstamp = (peaks[:, None] + np.arange(-half, half + 1)).ravel()
+    tstamp = tstamp[(tstamp > 0) & (tstamp <= n // 2)]
 
-    return np.real(x - np.fft.ifft(fcorrec))
+    correction = np.zeros_like(spectrum)
+    correction[tstamp] = spectrum[tstamp]
+    return x - irfft(correction, n)
 
 
 def notch_signals(signal: FloatArray, fsamp: float) -> FloatArray:
