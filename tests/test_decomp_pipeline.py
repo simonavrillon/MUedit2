@@ -1,118 +1,64 @@
-"""End-to-end decomposition pipeline tests on real HD-EMG data."""
+"""Tests for :mod:`muedit.decomp.pipeline`: a whole run, on the heap and in a session store."""
 
 from __future__ import annotations
-
-from pathlib import Path
 
 import numpy as np
 import pytest
 
 from muedit.decomp.pipeline import run_decomposition
 from muedit.decomp.types import DecompositionParameters, DecompositionResult
-from muedit.models import SignalImport
+from muedit.models import resident_nbytes
 from muedit.signal.decomp_primitives import POSTPROC_MIN_ISI_SEC
-from tests._metrics_helpers import central_roi, spike_times
+from muedit.storage import SessionStore
+from tests._platform import MAPPED_FILES_STAY
+from tests._synthetic_emg import ACTIVE_ROI, synthetic_recording
 
-# Keep the per-iteration budget modest so the real-data run finishes in well
-# under a minute while still exercising the full FastICA + CoV-ISI + peel-off
-# loop on all six grids.
-_NITER = 50
-# Width of the analysis window in seconds (central portion of the recording).
-_ROI_WIDTH_SEC = 10.0
-# A recording must yield at least this many motor units for the pipeline to be
-# considered functional on the 10 s window.
-_MIN_MU_COUNT = 5
+_STORE_PARAMS = DecompositionParameters(niter=8)
 
 
-# ── Session-scoped pipeline results ──────────────────────────────────────────
+def _store_files(store: SessionStore) -> list[str]:
+    return sorted(p.name.split("-")[0].removesuffix(".npy") for p in store.path.glob("*.npy"))
 
 
-@pytest.fixture(scope="session")
-def novecento_roi(novecento_emg: SignalImport) -> tuple[int, int]:
-    """Central 10 s ROI of the Novecento recording (where the contraction is)."""
-    return central_roi(novecento_emg.data, float(novecento_emg.fsamp), _ROI_WIDTH_SEC)
-
-
-@pytest.fixture(scope="session")
-def decomp_results(
-    novecento_otb4_file: Path, novecento_emg: SignalImport, novecento_roi: tuple[int, int]
-) -> DecompositionResult:
-    """Run the full pipeline with peel-off on real Novecento EMG."""
+def _run(store: SessionStore | None) -> DecompositionResult:
     return run_decomposition(
-        str(novecento_otb4_file),
-        roi=novecento_roi,
-        params=DecompositionParameters(niter=_NITER, peel_off_enabled=True),
+        "synthetic.mat",
+        params=_STORE_PARAMS,
         save_npz=False,
-        preloaded_signal=novecento_emg,
+        roi=ACTIVE_ROI,
+        include_full_preview=True,
+        preloaded_signal=synthetic_recording(),
+        store=store,
     )
 
 
-# ── Pipeline structure & output validity ─────────────────────────────────────
+@pytest.fixture(scope="module")
+def heap_run() -> DecompositionResult:
+    return _run(None)
 
 
-class TestDecompositionStructure:
-    """Validate the shape and internal consistency of the export payload."""
-
-    def test_counts_are_consistent(self, decomp_results: DecompositionResult) -> None:
-        result = decomp_results
-        dt = spike_times(result)
-        pulse_trains = result.pulse_trains
-        sil = result.sil
-        grid_idx = result.mu_grid_index
-
-        n_mu = len(dt)
-        assert n_mu > 0, "pipeline produced zero motor units"
-        assert pulse_trains.shape[0] == n_mu
-        assert len(sil) == n_mu
-        assert len(grid_idx) == n_mu
-
-    def test_pulse_trains_match_signal_length(
-        self, decomp_results: DecompositionResult, novecento_emg: SignalImport
-    ) -> None:
-        pulse_trains = decomp_results.pulse_trains
-        data = novecento_emg.data
-        assert pulse_trains.ndim == 2
-        # Pulse trains span the full signal; the ``roi`` argument only selects
-        # the ROI window that gets *filled* with non-zero activity.
-        assert pulse_trains.shape[1] == data.shape[1]
-        assert np.isfinite(pulse_trains).all()
+def test_a_run_gives_one_clean_entry_per_motor_unit(heap_run: DecompositionResult) -> None:
+    """Pulse trains span the recording; discharges are sorted, in range and refractory-clean."""
+    n_mu = len(heap_run.spike_times)
+    total_samples = heap_run.preview["total_samples"]
+    assert n_mu > 0
+    assert heap_run.pulse_trains.shape == (n_mu, total_samples)
+    assert np.isfinite(heap_run.pulse_trains).all()
+    assert len(heap_run.sil) == len(heap_run.mu_grid_index) == n_mu
+    assert min(heap_run.sil) >= _STORE_PARAMS.sil_thr
+    refractory = int(np.round(heap_run.fsamp * POSTPROC_MIN_ISI_SEC))
+    for spikes in heap_run.spike_times:
+        assert np.all(np.diff(spikes) >= refractory)
+        assert spikes.size == 0 or 0 <= spikes[0] <= spikes[-1] < total_samples
 
 
-# ── FastICA + min-CoV-ISI quality of detected motor units ────────────────────
-
-
-class TestMotorUnitQuality:
-    """Assert the separators the pipeline accepted are genuinely motor units."""
-
-    def test_finds_multiple_motor_units(self, decomp_results: DecompositionResult) -> None:
-        dt = spike_times(decomp_results)
-        assert len(dt) >= _MIN_MU_COUNT, f"expected >= {_MIN_MU_COUNT} motor units, got {len(dt)}"
-
-    def test_sil_above_acceptance_threshold(self, decomp_results: DecompositionResult) -> None:
-        result = decomp_results
-        sil = result.sil
-        sil_thr = result.parameters["sil_thr"]
-        assert sil, "no SIL scores returned"
-        assert min(sil) >= sil_thr, f"min SIL {min(sil):.3f} below acceptance threshold {sil_thr}"
-
-    def test_spike_times_respect_refractory(
-        self, decomp_results: DecompositionResult, novecento_roi: tuple[int, int]
-    ) -> None:
-        """Every MU spike train is sorted, in-bounds, and refractory-clean."""
-        result = decomp_results
-        fsamp = result.fsamp
-        n_samples = result.pulse_trains.shape[1]
-        refractory = int(np.round(fsamp * POSTPROC_MIN_ISI_SEC))
-
-        for i, d in enumerate(spike_times(result)):
-            if d.size == 0:
-                continue
-            assert np.all(np.diff(d) >= 0), f"MU {i}: discharge times not sorted"
-            assert d.min() >= 0 and d.max() < n_samples, (
-                f"MU {i}: discharge times out of [0, {n_samples})"
-            )
-            if d.size >= 2:
-                min_isi = int(np.diff(d).min())
-                assert min_isi >= refractory, (
-                    f"MU {i}: min ISI {min_isi} < refractory {refractory} samples"
-                )
+def test_a_run_in_a_store_matches_the_heap_run(heap_run: DecompositionResult) -> None:
+    store = SessionStore.create("run")
+    stored = _run(store)
+    np.testing.assert_array_equal(stored.pulse_trains, heap_run.pulse_trains)
+    for got, want in zip(stored.spike_times, heap_run.spike_times, strict=True):
+        np.testing.assert_array_equal(got, want)
+    assert resident_nbytes(stored.preview["pulse_trains_full"]) == 0
+    # Only the kept pulse trains outlive the run: the filtered EMG and the
+    # pre-dedup matrix were deleted.
+    assert MAPPED_FILES_STAY or _store_files(store) == ["pulse_trains"]

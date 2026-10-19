@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 
 from muedit.models import BoolArray, FloatArray, IntArray
+from muedit.signal.grid import grid_rows
 
 
 def abs_means(data: FloatArray, keep: BoolArray | None = None) -> tuple[FloatArray, FloatArray]:
@@ -37,7 +38,7 @@ def build_preview_payload(
     pulse_trains: FloatArray,
     spike_times: list[IntArray],
     grid_names: list[str],
-    roi_list: list[tuple[int, int]],
+    rois: list[tuple[int, int]],
     discard_channels: list[IntArray],
     coordinates: list[FloatArray],
     mu_grid_index: list[int],
@@ -51,19 +52,17 @@ def build_preview_payload(
     keeps it for ``/series/pulse`` and the run save, and never sends it. Series the frontend
     draws for the recording come from the upload's ``/series/*`` endpoints, not from here.
     """
-    channel_means: list[list[float]] = []
-    first = 0
-    for cell in discard_channels:
-        n_channels = np.asarray(cell).size
-        channel_means.append(abs_means(data[first : first + n_channels])[1].tolist())
-        first += n_channels
+    channel_means = [
+        abs_means(data[rows])[1].tolist()
+        for rows in grid_rows([len(mask) for mask in discard_channels])
+    ]
 
     return {
         "fsamp": fsamp,
         "spike_times": [np.asarray(d, dtype=np.int32) for d in spike_times],
         "total_samples": data.shape[1],
         "grid_names": grid_names,
-        "rois": roi_list,
+        "rois": rois,
         "pulse_trains_full": pulse_trains
         if include_full_preview and pulse_trains.size > 0
         else None,

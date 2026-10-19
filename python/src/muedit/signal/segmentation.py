@@ -284,12 +284,14 @@ def _dynamic_segment(
         freq, (_, _, r2) = max(
             ((f, _sine_fit(piece, rate, f)) for f in freqs), key=lambda fit: fit[1][2]
         )
-        # The smoothing shrinks a fast sine: its amplitude comes from the unsmoothed trace.
-        offset, amplitude, _ = _sine_fit(xd[start:end], rate, freq)
         regular = (
             _cv(periods) < cfg.period_cv and _cv(np.abs(np.diff(piece[turns]))) < cfg.amplitude_cv
         )
         if regular and r2 >= cfg.sine_r2:
+            # The smoothing shrinks a fast sine: its amplitude and extremes come from the
+            # unsmoothed trace.
+            offset, amplitude, _ = _sine_fit(xd[start:end], rate, freq)
+            common |= {"level_min": offset - amplitude, "level_max": offset + amplitude}
             return TargetSegment(
                 kind="sinusoid",
                 direction=None,

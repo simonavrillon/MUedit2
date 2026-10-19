@@ -157,7 +157,7 @@ draws them on the QC page. A ramp without `direction`, levels or `mvc_rate` take
 direction from its neighbour: down after a plateau, up otherwise. Other events (`ttl`,
 `cycle`, task events) are not drawn.
 
-`tests/test_bids_export.py` runs the official validator (`jsr:@bids/validator@3.0.2`) on a
+`tests/test_decomp_bids_export.py` runs the official validator (`jsr:@bids/validator@3.0.2`) on a
 full MUedit export (two grids, target and trigger lines, events, motor unit derivatives) and
 asserts no errors; it is skipped when `deno` is not installed.
 

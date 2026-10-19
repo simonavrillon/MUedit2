@@ -37,7 +37,7 @@ class SignalViews:
     grid_rows: list[tuple[int, int]]  # [first, stop) EMG rows of each grid
     emg_types: list[int]  # per grid, the bandpass the EMG is filtered with
     emg: MinMaxPyramid  # bandpassed EMG of the grid rows
-    overview: FloatArray  # (n_grids, n_samples): smoothed mean |bandpassed EMG| per grid
+    overview: FloatArray  # (ngrid, n_samples): smoothed mean |bandpassed EMG| per grid
     overview_levels: MinMaxPyramid
     aux: MinMaxPyramid
 
@@ -202,10 +202,10 @@ def _held_run_result(token: str | None) -> Iterator[RunResult | None]:
     if stored is None or token is None:
         yield None
         return
-    pulse = stored.pulse_trains.view()
-    pulse.flags.writeable = False
+    pulse_trains = stored.pulse_trains.view()
+    pulse_trains.flags.writeable = False
     try:
-        yield RunResult(pulse, None, stored.spike_times, stored.extras)
+        yield RunResult(pulse_trains, None, stored.spike_times, stored.extras)
     finally:
         _RUN_RESULTS.unhold(token)
         if stored.store is not None:

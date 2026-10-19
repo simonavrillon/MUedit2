@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import numpy as np
 
+from muedit.decomp.algorithm import pca_extended_signal, whiten_extended_signal
+from muedit.models import SignalImport
+from muedit.signal.decomp_primitives import extend_signal
 from muedit.signal.filters import bandpass_signals
 
 FSAMP = 2000.0
@@ -97,3 +100,34 @@ def motor_unit_emg(
                 continue
             seg += (amplitude * kernel[:, None]) * shape[None, :]
     return out
+
+
+#: Where ``synthetic_recording`` contracts: the window the decomposition tests decompose.
+ACTIVE_ROI = (5_000, 35_000)
+
+
+def synthetic_recording() -> SignalImport:
+    """One float32 64-channel grid of 40 000 samples, active over ``ACTIVE_ROI``."""
+    emg = motor_unit_emg(seed=5, n_samples=40_000, activity=ACTIVE_ROI)
+    return SignalImport(
+        data=emg.astype(np.float32), fsamp=FSAMP, grid_names=["GR08MM1305"], muscle_names=["ta"]
+    )
+
+
+#: Delay embedding the ``short_recording`` tests extend by.
+EX = 6
+
+
+def short_recording() -> np.ndarray:
+    """Ten channels x 3000 samples of synthetic MU activity (float64)."""
+    return motor_unit_emg(seed=5, n_samples=3000, activity=(0, 3000))[:10].astype(np.float64)
+
+
+def calibration_case(raw: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Whitening, filters and window mean of a calibration window over samples 200-2600."""
+    window = raw[:, 200:2600]
+    ext = extend_signal(window - window.mean(axis=1, keepdims=True), EX)
+    vecs, vals = pca_extended_signal(ext)
+    _, whitening = whiten_extended_signal(ext, vecs, vals)
+    filters = np.linalg.qr(np.random.default_rng(4).standard_normal((ext.shape[0], 4)))[0]
+    return whitening, filters, window.mean(axis=1)

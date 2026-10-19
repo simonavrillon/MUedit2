@@ -54,15 +54,15 @@ SESSION_HEADER = "X-MUedit-Session"
 def _noisy_pulse(n_mu: int, seed: int = 0) -> np.ndarray:
     """Pulse trains with random peaks, float32 like a saved file."""
     rng = np.random.default_rng(seed)
-    pulse = rng.random((n_mu, N_SAMPLES)).astype(np.float32) * 0.2
-    for row in pulse:
+    pulse_trains = rng.random((n_mu, N_SAMPLES)).astype(np.float32) * 0.2
+    for row in pulse_trains:
         row[rng.choice(N_SAMPLES, 60, replace=False)] += rng.random(60).astype(np.float32) + 0.5
-    return pulse
+    return pulse_trains
 
 
 def _session(
     spikes: list[Any],
-    pulse: np.ndarray | None = None,
+    pulse_trains: np.ndarray | None = None,
     grids: list[int] | None = None,
     **kw: Any,
 ) -> EditSession:
@@ -71,7 +71,7 @@ def _session(
         fsamp=FSAMP,
         total_samples=N_SAMPLES,
         spike_times=spikes,
-        pulse=pulse,
+        pulse_trains=pulse_trains,
         mu_grid_index=grids or [0] * len(spikes),
         mu_uids=[f"g0_mu{i}" for i in range(len(spikes))],
         **kw,
@@ -84,13 +84,15 @@ def synthetic_mu() -> dict[str, np.ndarray]:
 
 
 @pytest.fixture()
-def pulse() -> np.ndarray:
+def pulse_trains() -> np.ndarray:
     return _noisy_pulse(3)
 
 
 @pytest.fixture()
-def edit(pulse: np.ndarray) -> Iterator[EditSession]:
-    session = _session([_spike_train(10.0, seed=s).tolist() for s in (1, 2, 3)], pulse.copy())
+def edit(pulse_trains: np.ndarray) -> Iterator[EditSession]:
+    session = _session(
+        [_spike_train(10.0, seed=s).tolist() for s in (1, 2, 3)], pulse_trains.copy()
+    )
     yield session
     session.close()
 
@@ -100,33 +102,37 @@ def edit(pulse: np.ndarray) -> Iterator[EditSession]:
 
 class TestParity:
     @pytest.mark.parametrize("roi", [(900, 1100), (0, 400), (N_SAMPLES - 300, N_SAMPLES + 50)])
-    def test_add_spikes(self, edit: EditSession, pulse: np.ndarray, roi: tuple[int, int]) -> None:
+    def test_add_spikes(
+        self, edit: EditSession, pulse_trains: np.ndarray, roi: tuple[int, int]
+    ) -> None:
         before = edit.spike_times[1].tolist()
-        expected = add_spikes_in_roi(pulse[1].astype(float), before, FSAMP, *roi, 0.6)
+        expected = add_spikes_in_roi(pulse_trains[1].astype(float), before, FSAMP, *roi, 0.6)
         edit.apply("add-spikes", {"mu": 1, "x_start": roi[0], "x_end": roi[1], "y_min": 0.6})
         assert edit.spike_times[1].tolist() == expected.tolist()
         assert edit.spike_times[1].dtype == np.int32
 
-    def test_add_artifact(self, edit: EditSession, pulse: np.ndarray) -> None:
-        expected = add_spikes_in_roi(pulse[0].astype(float), [], FSAMP, 2000, 4000, 0.6)
+    def test_add_artifact(self, edit: EditSession, pulse_trains: np.ndarray) -> None:
+        expected = add_spikes_in_roi(pulse_trains[0].astype(float), [], FSAMP, 2000, 4000, 0.6)
         edit.apply("add-artifact", {"mu": 0, "x_start": 2000, "x_end": 4000, "y_min": 0.6})
         assert edit.artifacts[0].tolist() == expected.tolist()
 
-    def test_delete_spikes(self, edit: EditSession, pulse: np.ndarray) -> None:
+    def test_delete_spikes(self, edit: EditSession, pulse_trains: np.ndarray) -> None:
         before = edit.spike_times[2].tolist()
-        expected = delete_spikes_in_roi(pulse[2].astype(float), before, 1000, 6000, 0.0, 0.15)
+        expected = delete_spikes_in_roi(
+            pulse_trains[2].astype(float), before, 1000, 6000, 0.0, 0.15
+        )
         edit.apply(
             "delete-spikes", {"mu": 2, "x_start": 1000, "x_end": 6000, "y_min": 0.0, "y_max": 0.15}
         )
         assert edit.spike_times[2].tolist() == expected.tolist()
         assert edit.history[-1]["type"] == "delete_spikes"
 
-    def test_remove_outliers(self, edit: EditSession, pulse: np.ndarray) -> None:
+    def test_remove_outliers(self, edit: EditSession, pulse_trains: np.ndarray) -> None:
         edit.spike_times[0] = np.asarray(
             sorted({*edit.spike_times[0].tolist(), 4020}), dtype=np.int32
         )
         before = edit.spike_times[0].tolist()
-        expected = remove_discharge_rate_outliers(pulse[0].astype(float), before, FSAMP)
+        expected = remove_discharge_rate_outliers(pulse_trains[0].astype(float), before, FSAMP)
         change = edit.apply("remove-outliers", {"mu": 0})
         assert edit.spike_times[0].tolist() == expected.tolist()
         assert change.info["removed_count"] == len(before) - len(expected)
@@ -169,7 +175,7 @@ def _decomposition_filtered(ctx: EditSignalContext) -> np.ndarray:
         aux_data=np.zeros((0, ctx.data.shape[1])),
     )
     prep = preprocess_step(
-        loaded=LoadStepOutput("x", signal, signal.data, signal.fsamp),
+        loaded=LoadStepOutput("x", signal),
         duration=None,
         manual_roi=False,
         roi=None,
@@ -203,7 +209,7 @@ class TestUpdateFilter:
         target = synthetic_mu["target"].tolist()
         edit = _session([target], np.zeros((1, N_SAMPLES), np.float32), signal=signal)
         try:
-            pt, expected = update_motor_unit_filter_window(
+            pulse_train, expected = update_motor_unit_filter_window(
                 _decomposition_filtered(signal),
                 np.zeros(64, int),
                 target,
@@ -212,13 +218,13 @@ class TestUpdateFilter:
                 VIEW_END,
                 bandpass=False,
             )
-            assert pt is not None
+            assert pulse_train is not None
             edit.apply("update-filter", {"mu": 0, "view_start": VIEW_START, "view_end": VIEW_END})
             assert edit.spike_times[0].tolist() == expected.tolist()
             row = edit.values(0, 0, N_SAMPLES)
             np.testing.assert_array_equal(
                 row[VIEW_START + EDGE : VIEW_END - EDGE],
-                pt[EDGE : len(pt) - EDGE].astype(np.float32),
+                pulse_train[EDGE : len(pulse_train) - EDGE].astype(np.float32),
             )
             assert not row[: VIEW_START + EDGE].any()
             truth = _in_view(synthetic_mu["target"])
@@ -330,7 +336,7 @@ class TestUpdateFilter:
             edit.apply(
                 "update-filter", {"mu": 0, "view_start": VIEW_START, "view_end": VIEW_END, **args}
             )
-            assert (seen["nbextchan"], seen["peeloff_win"], seen["compute_dtype"]) == expected
+            assert (seen["nbextchan"], seen["peel_off_win"], seen["compute_dtype"]) == expected
         finally:
             edit.close()
 
@@ -505,7 +511,7 @@ class TestUndo:
         assert not edit.values(0, 0, 10).flags.writeable
 
     def test_reset_restores_the_file_train_and_spikes(
-        self, edit: EditSession, pulse: np.ndarray
+        self, edit: EditSession, pulse_trains: np.ndarray
     ) -> None:
         spikes = edit.spike_times[0].copy()
         _write_patch(edit, 0, 100, np.full(50, 7.0, np.float32))
@@ -513,7 +519,7 @@ class TestUndo:
         was_dirty = edit.dirty
         assert was_dirty
         edit.apply("reset", {"mu": 0})
-        np.testing.assert_array_equal(edit.values(0, 0, N_SAMPLES), pulse[0])
+        np.testing.assert_array_equal(edit.values(0, 0, N_SAMPLES), pulse_trains[0])
         np.testing.assert_array_equal(edit.spike_times[0], spikes)
         assert edit.dirty  # the reset is an unsaved edit too
         assert edit.history[-1]["type"] == "reset_mu"
@@ -585,12 +591,12 @@ def cache_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 class TestEditLog:
     def test_replaying_the_log_rebuilds_the_session(
-        self, cache_dir: Path, tmp_path: Path, pulse: np.ndarray
+        self, cache_dir: Path, tmp_path: Path, pulse_trains: np.ndarray
     ) -> None:
         source = tmp_path / "rec_decomp.npz"
         source.write_bytes(b"decomposition")
         spikes = [_spike_train(10.0, seed=s).tolist() for s in (1, 2, 3)]
-        first = _session(spikes, pulse.copy())
+        first = _session(spikes, pulse_trains.copy())
         first.log = EditLog.create(source, "tab-one")
         first.apply("add-spikes", {"mu": 0, "x_start": 0, "x_end": N_SAMPLES, "y_min": 0.6})
         first.apply("duplicate", {"mu": 2})
@@ -603,7 +609,7 @@ class TestEditLog:
 
         found = find_recoverable(source, set())
         assert found is not None and found.edits == 3
-        second = _session(spikes, pulse.copy())
+        second = _session(spikes, pulse_trains.copy())
         try:
             assert second.replay(found.records) == 5
             assert _state(second) == expected
@@ -1109,8 +1115,8 @@ class TestSessionApi:
 
 def test_delete_in_roi_matches_on_a_drawn_pulse() -> None:
     """The ROI helpers the session calls still work on a plain array."""
-    pulse = _pulse_with_peaks({100: 0.5, 200: 0.5, 300: 0.5}, n=1000)
-    assert delete_spikes_in_roi(pulse, [100, 200], 150, 400, 0.2, 0.8).tolist() == [100]
+    pulse_train = _pulse_with_peaks({100: 0.5, 200: 0.5, 300: 0.5}, n=1000)
+    assert delete_spikes_in_roi(pulse_train, [100, 200], 150, 400, 0.2, 0.8).tolist() == [100]
 
 
 def test_mu_uids_are_numbered_per_grid_and_never_reused() -> None:
@@ -1142,7 +1148,7 @@ def test_detach_copies_what_is_mapped_from_the_file(tmp_path: Path) -> None:
         fsamp=2048.0,
         total_samples=n_samples,
         spike_times=decomp.spike_times,
-        pulse=decomp.pulse_trains_full,
+        pulse_trains=decomp.pulse_trains_full,
         mu_grid_index=decomp.mu_grid_index,
         mu_uids=["g0_mu0", "g0_mu1"],
         signal=ctx,

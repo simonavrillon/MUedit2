@@ -22,9 +22,9 @@ from muedit.io.bids import (
     write_participant,
 )
 from muedit.io.factory import load_signal
-from muedit.models import BoolArray, FloatArray, SignalImport
+from muedit.models import BoolArray, FloatArray, IntArray, SignalImport
 from muedit.signal.filters import FILTER_BLOCK_ROWS, bandpass_inplace, notch_inplace
-from muedit.signal.grid import format_hdemg_signal
+from muedit.signal.grid import format_hdemg_signal, grid_rows
 from muedit.signal.qc_pipeline import run_auto_qc
 from muedit.signal.segmentation import SegmentationConfig, segment_target
 from muedit.storage import ArrayStore, RamStore
@@ -92,7 +92,7 @@ def select_roi_interactively(data: FloatArray, fsamp: float) -> tuple[int, int]:
     return idx_start, idx_end
 
 
-def _resolve_roi_list(
+def _resolve_rois(
     data: FloatArray,
     fsamp: float,
     duration: float | None,
@@ -114,33 +114,30 @@ def _resolve_roi_list(
             nwindows,
             n_rois,
         )
-    if rois:
-        roi_list = []
-        for r in rois:
+    requested = rois or ([roi] if roi else [])
+    if requested:
+        resolved = []
+        for r in requested:
             s = max(0, min(int(r[0]), total_len - 1))
             e = max(s + 1, min(int(r[1]), total_len))
-            roi_list.append((s, e))
-    elif roi:
-        s = max(0, min(int(roi[0]), total_len - 1))
-        e = max(s + 1, min(int(roi[1]), total_len))
-        roi_list = [(s, e)]
+            resolved.append((s, e))
     elif manual_roi:
         s, e = select_roi_interactively(data, fsamp)
-        roi_list = [(s, e)]
+        resolved = [(s, e)]
     elif duration is not None:
         total_samples = max(1, min(total_len, int(duration * fsamp)))
-        roi_list = [(0, total_samples)]
+        resolved = [(0, total_samples)]
     else:
-        roi_list = [(0, total_len)]
+        resolved = [(0, total_len)]
 
-    if nwindows > 1 and not explicit_rois and len(roi_list) == 1:
-        s, e = roi_list[0]
+    if nwindows > 1 and not explicit_rois and len(resolved) == 1:
+        s, e = resolved[0]
         span = e - s
         if span >= nwindows:
             step = span // nwindows
-            roi_list = [(s + i * step, s + (i + 1) * step) for i in range(nwindows)]
+            resolved = [(s + i * step, s + (i + 1) * step) for i in range(nwindows)]
             # Extend the last sub-window to the original end so no samples are lost.
-            roi_list[-1] = (roi_list[-1][0], e)
+            resolved[-1] = (resolved[-1][0], e)
         else:
             logger.warning(
                 "nwindows=%d requested but the ROI span (%d samples) is smaller "
@@ -148,52 +145,26 @@ def _resolve_roi_list(
                 nwindows,
                 span,
             )
-    return roi_list
+    return resolved
 
 
-def _build_coordinates_plateau(ngrid: int, roi_list: list[tuple[int, int]]) -> list[int]:
-    """Flatten per-grid ROI boundaries into the legacy plateau format."""
+def _build_coordinates_plateau(ngrid: int, rois: list[tuple[int, int]]) -> list[int]:
+    """Flatten the ROI bounds of every grid into ``[start, end, start, end, ...]``."""
     coordinates_plateau: list[int] = []
     for _ in range(ngrid):
-        for s, e in roi_list:
+        for s, e in rois:
             coordinates_plateau.extend([s, e])
     return coordinates_plateau
 
 
-def _apply_grid_notch_filters(
-    data: FloatArray,
-    fsamp: float,
-    grid_names: list[str],
-    coordinates: list[FloatArray],
+def _filter_grids(
+    data: FloatArray, fsamp: float, discard_channels: list[IntArray], emg_types: list[int]
 ) -> None:
-    """Apply notch filtering in-place to each grid's channels."""
-    ch_idx = 0
-    for i in range(len(grid_names)):
-        n_channels_grid = coordinates[i].shape[0]
-        logger.info("Applying notch filter to Grid %d...", i + 1)
-        notch_inplace(data[ch_idx : ch_idx + n_channels_grid, :], fsamp)
-        ch_idx += n_channels_grid
-
-
-def _apply_grid_bandpass_filters(
-    data: FloatArray,
-    fsamp: float,
-    grid_names: list[str],
-    coordinates: list[FloatArray],
-    emg_types: list[int],
-) -> None:
-    """Apply bandpass filtering in-place to each grid's channels using the grid's EMG type."""
-    ch_idx = 0
-    for i in range(len(grid_names)):
-        n_channels_grid = coordinates[i].shape[0]
-        current_type = emg_types[i] if i < len(emg_types) else 1
-        logger.info(
-            "Applying bandpass filter to Grid %d (Type %d)...",
-            i + 1,
-            current_type,
-        )
-        bandpass_inplace(data[ch_idx : ch_idx + n_channels_grid, :], fsamp, current_type)
-        ch_idx += n_channels_grid
+    """Notch- then bandpass-filter each grid's channels in place, for the grid's EMG type."""
+    for i, rows in enumerate(grid_rows([len(mask) for mask in discard_channels])):
+        logger.info("Filtering Grid %d (Type %d)...", i + 1, emg_types[i])
+        notch_inplace(data[rows], fsamp)
+        bandpass_inplace(data[rows], fsamp, emg_types[i])
 
 
 def load_step(
@@ -212,12 +183,7 @@ def load_step(
         preloaded_signal.readonly_view() if preloaded_signal is not None else load_signal(filepath)
     )
     logger.info("Loaded data: %s, Fs=%s", signal.data.shape, signal.fsamp)
-    return LoadStepOutput(
-        full_path=filepath,
-        signal=signal,
-        data=signal.data,
-        fsamp=signal.fsamp,
-    )
+    return LoadStepOutput(full_path=filepath, signal=signal)
 
 
 def build_manual_artifact_mask(
@@ -280,9 +246,11 @@ def preprocess_step(
     The filters themselves compute in float64.
     """
     store = store if store is not None else RamStore()
-    data = store.allocate("filtered", loaded.data.shape, params.work_dtype)
+    fsamp = loaded.signal.fsamp
+    raw = loaded.signal.data
+    data = store.allocate("filtered", raw.shape, params.work_dtype)
     for lo in range(0, data.shape[0], FILTER_BLOCK_ROWS):
-        data[lo : lo + FILTER_BLOCK_ROWS] = loaded.data[lo : lo + FILTER_BLOCK_ROWS]
+        data[lo : lo + FILTER_BLOCK_ROWS] = raw[lo : lo + FILTER_BLOCK_ROWS]
     grid_names = loaded.signal.grid_names
     if not grid_names:
         raise MueditError(
@@ -301,20 +269,16 @@ def preprocess_step(
             f"channels. Check that the grid name matches the recording."
         )
     declared_discard = list(discard_channels)
-    _apply_grid_notch_filters(data, loaded.fsamp, grid_names, coordinates)
-    _apply_grid_bandpass_filters(data, loaded.fsamp, grid_names, coordinates, emg_types)
+    _filter_grids(data, fsamp, discard_channels, emg_types)
 
-    roi_list = _resolve_roi_list(
-        data, loaded.fsamp, duration, manual_roi, roi, rois, params.nwindows
-    )
-    ngrid = len(grid_names)
+    resolved = _resolve_rois(data, fsamp, duration, manual_roi, roi, rois, params.nwindows)
 
     artifact_mask: BoolArray | None = None
     if params.auto_mask_artifacts:
         grid_channel_counts = [c.shape[0] for c in coordinates]
         qc_result = run_auto_qc(
             data,
-            loaded.fsamp,
+            fsamp,
             grid_channel_counts,
             grid_coordinates=coordinates,
             store=store,
@@ -354,16 +318,15 @@ def preprocess_step(
     return PreprocessStepOutput(
         signal=loaded.signal.without_data(),
         data=store.seal(data),
-        fsamp=loaded.fsamp,
+        fsamp=fsamp,
         grid_names=grid_names,
         coordinates=coordinates,
         ied=ied,
         discard_channels=discard_channels,
         muscle_names=loaded.signal.muscle_names,
         loader_meta=loaded.signal.metadata,
-        roi_list=roi_list,
-        ngrid=ngrid,
-        coordinates_plateau=_build_coordinates_plateau(ngrid, roi_list),
+        rois=resolved,
+        coordinates_plateau=_build_coordinates_plateau(len(grid_names), resolved),
         artifact_mask=artifact_mask,
         target_segments=_target_segments(loaded.signal, target_index),
         declared_discard_channels=declared_discard,
@@ -396,8 +359,8 @@ def bids_export_step(
 
     signal = loaded.signal
     out = export_bids_emg(
-        loaded.data,  # unfiltered
-        loaded.fsamp,
+        signal.data,  # unfiltered
+        signal.fsamp,
         prep.grid_names,
         prep.coordinates,
         prep.declared_discard_channels,
@@ -418,7 +381,7 @@ def bids_export_step(
     )
     # The events are refreshed even when the source is already BIDS: they are merged, not skipped.
     export_bids_events(
-        out["edf"], loaded.fsamp, aux_data=signal.aux_data, target_segments=prep.target_segments
+        out["edf"], signal.fsamp, aux_data=signal.aux_data, target_segments=prep.target_segments
     )
     write_participant(Path(bids_root), names.subject, entities.get("participant_meta"))
 

@@ -401,7 +401,7 @@ heap stand-in used when no store is given.
 | `grid_rows` | `list[tuple[int, int]]` | `[first, stop)` EMG rows of each grid |
 | `emg_types` | `list[int]` | Bandpass of each grid |
 | `emg` | `MinMaxPyramid` | Bandpassed EMG of the grid rows |
-| `overview` | `FloatArray` | `(n_grids, n_samples)`: smoothed mean \|EMG\| per grid |
+| `overview` | `FloatArray` | `(ngrid, n_samples)`: smoothed mean \|EMG\| per grid |
 | `overview_levels` | `MinMaxPyramid` | Pyramid of `overview` |
 | `aux` | `MinMaxPyramid` | Aux channels |
 

@@ -37,7 +37,7 @@ from muedit.errors import MueditError
 from muedit.io.npz import RowSource
 from muedit.models import EditSignalContext, FloatArray, IntArray, resident_nbytes, spike_array
 from muedit.signal.filters import emg_filter_inplace, for_each_row
-from muedit.signal.grid import fallback_grid_name, format_hdemg_signal, grid_spec
+from muedit.signal.grid import fallback_grid_name, format_hdemg_signal, grid_rows, grid_spec
 from muedit.storage import SessionStore, StoreClosedError, copy_into
 
 logger = logging.getLogger(__name__)
@@ -140,7 +140,7 @@ class EditSession:
         fsamp: float,
         total_samples: int,
         spike_times: Sequence[Any],
-        pulse: FloatArray | None,
+        pulse_trains: FloatArray | None,
         mu_grid_index: list[int],
         mu_uids: list[str],
         artifacts: Sequence[Any] | None = None,
@@ -169,10 +169,12 @@ class EditSession:
         self._closed = False
 
         self.arrays: dict[str, np.ndarray] = {}
-        has_pulse = pulse is not None and pulse.ndim == 2 and pulse.shape[0] == n_mu
+        has_pulse = (
+            pulse_trains is not None and pulse_trains.ndim == 2 and pulse_trains.shape[0] == n_mu
+        )
         if has_pulse:
-            assert pulse is not None
-            self.arrays["base"] = pulse
+            assert pulse_trains is not None
+            self.arrays["base"] = pulse_trains
         self.rows: list[PulseRef] = [("base", i) if has_pulse else None for i in range(n_mu)]
         self.owned = [False] * n_mu
         self.spike_times = [spike_array(s) for s in spike_times]
@@ -488,8 +490,8 @@ class EditSession:
         start = len(self.history)
         self._begin("remove_outliers", mu)
         before = self.spike_times[mu]
-        pulse = self.values(mu, 0, self.total_samples)
-        self.spike_times[mu] = remove_discharge_rate_outliers(pulse, before, self.fsamp)
+        pulse_train = self.values(mu, 0, self.total_samples)
+        self.spike_times[mu] = remove_discharge_rate_outliers(pulse_train, before, self.fsamp)
         _, removed = _diff(before, self.spike_times[mu])
         if removed:
             self._entry("remove_outliers", mu, spikes_removed=removed)
@@ -532,7 +534,7 @@ class EditSession:
             for i in range(self.n_mu)
             if i != mu and self.mu_grid_index[i] == grid and not self.flagged[i]
         ]
-        pt, updated = update_motor_unit_filter_window(
+        pulse_train, updated = update_motor_unit_filter_window(
             emg,
             emg_mask,
             self.spike_times[mu],
@@ -541,7 +543,7 @@ class EditSession:
             view_end,
             nbextchan=nbextchan,
             peeloff_spike_times=others,
-            peeloff_win=peel_off_win,
+            peel_off_win=peel_off_win,
             use_peeloff=bool(use_peeloff),
             artifact_times=self.artifacts[mu],
             lock_spikes=bool(lock_spikes),
@@ -549,15 +551,15 @@ class EditSession:
             bandpass=False,  # filtered as the decomposition was, by _grid_emg
             compute_dtype=compute_dtype,
         )
-        if pt is not None:
+        if pulse_train is not None:
             edge = int(round(0.1 * fsamp))
             seg_start = view_start + edge
-            seg_end = min(view_start + len(pt) - edge, self.total_samples)
-            if seg_end > seg_start and len(pt) > 2 * edge:
+            seg_end = min(view_start + len(pulse_train) - edge, self.total_samples)
+            if seg_end > seg_start and len(pulse_train) > 2 * edge:
                 row, copied = self._own_row(mu)
                 if not copied:
                     step.patch = (seg_start, self._patch_copy(row[seg_start:seg_end]))
-                row[seg_start:seg_end] = pt[edge : edge + (seg_end - seg_start)]
+                row[seg_start:seg_end] = pulse_train[edge : edge + (seg_end - seg_start)]
         before = self.spike_times[mu]
         self.spike_times[mu] = updated
         added, removed = _diff(before, self.spike_times[mu])
@@ -631,26 +633,28 @@ class EditSession:
         )
         if not 0 <= grid < len(coordinates):
             raise out_of_range("grid", grid, len(coordinates))
-        first = sum(int(coordinates[g].shape[0]) for g in range(grid))
-        n_ch = int(coordinates[grid].shape[0])
+        span = grid_rows([c.shape[0] for c in coordinates])[grid]
+        n_ch = span.stop - span.start
         cell = (
             ctx.discard_channels[grid]
             if grid < len(ctx.discard_channels)
             else np.array([], dtype=int)
         )
-        rows = data[first : first + n_ch, :]
+        rows = data[span, :]
         mask = _discard_mask(cell, n_ch)
         if ctx.prefiltered:  # a v1 file's EMG went through these filters before it was saved
             return rows, ctx.fsamp, mask
         out = self.store.allocate(f"filtered-grid{grid}", rows.shape, np.float32)
-        self._filter_rows(rows, out, ctx.fsamp, emg_types[grid] if grid < len(emg_types) else 1)
+        self._filter_rows(rows, out, ctx.fsamp, emg_types[grid])
         return self.store.seal(out), ctx.fsamp, mask
 
     @staticmethod
     def _emg_type(grid_names: Any, grid: int) -> int:
-        """The bandpass of grid ``grid`` from the grid catalogue (surface when unknown)."""
-        specs = [grid_spec(name) for name in list(grid_names or []) or [fallback_grid_name(0)]]
-        return specs[grid].emg_type if grid < len(specs) else 1
+        """The bandpass of grid ``grid`` from the grid catalogue; raises for a grid it does not know."""
+        names = list(grid_names or [])
+        if not 0 <= grid < len(names):
+            raise out_of_range("grid", grid, len(names))
+        return grid_spec(names[grid]).emg_type
 
     def _filter_rows(self, rows: FloatArray, out: FloatArray, fsamp: float, emg_type: int) -> None:
         """``rows`` notched and bandpassed into float32 ``out``, a few channels at once."""

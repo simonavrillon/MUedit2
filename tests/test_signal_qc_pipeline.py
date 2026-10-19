@@ -25,10 +25,8 @@ def _rest_artifact(data: np.ndarray, center: int, half_width: int, amplitude: fl
     return out
 
 
-def _qc(data: np.ndarray, n_grids: int = 1) -> QCPipelineResult:
-    return run_auto_qc(
-        data, FSAMP, [N_CHANNELS] * n_grids, grid_coordinates=[grid_coords()] * n_grids
-    )
+def _qc(data: np.ndarray, ngrid: int = 1) -> QCPipelineResult:
+    return run_auto_qc(data, FSAMP, [N_CHANNELS] * ngrid, grid_coordinates=[grid_coords()] * ngrid)
 
 
 def test_clean_recording_has_no_flags() -> None:
@@ -62,6 +60,6 @@ def test_multi_grid_reports_on_the_right_grid() -> None:
     g1 = _rest_artifact(add_contraction(correlated_emg(seed=1), 4000, 6000, seed=10), 1000, 50, 2.0)
     g2 = add_contraction(correlated_emg(seed=2), 14000, 16000, seed=20)
     g2[10] = 1e-12
-    result = _qc(np.vstack([g1, g2]), n_grids=2)
+    result = _qc(np.vstack([g1, g2]), ngrid=2)
     assert result.artifact_mask[950:1050].any()
     assert [np.flatnonzero(m).tolist() for m in result.bad_channel_masks] == [[], [10]]

@@ -738,9 +738,9 @@ class TestDecomposeStream:
         token = mu_run["preview"]["run_result_token"]
         entry = _run_result(token)
         assert entry is not None
-        pulse = entry.pulse_trains
-        assert pulse.dtype == np.float32
-        assert pulse.shape == (mu_run["summary"]["mu_count"], MU_RUN_SAMPLES)
+        pulse_trains = entry.pulse_trains
+        assert pulse_trains.dtype == np.float32
+        assert pulse_trains.shape == (mu_run["summary"]["mu_count"], MU_RUN_SAMPLES)
 
     def test_spike_times_stay_on_the_server(self, mu_run: dict[str, Any]) -> None:
         preview = mu_run["preview"]

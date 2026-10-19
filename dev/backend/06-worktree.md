@@ -88,7 +88,7 @@ Use this to trace what the user can reach.
 | `series_frame(kind, upload_token, start, end, bins, grid)` | App-internal | `GET /series/emg`, `/series/overview`, `/series/aux` |
 | `pulse_frame(token, mu, start, end, bins)` | App-internal | `GET /series/pulse`; an edit session's or a run's train |
 | `bandpassed_rows(signal, lo, hi, emg_type)` | App-internal | Preview pass and auto-QC |
-| `grid_rows(grid_counts, n_rows)`, `grid_emg_type(emg_types, grid)` | App-internal | Preview and auto-QC |
+| `grid_emg_type(emg_types, grid)` | App-internal | Preview and auto-QC |
 
 ### `services/decompose_service.py`
 
@@ -208,6 +208,7 @@ Use this to trace what the user can reach.
 | `preprocess_step()` | App-internal | Called by `run_decomposition` |
 | `bids_export_step()` | App-internal | Called by `run_decomposition` when it is given a `bids_root` |
 | `decompose_step()` | App-internal | Called by `run_decomposition` |
+| `extended_window()` | App-internal | Called by `decompose_step` and `postprocess_step` (one window, extended and trimmed) |
 | `postprocess_step()` | App-internal | Called by `run_decomposition` |
 | `export_step()` | App-internal | Called by `run_decomposition` |
 | `select_roi_interactively()` | User-exposed | CLI `--manual-roi` (imports matplotlib lazily; `plot` extra) |
@@ -233,7 +234,7 @@ Use this to trace what the user can reach.
 | `load_decomposition()` | App-internal | Called by editing service; one read of the file for both the decomposition and its EMG |
 | `pack_csr()` / `unpack_csr()` | App-internal | CSR layout of the `.npz` schema (spike times, per-window SIL, channel masks) |
 | `io.npz.NpzWriter` / `io.npz.NpzArchive` | App-internal | Aligned uncompressed `.npz` writing; one-open reading with memory maps and the restricted legacy unpickler |
-| `first_non_none()` | App-internal | Called by `decomp/decomposition_file.py` internals |
+| `decomp/_mat_layout.py` functions | App-internal | MATLAB-style payload normalizers, called by `decomposition_file.py` (`.mat` and schema v1 `.npz`) |
 | All `_`-prefixed functions | App-internal | Internal helpers |
 
 ---
@@ -277,6 +278,8 @@ Use this to trace what the user can reach.
 | `bandpass_signals()` | App-internal | Called by `operations.py` |
 | `demean()` | App-internal | Called by `decompose_step`, `postprocess_step` |
 | `format_hdemg_signal()` | App-internal | Called by `preprocess_step`, preview service, edit session |
+| `grid_rows(grid_counts, n_rows=None)` | App-internal | Each grid's slice of rows in the stacked signal: every per-grid offset (decomp, QC, series, preview, edit session, `channels.tsv`) |
+| `kept_rows(discard_channels)` | App-internal | Each grid's kept (not discarded) rows; called by `extended_window`, `postprocess_step` |
 | `grid_spec()` | App-internal | One grid's catalogue entry; Open Ephys loader, edit session |
 | `detect_bad_channels_per_grid()` | App-internal | Called by QC pipeline |
 | `_channel_qc_diagnostics()` | App-internal | Called by `detect_bad_channels_per_grid` |

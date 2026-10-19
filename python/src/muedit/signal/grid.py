@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from itertools import accumulate, pairwise
 
 import numpy as np
 
@@ -329,6 +330,22 @@ def format_hdemg_signal(
         discard_channels.append(discard_mask)
 
     return coordinates, ied, discard_channels, emg_types
+
+
+def grid_rows(grid_counts: list[int], n_rows: int | None = None) -> list[slice]:
+    """Each grid's rows in the stacked signal, cut at ``n_rows`` when the signal has fewer."""
+    bounds = [0, *accumulate(grid_counts)]
+    limit = bounds[-1] if n_rows is None else n_rows
+    return [slice(min(first, limit), min(stop, limit)) for first, stop in pairwise(bounds)]
+
+
+def kept_rows(discard_channels: list[IntArray]) -> list[IntArray]:
+    """Rows of each grid's kept (not discarded) channels in the stacked signal."""
+    rows = grid_rows([len(mask) for mask in discard_channels])
+    return [
+        grid.start + np.flatnonzero(np.asarray(mask) == 0)
+        for grid, mask in zip(rows, discard_channels, strict=True)
+    ]
 
 
 def get_grid_electrode_metadata(grid_name: str) -> dict[str, str]:

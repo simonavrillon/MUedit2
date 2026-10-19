@@ -27,7 +27,6 @@ from muedit.api.services.series_service import (
     bandpassed_row,
     build_signal_views,
     grid_emg_type,
-    grid_rows,
 )
 from muedit.errors import MueditError
 from muedit.io.aux_channels import find_target_channel
@@ -36,7 +35,7 @@ from muedit.io.factory import get_loader, load_signal
 from muedit.models import FloatArray, SignalImport
 from muedit.signal.artifact_mask import mask_to_intervals
 from muedit.signal.filters import for_each_row
-from muedit.signal.grid import format_hdemg_signal
+from muedit.signal.grid import format_hdemg_signal, grid_rows
 from muedit.signal.qc_pipeline import run_auto_qc
 from muedit.signal.segmentation import segment_target
 from muedit.storage import ArrayStore, RamStore, SessionStore
@@ -109,13 +108,13 @@ def _bandpassed_grids(
     # No notch, unlike the in-run auto-QC (preprocess_step): results can differ on powerline noise.
     n_rows, n_samples = sum(grid_counts), signal.data.shape[1]
     out = store.allocate("qc-auto", (n_rows, n_samples), np.float32)
-    for grid, (first, stop) in enumerate(grid_rows(grid_counts, n_rows)):
+    for grid, rows in enumerate(grid_rows(grid_counts, n_rows)):
         emg_type = grid_emg_type(emg_types, grid)
 
         def filter_row(row: int, emg_type: int = emg_type) -> None:
             out[row] = bandpassed_row(signal, row, emg_type)
 
-        for_each_row(filter_row, range(first, stop), n_samples)
+        for_each_row(filter_row, range(rows.start, rows.stop), n_samples)
     return store.seal(out)
 
 

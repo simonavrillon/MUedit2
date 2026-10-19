@@ -15,12 +15,11 @@ from muedit.adapt_decomp.adaptation import (
     drop_partial_batch_loss,
 )
 from muedit.adapt_decomp.config import Config
+from muedit.decomp.types import DecompositionParameters
 from muedit.models import BoolArray, FloatArray, IntArray
 from muedit.signal.decomp_primitives import enforce_refractory, extend_mask, signed_square
 from muedit.signal.streaming import SampleSource, StreamedExtender
 from muedit.storage import ArrayStore, RamStore
-
-_DEFAULT_CONFIG = Config()
 
 
 def _run_adapt_decomp_bidirectional(
@@ -81,43 +80,35 @@ def _run_adapt_decomp_bidirectional(
 
 def adaptive_batch_process(
     mu_filters_by_window: dict[int, FloatArray],
-    whiten_mats: dict[int, FloatArray],
+    whiten_mat_by_window: dict[int, FloatArray],
     grid_data: Mapping[int, SampleSource],  # kept channels per grid, read batch by batch
-    coordinates: list[int],
+    coordinates_plateau: list[int],
     total_samples: int,
     fsamp: float,
-    nwindows_per_grid: int,
-    win_means_by_window: dict[int, FloatArray],
-    batch_ms: int = _DEFAULT_CONFIG.batch_ms,
-    adapt_wh: bool = _DEFAULT_CONFIG.adapt_wh,
-    adapt_sv: bool = _DEFAULT_CONFIG.adapt_sv,
-    adapt_sd: bool = _DEFAULT_CONFIG.adapt_sd,
-    wh_learning_rate: float = _DEFAULT_CONFIG.wh_learning_rate,
-    sv_learning_rate: float = _DEFAULT_CONFIG.sv_learning_rate,
-    cov_alpha: float = _DEFAULT_CONFIG.cov_alpha,
-    spike_prev_weight: int = _DEFAULT_CONFIG.spike_prev_weight,
-    compute_loss: bool = _DEFAULT_CONFIG.compute_loss,
+    nwindows: int,
+    win_mean_by_window: dict[int, FloatArray],
+    params: DecompositionParameters,
     artifact_mask: BoolArray | None = None,
-    work_dtype: type[np.floating[Any]] | np.dtype[np.floating[Any]] = np.float32,
     store: ArrayStore | None = None,
+    compute_loss: bool = False,
 ) -> tuple[FloatArray, list[IntArray], dict[int, dict[str, Any]]]:
     """Apply adaptive post-processing across all decomposition windows and grids.
 
-    The adaptation runs in ``work_dtype``; the pulse trains are written into ``store``
-    (heap by default) batch by batch.
+    The adaptation runs in ``params.work_dtype``; the pulse trains are written into
+    ``store`` (heap by default) batch by batch.
     """
     config = Config(
         fsamp=int(fsamp),
-        batch_ms=batch_ms,
-        adapt_wh=adapt_wh,
-        adapt_sv=adapt_sv,
-        adapt_sd=adapt_sd,
-        wh_learning_rate=wh_learning_rate,
-        sv_learning_rate=sv_learning_rate,
-        cov_alpha=cov_alpha,
-        spike_prev_weight=spike_prev_weight,
+        batch_ms=params.adapt_batch_ms,
+        adapt_wh=params.adapt_wh,
+        adapt_sv=params.adapt_sv,
+        adapt_sd=params.adapt_sd,
+        wh_learning_rate=params.adapt_wh_learning_rate,
+        sv_learning_rate=params.adapt_sv_learning_rate,
+        cov_alpha=params.adapt_cov_alpha,
+        spike_prev_weight=params.adapt_spike_prev_weight,
         compute_loss=compute_loss,
-        dtype=work_dtype,
+        dtype=params.work_dtype,
     )
 
     total_mus = sum(f.shape[1] for f in mu_filters_by_window.values() if f.size > 0)
@@ -133,20 +124,23 @@ def adaptive_batch_process(
     mu_nb = 0
     all_losses: dict[int, dict[str, Any]] = {}
 
-    for nwin in sorted(mu_filters_by_window.keys()):
-        filters = mu_filters_by_window[nwin]
+    for win_global in sorted(mu_filters_by_window.keys()):
+        filters = mu_filters_by_window[win_global]
         if filters.size == 0:
             continue
 
-        grid_idx = nwin // max(1, nwindows_per_grid)
-        calib_start, calib_end = coordinates[nwin * 2], coordinates[nwin * 2 + 1]
+        grid_idx = win_global // max(1, nwindows)
+        calib_start, calib_end = (
+            coordinates_plateau[win_global * 2],
+            coordinates_plateau[win_global * 2 + 1],
+        )
         grid = grid_data[grid_idx]
-        win_mean = win_means_by_window[nwin]
+        win_mean = win_mean_by_window[win_global]
         source = StreamedExtender(
             grid,
-            whiten_mats[nwin].shape[0] // grid.shape[0],
+            whiten_mat_by_window[win_global].shape[0] // grid.shape[0],
             offset=win_mean,
-            dtype=work_dtype,
+            dtype=params.work_dtype,
             samples_first=True,
             artifact_mask=artifact_mask,
         )
@@ -165,7 +159,7 @@ def adaptive_batch_process(
 
         win_losses = _run_adapt_decomp_bidirectional(
             source=source,
-            whiten_mat=whiten_mats[nwin],
+            whiten_mat=whiten_mat_by_window[win_global],
             mu_filters=filters,
             calib_start=calib_start,
             calib_end=calib_end,
@@ -173,7 +167,7 @@ def adaptive_batch_process(
             sink=_collect,
         )
         if compute_loss and win_losses:
-            all_losses[nwin] = win_losses
+            all_losses[win_global] = win_losses
         if artifact_mask is not None:
             pulse_trains[rows][:, extend_mask(artifact_mask[:total_samples], source.ex_factor)] = (
                 0.0

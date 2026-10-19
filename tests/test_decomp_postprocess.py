@@ -1,315 +1,149 @@
-"""Post-processing path validation: adaptive decomposition and full-trace filtering."""
+"""Tests for :mod:`muedit.decomp.postprocess`: the filter application routes and duplicate removal."""
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any
+from dataclasses import replace
 
 import numpy as np
 import pytest
 
-from muedit.adapt_decomp.adaptation import run_adaptive_decomposition
-from muedit.adapt_decomp.config import Config
 from muedit.decomp.core import decompose_step
-from muedit.decomp.postprocess import postprocess_step
+from muedit.decomp.postprocess import dedup_survivors, postprocess_step
 from muedit.decomp.preprocess import load_step, preprocess_step
 from muedit.decomp.types import (
     POSTPROCESS_MODES,
-    DecomposeStepOutput,
     DecompositionParameters,
-    PostprocessStepOutput,
+    PostprocessMode,
     PreprocessStepOutput,
 )
-from muedit.models import SignalImport
-from muedit.signal.decomp_primitives import POSTPROC_MIN_ISI_SEC, enforce_refractory
-from tests._metrics_helpers import central_roi
-from tests._report import record
+from muedit.models import SignalImport, resident_nbytes
+from muedit.storage import SessionStore
+from tests._platform import MAPPED_FILES_STAY
+from tests._synthetic_emg import ACTIVE_ROI, FSAMP, synthetic_recording
 
-# Keep the per-iteration budget modest so the real-data decomposition finishes
-# in well under a minute (matches ``test_decomp_pipeline``).
-_NITER = 50
-# Width of the analysis window in seconds (central portion of the recording).
-_ROI_WIDTH_SEC = 10.0
-
-# Novecento has a movement artifact after the ROI (samples ~51600-52000 and
-# ~56900-57000).  Unmasked, the adaptive whitening overflows to inf/NaN there and
-# every full-trace filter of the first grid fires only on the artifact.
-_AUTO_MASK = True
-# Unmasked that costs a whole grid, ~20% of the MUs; masked, only one or two weak
-# units have no discharge in the ROI.
-_MAX_ROI_SILENT_FRAC = 0.1
-
-# Default dedup overlap threshold; disabling value sits above the maximum
-# achievable overlap score (1.0) so no MU pair can ever be flagged a duplicate.
-_DEDUP_ON_THRESH = 0.3
-_DEDUP_OFF_THRESH = 2.0
+_STORE_PARAMS = DecompositionParameters(niter=8)
 
 
-# ── Session-scoped post-processing variants ──────────────────────────────────
+_DEDUP_N_SAMPLES = 4000
 
 
-@pytest.fixture(scope="session")
-def novecento_roi_local(novecento_emg: SignalImport) -> tuple[int, int]:
-    """Central 10 s ROI of the Novecento recording (where the contraction is)."""
-    return central_roi(novecento_emg.data, float(novecento_emg.fsamp), _ROI_WIDTH_SEC)
+def _store_files(store: SessionStore) -> list[str]:
+    return sorted(p.name.split("-")[0].removesuffix(".npy") for p in store.path.glob("*.npy"))
 
 
-@pytest.fixture(scope="session")
-def postprocess_variants(
-    novecento_otb4_file: Path,
-    novecento_emg: SignalImport,
-    novecento_roi_local: tuple[int, int],
-) -> dict[str, Any]:
-    """Decompose once, then re-run post-processing for each branch x dedup state."""
-    base = DecompositionParameters(
-        niter=_NITER, peel_off_enabled=True, auto_mask_artifacts=_AUTO_MASK
+def _spikes(seed: int) -> list[int]:
+    rng = np.random.default_rng(seed)
+    return sorted(rng.choice(np.arange(100, _DEDUP_N_SAMPLES - 100), 40, replace=False).tolist())
+
+
+@pytest.fixture(scope="module")
+def synthetic_signal() -> SignalImport:
+    """One float32 64-channel recording, as loaders now return it."""
+    return synthetic_recording()
+
+
+@pytest.fixture(scope="module")
+def store_prep(synthetic_signal: SignalImport) -> dict[str, object]:
+    """Preprocessing on the heap and into a session store, and one decomposition."""
+    loaded = load_step("synthetic.mat", None, synthetic_signal, None)
+
+    def prep(store: SessionStore | None) -> PreprocessStepOutput:
+        return preprocess_step(
+            loaded=loaded,
+            duration=None,
+            manual_roi=False,
+            roi=ACTIVE_ROI,
+            rois=None,
+            params=_STORE_PARAMS,
+            discard_overrides=None,
+            store=store,
+        )
+
+    store = SessionStore.create("parity")
+    heap = prep(None)
+    decomposed = decompose_step(
+        prep=heap, params=_STORE_PARAMS, rng=np.random.default_rng(0), progress_cb=None
     )
-    rng = np.random.default_rng(base.random_seed)
+    assert sum(f.shape[1] for f in decomposed.mu_filters_by_window.values() if f.size), "no filters"
+    return {"heap": heap, "stored": prep(store), "store": store, "decomposed": decomposed}
 
-    loaded = load_step(str(novecento_otb4_file), None, novecento_emg, None)
-    prep: PreprocessStepOutput = preprocess_step(
-        loaded=loaded,
-        duration=None,
-        manual_roi=False,
-        roi=novecento_roi_local,
-        rois=None,
-        params=base,
-        discard_overrides=None,
+
+@pytest.mark.parametrize("mode", list(POSTPROCESS_MODES))
+def test_pulse_trains_in_the_store_match_the_heap(store_prep: dict, mode: PostprocessMode) -> None:
+    flags = POSTPROCESS_MODES[mode]
+    params = replace(
+        _STORE_PARAMS, use_adaptive=flags["use_adaptive"], full_trace=flags["full_trace"]
     )
-    decomposed: DecomposeStepOutput = decompose_step(
-        prep=prep, params=base, rng=rng, progress_cb=None
+    store = store_prep["store"]
+    heap = postprocess_step(
+        prep=store_prep["heap"],
+        decomposed=store_prep["decomposed"],
+        params=params,
+        progress_cb=None,
     )
-    pre_dedup_count = sum(f.shape[1] for f in decomposed.mu_filters.values() if f.size > 0)
-
-    variants: dict[str, PostprocessStepOutput] = {}
-    for label, mode in (
-        ("adaptive", POSTPROCESS_MODES["adaptive"]),
-        ("full_trace", POSTPROCESS_MODES["full-trace"]),
-    ):
-        for tag, thresh in (("_on", _DEDUP_ON_THRESH), ("_off", _DEDUP_OFF_THRESH)):
-            params = DecompositionParameters(
-                niter=_NITER,
-                peel_off_enabled=True,
-                auto_mask_artifacts=_AUTO_MASK,
-                duplicatesthresh=thresh,
-                use_adaptive=mode["use_adaptive"],
-                full_trace=mode["full_trace"],
-            )
-            variants[label + tag] = postprocess_step(
-                prep=prep, decomposed=decomposed, params=params, progress_cb=None
-            )
-
-    return {
-        "roi": novecento_roi_local,
-        "fsamp": float(prep.fsamp),
-        "ngrid": prep.ngrid,
-        "n_samples": prep.data.shape[1],
-        "pre_dedup_count": pre_dedup_count,
-        **variants,
-    }
+    stored = postprocess_step(
+        prep=store_prep["stored"],
+        decomposed=store_prep["decomposed"],
+        params=params,
+        progress_cb=None,
+        store=store,
+    )
+    assert len(heap.spike_times) > 0
+    if mode != "windowed":
+        # The full-signal routes run over the whole recording, not the decomposed window.
+        active = np.any(heap.pulse_trains != 0, axis=0)
+        assert active[: ACTIVE_ROI[0]].any() and active[ACTIVE_ROI[1] :].any(), mode
+    np.testing.assert_array_equal(stored.pulse_trains, heap.pulse_trains)
+    assert stored.pulse_trains.dtype == np.float32
+    assert len(stored.spike_times) == len(heap.spike_times)
+    for got, want in zip(stored.spike_times, heap.spike_times, strict=True):
+        np.testing.assert_array_equal(got, want)
+    assert stored.mu_grid_index == heap.mu_grid_index
+    assert resident_nbytes(stored.pulse_trains) == 0
+    assert MAPPED_FILES_STAY or "pulse_trains_all" not in _store_files(store)
 
 
-# ── Shared validation helpers ────────────────────────────────────────────────
+def test_dedup_keeps_survivors_in_input_order() -> None:
+    a = np.array(_spikes(1))
+    b = np.array(_spikes(2))
+    # Index 1 duplicates index 0 with a steadier rhythm, so it is the one kept of the pair.
+    steady = np.arange(200, _DEDUP_N_SAMPLES - 200, 100)
+    kept, grids = dedup_survivors(
+        [np.unique(np.r_[steady, steady[::3] + 7]), steady, a, b],
+        [0, 0, 1, 1],
+        2,
+        DecompositionParameters(duplicatesbgrids=False),
+        FSAMP,
+        _DEDUP_N_SAMPLES,
+    )
+    assert kept == sorted(kept) and 1 in kept and 0 not in kept
+    assert grids == [0, 1, 1]
 
 
-def _nonzero_samples_outside_roi(post: PostprocessStepOutput, roi: tuple[int, int]) -> int:
-    """Count samples with any pulse activity lying outside the ROI window."""
-    nz = np.any(post.pulse_trains != 0, axis=0)
-    roi_start, roi_end = roi
-    return int(np.count_nonzero(nz[:roi_start]) + np.count_nonzero(nz[roi_end:]))
-
-
-def _assert_structure(
-    post: PostprocessStepOutput,
-    n_samples: int,
-    fsamp: float,
-    roi: tuple[int, int],
-    min_isi_sec: float,
+@pytest.mark.parametrize(
+    ("across_grids", "kept", "grids"),
+    [(False, [0, 1, 2], [0, 1, 1]), (True, [0, 2], [0, 1])],
+    ids=["within-grids-only", "across-grids"],
+)
+def test_a_copy_on_another_grid_goes_only_across_grids(
+    across_grids: bool, kept: list[int], grids: list[int]
 ) -> None:
-    """Assert the postprocess payload is internally consistent."""
-    # Both branches pick spikes with POSTPROC_MIN_ISI_SEC: the separator is fitted
-    # by now, so the stricter in-loop DECOMP_MIN_ISI_SEC no longer applies.
-    n_mu = len(post.spike_times)
-    assert n_mu > 0, "postprocess produced zero motor units"
-    assert post.pulse_trains.shape[0] == n_mu
-    assert post.pulse_trains.shape[1] == n_samples
-    assert len(post.mu_grid_index) == n_mu
-    assert len(post.sil) == n_mu
-    assert np.isfinite(post.pulse_trains).all(), "pulse trains contain non-finite values"
-    roi_start, roi_end = roi
-    silent = [
-        i
-        for i, raw in enumerate(post.spike_times)
-        if not np.any((np.asarray(raw) >= roi_start) & (np.asarray(raw) < roi_end))
-    ]
-    assert len(silent) <= _MAX_ROI_SILENT_FRAC * n_mu, (
-        f"{len(silent)}/{n_mu} MUs never discharge inside the ROI: {silent}"
+    steady = np.arange(200, _DEDUP_N_SAMPLES - 200, 100)
+    copy = steady + 20  # within the lag the dedup aligns
+    other = np.array(_spikes(2))
+    got = dedup_survivors(
+        [steady, copy, other],
+        [0, 1, 1],
+        2,
+        DecompositionParameters(duplicatesbgrids=across_grids),
+        FSAMP,
+        _DEDUP_N_SAMPLES,
     )
-
-    refractory = int(np.round(fsamp * min_isi_sec))
-    for i, raw in enumerate(post.spike_times):
-        d = np.asarray(raw)
-        if d.size == 0:
-            continue
-        assert np.all(np.diff(d) >= 0), f"MU {i}: discharge times not sorted"
-        assert d.min() >= 0 and d.max() < n_samples, f"MU {i}: discharge times out of bounds"
-        if d.size >= 2:
-            assert int(np.diff(d).min()) >= refractory, (
-                f"MU {i}: min ISI {int(np.diff(d).min())} < refractory {refractory}"
-            )
+    assert got == (kept, grids)
 
 
-def _record_dedup_effect(
-    label: str,
-    post_on: PostprocessStepOutput,
-    post_off: PostprocessStepOutput,
-    variants: dict[str, Any],
-) -> None:
-    """Measure how much the default dedup threshold removed, and check invariants."""
-    n_on = len(post_on.spike_times)
-    n_off = len(post_off.spike_times)
-    pre = variants["pre_dedup_count"]
-
-    record(
-        "dedup",
-        caption=(
-            "Duplicate removal by postprocess branch "
-            f"(threshold {_DEDUP_ON_THRESH} vs disabled {_DEDUP_OFF_THRESH})"
-        ),
-        branch=label,
-        pre_dedup_filters=pre,
-        dedup_disabled=n_off,
-        dedup_enabled=n_on,
-        removed=n_off - n_on,
-        removed_pct=(100.0 * (n_off - n_on) / n_off) if n_off else 0.0,
-    )
-
-    assert n_off <= pre, (
-        f"{label}: dedup-disabled retained {n_off} MUs but decompose only produced {pre}"
-    )
-    assert n_on <= n_off, f"{label}: dedup increased MU count: {n_on} > {n_off}"
-
-    assert len(post_off.sil) == n_off
-    assert len(post_on.sil) == n_on
-
-
-# ── Tests ────────────────────────────────────────────────────────────────────
-
-
-class TestEnforceRefractory:
-    """The seam guard the adaptive branch applies to its per-batch spike picks."""
-
-    def test_keeps_the_larger_peak_of_a_too_close_pair(self) -> None:
-        values = np.zeros(100)
-        values[[40, 44]] = [1.0, 3.0]
-        kept = enforce_refractory(np.array([40, 44]), values, fsamp=2000.0, min_isi_sec=0.005)
-        assert kept.tolist() == [44]
-
-    def test_spikes_a_refractory_period_apart_are_kept(self) -> None:
-        values = np.ones(100)
-        # 10 samples = 5 ms at 2 kHz, exactly the refractory distance.
-        kept = enforce_refractory(np.array([40, 50]), values, fsamp=2000.0, min_isi_sec=0.005)
-        assert kept.tolist() == [40, 50]
-
-    def test_a_kept_spike_gates_the_ones_after_it(self) -> None:
-        """Survivors are compared against the last kept spike, not the last seen one."""
-        values = np.zeros(100)
-        values[[40, 43, 46]] = [3.0, 1.0, 2.0]
-        kept = enforce_refractory(np.array([40, 43, 46]), values, fsamp=2000.0, min_isi_sec=0.005)
-        assert kept.tolist() == [40]
-
-    def test_short_trains_pass_through(self) -> None:
-        values = np.ones(100)
-        assert enforce_refractory(np.array([7]), values, fsamp=2000.0).tolist() == [7]
-        assert enforce_refractory(np.array([], dtype=int), values, fsamp=2000.0).size == 0
-
-
-class TestBatchSeamDetection:
-    """A discharge peaking on a batch edge must still be detected."""
-
-    # Identity whitening with adaptation off, so the peak picker alone decides.
-    # On real data these edges silently cost ~1% of all discharges.
-
-    @staticmethod
-    def _run(peak_positions: list[int]) -> np.ndarray:
-        fsamp, n_samples = 2000, 1000
-        emg = np.zeros((n_samples, 1), dtype=np.float32)
-        for pos in peak_positions:
-            emg[pos, 0] = 1.0
-            emg[pos - 1, 0] = 0.4
-            emg[pos + 1, 0] = 0.4
-
-        config = Config(
-            fsamp=fsamp, ex_factor=1, batch_ms=100, adapt_wh=False, adapt_sv=False, adapt_sd=False
+def test_dedup_survivors_refuses_a_grid_outside_the_range() -> None:
+    with pytest.raises(ValueError, match="outside"):
+        dedup_survivors(
+            [np.array([1]), np.array([2])], [0, 1], 1, DecompositionParameters(), FSAMP, 10
         )
-        rng = np.random.default_rng(0)
-        _pulse_trains, spikes, _losses = run_adaptive_decomposition(
-            emg=emg,
-            whitening=np.eye(1, dtype=np.float32),
-            sep_vectors=np.ones((1, 1), dtype=np.float32),
-            base_centr=np.array([0.04], dtype=np.float32),
-            spikes_centr=np.array([1.0], dtype=np.float32),
-            emg_calib=rng.normal(0, 0.05, size=(400, 1)).astype(np.float32),
-            config=config,
-        )
-        return np.where(spikes[:, 0] > 0)[0]
-
-    def test_peak_inside_a_batch_is_detected(self) -> None:
-        """Control: the same peak away from any edge is found."""
-        assert self._run([300]).tolist() == [300]
-
-    def test_peak_on_the_first_sample_of_a_batch_is_detected(self) -> None:
-        # batch_size = 200 samples, so 200 and 400 open a batch.
-        assert self._run([200, 400]).tolist() == [200, 400]
-
-    def test_peak_on_the_last_sample_of_a_batch_is_detected(self) -> None:
-        # 199 and 399 close a batch.
-        assert self._run([199, 399]).tolist() == [199, 399]
-
-
-class TestPostprocessBranches:
-    """Validate the adaptive and full-trace post-processing branches + dedup."""
-
-    def test_postprocess_adaptive_decomp(self, postprocess_variants: dict[str, Any]) -> None:
-        """Adaptive batch post-processing spans the full trace and deduplicates MUs."""
-        post_on = postprocess_variants["adaptive_on"]
-        post_off = postprocess_variants["adaptive_off"]
-        roi = postprocess_variants["roi"]
-
-        assert _nonzero_samples_outside_roi(post_on, roi) > 0, (
-            "adaptive postprocess left no activity outside the ROI (windowed branch ran instead)"
-        )
-
-        # Check the dedup-disabled run too: dedup would collapse a grid of
-        # broken filters into one unit and hide it.
-        for post in (post_on, post_off):
-            _assert_structure(
-                post,
-                postprocess_variants["n_samples"],
-                postprocess_variants["fsamp"],
-                roi,
-                POSTPROC_MIN_ISI_SEC,
-            )
-        _record_dedup_effect("adaptive", post_on, post_off, postprocess_variants)
-
-    def test_postprocess_full_trace(self, postprocess_variants: dict[str, Any]) -> None:
-        """Full-trace post-processing spans the full trace and deduplicates MUs."""
-        post_on = postprocess_variants["full_trace_on"]
-        post_off = postprocess_variants["full_trace_off"]
-        roi = postprocess_variants["roi"]
-
-        assert _nonzero_samples_outside_roi(post_on, roi) > 0, (
-            "full-trace postprocess left no activity outside the ROI (windowed branch ran instead)"
-        )
-
-        # Check the dedup-disabled run too: dedup would collapse a grid of
-        # broken filters into one unit and hide it.
-        for post in (post_on, post_off):
-            _assert_structure(
-                post,
-                postprocess_variants["n_samples"],
-                postprocess_variants["fsamp"],
-                roi,
-                POSTPROC_MIN_ISI_SEC,
-            )
-        _record_dedup_effect("full_trace", post_on, post_off, postprocess_variants)

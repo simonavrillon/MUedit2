@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 
 import numpy as np
 from scipy.ndimage import binary_closing, binary_dilation, maximum_filter1d, median_filter
 
 from muedit.models import BoolArray, FloatArray, IntArray
+from muedit.signal.grid import grid_rows
 from muedit.storage import ArrayStore, RamStore, sample_blocks
 
 logger = logging.getLogger(__name__)
@@ -248,19 +249,19 @@ def detect_artifact_masks(
     fsamp: float,
     grid_channel_counts: list[int],
     config: ArtifactMaskConfig | None = None,
-    grid_rows: list[IntArray] | None = None,
+    kept_rows: list[IntArray] | None = None,
     store: ArrayStore | None = None,
 ) -> BoolArray:
-    """Union of the grids' artifact masks; grid ``i`` is ``data[grid_rows[i]]`` or its next rows."""
+    """Union of the grids' artifact masks; grid ``i`` is ``data[kept_rows[i]]``, or all its rows."""
     n_samples = data.shape[1]
     global_mask = np.zeros(n_samples, dtype=bool)
 
-    ch_idx = 0
-    for grid_idx, n_channels in enumerate(grid_channel_counts):
-        rows = slice(ch_idx, ch_idx + n_channels) if grid_rows is None else grid_rows[grid_idx]
+    rows_of: Sequence[slice | IntArray] = (
+        grid_rows(grid_channel_counts) if kept_rows is None else kept_rows
+    )
+    for grid_idx, rows in enumerate(rows_of):
         mask = _detect_artifact_mask(data, fsamp, config, rows, store)
         global_mask |= mask
-        ch_idx += n_channels
 
         if mask.any():
             logger.info(

@@ -115,8 +115,6 @@ POSTPROCESS_MODES = {
 |---|---|
 | `full_path` | `str` |
 | `signal` | `SignalImport` |
-| `data` | `FloatArray` |
-| `fsamp` | `float` |
 
 ### `PreprocessStepOutput`
 | Field | Type |
@@ -130,20 +128,19 @@ POSTPROCESS_MODES = {
 | `discard_channels` | `list[np.ndarray]` |
 | `muscles` | `list[str]` |
 | `loader_meta` | `dict[str, Any]` |
-| `roi_list` | `list[tuple[int, int]]` |
-| `ngrid` | `int` |
+| `rois` | `list[tuple[int, int]]` |
 | `coordinates_plateau` | `list[int]` |
 | `artifact_mask` | `np.ndarray \| None` |
 
 ### `DecomposeStepOutput`
 | Field | Type |
 |---|---|
-| `mu_filters` | `dict[int, np.ndarray]` |
-| `whiten_mat` | `dict[int, np.ndarray]` |
+| `mu_filters_by_window` | `dict[int, np.ndarray]` |
+| `whiten_mat_by_window` | `dict[int, np.ndarray]` |
 | `coordinates_plateau` | `list[int]` |
 | `sil_by_window` | `dict[int, list[float]]` |
 | `mu_grid_index` | `list[int]` |
-| `win_means` | `dict[int, np.ndarray]` |
+| `win_mean_by_window` | `dict[int, np.ndarray]` |
 
 ### `PostprocessStepOutput`
 | Field | Type |
@@ -205,10 +202,9 @@ changed), which `export_step` reads to save the decomposition in the dataset's d
 | Function | Description |
 |---|---|
 | `select_roi_interactively(data, fsamp) -> (start, end)` | Matplotlib ginput ROI selection |
-| `_resolve_roi_list(data, fsamp, duration, manual_roi, roi, rois, nwindows)` | Resolves analysis ROI from various input methods |
-| `_build_coordinates_plateau(ngrid, roi_list)` | Flattens per-grid ROI into legacy format |
-| `_apply_grid_notch_filters(data, fsamp, grid_names, coordinates)` | Per-grid notch filtering (in-place) |
-| `_apply_grid_bandpass_filters(data, fsamp, grid_names, coordinates, emg_type)` | Per-grid bandpass filtering (in-place) |
+| `_resolve_rois(data, fsamp, duration, manual_roi, roi, rois, nwindows)` | Resolves analysis ROI from various input methods |
+| `_build_coordinates_plateau(ngrid, rois)` | Flattens the ROI bounds of every grid into `[s0, e0, s1, e1, ...]` |
+| `_filter_grids(data, fsamp, discard_channels, emg_types)` | Per-grid notch then bandpass filtering (in place), for each grid's EMG type |
 | `build_manual_artifact_mask(artifact_regions, n_samples)` | Rasterize user-drawn `(start, end)` ranges into a boolean mask |
 
 ---
@@ -235,6 +231,10 @@ Runs the full ICA decomposition loop over every grid x ROI window. For each wind
 
 Returns per-window MU filters, whitening matrices, SIL scores, and grid assignments.
 
+Steps 1-2 and the edge trim are `extended_window(prep, params, win_global) -> (e_sig, win_mean,
+ex_factor, trim)`, which `postprocess_step` also calls to rebuild a window before whitening it with
+the stored matrix. Each grid's kept rows come from `signal.grid.kept_rows(discard_channels)`.
+
 ---
 
 ## Algorithm (`algorithm.py`)
@@ -260,7 +260,7 @@ PCA eigendecomposition of extended signal covariance. Selects components above r
 ```python
 def whiten_extended_signal(signal, eigenvectors, eigenvalues_diag) -> (whitened, whiten_mat)
 ```
-Whitens: `eigenvectors @ inv(sqrt(eigenvalues_diag)) @ eigenvectors.T`
+Whitens `signal` in place (`whitened` is `signal`): `eigenvectors @ inv(sqrt(eigenvalues_diag)) @ eigenvectors.T`
 
 ```python
 def fixed_point_alg(w, x, basis, maxiter, contrast_func) -> w
@@ -268,7 +268,7 @@ def fixed_point_alg(w, x, basis, maxiter, contrast_func) -> w
 One-unit FastICA fixed-point iteration with Gram-Schmidt orthogonalization against `basis`. Supports `"skew"`, `"kurtosis"`, `"logcosh"` contrast functions. Converges when `delta < 1e-4` or `maxiter` reached.
 
 ```python
-def get_spikes(w, x, fsamp) -> (icasig, spikes)
+def get_spikes(w, x, fsamp) -> spikes
 ```
 Computes pulse train, detects peaks, k-means amplitude split, removes outliers above `mean + 3*std`.
 
@@ -278,7 +278,7 @@ def minimize_isi_covariance(w, x, cov, fsamp) -> (best_w, best_spikes, best_cov)
 Iteratively refines separation vector by re-detecting spikes and re-summing `x[:, spikes]`, tracking the best (lowest) ISI coefficient-of-variation.
 
 ```python
-def compute_silhouette(x, w, fsamp) -> (icasig, spikes2, sil)
+def compute_silhouette(x, w, fsamp) -> sil
 ```
 Silhouette-like separability score using k-means cluster centroids: `sil = (between - within) / max(within, between)`.
 
@@ -288,15 +288,15 @@ def subtract_mu_waveforms(x, spikes, fsamp, win) -> ndarray
 Subtracts averaged MU waveform (estimated from spikes within `+/- win*fsamp` samples) from the multichannel signal. This is the peel-off step.
 
 ```python
-def batch_process_filters(mu_filters_by_window, whitened_windows, coordinates, total_samples, fsamp,
-                           whiten_mat_by_window, build_full_extended, window_to_grid,
-                           win_means_by_window, artifact_mask) -> (pulse_trains, spike_times)
+def batch_process_filters(mu_filters_by_window, whitened_window, coordinates_plateau, total_samples, fsamp,
+                           grid_data, window_to_grid, whiten_mat_by_window=None,
+                           win_mean_by_window=None, artifact_mask=None, store=None,
+                           work_dtype=np.float64) -> (pulse_trains, spike_times)
 ```
-Applies MU filters across all windows to reconstruct pulse trains and spike times. In full-trace mode, dewhitens filters and projects through full extended signal with mean-correction. In windowed mode, projects through per-window whitened signal. Zeros pulse trains at artifact-masked samples, then detects spikes via `find_refractory_peaks` + `split_by_amplitude`.
+Applies MU filters across all windows to reconstruct pulse trains and spike times. `whitened_window(win_global)` rebuilds a window's whitened signal. In full-trace mode (given `whiten_mat_by_window`), dewhitens filters and projects through full extended signal with mean-correction. In windowed mode, projects through per-window whitened signal. Zeros pulse trains at artifact-masked samples, then detects spikes via `find_refractory_peaks` + `split_by_amplitude`.
 
 ```python
-def unique_mu_indices(spike_times, spike_times_ref, maxlag, jitter, tol, fsamp,
-                      total_samples) -> list[int]  # indices of the MUs kept
+def unique_mu_indices(spike_times, maxlag, jitter, tol, fsamp, total_samples) -> list[int]  # indices of the MUs kept
 ```
 Removes duplicated MUs using lag-aware spike-train overlap. For each pair: expand jittered spike times, find best cross-correlation lag, compute overlap score, group duplicates if `score >= tol`. Within each group, keeps the MU with lowest ISI CoV.
 
@@ -311,7 +311,7 @@ def postprocess_step(prep, decomposed, params, progress_cb) -> PostprocessStepOu
 Steps:
 
 1. **Filter application**:
-   - If `use_adaptive`: extract per-grid raw data and call `adaptive_batch_process()` with all adapt params + artifact mask
+   - If `use_adaptive`: extract per-grid raw data and call `adaptive_batch_process()` with `params` + artifact mask
    - Else: call `batch_process_filters()` (full-trace dewhitened or windowed mode)
 2. **Deduplication** via `remove_duplicates_by_grid()` (calls `unique_mu_indices()` with `maxlag = fsamp/40`, `jitter = 0.00025s`)
 3. **SIL remapping** from deduplicated global indices
@@ -323,21 +323,21 @@ Steps:
 |---|---|
 | `dedup_survivors(spike_times, mu_grid_index, ngrid, params, fsamp, total_samples) -> (kept, grids)` | Indices of the MUs duplicate removal keeps, within grids then across, in ascending order (grid-major for the run, whose MUs come grid by grid); works on spike times only (also the edit stage's dedup). A grid index outside `[0, ngrid)` raises `ValueError` |
 | `remove_duplicates_by_grid(pulse_trains, spike_times, mu_grid_index, ngrid, params, fsamp)` | `dedup_survivors`, then the kept pulse rows indexed once |
-| `_reconstruct_window_signal(prep, params, win_global, whiten_mat) -> w_sig` | Recompute a window's whitened extended signal for filter application; `postprocess_step` wraps it in `get_w_sig(nwin)` |
+| `get_w_sig(win_global)` (inside `postprocess_step`) | A window's whitened extended signal for filter application: `extended_window` whitened in place with the stored matrix |
 
 ---
 
 ## Stage 5: Export (`postprocess.py: export_step`)
 
 ```python
-def export_step(loaded, prep, post, params, include_full_preview, save_npz, raw_emg,
+def export_step(loaded, prep, post, params, include_full_preview, save_npz, emg_data,
                progress_cb) -> DecompositionResult
 ```
 
 Steps:
 
 1. Build preview payload via `build_preview_payload()`
-2. If `save_npz`: resolve the save path (`io.bids.run_decomp_path`: the MUedit derivatives of the BIDS dataset the recording belongs to, whether loaded from it or exported into it by this run, else beside the input file) and save the schema v2 NPZ with sil, sil_by_window, rois, the artifact mask and the target segments; with `raw_emg` (the pipeline passes it only for a file saved outside a dataset), also the raw EMG, discard_channels, coordinates and loader_meta. A save into a dataset also writes `derivatives/muedit/dataset_description.json`
+2. If `save_npz`: resolve the save path (`io.bids.run_decomp_path`: the MUedit derivatives of the BIDS dataset the recording belongs to, whether loaded from it or exported into it by this run, else beside the input file) and save the schema v2 NPZ with sil, sil_by_window, rois, the artifact mask and the target segments; with `emg_data` (the pipeline passes it only for a file saved outside a dataset), also the raw EMG, discard_channels, coordinates and loader_meta. A save into a dataset also writes `derivatives/muedit/dataset_description.json`
 3. Return the `DecompositionResult` (with the `rois` and `target_segments` the run save writes); `save_path` is set only when the file was written
 
 ---
@@ -345,7 +345,7 @@ Steps:
 ## Preview (`preview.py`)
 
 ```python
-def build_preview_payload(data, fsamp, pulse_trains, spike_times, grid_names, roi_list,
+def build_preview_payload(data, fsamp, pulse_trains, spike_times, grid_names, rois,
                            discard_channels, coordinates, mu_grid_index, loader_meta,
                            muscles, include_full_preview) -> dict[str, Any]
 ```
@@ -401,13 +401,25 @@ convention (shifts by -1). A v1 `.npz` embeds filtered EMG, so its context has
 | `normalize_spike_times(raw) -> list[IntArray]` | One `spike_array` per MU (sorted, deduplicated, non-negative int32) |
 | `build_pulse_trains_from_spike_times(spike_times, total_samples) -> np.ndarray` | Binary float32 `(n_mu, total_samples)` pulse matrix from discharge indices |
 | `save_editlog(path, mu_uids, edit_history, artifact_times)` | Write JSON editlog sidecar; `artifact_times` only when an MU has markers (the edit save writes it to a temporary file and renames it with the `.npz`) |
-| `first_non_none(*values)` | Return first non-None argument |
 | `_npz_v1_decomp(archive)` / `_npz_v2_decomp(archive) -> DecompositionLoad` | Read the MUedit NPZ schemas |
 | `_mat5_decomp(mat)` / `_mat73_decomp(h5f) -> DecompositionLoad` | Read MATLAB MAT (scipy v5 or HDF5 v7.3, without the EMG samples) |
 | `_parse_mu_grid_index(raw) -> list[int]` | Normalize MU-to-grid assignment |
-| `_unpack_gridwise_decomposition(pulse_trains, spike_times_raw, mu_grid_index) -> (pulse, spike_times, mu_grid_index)` | Stack per-grid blocks |
+| `_first_float(raw) -> float \| None` | First value of a scalar or array payload (`fsamp`) |
 | `_spike_times_from_pulse_matrix(matrix) -> list[IntArray]` | Derive discharge times from pulse matrix non-zero entries |
 | `_shift_spike_times(values, shift, limit) -> list[IntArray]` | Shift all discharge times by constant, clip to `[0, limit)` |
+
+### MATLAB-style payloads (`decomp/_mat_layout.py`)
+
+Normalizers for the cell arrays, matrices of either orientation and case-insensitive struct
+fields that `.mat` and schema v1 `.npz` files hold. `decomposition_file.py` imports them (and
+re-exports `normalize_spike_times` for the editing service); they import nothing from it.
+
+| Function | Description |
+|---|---|
+| `unpack_gridwise_decomposition(pulse_trains, spike_times_raw, mu_grid_index) -> (pulse_trains, spike_times, mu_grid_index)` | Stack per-grid blocks |
+| `coerce_pulse_matrix(value)` / `normalize_pulse_matrix(pulse)` / `infer_total_samples_from_pulse(pulse)` | 2-D `(n_mu, n_samples)` pulse matrices and their length |
+| `parse_discard_channels(raw)` / `parse_signal_coordinates(raw)` / `parse_signal_ied(raw)` | Per-grid channel masks, `(n_channels, 2)` coordinates, IED |
+| `get_case_insensitive(mapping, *names)` / `first_non_none(*values)` / `unwrap_parameters(raw)` / `samples_in(shape)` | Struct field lookup and small payload helpers |
 
 ### `DecompositionLoad` (NamedTuple)
 
@@ -439,15 +451,15 @@ Instead of applying static ICA filters to the full signal, the adaptive engine r
 
 ```python
 def adaptive_batch_process(
-    mu_filters_by_window, w_sig_by_window, win_data, whiten_mats,
-    grid_data, coordinates, total_samples, fsamp, nwindows_per_grid,
-    win_means_by_window=None, batch_ms=100,
-    adapt_wh=True, adapt_sv=True, adapt_sd=True,
-    wh_learning_rate=7e-3, sv_learning_rate=3e-3,
-    cov_alpha=0.1, spike_prev_weight=5,
-    compute_loss=False, artifact_mask=None,
+    mu_filters_by_window, whiten_mat_by_window, grid_data, coordinates_plateau, total_samples, fsamp,
+    nwindows, win_mean_by_window, params,
+    artifact_mask=None, store=None, compute_loss=False,
 ) -> (pulse_trains, spike_times, all_losses)
 ```
+
+The `Config` of the adaptation comes from `params` (`adapt_batch_ms`, `adapt_wh`, `adapt_sv`,
+`adapt_sd`, `adapt_wh_learning_rate`, `adapt_sv_learning_rate`, `adapt_cov_alpha`,
+`adapt_spike_prev_weight`, `compute_dtype`).
 
 For each window: a samples-first `StreamedExtender` in the run's `compute_dtype` over the grid's kept channels (window mean subtracted per batch), a bidirectional adaptive pass writing the `signed_square` of each batch's pulse trains into the store, artifact regions zeroed, discharge times collected per batch.
 

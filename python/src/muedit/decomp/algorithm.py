@@ -36,26 +36,6 @@ DEDUP_LAG_GATE: float = 0.2
 _CHUNK_BYTES = 32 * 1024 * 1024
 _FULL_TRACE_BATCH_BYTES = 64 * 1024 * 1024
 
-__all__ = [
-    "DEDUP_JITTER",
-    "DEDUP_LAG_GATE",
-    "DEDUP_MAXLAG_RATIO",
-    "FIXED_POINT_MAXITER",
-    "batch_process_filters",
-    "column_energy",
-    "compute_silhouette",
-    "covariance",
-    "fixed_point_alg",
-    "get_spikes",
-    "minimize_isi_covariance",
-    "pca_extended_signal",
-    "subtract_mu_waveforms",
-    "unique_mu_indices",
-    "whiten_extended_signal",
-    "whiten_inplace",
-    "window_trim",
-]
-
 
 def vec_mat(v: FloatArray, m: FloatArray) -> FloatArray:
     """``v @ m`` in ``m``'s dtype, written into a zeroed output (see ``zeroed_matmul``)."""
@@ -143,26 +123,23 @@ def whiten_extended_signal(
     signal: FloatArray,
     eigenvectors: FloatArray,
     eigenvalues_diag: FloatArray,
-    inplace: bool = False,
 ) -> tuple[FloatArray, FloatArray]:
-    """Whiten extended signal and return the whitening matrix."""
+    """Whiten the extended signal in place; return it and the whitening matrix."""
     inv_sqrt_d = inv(np.sqrt(eigenvalues_diag))
 
-    whitening_matrix = eigenvectors @ inv_sqrt_d @ eigenvectors.T
-    if not inplace:
-        return whitening_matrix @ signal, whitening_matrix
-    return whiten_inplace(signal, whitening_matrix), whitening_matrix
+    whiten_mat = eigenvectors @ inv_sqrt_d @ eigenvectors.T
+    return whiten_inplace(signal, whiten_mat), whiten_mat
 
 
-def whiten_inplace(signal: FloatArray, whitening_matrix: FloatArray) -> FloatArray:
-    """Overwrite ``signal`` with ``whitening_matrix @ signal``, one column chunk at a time.
+def whiten_inplace(signal: FloatArray, whiten_mat: FloatArray) -> FloatArray:
+    """Overwrite ``signal`` with ``whiten_mat @ signal``, one column chunk at a time.
 
     The product is float64 (a float32 chunk is promoted), then stored in ``signal``'s dtype.
     """
     # Each output column depends only on the same input column, so chunks can
     # be written back without a second full-size array.
     for cols in _column_chunks(signal.shape[1], signal.shape[0]):
-        signal[:, cols] = whitening_matrix @ signal[:, cols]
+        signal[:, cols] = whiten_mat @ signal[:, cols]
     return signal
 
 
@@ -227,35 +204,33 @@ def fixed_point_alg(
     return w
 
 
-def _pulse_train(w: FloatArray, x: FloatArray) -> FloatArray:
+def _source_pulse_train(w: FloatArray, x: FloatArray) -> FloatArray:
     """Project source and apply signed-squared nonlinearity, in ``x``'s dtype."""
     return signed_square(vec_mat(w, x)).flatten()
 
 
-def _detect_peaks(icasig: FloatArray, fsamp: float) -> IntArray:
+def _detect_peaks(pulse_train: FloatArray, fsamp: float) -> IntArray:
     """Detect candidate spikes with refractory-distance peak picking."""
-    return find_refractory_peaks(icasig, fsamp, min_isi_sec=DECOMP_MIN_ISI_SEC)
+    return find_refractory_peaks(pulse_train, fsamp, min_isi_sec=DECOMP_MIN_ISI_SEC)
 
 
 def get_spikes(
     w: FloatArray,
     x: FloatArray,
     fsamp: float,
-) -> tuple[FloatArray, IntArray]:
+) -> IntArray:
     """Estimate spike times from one source using k-means amplitude split."""
-    icasig = _pulse_train(w, x)
-    spikes = _detect_peaks(icasig, fsamp)
+    pulse_train = _source_pulse_train(w, x)
+    spikes = _detect_peaks(pulse_train, fsamp)
 
     if len(spikes) <= 1:
-        return icasig, np.asarray(spikes, dtype=int)
+        return np.asarray(spikes, dtype=int)
 
-    spikes2, _, _ = split_by_amplitude(icasig, spikes)
+    spikes2, _, _ = split_by_amplitude(pulse_train, spikes)
 
-    vals = icasig[spikes2]
+    vals = pulse_train[spikes2]
     threshold = np.mean(vals) + 3 * np.std(vals)
-    spikes2 = spikes2[vals <= threshold]
-
-    return icasig, spikes2
+    return spikes2[vals <= threshold]
 
 
 def minimize_isi_covariance(
@@ -276,7 +251,7 @@ def minimize_isi_covariance(
         cov_last = cov
         w_detect = w.copy()
 
-        _, spikes = get_spikes(w, x, fsamp)
+        spikes = get_spikes(w, x, fsamp)
 
         if len(spikes) < 2:
             break
@@ -291,7 +266,7 @@ def minimize_isi_covariance(
         w = np.sum(x[:, spikes], axis=1, dtype=np.float64)
 
     if len(best_spikes) < 2:
-        _, spikes = get_spikes(best_w, x, fsamp)
+        spikes = get_spikes(best_w, x, fsamp)
         return best_w, spikes, isi_cov(spikes, fsamp)
 
     return best_w, best_spikes, best_cov
@@ -301,40 +276,38 @@ def compute_silhouette(
     x: FloatArray,
     w: FloatArray,
     fsamp: float,
-) -> tuple[FloatArray, IntArray, float]:
+) -> float:
     """Compute silhouette-like separability score for detected spikes."""
-    icasig = _pulse_train(w, x)
-    spikes = _detect_peaks(icasig, fsamp)
+    pulse_train = _source_pulse_train(w, x)
+    spikes = _detect_peaks(pulse_train, fsamp)
 
     if len(spikes) <= 1:
-        return icasig, np.array(spikes, dtype=int), 0.0
+        return 0.0
 
-    spikes2, centroids, labels = split_by_amplitude(icasig, spikes)
+    _, centroids, labels = split_by_amplitude(pulse_train, spikes)
 
     idx2 = int(np.argmax(centroids))
     other_idx = 1 - idx2
 
-    spike_cluster_vals = icasig[spikes][labels == idx2]
+    spike_cluster_vals = pulse_train[spikes][labels == idx2]
     within = float(np.sum((spike_cluster_vals - centroids[idx2]) ** 2))
     between = float(np.sum((spike_cluster_vals - centroids[other_idx]) ** 2))
 
     denom = max(within, between)
-    sil = (between - within) / denom if denom > 0 else 0.0
-
-    return icasig, spikes2, sil
+    return (between - within) / denom if denom > 0 else 0.0
 
 
 def subtract_mu_waveforms(
     x: FloatArray,
     spikes: IntArray,
     fsamp: float,
-    win: float,
+    peel_off_win: float,
 ) -> list[tuple[int, int]]:
     """Subtract the averaged MU waveform from ``x`` at every spike, in place.
 
     Returns the ``[start, stop)`` column runs that changed, merged and ascending.
     """
-    window_l = int(np.round(win * fsamp))
+    window_l = int(np.round(peel_off_win * fsamp))
     n_cols = x.shape[1]
 
     spikes = np.asarray(spikes, dtype=int)
@@ -398,19 +371,19 @@ def _stream_full_trace(
     w_t = w_dewhite.T.astype(source.dtype)
     for start in range(0, source.n_samples, step):
         stop = min(start + step, source.n_samples)
-        pt = zeroed_matmul(w_t, source.read(start, stop))
+        pulse_trains = zeroed_matmul(w_t, source.read(start, stop))
         if corr_cum is not None:
-            pt -= corr_cum[np.minimum(np.arange(start, stop), last_delay)].T
-        out[rows, start:stop] = signed_square(pt)
+            pulse_trains -= corr_cum[np.minimum(np.arange(start, stop), last_delay)].T
+        out[rows, start:stop] = signed_square(pulse_trains)
 
 
-def _detect_row(pt: FloatArray, fsamp: float, artifact_mask: BoolArray | None) -> IntArray:
+def _detect_row(pulse_train: FloatArray, fsamp: float, artifact_mask: BoolArray | None) -> IntArray:
     """Mask and detect one pulse train (global peak picking + k-means split)."""
     if artifact_mask is not None:
-        pt[artifact_mask] = 0.0
-    spikes = find_refractory_peaks(pt, fsamp, min_isi_sec=POSTPROC_MIN_ISI_SEC)
+        pulse_train[artifact_mask] = 0.0
+    spikes = find_refractory_peaks(pulse_train, fsamp, min_isi_sec=POSTPROC_MIN_ISI_SEC)
     if len(spikes) > 1:
-        spikes, _, _ = split_by_amplitude(pt, spikes)
+        spikes, _, _ = split_by_amplitude(pulse_train, spikes)
     if artifact_mask is not None and len(spikes) > 0:
         spikes = spikes[~artifact_mask[spikes]]
     return spikes
@@ -418,19 +391,20 @@ def _detect_row(pt: FloatArray, fsamp: float, artifact_mask: BoolArray | None) -
 
 def batch_process_filters(
     mu_filters_by_window: dict[int, FloatArray],
-    whitened_windows: dict[int, FloatArray] | Callable[[int], FloatArray],
-    coordinates: list[int],
+    whitened_window: Callable[[int], FloatArray],
+    coordinates_plateau: list[int],
     total_samples: int,
     fsamp: float,
+    grid_data: Mapping[int, SampleSource],
+    window_to_grid: dict[int, int],
     whiten_mat_by_window: dict[int, FloatArray] | None = None,
-    grid_data: Mapping[int, SampleSource] | None = None,
-    window_to_grid: dict[int, int] | None = None,
-    win_means_by_window: dict[int, FloatArray] | None = None,
+    win_mean_by_window: dict[int, FloatArray] | None = None,
     artifact_mask: BoolArray | None = None,
     store: ArrayStore | None = None,
     work_dtype: type[np.floating[Any]] | np.dtype[np.floating[Any]] = np.float64,
 ) -> tuple[FloatArray, list[IntArray]]:
-    """Apply MU filters over their windows, or streamed over each grid's ``grid_data`` (full trace).
+    """Apply MU filters over their windows, or, with ``whiten_mat_by_window``, streamed over
+    each grid's ``grid_data`` (full trace).
 
     The pulse trains are written into ``store`` (heap by default) as they are produced. The
     full-trace projection runs in ``work_dtype``; a window's, in the window's dtype.
@@ -438,23 +412,20 @@ def batch_process_filters(
     sorted_wins = sorted(mu_filters_by_window.keys())
     first_row: dict[int, int] = {}
     total_mus = 0
-    for nwin in sorted_wins:
-        first_row[nwin] = total_mus
-        if mu_filters_by_window[nwin].size > 0:
-            total_mus += mu_filters_by_window[nwin].shape[1]
+    for win_global in sorted_wins:
+        first_row[win_global] = total_mus
+        if mu_filters_by_window[win_global].size > 0:
+            total_mus += mu_filters_by_window[win_global].shape[1]
 
     if total_mus == 0:
         return np.array([]), []
 
     by_grid: dict[int, list[int]] = {}
-    for nwin in sorted_wins:
-        if mu_filters_by_window[nwin].size > 0:
-            g = window_to_grid[nwin] if window_to_grid is not None else 0
-            by_grid.setdefault(g, []).append(nwin)
+    for win_global in sorted_wins:
+        if mu_filters_by_window[win_global].size > 0:
+            by_grid.setdefault(window_to_grid[win_global], []).append(win_global)
     ex_by_grid = {
         g: mu_filters_by_window[wins[0]].shape[0] // grid_data[g].shape[0]
-        if grid_data is not None
-        else 1
         for g, wins in by_grid.items()
     }
     mask_by_grid = {
@@ -468,24 +439,24 @@ def batch_process_filters(
     )
     spikes_by_row: dict[int, IntArray] = {}
 
-    if grid_data is not None and whiten_mat_by_window is not None:
+    if whiten_mat_by_window is not None:
         for g, wins in by_grid.items():
             source = StreamedExtender(grid_data[g], ex_by_grid[g], dtype=work_dtype)
             w_parts: list[FloatArray] = []
             corr_parts: list[FloatArray] = []
             rows: list[IntArray] = []
-            for nwin in wins:
-                filters = mu_filters_by_window[nwin]
+            for win_global in wins:
+                filters = mu_filters_by_window[win_global]
                 w_dewhite, corr_cum = _dewhitened_filters(
                     filters,
-                    whiten_mat_by_window[nwin],
-                    win_means_by_window[nwin] if win_means_by_window is not None else None,
+                    whiten_mat_by_window[win_global],
+                    win_mean_by_window[win_global] if win_mean_by_window is not None else None,
                     source.ex_factor,
                 )
                 w_parts.append(w_dewhite)
                 if corr_cum is not None:
                     corr_parts.append(corr_cum)
-                rows.append(first_row[nwin] + np.arange(filters.shape[1]))
+                rows.append(first_row[win_global] + np.arange(filters.shape[1]))
             unit_rows = np.concatenate(rows)
             _stream_full_trace(
                 source,
@@ -495,25 +466,27 @@ def batch_process_filters(
                 unit_rows,
             )
             for mu_nb in unit_rows:
-                pt = pulse_trains[mu_nb].astype(np.float64)
-                spikes_by_row[int(mu_nb)] = _detect_row(pt, fsamp, mask_by_grid[g])
-                pulse_trains[mu_nb] = pt
+                pulse_train = pulse_trains[mu_nb].astype(np.float64)
+                spikes_by_row[int(mu_nb)] = _detect_row(pulse_train, fsamp, mask_by_grid[g])
+                pulse_trains[mu_nb] = pulse_train
         return pulse_trains, [spikes_by_row[i] for i in range(total_mus)]
 
     for g, wins in by_grid.items():
-        for nwin in wins:
-            filters = mu_filters_by_window[nwin]
-            start = coordinates[nwin * 2]
-            w_win = whitened_windows(nwin) if callable(whitened_windows) else whitened_windows[nwin]
+        for win_global in wins:
+            filters = mu_filters_by_window[win_global]
+            start = coordinates_plateau[win_global * 2]
+            w_win = whitened_window(win_global)
             segment_len = w_win.shape[1]
             # Every filter of the window in one product: the window is read once, not per MU.
             projections = zeroed_matmul(filters.T.astype(w_win.dtype), w_win)
             for j, projection in enumerate(projections):
-                pt = np.zeros(total_samples)
-                pt[start : start + segment_len] = projection[: total_samples - start]
-                pt = signed_square(pt)
-                spikes_by_row[first_row[nwin] + j] = _detect_row(pt, fsamp, mask_by_grid[g])
-                pulse_trains[first_row[nwin] + j] = pt
+                pulse_train = np.zeros(total_samples)
+                pulse_train[start : start + segment_len] = projection[: total_samples - start]
+                pulse_train = signed_square(pulse_train)
+                spikes_by_row[first_row[win_global] + j] = _detect_row(
+                    pulse_train, fsamp, mask_by_grid[g]
+                )
+                pulse_trains[first_row[win_global] + j] = pulse_train
             # Released before the next window is reconstructed, not when the name rebinds.
             del w_win
 
@@ -541,7 +514,6 @@ def _lag_overlap(ref: IntArray, target: IntArray, max_lag: int) -> IntArray:
 
 def unique_mu_indices(
     spike_times: list[IntArray],
-    spike_times_ref: list[IntArray] | None,
     maxlag: int,
     jitter: float,
     tol: float,
@@ -549,15 +521,9 @@ def unique_mu_indices(
     total_samples: int,
 ) -> list[int]:
     """Indices of the motor units kept after removing duplicates by lag-aware spike-train overlap."""
-
-    if spike_times_ref is None:
-        spike_times_ref = spike_times
-
     jitter_samples = int(round(jitter * fsamp))
     n_mus = len(spike_times)
-    jittered_spike_times = [
-        _jittered_times(d, jitter_samples, total_samples) for d in spike_times_ref
-    ]
+    jittered_spike_times = [_jittered_times(d, jitter_samples, total_samples) for d in spike_times]
 
     kept_indices: list[int] = []
     active_mus = np.ones(n_mus, dtype=bool)

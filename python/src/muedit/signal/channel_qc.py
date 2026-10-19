@@ -10,6 +10,7 @@ from scipy.ndimage import uniform_filter1d
 
 from muedit.models import BoolArray, FloatArray
 from muedit.signal.artifact_mask import mask_to_intervals
+from muedit.signal.grid import grid_rows
 
 logger = logging.getLogger(__name__)
 
@@ -256,9 +257,9 @@ def detect_bad_channels_per_grid(
     if keep is not None and (keep.all() or not keep.any()):
         keep = None
     per_grid_masks: list[BoolArray] = []
-    ch_idx = 0
-    for grid_idx, n_channels in enumerate(grid_channel_counts):
-        grid_data = data[ch_idx : ch_idx + n_channels, :]
+    for grid_idx, rows in enumerate(grid_rows(grid_channel_counts)):
+        grid_data = data[rows, :]
+        n_channels = rows.stop - rows.start
         if keep is not None:
             # Row by row: indexing the columns of the block would return a Fortran-ordered copy.
             kept = np.empty((n_channels, int(keep.sum())), dtype=np.float32)
@@ -272,5 +273,4 @@ def detect_bad_channels_per_grid(
             grid_data, fsamp, coords, config, structural_only=structural_only
         ).mask
         per_grid_masks.append(mask)
-        ch_idx += n_channels
     return per_grid_masks

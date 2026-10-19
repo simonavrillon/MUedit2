@@ -10,6 +10,7 @@ import numpy as np
 from muedit.models import BoolArray, FloatArray, IntArray
 from muedit.signal.artifact_mask import ArtifactMaskConfig, detect_artifact_masks
 from muedit.signal.channel_qc import ChannelQCConfig, detect_bad_channels_per_grid
+from muedit.signal.grid import grid_rows
 from muedit.storage import ArrayStore
 
 logger = logging.getLogger(__name__)
@@ -56,7 +57,7 @@ def run_auto_qc(
         fsamp,
         [rows.size for rows in kept_rows],
         artifact_config,
-        grid_rows=kept_rows,
+        kept_rows=kept_rows,
         store=store,
     )
     logger.info(
@@ -95,11 +96,9 @@ def _kept_channel_rows(
 ) -> list[IntArray]:
     """Rows of each grid's kept channels in the full signal (its first channel if none is kept)."""
     rows: list[IntArray] = []
-    ch_idx = 0
-    for n_channels, bad in zip(grid_channel_counts, bad_channel_masks, strict=True):
+    for grid, bad in zip(grid_rows(grid_channel_counts), bad_channel_masks, strict=True):
         kept = np.flatnonzero(~bad)
         if kept.size == 0:
             kept = np.array([0])
-        rows.append(ch_idx + kept)
-        ch_idx += n_channels
+        rows.append(grid.start + kept)
     return rows

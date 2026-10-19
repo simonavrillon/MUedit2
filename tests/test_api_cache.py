@@ -198,16 +198,16 @@ class TestSignalViews:
 
 class TestRunResult:
     def test_read_only_view_with_its_spikes(self, clock: FakeClock) -> None:
-        pulse = np.arange(6, dtype=np.float32).reshape(2, 3)
+        pulse_trains = np.arange(6, dtype=np.float32).reshape(2, 3)
         spikes: list[IntArray] = [np.array([0, 2], np.int32), np.array([1], np.int32)]
-        token = cache._store_run_result(pulse, spike_times=spikes)
+        token = cache._store_run_result(pulse_trains, spike_times=spikes)
         entry = _run_result(token)
         assert entry is not None and entry.spike_times is not None
-        assert np.shares_memory(entry.pulse_trains, pulse)
+        assert np.shares_memory(entry.pulse_trains, pulse_trains)
         with pytest.raises(ValueError):
             entry.pulse_trains[0, 0] = 5
         assert [s.tolist() for s in entry.spike_times] == [[0, 2], [1]]
-        assert cache._RUN_RESULTS.slots[token].nbytes == pulse.nbytes + 12
+        assert cache._RUN_RESULTS.slots[token].nbytes == pulse_trains.nbytes + 12
 
     def test_keeps_only_the_latest_run_of_a_session(self, clock: FakeClock) -> None:
         first = cache._store_run_result(np.zeros((1, 3), dtype=np.float32), "tab-a")
@@ -237,7 +237,7 @@ def _edit(fill: int = 1) -> EditSession:
         fsamp=2048.0,
         total_samples=50,
         spike_times=[[fill, 10 + fill]],
-        pulse=np.full((1, 50), fill, dtype=np.float32),
+        pulse_trains=np.full((1, 50), fill, dtype=np.float32),
         mu_grid_index=[0],
         mu_uids=["g0_mu0"],
     )
@@ -353,8 +353,8 @@ def _stored_upload(session: str = "tab-a") -> tuple[str, SessionStore]:
 
 def _stored_run(session: str = "tab-a") -> tuple[str, SessionStore]:
     st = SessionStore.create("run")
-    pulse = st.allocate("pulse_trains", (2, 50), np.float32, zero=True)
-    return cache._store_run_result(st.seal(pulse), session, st), st
+    pulse_trains = st.allocate("pulse_trains", (2, 50), np.float32, zero=True)
+    return cache._store_run_result(st.seal(pulse_trains), session, st), st
 
 
 class TestSessionStores:

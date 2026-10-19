@@ -99,8 +99,6 @@ class LoadStepOutput:
 
     full_path: str
     signal: SignalImport
-    data: FloatArray
-    fsamp: float
 
 
 @dataclass
@@ -119,8 +117,7 @@ class PreprocessStepOutput:
     declared_discard_channels: list[IntArray]
     muscle_names: list[str]
     loader_meta: dict[str, Any]
-    roi_list: list[tuple[int, int]]
-    ngrid: int
+    rois: list[tuple[int, int]]
     coordinates_plateau: list[int]
     artifact_mask: BoolArray | None = None
     target_segments: dict[str, Any] | None = None  # see preprocess._target_segments
@@ -130,12 +127,12 @@ class PreprocessStepOutput:
 class DecomposeStepOutput:
     """ICA filters and per-window SIL scores produced by the decompose step."""
 
-    mu_filters: dict[int, FloatArray]
-    whiten_mat: dict[int, FloatArray]
+    mu_filters_by_window: dict[int, FloatArray]
+    whiten_mat_by_window: dict[int, FloatArray]
     coordinates_plateau: list[int]
     sil_by_window: dict[int, list[float]]
     mu_grid_index: list[int]
-    win_means: dict[int, FloatArray]
+    win_mean_by_window: dict[int, FloatArray]
 
 
 @dataclass

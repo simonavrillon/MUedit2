@@ -7,15 +7,12 @@ import pytest
 
 from muedit.signal.decomp_primitives import extend_signal
 from muedit.signal.streaming import RowSelection, StreamedExtender
-from tests._synthetic_emg import motor_unit_emg
-
-EX = 6
+from tests._synthetic_emg import EX, short_recording
 
 
 @pytest.fixture(scope="module")
 def raw() -> np.ndarray:
-    """Ten channels x 3000 samples of synthetic MU activity (float64)."""
-    return motor_unit_emg(seed=5, n_samples=3000, activity=(0, 3000))[:10].astype(np.float64)
+    return short_recording()
 
 
 class TestStreamedExtender:
@@ -56,3 +53,10 @@ class TestStreamedExtender:
         np.testing.assert_array_equal(source.mask(108, 118), [True] * 7 + [False] * 3)
         np.testing.assert_array_equal(source.mask(1995, 2005), [False] * 10)
         assert StreamedExtender(raw, EX).mask(0, 10) is None
+
+
+@pytest.mark.parametrize("samples_first", [False, True])
+def test_streamed_batches_keep_the_extender_dtype(samples_first: bool) -> None:
+    source = np.ones((3, 50), dtype=np.float64)
+    extender = StreamedExtender(source, 4, dtype=np.float32, samples_first=samples_first)
+    assert extender.read(10, 30).dtype == np.float32

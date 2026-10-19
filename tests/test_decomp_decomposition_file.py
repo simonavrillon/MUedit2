@@ -72,9 +72,7 @@ def _run_save(tmp_path: Path) -> tuple[Path, dict[str, Any]]:
         aux_names=["Force - Original Path"],
         metadata=LOADER_META,
     )
-    loaded = LoadStepOutput(
-        full_path=str(tmp_path / "rec.otb+"), signal=sig, data=sig.data, fsamp=FSAMP
-    )
+    loaded = LoadStepOutput(full_path=str(tmp_path / "rec.otb+"), signal=sig)
     params = DecompositionParameters()
     prep = preprocess_step(
         loaded=loaded,
@@ -94,7 +92,7 @@ def _run_save(tmp_path: Path) -> tuple[Path, dict[str, Any]]:
         sil_by_window={0: [0.9, 0.8], 1: [0.7]},
         sil=[0.9, 0.8, 0.7],
     )
-    result = export_step(loaded, prep, post, params, False, True, loaded.data, None)
+    result = export_step(loaded, prep, post, params, False, True, sig.data, None)
     assert result.save_path is not None
     expected = {
         "parameters": asdict(params),
@@ -111,13 +109,13 @@ def _edit_save(tmp_path: Path) -> tuple[Path, dict[str, Any]]:
     """An edit of the run's file: one MU flagged and removed, one discharge added."""
     run_path, _ = _run_save(tmp_path)
     decomp, ctx = df.load_decomposition(str(run_path), RamStore(), binary_trains=False)
-    pulse = decomp.pulse_trains_full
+    pulse_trains = decomp.pulse_trains_full
     reads: list[tuple[int, int]] = []
 
     def rows(kept: list[int]) -> npz.RowSource:
         def read(first: int, stop: int) -> np.ndarray:
             reads.append((first, stop))
-            return np.asarray(pulse[kept[first:stop]])
+            return np.asarray(pulse_trains[kept[first:stop]])
 
         return npz.RowSource((len(kept), T), read)
 
@@ -138,7 +136,7 @@ def _edit_save(tmp_path: Path) -> tuple[Path, dict[str, Any]]:
         rois=decomp.rois,
         artifact_mask=ctx.artifact_mask if ctx is not None else None,
         form=BidsSaveFields(entity_label="sub-01_task-ramp", remove_flagged=True),
-        pulse=rows,
+        pulse_trains=rows,
         bids_root=tmp_path / "study",
     )
     result = _save(request)[0]
@@ -331,3 +329,59 @@ def test_refuses_bad_decomposition(tmp_path: Path, case: str) -> None:
     if case == "a-crafted-pickle":
         assert isinstance(raised.value.__cause__, LegacyPickleError)
         assert not (tmp_path / "ran").exists()
+
+
+GRID = "GR08MM1305"
+
+
+def _save_npz(path: Path, **extras: Any) -> None:
+    spike_times = [[100, 300], [200]]
+    pulse_trains = np.zeros((2, 1000))
+    df.save_decomposition_npz(
+        path,
+        pulse_trains=pulse_trains,
+        spike_times=spike_times,
+        fsamp=FSAMP,
+        grid_names=[GRID],
+        mu_grid_index=[0, 0],
+        muscle_names=["ta"],
+        parameters={},
+        total_samples=1000,
+        **extras,
+    )
+
+
+class TestNpzArtifactMask:
+    def test_mask_only_file_returns_the_mask(self, tmp_path: Path) -> None:
+        mask = np.zeros(1000, dtype=bool)
+        mask[400:450] = True
+        path = tmp_path / "d.npz"
+        _save_npz(path, artifact_mask=mask)
+        ctx = df.load_decomposition(str(path))[1]
+        assert ctx is not None
+        assert ctx.data.size == 0
+        assert ctx.artifact_mask is not None
+        np.testing.assert_array_equal(ctx.artifact_mask, mask)
+        assert ctx.artifact_mask.dtype == bool
+
+    def test_signal_context_with_emg_and_mask(self, tmp_path: Path) -> None:
+        emg = np.arange(3 * 1000, dtype=float).reshape(3, 1000)
+        mask = np.zeros(1000, dtype=bool)
+        mask[5:7] = True
+        path = tmp_path / "d.npz"
+        _save_npz(
+            path,
+            emg_data=emg.T,
+            discard_channels=[np.array([0, 1, 0])],
+            artifact_mask=mask,
+        )
+        ctx = df.load_decomposition(str(path))[1]
+        assert ctx is not None
+        np.testing.assert_array_equal(ctx.data, emg)
+        assert not ctx.prefiltered
+        assert ctx.fsamp == FSAMP
+        assert ctx.grid_names == [GRID]
+        assert ctx.artifact_mask is not None
+        np.testing.assert_array_equal(ctx.artifact_mask, mask)
+        assert len(ctx.discard_channels) == 1
+        np.testing.assert_array_equal(ctx.discard_channels[0], [0, 1, 0])

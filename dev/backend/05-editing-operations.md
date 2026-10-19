@@ -130,7 +130,7 @@ def update_motor_unit_filter_window(
     end: int,                     # window end sample
     nbextchan: int = DEFAULT_NBEXTCHAN,    # target extended channels (1000)
     peeloff_spike_times: Sequence[SpikeTimes] | None = None,  # other MUs' spikes for peel-off
-    peeloff_win: float = DEFAULT_PEEL_OFF_WIN_SEC,       # 0.025 s
+    peel_off_win: float = DEFAULT_PEEL_OFF_WIN_SEC,       # 0.025 s
     emg_offset: int = 0,          # offset of emg array within full signal
     use_peeloff: bool = False,    # enable peel-off of other MUs
     artifact_times: SpikeTimes | None = None,  # artifact spike times to subtract
@@ -161,7 +161,7 @@ def update_motor_unit_filter_window(
 13. Drop spikes inside artifact regions
 14. Optional lock_spikes: snap existing spikes to nearest peak (+/- 10 samples),
     then merge with new detections
-15. Amplitude ceiling: pt[spike] <= 3 * centroid_high
+15. Amplitude ceiling: pulse_train[spike] <= 3 * centroid_high
 16. Merge with spikes outside the window
 17. Return (pulse_train | None, updated_spike_times)
 ```

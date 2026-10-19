@@ -110,7 +110,7 @@ def _recording() -> SignalImport:
 
 def _run_export(root: Path, sig: SignalImport, form: dict[str, Any]) -> PreprocessStepOutput:
     """A run's export of the raw recording, as ``run_decomposition`` makes it before decomposing."""
-    loaded = LoadStepOutput(full_path="rec.otb+", signal=sig, data=sig.data, fsamp=FSAMP)
+    loaded = LoadStepOutput(full_path="rec.otb+", signal=sig)
     prep = preprocess_step(
         loaded=loaded,
         duration=None,
@@ -363,7 +363,7 @@ def _edit_save(root: Path, recording: SignalImport, form: BidsSaveFields) -> dic
         grid_names=recording.grid_names,
         parameters={},
         form=form,
-        pulse=lambda kept: None,
+        pulse_trains=lambda kept: None,
         signal=ctx,
         bids_root=root,
     )

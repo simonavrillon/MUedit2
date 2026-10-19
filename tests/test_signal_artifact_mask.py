@@ -162,7 +162,7 @@ def test_kept_rows_give_the_mask_of_the_stacked_rows() -> None:
     want = _detect_artifact_mask(data[rows], FSAMP)
     assert want.any()
     np.testing.assert_array_equal(_detect_artifact_mask(data, FSAMP, rows=rows), want)
-    mask = detect_artifact_masks(data, FSAMP, [rows.size], grid_rows=[rows])
+    mask = detect_artifact_masks(data, FSAMP, [rows.size], kept_rows=[rows])
     np.testing.assert_array_equal(mask, want)
 
 

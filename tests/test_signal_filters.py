@@ -14,6 +14,7 @@ from muedit.signal.filters import (
     _remove_line_interference,
     bandpass_inplace,
     bandpass_signals,
+    demean,
     notch_inplace,
 )
 
@@ -124,3 +125,20 @@ def test_threaded_inplace_filter_matches_the_whole_array_filter(
     threaded = data.copy()
     inplace(threaded, FSAMP)
     np.testing.assert_array_equal(threaded, whole(data).astype(np.float32))
+
+
+def test_demean_takes_the_mean_in_float64() -> None:
+    x = (np.random.default_rng(0).standard_normal((4, 100_001)) + 1e4).astype(np.float32)
+    out = demean(x)
+    assert out.dtype == np.float32
+    expected = (x - x.astype(np.float64).mean(axis=1, keepdims=True)).astype(np.float32)
+    np.testing.assert_array_equal(out, expected)
+
+
+def test_float32_notch_filters_in_float64() -> None:
+    t = np.arange(20_001) / 2048.0
+    x = np.random.default_rng(1).standard_normal((3, t.size)) + 4 * np.sin(2 * np.pi * 50 * t)
+    x32, x64 = x.astype(np.float32), x.astype(np.float32).astype(np.float64)
+    notch_inplace(x32, 2048.0)
+    notch_inplace(x64, 2048.0)
+    np.testing.assert_array_equal(x32, x64.astype(np.float32))

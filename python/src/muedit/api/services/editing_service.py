@@ -193,15 +193,15 @@ def _dataset_root(edit: EditSession, project: str | None) -> Path:
     return bids_root_for(project)
 
 
-def _session_pulse(decomp: LoadedDecomposition, store: SessionStore) -> FloatArray | None:
+def _session_pulse_trains(decomp: LoadedDecomposition, store: SessionStore) -> FloatArray | None:
     """The file's pulse trains as float32 outside the heap, or None when it has none."""
-    pulse = decomp.pulse_trains_full
+    pulse_trains = decomp.pulse_trains_full
     n_mu, total = len(decomp.spike_times), int(decomp.total_samples)
-    if pulse.ndim != 2 or n_mu == 0 or pulse.shape != (n_mu, total):
+    if pulse_trains.ndim != 2 or n_mu == 0 or pulse_trains.shape != (n_mu, total):
         return None
-    if pulse.dtype != np.float32 or resident_nbytes(pulse):
-        pulse = copy_into(store, "pulse", pulse)
-    return pulse
+    if pulse_trains.dtype != np.float32 or resident_nbytes(pulse_trains):
+        pulse_trains = copy_into(store, "pulse", pulse_trains)
+    return pulse_trains
 
 
 def _new_session(
@@ -237,7 +237,7 @@ def _new_session(
         fsamp=fsamp,
         total_samples=total,
         spike_times=decomp.spike_times,
-        pulse=_session_pulse(decomp, store),
+        pulse_trains=_session_pulse_trains(decomp, store),
         mu_grid_index=decomp.mu_grid_index,
         mu_uids=uids if uids and len(uids) == n_mu else initial_mu_uids(decomp.mu_grid_index),
         artifacts=extras.artifact_times,
@@ -437,7 +437,9 @@ class _SaveRequest:
     grid_names: list[str]
     parameters: dict[str, Any]
     form: BidsSaveFields
-    pulse: Callable[[list[int]], FloatArray | RowSource | None]  # pulse trains of the kept MUs
+    pulse_trains: Callable[
+        [list[int]], FloatArray | RowSource | None
+    ]  # pulse trains of the kept MUs
     muscle_names: list[str] = field(default_factory=list)  # the file's, for a form that names none
     sil: list[float | None] | None = None  # per MU; None where unknown
     rois: list[tuple[int, int]] | None = None
@@ -626,7 +628,7 @@ def _write_decomposition(
     try:
         save_decomposition_npz(
             npz_tmp,
-            pulse_trains=req.pulse(kept),
+            pulse_trains=req.pulse_trains(kept),
             spike_times=[req.spike_times[i] for i in kept],
             fsamp=req.fsamp,
             mu_grid_index=[req.mu_grid_index[i] for i in kept],
@@ -739,7 +741,7 @@ def save_edit_session(
             form=payload.model_copy(
                 update={"file_label": payload.file_label or meta.get("file_label")}
             ),
-            pulse=edit.pulse_rows,
+            pulse_trains=edit.pulse_rows,
             muscle_names=list(meta.get("muscle_names") or meta.get("muscle") or []),
             sil=[edit.sil_by_uid.get(uid) for uid in edit.mu_uids],
             rois=list(meta.get("rois") or []) or None,
@@ -783,7 +785,7 @@ def save_edits(payload: EditSavePayload) -> dict[str, Any]:
         ):
             matrix = None  # the loader draws them from the discharge times
 
-        def pulse(kept: list[int]) -> FloatArray | RowSource | None:
+        def pulse_trains(kept: list[int]) -> FloatArray | RowSource | None:
             if matrix is None or len(kept) == matrix.shape[0]:
                 return matrix
             # Read as the file is written, not indexed into a heap copy of the kept rows.
@@ -806,7 +808,7 @@ def save_edits(payload: EditSavePayload) -> dict[str, Any]:
             grid_names=list(payload.grid_names or []),
             parameters=dict(payload.parameters or {}),
             form=payload,
-            pulse=pulse,
+            pulse_trains=pulse_trains,
             sil=list(sil) if sil is not None else None,
             rois=extras.rois,
             target_segments=extras.target_segments,

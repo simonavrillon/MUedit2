@@ -33,7 +33,7 @@ from muedit.io._bids_reader import (
     resolve_bids_channels_tsv,
     resolve_bids_emg_path,
 )
-from muedit.signal.grid import fallback_grid_name, get_grid_electrode_metadata
+from muedit.signal.grid import fallback_grid_name, get_grid_electrode_metadata, grid_rows
 from muedit.storage import BLOCK_BYTES, sample_blocks
 
 __all__ = [
@@ -258,11 +258,11 @@ def _shared_cutoff(val: Any, n_channels: int) -> float | str | None:
     return numbers[0] if len(numbers) == n_channels and len(set(numbers)) == 1 else "n/a"
 
 
-def _group_labels(grid_labels: list[str] | None, n_grids: int) -> list[str]:
+def _group_labels(grid_labels: list[str] | None, ngrid: int) -> list[str]:
     """The ``group`` of each grid: the source's labels when there is one per grid, else ``Grid<n>``."""
-    if grid_labels and len(grid_labels) == n_grids and all(grid_labels):
+    if grid_labels and len(grid_labels) == ngrid and all(grid_labels):
         return [str(label) for label in grid_labels]
-    return [fallback_grid_name(i) for i in range(n_grids)]
+    return [fallback_grid_name(i) for i in range(ngrid)]
 
 
 def _aux_unit_list(aux_units: str | list[str | None] | None, n_aux: int) -> list[str]:
@@ -565,7 +565,7 @@ def export_bids_emg(
 
     _ch_placement = "measured" if (placement_scheme or "").lower() == "measured" else "other"
 
-    ch_idx = 0
+    spans = grid_rows([mask.size for mask in discard_channels])
     for g_idx, grid_name in enumerate(grid_names):
         mask = discard_channels[g_idx]
         n_grid_ch = mask.size
@@ -576,7 +576,7 @@ def export_bids_emg(
             ied_mm = ied_values[g_idx]
 
         for local_idx in range(n_grid_ch):
-            global_idx = ch_idx + local_idx
+            global_idx = spans[g_idx].start + local_idx
             ch_name = f"Ch{global_idx + 1:02d}"
             electrode_name = f"E{global_idx + 1}"
 
@@ -630,7 +630,6 @@ def export_bids_emg(
                     ),
                 ]
             )
-        ch_idx += n_grid_ch
 
     n_trig = 0
     if n_aux > 0:
@@ -1082,8 +1081,8 @@ def export_bids_mu_derivatives(
 
     events_tsv = deriv_emg_dir / f"{entity_label}_desc-{desc}_events.tsv"
 
-    n_grids = max(max(mu_grid_index or [], default=-1) + 1, len(grid_labels or []))
-    labels = _group_labels(grid_labels, n_grids)
+    ngrid = max(max(mu_grid_index or [], default=-1) + 1, len(grid_labels or []))
+    labels = _group_labels(grid_labels, ngrid)
     spikes: list[tuple[int, int, str, str]] = []
     for idx, spike_samples in enumerate(spike_times):
         uid = mu_uids[idx] if mu_uids and idx < len(mu_uids) else str(idx)

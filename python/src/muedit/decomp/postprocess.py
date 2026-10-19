@@ -1,4 +1,4 @@
-"""Post-processing, deduplication, preview building, and export hooks."""
+"""Post-processing, deduplication, and export of a decomposition run."""
 
 from __future__ import annotations
 
@@ -16,8 +16,8 @@ from muedit.decomp.algorithm import (
     batch_process_filters,
     unique_mu_indices,
     whiten_inplace,
-    window_trim,
 )
+from muedit.decomp.core import extended_window
 from muedit.decomp.decomposition_file import save_decomposition_npz
 from muedit.decomp.preview import build_preview_payload
 from muedit.decomp.types import (
@@ -30,8 +30,7 @@ from muedit.decomp.types import (
 )
 from muedit.io.bids import run_decomp_path, write_derivative_description
 from muedit.models import FloatArray, IntArray
-from muedit.signal.decomp_primitives import extend_signal, extension_factor
-from muedit.signal.filters import demean
+from muedit.signal.grid import kept_rows
 from muedit.signal.streaming import RowSelection
 from muedit.storage import ArrayStore
 
@@ -62,7 +61,6 @@ def dedup_survivors(
         dist_subset = [spike_times[idx] for idx in mu_indices]
         kept_local = unique_mu_indices(
             dist_subset,
-            dist_subset,
             maxlag,
             DEDUP_JITTER,
             params.duplicatesthresh,
@@ -75,7 +73,6 @@ def dedup_survivors(
     if params.duplicatesbgrids and kept:
         dist_kept = [spike_times[idx] for idx in kept]
         kept_idx = unique_mu_indices(
-            dist_kept,
             dist_kept,
             maxlag,
             DEDUP_JITTER,
@@ -125,38 +122,6 @@ def remove_duplicates_by_grid(
     return pulse_trains_out, [spike_times[idx] for idx in kept], kept_grids, kept
 
 
-def _reconstruct_window_signal(
-    prep: PreprocessStepOutput,
-    params: DecompositionParameters,
-    win_global: int,
-    whiten_mat: FloatArray,
-) -> FloatArray:
-    """Recompute the whitened window ``w_sig`` from ``prep.data`` + ``whiten_mat``."""
-    nwindows = len(prep.roi_list)
-    grid_idx = win_global // max(1, nwindows)
-
-    ch_offset = 0
-    for g in range(grid_idx):
-        ch_offset += int(np.array(prep.discard_channels[g]).astype(int).size)
-
-    mask = np.array(prep.discard_channels[grid_idx]).astype(int)
-    n_ch_grid = mask.size
-    keep_idx = np.where(mask == 0)[0]
-
-    start = prep.coordinates_plateau[win_global * 2]
-    end = prep.coordinates_plateau[win_global * 2 + 1]
-    grid_block = prep.data[ch_offset : ch_offset + n_ch_grid, start:end]
-    win_data_arr = grid_block[keep_idx, :]
-
-    ex_factor = extension_factor(params.nbextchan, win_data_arr.shape[0])
-    trim = window_trim(win_data_arr.shape[1], prep.fsamp, params.edges_sec, ex_factor)
-
-    e_sig = extend_signal(demean(win_data_arr), ex_factor, dtype=params.work_dtype)
-    if trim:
-        e_sig = e_sig[:, trim:-trim]
-    return whiten_inplace(e_sig, whiten_mat)
-
-
 def postprocess_step(
     prep: PreprocessStepOutput,
     decomposed: DecomposeStepOutput,
@@ -173,54 +138,44 @@ def postprocess_step(
     if progress_cb:
         progress_cb("progress", {"message": "Batch processing filters", "phase": "postprocess"})
 
-    nwindows = len(prep.roi_list)
+    nwindows = len(prep.rois)
 
-    def get_w_sig(nwin: int) -> FloatArray:
-        return _reconstruct_window_signal(prep, params, nwin, decomposed.whiten_mat[nwin])
+    def get_w_sig(win_global: int) -> FloatArray:
+        e_sig = extended_window(prep, params, win_global)[0]
+        return whiten_inplace(e_sig, decomposed.whiten_mat_by_window[win_global])
 
     # Kept channels of each grid, read batch by batch by the streamed passes.
-    grid_data: dict[int, RowSelection] = {}
-    ch_idx_g = 0
-    for i in range(prep.ngrid):
-        mask = np.array(prep.discard_channels[i]).astype(int)
-        grid_data[i] = RowSelection(prep.data, ch_idx_g + np.where(mask == 0)[0])
-        ch_idx_g += mask.size
+    grid_data = {
+        i: RowSelection(prep.data, kept) for i, kept in enumerate(kept_rows(prep.discard_channels))
+    }
 
     if params.use_adaptive:
         pulse_trains, spike_times, _ = adaptive_batch_process(
-            decomposed.mu_filters,
-            decomposed.whiten_mat,
+            decomposed.mu_filters_by_window,
+            decomposed.whiten_mat_by_window,
             grid_data,
             decomposed.coordinates_plateau,
             prep.data.shape[1],
             prep.fsamp,
             nwindows,
-            decomposed.win_means,
-            batch_ms=params.adapt_batch_ms,
-            adapt_wh=params.adapt_wh,
-            adapt_sv=params.adapt_sv,
-            adapt_sd=params.adapt_sd,
-            wh_learning_rate=params.adapt_wh_learning_rate,
-            sv_learning_rate=params.adapt_sv_learning_rate,
-            cov_alpha=params.adapt_cov_alpha,
-            spike_prev_weight=params.adapt_spike_prev_weight,
+            decomposed.win_mean_by_window,
+            params,
             artifact_mask=prep.artifact_mask,
             store=store,
-            work_dtype=params.work_dtype,
         )
     else:
         if params.full_trace:
             logger.info("Applying MU filters over the full trace (dewhitened).")
         pulse_trains, spike_times = batch_process_filters(
-            decomposed.mu_filters,
+            decomposed.mu_filters_by_window,
             get_w_sig,
             decomposed.coordinates_plateau,
             prep.data.shape[1],
             prep.fsamp,
-            whiten_mat_by_window=decomposed.whiten_mat if params.full_trace else None,
-            grid_data=grid_data,
-            window_to_grid={nwin: nwin // max(1, nwindows) for nwin in decomposed.mu_filters},
-            win_means_by_window=decomposed.win_means if params.full_trace else None,
+            grid_data,
+            {win_global: win_global // nwindows for win_global in decomposed.mu_filters_by_window},
+            whiten_mat_by_window=decomposed.whiten_mat_by_window if params.full_trace else None,
+            win_mean_by_window=decomposed.win_mean_by_window if params.full_trace else None,
             artifact_mask=prep.artifact_mask,
             store=store,
             work_dtype=params.work_dtype,
@@ -231,7 +186,7 @@ def postprocess_step(
         pulse_trains_all,
         spike_times,
         decomposed.mu_grid_index,
-        prep.ngrid,
+        len(prep.grid_names),
         params,
         prep.fsamp,
         store=store,
@@ -240,21 +195,18 @@ def postprocess_step(
         store.discard(pulse_trains_all)
     del pulse_trains_all
 
-    mu_window_map: list[tuple[int, int]] = [
-        (nwin, j)
-        for nwin in sorted(decomposed.mu_filters.keys())
-        for j in range(decomposed.mu_filters[nwin].shape[1])
+    # One (window, SIL) per pulse-train row, in the row order of the batch passes.
+    sil_rows = [
+        (win_global, sil)
+        for win_global in sorted(decomposed.mu_filters_by_window)
+        for sil in decomposed.sil_by_window[win_global]
     ]
-
     sil_flat: list[float] = []
     sil_by_window: dict[int, list[float]] = {}
-    for g_idx in kept_global:
-        if g_idx < len(mu_window_map):
-            win, local = mu_window_map[g_idx]
-            old_sil = decomposed.sil_by_window.get(win, [])
-            if local < len(old_sil):
-                sil_flat.append(old_sil[local])
-                sil_by_window.setdefault(win, []).append(old_sil[local])
+    for mu_idx in kept_global:
+        win_global, sil = sil_rows[mu_idx]
+        sil_flat.append(sil)
+        sil_by_window.setdefault(win_global, []).append(sil)
 
     if progress_cb:
         progress_cb("progress", {"message": "Finalizing output", "phase": "postprocess"})
@@ -275,10 +227,10 @@ def export_step(
     params: DecompositionParameters,
     include_full_preview: bool,
     save_npz: bool,
-    raw_emg: FloatArray | None,
+    emg_data: FloatArray | None,
     progress_cb: Callable[[str, dict[str, Any]], None] | None,
 ) -> DecompositionResult:
-    """Build the run's result and preview, and optionally save the ``.npz``, with ``raw_emg``."""
+    """Build the run's result and preview, and optionally save the ``.npz``, with ``emg_data``."""
     if progress_cb:
         progress_cb("progress", {"message": "Writing output", "phase": "export"})
     preview = build_preview_payload(
@@ -287,7 +239,7 @@ def export_step(
         pulse_trains=post.pulse_trains,
         spike_times=post.spike_times,
         grid_names=prep.grid_names,
-        roi_list=prep.roi_list,
+        rois=prep.rois,
         discard_channels=prep.discard_channels,
         coordinates=prep.coordinates,
         mu_grid_index=post.mu_grid_index,
@@ -300,7 +252,7 @@ def export_step(
         path, in_dataset = run_decomp_path(loaded.full_path, prep.loader_meta)
         path.parent.mkdir(parents=True, exist_ok=True)
         save_path = str(path)
-        with_emg = raw_emg is not None
+        with_emg = emg_data is not None
         save_decomposition_npz(
             save_path,
             pulse_trains=post.pulse_trains,
@@ -313,9 +265,9 @@ def export_step(
             total_samples=prep.data.shape[1],
             sil=post.sil,
             sil_by_window=post.sil_by_window,
-            rois=prep.roi_list,
+            rois=prep.rois,
             artifact_mask=prep.artifact_mask,
-            emg_data=raw_emg,
+            emg_data=emg_data,
             discard_channels=prep.discard_channels if with_emg else None,
             coordinates=prep.coordinates if with_emg else None,
             loader_meta=prep.loader_meta if with_emg else None,
@@ -339,5 +291,5 @@ def export_step(
         preview=preview,
         save_path=save_path,
         target_segments=prep.target_segments,
-        rois=prep.roi_list,
+        rois=prep.rois,
     )

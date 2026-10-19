@@ -21,6 +21,7 @@ from muedit.editing.session import out_of_range
 from muedit.errors import MueditError
 from muedit.models import FloatArray, IntArray, SignalImport
 from muedit.signal.filters import FILTER_BLOCK_ROWS, bandpass_inplace, map_rows
+from muedit.signal.grid import grid_rows
 from muedit.signal.pyramid import MinMaxPyramid, Reader, SeriesView, envelope, view
 from muedit.storage import ArrayStore
 
@@ -45,16 +46,6 @@ def moving_average_ms(series: FloatArray, fsamp: float, win_ms: float) -> FloatA
     return (sums / counts).astype(np.float32)
 
 
-def grid_rows(grid_counts: list[int], n_rows: int) -> list[tuple[int, int]]:
-    """``[first, stop)`` EMG rows of each grid, cut at the rows the signal has."""
-    rows = []
-    first = 0
-    for n_channels in grid_counts:
-        rows.append((min(first, n_rows), min(first + n_channels, n_rows)))
-        first += n_channels
-    return rows
-
-
 def grid_emg_type(emg_types: list[int], grid: int) -> int:
     """The bandpass of grid ``grid`` (surface when the catalogue gives none)."""
     return emg_types[grid] if grid < len(emg_types) else 1
@@ -77,13 +68,14 @@ def build_signal_views(
     """
     n_rows, n_samples = signal.data.shape
     rows_of = grid_rows(grid_counts, n_rows)
-    n_grid_rows = rows_of[-1][1] if rows_of else 0
+    n_grid_rows = rows_of[-1].stop if rows_of else 0
     emg = MinMaxPyramid.allocate(store, "emg-pyramid", n_grid_rows, n_samples)
     overview = store.allocate("overview", (len(grid_counts), n_samples), np.float32)
     channel_means: list[FloatArray] = []
     abs_sums = np.empty(n_samples)
     row = np.empty(n_samples)
-    for grid, (first, stop) in enumerate(rows_of):
+    for grid, rows in enumerate(rows_of):
+        first, stop = rows.start, rows.stop
         means = np.zeros(stop - first)
         abs_sums[:] = 0.0
         filter_row = partial(bandpassed_row, signal, emg_type=grid_emg_type(emg_types, grid))
@@ -109,7 +101,7 @@ def build_signal_views(
     views = SignalViews(
         fsamp=float(signal.fsamp),
         grid_names=list(signal.grid_names),
-        grid_rows=rows_of,
+        grid_rows=[(rows.start, rows.stop) for rows in rows_of],
         emg_types=list(emg_types),
         emg=emg.seal(store),
         overview=overview,
@@ -271,12 +263,12 @@ def pulse_frame(token: str, mu: int, start: int, end: int, bins: int) -> Respons
         else:
             if run is None:
                 raise _missing_token()
-            pulse = run.pulse_trains
-            if not 0 <= mu < pulse.shape[0]:
-                raise out_of_range("mu", mu, pulse.shape[0])
-            n_samples = int(pulse.shape[1])
+            pulse_trains = run.pulse_trains
+            if not 0 <= mu < pulse_trains.shape[0]:
+                raise out_of_range("mu", mu, pulse_trains.shape[0])
+            n_samples = int(pulse_trains.shape[1])
             s, e = _clamp_window(n_samples, start, end)
-            series = envelope(lambda a, b: pulse[mu, a:b], s, e, bins)
+            series = envelope(lambda a, b: pulse_trains[mu, a:b], s, e, bins)
             spikes = (
                 _in_view(run.spike_times[mu], s, e)
                 if mu < len(run.spike_times)
@@ -285,7 +277,7 @@ def pulse_frame(token: str, mu: int, start: int, end: int, bins: int) -> Respons
             meta = {"version": 0, "flagged": False}
             arrays = {
                 "spikes": (spikes, "i4"),
-                "spike_values": (pulse[mu, spikes], "f4"),
+                "spike_values": (pulse_trains[mu, spikes], "f4"),
             }
         meta.update(
             {

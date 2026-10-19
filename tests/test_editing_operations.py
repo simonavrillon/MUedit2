@@ -83,10 +83,10 @@ def _match_count(truth: np.ndarray, found: np.ndarray, tol: int = 2) -> int:
 
 def _pulse_with_peaks(peaks: dict[int, float], n: int = N_SAMPLES) -> np.ndarray:
     """Flat pulse train with isolated peaks of the given heights."""
-    pulse = np.zeros(n)
+    pulse_train = np.zeros(n)
     for t, h in peaks.items():
-        pulse[t] = h
-    return pulse
+        pulse_train[t] = h
+    return pulse_train
 
 
 # ── add_spikes_in_roi ────────────────────────────────────────────────────────
@@ -94,25 +94,25 @@ def _pulse_with_peaks(peaks: dict[int, float], n: int = N_SAMPLES) -> np.ndarray
 
 class TestAddInRoi:
     def test_adds_peaks_above_threshold_inside_roi(self) -> None:
-        pulse = _pulse_with_peaks({1000: 1.0, 1500: 0.2, 3000: 1.0})
-        out = add_spikes_in_roi(pulse, [500], FSAMP, 900, 2000, 0.5)
+        pulse_train = _pulse_with_peaks({1000: 1.0, 1500: 0.2, 3000: 1.0})
+        out = add_spikes_in_roi(pulse_train, [500], FSAMP, 900, 2000, 0.5)
         assert out.tolist() == [500, 1000]
 
     def test_roi_bounds_are_inclusive(self) -> None:
-        pulse = _pulse_with_peaks({1000: 1.0, 2000: 1.0})
-        assert add_spikes_in_roi(pulse, [], FSAMP, 1000, 2000, 0.5).tolist() == [1000, 2000]
+        pulse_train = _pulse_with_peaks({1000: 1.0, 2000: 1.0})
+        assert add_spikes_in_roi(pulse_train, [], FSAMP, 1000, 2000, 0.5).tolist() == [1000, 2000]
 
     def test_no_peak_returns_sorted_unique_input(self) -> None:
-        pulse = np.zeros(N_SAMPLES)
-        assert add_spikes_in_roi(pulse, [30, 10, 30], FSAMP, 0, 100, 0.5).tolist() == [10, 30]
+        pulse_train = np.zeros(N_SAMPLES)
+        assert add_spikes_in_roi(pulse_train, [30, 10, 30], FSAMP, 0, 100, 0.5).tolist() == [10, 30]
 
     def test_existing_spike_not_duplicated(self) -> None:
-        pulse = _pulse_with_peaks({1000: 1.0})
-        assert add_spikes_in_roi(pulse, [1000], FSAMP, 0, 2000, 0.5).tolist() == [1000]
+        pulse_train = _pulse_with_peaks({1000: 1.0})
+        assert add_spikes_in_roi(pulse_train, [1000], FSAMP, 0, 2000, 0.5).tolist() == [1000]
 
     def test_refractory_period_keeps_one_of_close_peaks(self) -> None:
-        pulse = _pulse_with_peaks({1000: 1.0, 1005: 0.8})
-        assert add_spikes_in_roi(pulse, [], FSAMP, 0, 2000, 0.5).tolist() == [1000]
+        pulse_train = _pulse_with_peaks({1000: 1.0, 1005: 0.8})
+        assert add_spikes_in_roi(pulse_train, [], FSAMP, 0, 2000, 0.5).tolist() == [1000]
 
 
 # ── delete_spikes_in_roi ─────────────────────────────────────────────────────
@@ -120,17 +120,17 @@ class TestAddInRoi:
 
 class TestDeleteInRoi:
     def test_deletes_only_spikes_inside_box(self) -> None:
-        pulse = _pulse_with_peaks({100: 0.5, 200: 0.5, 300: 5.0, 900: 0.5})
-        out = delete_spikes_in_roi(pulse, [100, 200, 300, 900], 150, 400, 0.2, 0.8)
+        pulse_train = _pulse_with_peaks({100: 0.5, 200: 0.5, 300: 5.0, 900: 0.5})
+        out = delete_spikes_in_roi(pulse_train, [100, 200, 300, 900], 150, 400, 0.2, 0.8)
         assert out.tolist() == [100, 300, 900]
 
     def test_y_bounds_order_is_irrelevant(self) -> None:
-        pulse = _pulse_with_peaks({200: 0.5})
-        assert delete_spikes_in_roi(pulse, [200], 0, 400, 0.8, 0.2).tolist() == []
+        pulse_train = _pulse_with_peaks({200: 0.5})
+        assert delete_spikes_in_roi(pulse_train, [200], 0, 400, 0.8, 0.2).tolist() == []
 
     def test_x_bounds_are_inclusive(self) -> None:
-        pulse = _pulse_with_peaks({150: 0.5, 400: 0.5})
-        assert delete_spikes_in_roi(pulse, [150, 400], 150, 400, 0.2, 0.8).tolist() == []
+        pulse_train = _pulse_with_peaks({150: 0.5, 400: 0.5})
+        assert delete_spikes_in_roi(pulse_train, [150, 400], 150, 400, 0.2, 0.8).tolist() == []
 
 
 # ── remove_discharge_rate_outliers ───────────────────────────────────────────
@@ -142,27 +142,27 @@ class TestRemoveDischargeRateOutliers:
         spikes.append(4020)
         heights = dict.fromkeys(spikes, 1.0)
         heights[4020] = 0.2
-        pulse = _pulse_with_peaks(heights)
-        out = remove_discharge_rate_outliers(pulse, spikes, FSAMP)
+        pulse_train = _pulse_with_peaks(heights)
+        out = remove_discharge_rate_outliers(pulse_train, spikes, FSAMP)
         assert 4020 not in out
         assert out.tolist() == list(range(1000, 9001, 200))
 
     def test_regular_train_untouched(self) -> None:
         spikes = list(range(1000, 9001, 200))
-        pulse = _pulse_with_peaks(dict.fromkeys(spikes, 1.0))
-        assert remove_discharge_rate_outliers(pulse, spikes, FSAMP).tolist() == spikes
+        pulse_train = _pulse_with_peaks(dict.fromkeys(spikes, 1.0))
+        assert remove_discharge_rate_outliers(pulse_train, spikes, FSAMP).tolist() == spikes
 
     def test_z_factor_controls_sensitivity(self) -> None:
         spikes = [*range(1000, 9001, 200), 4100]
-        pulse = _pulse_with_peaks(dict.fromkeys(spikes, 1.0))
-        strict = remove_discharge_rate_outliers(pulse, spikes, FSAMP, z_factor=0.5)
-        lenient = remove_discharge_rate_outliers(pulse, spikes, FSAMP, z_factor=100.0)
+        pulse_train = _pulse_with_peaks(dict.fromkeys(spikes, 1.0))
+        strict = remove_discharge_rate_outliers(pulse_train, spikes, FSAMP, z_factor=0.5)
+        lenient = remove_discharge_rate_outliers(pulse_train, spikes, FSAMP, z_factor=100.0)
         assert len(strict) < len(spikes)
         assert lenient.tolist() == sorted(spikes)
 
     def test_fewer_than_three_spikes(self) -> None:
-        pulse = np.zeros(10)
-        assert remove_discharge_rate_outliers(pulse, [5, 1], FSAMP).tolist() == [1, 5]
+        pulse_train = np.zeros(10)
+        assert remove_discharge_rate_outliers(pulse_train, [5, 1], FSAMP).tolist() == [1, 5]
 
 
 # ── update_motor_unit_filter_window ──────────────────────────────────────────
@@ -191,9 +191,9 @@ def _update(
 
 class TestUpdateFilterWindow:
     def test_recovers_target_unit(self, synthetic_mu: dict[str, np.ndarray]) -> None:
-        pt, updated = _update(synthetic_mu)
-        assert pt is not None
-        assert pt.shape == (VIEW_END - VIEW_START,)
+        pulse_train, updated = _update(synthetic_mu)
+        assert pulse_train is not None
+        assert pulse_train.shape == (VIEW_END - VIEW_START,)
 
         truth = _in_view(synthetic_mu["target"])
         found = _in_view(updated)
@@ -224,8 +224,8 @@ class TestUpdateFilterWindow:
         monkeypatch.setattr(operations, "pca_extended_signal", spy)
         mask = np.zeros(N_SAMPLES, dtype=bool)
         mask[VIEW_START + 3000 : VIEW_START + 3100] = masked
-        pt, _ = _update(synthetic_mu, artifact_mask=mask if masked else None)
-        assert pt is not None
+        pulse_train, _ = _update(synthetic_mu, artifact_mask=mask if masked else None)
+        assert pulse_train is not None
         (cols,) = seen
         assert cols is not None
         win_len = VIEW_END - VIEW_START
@@ -236,10 +236,10 @@ class TestUpdateFilterWindow:
         assert cols.size == win_len - 2 * EDGE - (masked_cols.size if masked else 0)
 
     def test_pulse_train_edges_zeroed(self, synthetic_mu: dict[str, np.ndarray]) -> None:
-        pt, _ = _update(synthetic_mu)
-        assert pt is not None
-        assert not pt[:EDGE].any()
-        assert not pt[-EDGE:].any()
+        pulse_train, _ = _update(synthetic_mu)
+        assert pulse_train is not None
+        assert not pulse_train[:EDGE].any()
+        assert not pulse_train[-EDGE:].any()
 
     def test_lock_spikes_retains_original_spikes(self, synthetic_mu: dict[str, np.ndarray]) -> None:
         _, free = _update(synthetic_mu)
@@ -283,26 +283,26 @@ class TestUpdateFilterWindow:
         end: int,
     ) -> None:
         spikes = synthetic_mu["target"].tolist()
-        pt, updated = _update(synthetic_mu, start=start, end=end)
-        assert pt is None
+        pulse_train, updated = _update(synthetic_mu, start=start, end=end)
+        assert pulse_train is None
         assert updated.tolist() == spikes
 
     def test_no_spikes_in_window_is_noop(self, synthetic_mu: dict[str, np.ndarray]) -> None:
         spikes = [100, 9900]
-        pt, updated = _update(synthetic_mu, spike_times=spikes)
-        assert pt is None
+        pulse_train, updated = _update(synthetic_mu, spike_times=spikes)
+        assert pulse_train is None
         assert updated.tolist() == spikes
 
     def test_peeloff_and_artifact_times_run(self, synthetic_mu: dict[str, np.ndarray]) -> None:
         """Peel-off of the other MU and manual artifact times still recover the target."""
         artifact_times = [4321]
-        pt, updated = _update(
+        pulse_train, updated = _update(
             synthetic_mu,
             use_peeloff=True,
             peeloff_spike_times=[synthetic_mu["other"].tolist()],
             artifact_times=artifact_times,
         )
-        assert pt is not None
+        assert pulse_train is not None
         truth = _in_view(synthetic_mu["target"])
         assert _match_count(truth, _in_view(updated)) >= 0.75 * truth.size
 
@@ -318,11 +318,11 @@ class TestUpdateFilterArtifactMask:
         return mask
 
     def test_nothing_detected_inside_mask(self, synthetic_mu: dict[str, np.ndarray]) -> None:
-        pt, updated = _update(synthetic_mu, artifact_mask=self._mask())
-        assert pt is not None
+        pulse_train, updated = _update(synthetic_mu, artifact_mask=self._mask())
+        assert pulse_train is not None
         local = slice(self.MASK_START - VIEW_START, self.MASK_END - VIEW_START)
-        assert not pt[local].any()
-        assert pt.max() > 0
+        assert not pulse_train[local].any()
+        assert pulse_train.max() > 0
         arr = np.asarray(updated)
         assert not ((arr >= self.MASK_START) & (arr < self.MASK_END)).any()
 

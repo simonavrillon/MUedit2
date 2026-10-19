@@ -1,4 +1,4 @@
-"""Top-level decomposition pipeline entrypoint and helper re-exports."""
+"""Top-level decomposition pipeline entrypoint."""
 
 from __future__ import annotations
 
@@ -66,9 +66,11 @@ def run_decomposition(
         )
     # A file saved outside a BIDS dataset embeds the raw EMG; BIDS has its own copy.
     _, in_dataset = run_decomp_path(loaded.full_path, preprocessed.loader_meta)
-    raw_emg = _raw_emg_for_file(loaded.data, store) if save_npz and not in_dataset else None
+    emg_data = (
+        _emg_data_for_file(loaded.signal.data, store) if save_npz and not in_dataset else None
+    )
     # Only the filtered copy is needed from here on; let the raw samples go.
-    loaded = replace(loaded, signal=preprocessed.signal, data=preprocessed.signal.data)
+    loaded = replace(loaded, signal=preprocessed.signal)
     decomposed = decompose_step(
         prep=preprocessed,
         params=params,
@@ -89,17 +91,17 @@ def run_decomposition(
         params=params,
         include_full_preview=include_full_preview,
         save_npz=save_npz,
-        raw_emg=raw_emg,
+        emg_data=emg_data,
         progress_cb=progress_cb,
     )
     if store is not None:
         store.discard(preprocessed.data)
-        if raw_emg is not None:
-            store.discard(raw_emg)
+        if emg_data is not None:
+            store.discard(emg_data)
     return result
 
 
-def _raw_emg_for_file(data: FloatArray, store: ArrayStore | None) -> FloatArray:
+def _emg_data_for_file(data: FloatArray, store: ArrayStore | None) -> FloatArray:
     """``data`` itself when memory-mapped, else a float32 copy (in ``store``) held until the save."""
     if resident_nbytes(data) == 0:
         return data

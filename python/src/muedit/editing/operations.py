@@ -40,11 +40,11 @@ FilterUpdateResult: TypeAlias = tuple[FloatArray | None, SpikeTimes]
 _LOCK_RADIUS = 10
 
 
-def _values_at(pulse: FloatArray, times: IntArray) -> FloatArray:
-    """``pulse`` at ``times``, 0 where a time falls outside it."""
+def _values_at(pulse_train: FloatArray, times: IntArray) -> FloatArray:
+    """``pulse_train`` at ``times``, 0 where a time falls outside it."""
     out = np.zeros(times.shape, dtype=np.float64)
-    ok = (times >= 0) & (times < len(pulse))
-    out[ok] = pulse[times[ok]]
+    ok = (times >= 0) & (times < len(pulse_train))
+    out[ok] = pulse_train[times[ok]]
     return out
 
 
@@ -73,7 +73,7 @@ def _whitened_window(
             pca_keep = clean
     pca_cols = np.flatnonzero(pca_keep) if pca_keep.any() else None
     eigenvectors, eigenvalues_diag = pca_extended_signal(e_sig, pca_cols)
-    w_sig, _ = whiten_extended_signal(e_sig, eigenvectors, eigenvalues_diag, inplace=True)
+    w_sig, _ = whiten_extended_signal(e_sig, eigenvectors, eigenvalues_diag)
     return w_sig
 
 
@@ -99,35 +99,35 @@ def _window_pulse_train(
     norm = float(np.linalg.norm(mu_filter))
     if norm > 0.0:
         mu_filter /= norm
-    pt: FloatArray = vec_mat(mu_filter, w_sig).astype(np.float64)[:win_len]
-    pt[:edge] = 0
-    pt[-edge:] = 0
-    pt = signed_square(pt)
+    pulse_train: FloatArray = vec_mat(mu_filter, w_sig).astype(np.float64)[:win_len]
+    pulse_train[:edge] = 0
+    pulse_train[-edge:] = 0
+    pulse_train = signed_square(pulse_train)
     if win_mask is not None:
-        pt[win_mask] = 0.0
-    return pt
+        pulse_train[win_mask] = 0.0
+    return pulse_train
 
 
 def _detect_in_window(
-    pt: FloatArray,
+    pulse_train: FloatArray,
     fsamp: float,
     local: IntArray,
     edge: int,
     win_mask: BoolArray | None,
     lock_spikes: bool,
 ) -> IntArray | None:
-    """The window's discharges in ``pt``, or None when its peaks do not split in two."""
-    peaks = find_refractory_peaks(pt, fsamp, min_isi_sec=POSTPROC_MIN_ISI_SEC)
+    """The window's discharges in ``pulse_train``, or None when its peaks do not split in two."""
+    peaks = find_refractory_peaks(pulse_train, fsamp, min_isi_sec=POSTPROC_MIN_ISI_SEC)
     if peaks.size <= 2:
         return None
-    found, centroids, labels = split_by_amplitude(pt, peaks, missing="warn")
+    found, centroids, labels = split_by_amplitude(pulse_train, peaks, missing="warn")
     if len(np.unique(labels)) < 2:
         return None
     if win_mask is not None:
         found = found[~win_mask[found]]
     if lock_spikes:
-        found = np.union1d(_realign(local, peaks, edge, pt.size), found)
-    return found[pt[found] <= 3 * centroids[int(np.argmax(centroids))]]
+        found = np.union1d(_realign(local, peaks, edge, pulse_train.size), found)
+    return found[pulse_train[found] <= 3 * centroids[int(np.argmax(centroids))]]
 
 
 def _recompute_spikes_in_window(
@@ -138,7 +138,7 @@ def _recompute_spikes_in_window(
     end: int,
     nbextchan: int,
     peeloff_spike_times: Sequence[ArrayLike] | None = None,
-    peeloff_win: float = DEFAULT_PEEL_OFF_WIN_SEC,
+    peel_off_win: float = DEFAULT_PEEL_OFF_WIN_SEC,
     emg_offset: int = 0,
     use_peeloff: bool = False,
     artifact_times: ArrayLike | None = None,
@@ -176,14 +176,14 @@ def _recompute_spikes_in_window(
     for times in subtracted:
         inside = _in_window(spike_array(times), start + edge, end - edge) + edge
         if inside.size:
-            subtract_mu_waveforms(w_sig, inside, fsamp, peeloff_win)
+            subtract_mu_waveforms(w_sig, inside, fsamp, peel_off_win)
 
-    pt = _window_pulse_train(w_sig, local, win_len, edge, win_mask)
-    found = _detect_in_window(pt, fsamp, local, edge, win_mask, lock_spikes)
+    pulse_train = _window_pulse_train(w_sig, local, win_len, edge, win_mask)
+    found = _detect_in_window(pulse_train, fsamp, local, edge, win_mask, lock_spikes)
     if found is None:
         return None, spikes
     outside = spikes[(spikes < start + edge) | (spikes >= end - edge)]
-    return pt, spike_array(np.concatenate([outside, found + start]))
+    return pulse_train, spike_array(np.concatenate([outside, found + start]))
 
 
 def update_motor_unit_filter_window(
@@ -195,7 +195,7 @@ def update_motor_unit_filter_window(
     end: int,
     nbextchan: int = DEFAULT_NBEXTCHAN,
     peeloff_spike_times: Sequence[ArrayLike] | None = None,
-    peeloff_win: float = DEFAULT_PEEL_OFF_WIN_SEC,
+    peel_off_win: float = DEFAULT_PEEL_OFF_WIN_SEC,
     emg_offset: int = 0,
     use_peeloff: bool = False,
     artifact_times: ArrayLike | None = None,
@@ -217,7 +217,7 @@ def update_motor_unit_filter_window(
         end,
         nbextchan=nbextchan,
         peeloff_spike_times=peeloff_spike_times,
-        peeloff_win=peeloff_win,
+        peel_off_win=peel_off_win,
         emg_offset=emg_offset,
         use_peeloff=use_peeloff,
         artifact_times=artifact_times,
@@ -229,7 +229,7 @@ def update_motor_unit_filter_window(
 
 
 def add_spikes_in_roi(
-    pulse: FloatArray,
+    pulse_train: FloatArray,
     spike_times: ArrayLike,
     fsamp: float,
     x_start: int,
@@ -238,14 +238,14 @@ def add_spikes_in_roi(
 ) -> SpikeTimes:
     """Add the peaks above ``y_min`` inside ``[x_start, x_end]``."""
     lo, hi = max(0, x_start), max(0, x_end + 1)
-    roi = np.zeros_like(pulse)
-    roi[lo:hi] = pulse[lo:hi]
+    roi = np.zeros_like(pulse_train)
+    roi[lo:hi] = pulse_train[lo:hi]
     peaks = find_refractory_peaks(roi, fsamp, min_isi_sec=POSTPROC_MIN_ISI_SEC, height=y_min)
     return spike_array(np.concatenate([spike_array(spike_times), peaks]))
 
 
 def delete_spikes_in_roi(
-    pulse: FloatArray,
+    pulse_train: FloatArray,
     spike_times: ArrayLike,
     x_start: int,
     x_end: int,
@@ -254,15 +254,15 @@ def delete_spikes_in_roi(
 ) -> SpikeTimes:
     """Delete the spikes inside ``[x_start, x_end]`` whose amplitude is within ``[y_min, y_max]``."""
     times = spike_array(spike_times)
-    values = _values_at(pulse, times)
+    values = _values_at(pulse_train, times)
     low, high = min(y_min, y_max), max(y_min, y_max) + 1
     in_box = (times >= x_start) & (times <= x_end) & (values >= low) & (values <= high)
     return times[~in_box]
 
 
-def _drop_weaker(pulse: FloatArray, ordered: IntArray, pairs: IntArray) -> SpikeTimes:
+def _drop_weaker(pulse_train: FloatArray, ordered: IntArray, pairs: IntArray) -> SpikeTimes:
     """``ordered`` without the lower-amplitude spike of each pair ``(pairs[k], pairs[k] + 1)``."""
-    values = _values_at(pulse, ordered)
+    values = _values_at(pulse_train, ordered)
     drop = np.where(values[pairs] < values[pairs + 1], pairs, pairs + 1)
     keep = np.ones(ordered.size, dtype=bool)
     keep[drop] = False
@@ -270,7 +270,7 @@ def _drop_weaker(pulse: FloatArray, ordered: IntArray, pairs: IntArray) -> Spike
 
 
 def remove_discharge_rate_outliers(
-    pulse: FloatArray,
+    pulse_train: FloatArray,
     spike_times: ArrayLike,
     fsamp: float,
     z_factor: float = 3.0,
@@ -281,4 +281,4 @@ def remove_discharge_rate_outliers(
         return ordered
     rate = fsamp / np.diff(ordered)
     threshold = rate.mean() + z_factor * rate.std()
-    return _drop_weaker(pulse, ordered, np.flatnonzero(rate > threshold))
+    return _drop_weaker(pulse_train, ordered, np.flatnonzero(rate > threshold))

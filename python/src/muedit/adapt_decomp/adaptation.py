@@ -47,15 +47,15 @@ def calibration_centroids(pulse_trains: np.ndarray, fsamp: float) -> tuple[np.nd
     base_centr = np.zeros(n_mu, dtype=np.float32)
     spikes_centr = np.ones(n_mu, dtype=np.float32)
     for j in range(n_mu):
-        pt = pulse_trains[j]
-        peaks = find_refractory_peaks(pt, fsamp, min_isi_sec=POSTPROC_MIN_ISI_SEC)
+        pulse_train = pulse_trains[j]
+        peaks = find_refractory_peaks(pulse_train, fsamp, min_isi_sec=POSTPROC_MIN_ISI_SEC)
         if len(peaks) > 1:
-            _, centroids, _ = split_by_amplitude(pt, peaks)
+            _, centroids, _ = split_by_amplitude(pulse_train, peaks)
             hi = int(np.argmax(centroids))
             spikes_centr[j] = float(centroids[hi])
             base_centr[j] = float(centroids[1 - hi])
         elif len(peaks) == 1:
-            spikes_centr[j] = float(pt[peaks[0]])
+            spikes_centr[j] = float(pulse_train[peaks[0]])
     return base_centr, spikes_centr
 
 

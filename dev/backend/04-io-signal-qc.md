@@ -366,7 +366,7 @@ def _detect_artifact_mask(data, fsamp, config=None) -> np.ndarray
 One-grid detection. Returns `(n_samples,)` bool.
 
 ```python
-def detect_artifact_masks(data, fsamp, grid_channel_counts, config=None)
+def detect_artifact_masks(data, fsamp, grid_channel_counts, config=None, kept_rows=None, store=None)
     -> (per_grid_masks, global_mask)
 ```
 Runs per grid. `global_mask` is the logical OR union across all grids.

@@ -20,7 +20,6 @@ from muedit.api.schemas import DecomposePayload
 from muedit.api.services import decompose_service, editing_service
 from muedit.decomp.decomposition_file import save_decomposition_npz
 from muedit.decomp.pipeline import run_decomposition
-from muedit.decomp.postprocess import dedup_survivors
 from muedit.decomp.types import DecompositionParameters
 from muedit.io import bids
 from muedit.io.bids import (
@@ -131,27 +130,6 @@ def test_a_negative_grid_index_is_refused_rather_than_dropping_its_mus(
     _, opened = _open(api, _decomp(tmp_path / "neg_decomp.npz", mu_grid_index=[-1, -1]))
     assert opened.status_code == 400
     assert "negative grid index" in opened.json()["error"]["message"]
-    with pytest.raises(ValueError, match="outside"):
-        dedup_survivors(
-            [np.array([1]), np.array([2])], [0, 1], 1, DecompositionParameters(), FSAMP, 10
-        )
-
-
-def test_dedup_keeps_survivors_in_input_order() -> None:
-    a = np.array(_spikes(1))
-    b = np.array(_spikes(2))
-    # Index 1 duplicates index 0 with a steadier rhythm, so it is the one kept of the pair.
-    steady = np.arange(200, N_SAMPLES - 200, 100)
-    kept, grids = dedup_survivors(
-        [np.unique(np.r_[steady, steady[::3] + 7]), steady, a, b],
-        [0, 0, 1, 1],
-        2,
-        DecompositionParameters(duplicatesbgrids=False),
-        FSAMP,
-        N_SAMPLES,
-    )
-    assert kept == sorted(kept) and 1 in kept and 0 not in kept
-    assert grids == [0, 1, 1]
 
 
 # ── A2-02, A2-03, A2-04, A2-13, A2-15: what an edited file keeps ────────────

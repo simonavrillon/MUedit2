@@ -370,7 +370,7 @@ def test_save_stage(prepared: Any, post_windowed: Any) -> None:
             params=DecompositionParameters(niter=NITER),
             include_full_preview=False,
             save_npz=True,
-            raw_emg=loaded.data,
+            emg_data=loaded.signal.data,
             progress_cb=None,
         )
     )
@@ -383,8 +383,8 @@ def test_bids_export_stage(prepared: Any, tmp_path: Path) -> None:
 
     _, peak = _peak_mb(
         lambda: export_bids_emg(
-            loaded.data,
-            loaded.fsamp,
+            loaded.signal.data,
+            loaded.signal.fsamp,
             prep.grid_names,
             prep.coordinates,
             prep.discard_channels,
