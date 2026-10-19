@@ -6,10 +6,13 @@ const { ApiError } = await import("../src/app/http.js");
 const { withUpload } = await import("../src/app/services/upload.js");
 
 const missingUpload = () =>
-  new ApiError("Request failed: upload_token Token expired", {
-    status: 400,
-    field: "upload_token",
-  });
+  new ApiError(
+    "Missing or expired upload; request /api/v1/preview-by-path first",
+    {
+      status: 400,
+      field: "upload_token",
+    },
+  );
 
 /** @param {(path: string) => Promise<unknown>} fetchPreviewByPath */
 function appWith(fetchPreviewByPath) {

@@ -62,7 +62,7 @@ User clicks #browseSignalBtn
                                fall back to decomposition on failure
 ```
 
-For `.bdf`/`.edf` files that open, BIDS entities are parsed from the filename. The project comes from the preview (`project`, the file's folder under the output folder), which `applyPreviewMetadata` puts in the Project field.
+For `.bdf`/`.edf` files that open, BIDS entities are parsed from the filename. The project comes from the preview (`project`, the file's folder under the output folder), which `applyPreviewMetadata` puts in the Project field. For a recording in a BIDS dataset, `applyPreviewMetadata` also sets the placement scheme, its description and the reference and ground locations its `_emg.json` gives.
 
 ### State Written
 

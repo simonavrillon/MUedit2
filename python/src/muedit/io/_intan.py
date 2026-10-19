@@ -2,20 +2,23 @@
 
 from __future__ import annotations
 
-import json
+import logging
 import struct
 import xml.etree.ElementTree as ET
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
-from muedit.models import SignalImport
-from muedit.signal.grid import format_hdemg_signal
+from muedit.errors import SignalLoadError
+from muedit.io._common import _AMPLIFIER_GAIN, _GRID_SIDECAR, _read_grid_sidecar, _resolve_muscles
+from muedit.models import SignalImport, _as_name_list
 from muedit.signal.segmentation import aux_kinds
 from muedit.storage import ArrayStore, RamStore, sample_blocks
+
+logger = logging.getLogger(__name__)
 
 _RHD_MAGIC = 0xC6912702
 
@@ -54,14 +57,10 @@ _ADC_STEP_DEFAULT = 50.354e-6
 
 _NOTCH_HZ = {0: None, 1: 50.0, 2: 60.0}
 
-_RHD_AMPLIFIER_GAIN = 192.0
-
-_GRID_SIDECAR = "muedit_grids.json"
-
 _DEFAULT_GRIDS = {64: "INTAN64-1305"}
 
 
-class _TruncatedHeader(OSError):
+class _TruncatedHeader(SignalLoadError):
     """The header runs past the bytes read so far."""
 
 
@@ -104,12 +103,8 @@ class _IntanChannel:
     native_order: int
     signal_type: int
     enabled: bool
-    port_name: str
     port_prefix: str
-    chip_channel: int
-    board_stream: int
-    impedance_magnitude: float
-    impedance_phase: float
+    impedance_magnitude: float  # ohms, 0 when never measured
 
 
 @dataclass
@@ -126,8 +121,6 @@ class _IntanHeader:
     upper_bandwidth: float
     notch_hz: float | None
     eval_board_mode: int
-    reference_channel: str
-    notes: list[str] = field(default_factory=list)
     n_temp_sensors: int = 0
 
     def enabled_channels(self, signal_type: int) -> list[_IntanChannel]:
@@ -144,7 +137,7 @@ def _parse_rhd_header(buf: bytes) -> _IntanHeader:
     """Parse an RHD header block into an :class:`_IntanHeader`."""
     cur = _HeaderCursor(buf)
     if cur.scalar("I") != _RHD_MAGIC:
-        raise OSError("Not an Intan RHD file: magic number mismatch")
+        raise SignalLoadError("Not an Intan RHD file: magic number mismatch")
 
     version = (int(cur.scalar("h")), int(cur.scalar("h")))
     fsamp = float(cur.scalar("f"))
@@ -161,15 +154,17 @@ def _parse_rhd_header(buf: bytes) -> _IntanHeader:
     cur.scalar("f")
     cur.scalar("f")
 
-    notes = [cur.qstring(), cur.qstring(), cur.qstring()]
+    for _ in range(3):  # notes
+        cur.qstring()
 
     n_temp_sensors = int(cur.scalar("h")) if version >= (1, 1) else 0
     eval_board_mode = int(cur.scalar("h")) if version >= (1, 3) else 0
-    reference_channel = cur.qstring() if version >= (2, 0) else ""
+    if version >= (2, 0):  # reference channel
+        cur.qstring()
 
     channels: list[_IntanChannel] = []
     for _ in range(int(cur.scalar("h"))):
-        port_name = cur.qstring()
+        cur.qstring()  # port name
         port_prefix = cur.qstring()
         group_enabled = int(cur.scalar("h"))
         n_channels = int(cur.scalar("h"))
@@ -183,12 +178,10 @@ def _parse_rhd_header(buf: bytes) -> _IntanHeader:
             cur.scalar("h")
             signal_type = int(cur.scalar("h"))
             channel_enabled = bool(cur.scalar("h"))
-            chip_channel = int(cur.scalar("h"))
-            board_stream = int(cur.scalar("h"))
-            for _ in range(4):
+            for _ in range(6):  # chip channel, board stream, trigger settings
                 cur.scalar("h")
             impedance_magnitude = float(cur.scalar("f"))
-            impedance_phase = float(cur.scalar("f"))
+            cur.scalar("f")  # impedance phase
             channels.append(
                 _IntanChannel(
                     native_name=native_name,
@@ -196,12 +189,8 @@ def _parse_rhd_header(buf: bytes) -> _IntanHeader:
                     native_order=native_order,
                     signal_type=signal_type,
                     enabled=channel_enabled,
-                    port_name=port_name,
                     port_prefix=port_prefix,
-                    chip_channel=chip_channel,
-                    board_stream=board_stream,
                     impedance_magnitude=impedance_magnitude,
-                    impedance_phase=impedance_phase,
                 )
             )
 
@@ -216,8 +205,6 @@ def _parse_rhd_header(buf: bytes) -> _IntanHeader:
         upper_bandwidth=upper_bandwidth,
         notch_hz=notch_hz,
         eval_board_mode=eval_board_mode,
-        reference_channel=reference_channel,
-        notes=[n for n in notes if n],
         n_temp_sensors=n_temp_sensors,
     )
 
@@ -246,18 +233,17 @@ def _read_settings_xml(directory: Path) -> dict[str, str]:
     try:
         # Local file the user chose, not untrusted network input.
         root = ET.parse(path).getroot()  # noqa: S314
-    except ET.ParseError:
+    except ET.ParseError as exc:
+        logger.warning("Ignoring %s: %s", path, exc)
         return {}
-    general = root.find("GeneralConfig")
     return {
         "software_version": root.get("Version", ""),
         "controller_type": root.get("Type", ""),
-        "file_format": general.get("FileFormat", "") if general is not None else "",
     }
 
 
 @dataclass
-class _Recording:
+class _IntanRecording:
     """A resolved Intan recording: its header, its layout, and where data lives."""
 
     header: _IntanHeader
@@ -267,36 +253,36 @@ class _Recording:
     settings: dict[str, str]
 
 
-def _resolve_recording(filepath: str | Path) -> _Recording:
+def _resolve_intan_recording(filepath: str | Path) -> _IntanRecording:
     """Locate the header and decide which of the three save layouts applies."""
     path = Path(filepath)
     if path.is_dir():
         directory = path
         candidates = sorted(directory.glob("*.rhd"))
         if not candidates:
-            raise FileNotFoundError(f"No .rhd header found in Intan directory: {directory}")
+            raise SignalLoadError(f"No .rhd header found in Intan directory: {directory}")
         header_path = next((c for c in candidates if c.name == "info.rhd"), candidates[0])
     elif path.suffix.lower() == ".rhd":
         header_path, directory = path, path.parent
     else:
-        raise ValueError(f"Not an Intan recording: {path}")
+        raise SignalLoadError(f"Not an Intan recording: {path}")
 
     header = _read_rhd_header(header_path)
 
     settings = _read_settings_xml(directory)
     if header_path.stat().st_size > header.header_bytes:
-        return _Recording(header, "traditional", directory, header_path, settings)
+        return _IntanRecording(header, "traditional", directory, header_path, settings)
 
     if any(directory.glob("amp-*.dat")):
         layout = "per_channel"
     elif (directory / "amplifier.dat").exists():
         layout = "per_signal_type"
     else:
-        raise FileNotFoundError(
+        raise SignalLoadError(
             f"{header_path.name} carries no samples and no amplifier data files were found "
             f"in {directory}. Expected 'amp-<port>-<nnn>.dat' or 'amplifier.dat'."
         )
-    return _Recording(header, layout, directory, directory, settings)
+    return _IntanRecording(header, layout, directory, directory, settings)
 
 
 def _channel_filename(channel: _IntanChannel) -> str:
@@ -314,11 +300,11 @@ class _Stream:
     bias: float = 0.0  # subtracted before scaling (unsigned amplifier words)
 
 
-def _time_samples(rec: _Recording) -> int:
+def _time_samples(rec: _IntanRecording) -> int:
     """Sample count declared by ``time.dat`` (the per-channel and per-signal-type layouts)."""
     time_path = rec.directory / "time.dat"
     if not time_path.exists():
-        raise FileNotFoundError(f"Missing time.dat in Intan recording: {rec.directory}")
+        raise SignalLoadError(f"Missing time.dat in Intan recording: {rec.directory}")
     return time_path.stat().st_size // np.dtype(np.int32).itemsize
 
 
@@ -363,7 +349,7 @@ def _digital_reader(
     return read
 
 
-def _per_channel_streams(rec: _Recording) -> tuple[dict[int, _Stream], int]:
+def _per_channel_streams(rec: _IntanRecording) -> tuple[dict[int, _Stream], int]:
     """Streams of the one-file-per-channel layout."""
     n_samples = _time_samples(rec)
     streams: dict[int, _Stream] = {}
@@ -383,13 +369,13 @@ def _per_channel_streams(rec: _Recording) -> tuple[dict[int, _Stream], int]:
         for channel in channels:
             path = rec.directory / _channel_filename(channel)
             if not path.exists():
-                raise FileNotFoundError(
+                raise SignalLoadError(
                     f"Header lists channel '{channel.native_name}' as saved, but "
                     f"{path.name} is missing from {rec.directory}"
                 )
             stored = path.stat().st_size // np.dtype(dtype).itemsize
             if stored < n_samples:
-                raise OSError(
+                raise SignalLoadError(
                     f"{path.name} holds {stored} samples but time.dat declares {n_samples}"
                 )
             paths.append(path)
@@ -397,7 +383,7 @@ def _per_channel_streams(rec: _Recording) -> tuple[dict[int, _Stream], int]:
     return streams, n_samples
 
 
-def _per_signal_type_streams(rec: _Recording) -> tuple[dict[int, _Stream], int]:
+def _per_signal_type_streams(rec: _IntanRecording) -> tuple[dict[int, _Stream], int]:
     """Streams of the one-file-per-signal-type layout."""
     n_samples = _time_samples(rec)
     streams: dict[int, _Stream] = {}
@@ -411,7 +397,7 @@ def _per_signal_type_streams(rec: _Recording) -> tuple[dict[int, _Stream], int]:
         n_cols = 1 if digital else len(channels)
         stored = path.stat().st_size // np.dtype(dtype).itemsize
         if stored % n_cols:
-            raise OSError(f"{filename} does not divide into {n_cols} channels")
+            raise SignalLoadError(f"{filename} does not divide into {n_cols} channels")
         read = _interleaved_reader(path, dtype, n_cols)
         if digital:
             read = _digital_reader(read, channels)
@@ -437,7 +423,7 @@ def _block_field_reader(
     return read
 
 
-def _traditional_streams(rec: _Recording) -> tuple[dict[int, _Stream], int]:
+def _traditional_streams(rec: _IntanRecording) -> tuple[dict[int, _Stream], int]:
     """Streams of a monolithic ``.rhd`` with fixed-size data blocks following the header."""
     header = rec.header
     n_per_block = header.samples_per_block
@@ -463,7 +449,7 @@ def _traditional_streams(rec: _Recording) -> tuple[dict[int, _Stream], int]:
     block_dtype = np.dtype(fields)
     file_bytes = rec.data_path.stat().st_size - header.header_bytes
     if file_bytes % block_dtype.itemsize:
-        raise OSError(
+        raise SignalLoadError(
             f"{rec.data_path.name} holds {file_bytes} data bytes, not a whole number of "
             f"{block_dtype.itemsize}-byte blocks; the file is truncated or the header is stale"
         )
@@ -531,7 +517,7 @@ def _write_stream(
         out[:, start:stop] = (values - offset) * step
 
 
-def _scale_auxiliary(
+def _scale_aux_data(
     streams: dict[int, _Stream], header: _IntanHeader, n_samples: int, store: ArrayStore
 ) -> tuple[np.ndarray, list[str], list[bool]]:
     """Write every non-amplifier stream in physical units into ``store``; name each row and flag the digital ones."""
@@ -545,11 +531,11 @@ def _scale_auxiliary(
         _DIGITAL_OUT: (1.0, 0.0),
     }
     present = [t for t in scaling if t in streams]
-    names = [c.custom_name for t in present for c in header.enabled_channels(t)]
-    digital = [
+    aux_names = [c.custom_name for t in present for c in header.enabled_channels(t)]
+    aux_digital = [
         t in (_DIGITAL_IN, _DIGITAL_OUT) for t in present for _ in header.enabled_channels(t)
     ]
-    auxiliary = store.allocate(
+    aux_data = store.allocate(
         "aux", (sum(streams[t].n_rows for t in present), n_samples), np.float32
     )
     row = 0
@@ -557,87 +543,58 @@ def _scale_auxiliary(
         stream = streams[signal_type]
         step, offset = scaling[signal_type]
         _write_stream(
-            auxiliary[row : row + stream.n_rows], stream, n_samples, offset=offset, step=step
+            aux_data[row : row + stream.n_rows], stream, n_samples, offset=offset, step=step
         )
         row += stream.n_rows
-    return store.seal(auxiliary), names, digital
+    return store.seal(aux_data), aux_names, aux_digital
 
 
-def _read_grid_sidecar(sidecar: Path) -> tuple[list[str], list[str]]:
-    """Return the grid names and muscle labels a ``muedit_grids.json`` sidecar lists, if any."""
-    if not sidecar.exists():
-        return [], []
-    try:
-        payload = json.loads(sidecar.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise OSError(f"Cannot read grid sidecar {sidecar}: {exc}") from exc
-    return (
-        [str(g) for g in _as_list(payload.get("gridname"))],
-        [str(m) for m in _as_list(payload.get("muscle"))],
-    )
-
-
-def _resolve_grids(
-    rec: _Recording,
+def _resolve_intan_grids(
+    rec: _IntanRecording,
     ports: list[str],
     channels_per_port: list[int],
     grid_names: str | list[str] | None,
-    muscles: str | list[str] | None,
+    muscle_names: str | list[str] | None,
 ) -> tuple[list[str], list[str]]:
     """Resolve the grid model and muscle label of each amplifier port."""
-    sidecar_names, sidecar_muscles = _read_grid_sidecar(rec.directory / _GRID_SIDECAR)
-    resolved = [str(g) for g in _as_list(grid_names)] or sidecar_names
+    sidecar_grid_names, sidecar_muscle_names = _read_grid_sidecar(rec.directory / _GRID_SIDECAR)
+    resolved = _as_name_list(grid_names) or sidecar_grid_names
     if not resolved:
         missing = sorted({n for n in channels_per_port if n not in _DEFAULT_GRIDS})
         if missing:
-            raise ValueError(
+            raise SignalLoadError(
                 f"Cannot infer the electrode array for Intan port(s) with {missing} channels: "
                 "the RHD header does not record one. Pass grid_names=... to load_intan, or "
                 f"write a '{_GRID_SIDECAR}' sidecar into {rec.directory} of the form "
-                '{"gridname": ["GR08MM1305", ...], "muscle": ["ta", ...]}.'
+                '{"grid_names": ["GR08MM1305", ...], "muscle_names": ["ta", ...]}.'
             )
         resolved = [_DEFAULT_GRIDS[n] for n in channels_per_port]
 
     if len(resolved) == 1 and len(ports) > 1:
         resolved = resolved * len(ports)
     if len(resolved) != len(ports):
-        raise ValueError(
+        raise SignalLoadError(
             f"Got {len(resolved)} grid name(s) for {len(ports)} amplifier port(s) "
             f"({', '.join(ports)}); pass one name per port or a single shared name."
         )
 
-    resolved_muscles = [str(m) for m in _as_list(muscles)] or sidecar_muscles
-    if resolved_muscles and len(resolved_muscles) == 1 and len(ports) > 1:
-        resolved_muscles = resolved_muscles * len(ports)
-    if resolved_muscles and len(resolved_muscles) != len(ports):
-        raise ValueError(
-            f"Got {len(resolved_muscles)} muscle label(s) for {len(ports)} amplifier port(s)"
-        )
-    return resolved, resolved_muscles
-
-
-def _as_list(value: Any) -> list[Any]:
-    """Normalize ``None`` / scalar / sequence inputs to a list."""
-    if value is None:
-        return []
-    if isinstance(value, (str, bytes)):
-        return [value]
-    if isinstance(value, (list, tuple)):
-        return list(value)
-    return [value]
+    return resolved, _resolve_muscles(
+        muscle_names, sidecar_muscle_names, len(ports), "amplifier port(s)"
+    )
 
 
 def load_intan(
     filepath: str,
     grid_names: str | list[str] | None = None,
-    muscles: str | list[str] | None = None,
+    muscle_names: str | list[str] | None = None,
     store: ArrayStore | None = None,
 ) -> SignalImport:
     """Load an Intan RHD recording as a ``SignalImport``, written into ``store`` block by block."""
-    rec = _resolve_recording(filepath)
+    store = store if store is not None else RamStore()
+    rec = _resolve_intan_recording(filepath)
     header = rec.header
     if not header.enabled_channels(_AMPLIFIER):
-        raise ValueError(f"Intan recording holds no enabled amplifier channels: {filepath}")
+        raise SignalLoadError(f"Intan recording holds no enabled amplifier channels: {filepath}")
 
     readers = {
         "per_channel": _per_channel_streams,
@@ -645,7 +602,6 @@ def load_intan(
         "traditional": _traditional_streams,
     }
     streams, n_samples = readers[rec.layout](rec)
-    store = store if store is not None else RamStore()
 
     amp_channels = header.enabled_channels(_AMPLIFIER)
     ports: list[str] = []
@@ -657,6 +613,9 @@ def load_intan(
         channels_per_port[ports.index(channel.port_prefix)] += 1
     order = np.argsort([ports.index(c.port_prefix) for c in amp_channels], kind="stable")
     amp_channels = [amp_channels[i] for i in order]
+    grid_names, muscle_names = _resolve_intan_grids(
+        rec, ports, channels_per_port, grid_names, muscle_names
+    )
 
     amp = streams[_AMPLIFIER]
     data = store.allocate("emg", (len(amp_channels), n_samples), np.float32)
@@ -668,68 +627,54 @@ def load_intan(
         step=_AMP_STEP_MV,
     )
     data = store.seal(data)
-    auxiliary, aux_names, aux_digital = _scale_auxiliary(streams, header, n_samples, store)
-
-    resolved_grids, resolved_muscles = _resolve_grids(
-        rec, ports, channels_per_port, grid_names, muscles
-    )
-    coordinates, ieds, discard_vecs, emg_types = format_hdemg_signal(resolved_grids)
+    aux_data, aux_names, aux_digital = _scale_aux_data(streams, header, n_samples, store)
 
     high_pass = (
         max(header.dsp_cutoff, header.lower_bandwidth)
         if header.dsp_enabled
-        else (header.lower_bandwidth)
+        else header.lower_bandwidth
     )
     hardware_filter = (
         f"HP: {high_pass:.2f} Hz, LP: {header.upper_bandwidth:.2f} Hz, "
         f"Notch: {'none' if header.notch_hz is None else f'{header.notch_hz:.0f} Hz'}"
     )
 
-    n_emg = data.shape[0]
+    n_emg, n_aux = len(amp_channels), len(aux_names)
     metadata: dict[str, Any] = {
-        "acquisition_date": None,
+        "acquisition_date": None,  # the RHD header does not record it
         "manufacturer": "Intan Technologies",
         "device_name": rec.settings.get("controller_type") or "Intan RHD",
-        "manufacturers_model_name": rec.settings.get("controller_type") or "Intan RHD",
         "software_versions": (
             f"IntanRHX {rec.settings['software_version']}"
             if rec.settings.get("software_version")
             else f"RHD file format {header.version[0]}.{header.version[1]}"
         ),
-        "ad_bits": 16,
-        "coordinates": coordinates,
-        "ieds": ieds,
-        "discard_channels": discard_vecs,
-        "emg_types": emg_types,
         "hardware_filters": [hardware_filter],
-        "channel_map_filters": {},
-        "gains": [_RHD_AMPLIFIER_GAIN] * n_emg,
+        "powerline_freq": header.notch_hz,  # the notch setting; None when off
+        "units": "mV",
+        "gains": [_AMPLIFIER_GAIN] * n_emg,
         "emg_hpf": [high_pass] * n_emg,
         "emg_lpf": [header.upper_bandwidth] * n_emg,
-        "aux_gains": [1.0] * len(aux_names),
-        "aux_hpf": ["n/a"] * len(aux_names),
-        "aux_lpf": ["n/a"] * len(aux_names),
-        "units": "mV",
         "aux_units": "V",
+        "aux_gains": [1.0] * n_aux,
+        "aux_hpf": ["n/a"] * n_aux,
+        "aux_lpf": ["n/a"] * n_aux,
         "aux_kinds": aux_kinds(aux_names, aux_digital),
         "recording_type": "continuous",
         "software_filters": "n/a",
-        "powerline_freq": header.notch_hz or 50.0,
-        "intan_layout": rec.layout,
-        "intan_ports": ports,
-        "intan_channel_names": [c.native_name for c in amp_channels],
-        "intan_eval_board_mode": header.eval_board_mode,
-        "intan_reference_channel": header.reference_channel,
-        "intan_notes": header.notes,
-        "electrode_impedances": [c.impedance_magnitude for c in amp_channels],
+        # In kOhm, as electrodes.tsv lists them; None for a channel never measured.
+        "electrode_impedances": [
+            c.impedance_magnitude / 1000.0 if c.impedance_magnitude > 0 else None
+            for c in amp_channels
+        ],
     }
 
     return SignalImport.build(
         data=data,
         fsamp=float(header.fsamp),
-        gridname=resolved_grids,
-        muscle=resolved_muscles,
-        auxiliary=auxiliary,
-        auxiliaryname=aux_names,
+        grid_names=grid_names,
+        muscle_names=muscle_names,
+        aux_data=aux_data,
+        aux_names=aux_names,
         metadata=metadata,
     )

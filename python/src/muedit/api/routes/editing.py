@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query
+from fastapi import APIRouter, Depends, Path, Query
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import Response
 from pydantic import ValidationError
@@ -28,6 +28,7 @@ from muedit.api.services.editing_service import (
     save_edit_session,
     save_edits,
 )
+from muedit.errors import MueditError
 
 router = APIRouter(prefix="/api/v1", dependencies=[Depends(request_session)])
 
@@ -40,7 +41,7 @@ def open_session_endpoint(
 ) -> Response:
     """Open a decomposition for editing (MUB1: its fields, then CSR discharge times and artifacts)."""
     if not payload.path:
-        raise HTTPException(status_code=400, detail="path is required")
+        raise MueditError("path is required", "path")
     return open_edit_session(payload.path, session)
 
 

@@ -231,8 +231,8 @@ export async function requestPreview(app, { file, silentFailure = false }) {
     setChannelMeans(state, data.channel_means);
     setCoordinates(state, data.coordinates);
     setMetadata(state, data.metadata);
-    setMuscle(state, data.muscle);
-    setAuxData(state, aux.rows, data.auxiliary_names);
+    setMuscle(state, data.muscle_names ?? data.muscle);
+    setAuxData(state, aux.rows, data.aux_names ?? data.auxiliary_names);
     // A BIDS recording brings the target phases its events.tsv lists.
     setSegments(state, toSegments(data.segments));
     setTargetIndex(state, data.target_index);
@@ -247,7 +247,7 @@ export async function requestPreview(app, { file, silentFailure = false }) {
     setArtifactRegions(state, []);
     setArtifactMode(state, false);
     // Raw preview resets edit slice first; ensure BIDS rows render in QC context
-    // so they source run grid names instead of edit fallback ("Grid 1").
+    // so they source run grid names instead of edit fallback ("Grid1").
     showWorkspace("qc");
     prefillHardwareFields();
     renderBidsMuscleFields();

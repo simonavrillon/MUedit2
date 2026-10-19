@@ -114,7 +114,7 @@ def postprocess_variants(
 
 def _nonzero_samples_outside_roi(post: PostprocessStepOutput, roi: tuple[int, int]) -> int:
     """Count samples with any pulse activity lying outside the ROI window."""
-    nz = np.any(post.pulse_t != 0, axis=0)
+    nz = np.any(post.pulse_trains != 0, axis=0)
     roi_start, roi_end = roi
     return int(np.count_nonzero(nz[:roi_start]) + np.count_nonzero(nz[roi_end:]))
 
@@ -129,17 +129,17 @@ def _assert_structure(
     """Assert the postprocess payload is internally consistent."""
     # Both branches pick spikes with POSTPROC_MIN_ISI_SEC: the separator is fitted
     # by now, so the stricter in-loop DECOMP_MIN_ISI_SEC no longer applies.
-    n_mu = len(post.distime)
+    n_mu = len(post.spike_times)
     assert n_mu > 0, "postprocess produced zero motor units"
-    assert post.pulse_t.shape[0] == n_mu
-    assert post.pulse_t.shape[1] == n_samples
+    assert post.pulse_trains.shape[0] == n_mu
+    assert post.pulse_trains.shape[1] == n_samples
     assert len(post.mu_grid_index) == n_mu
     assert len(post.sil) == n_mu
-    assert np.isfinite(post.pulse_t).all(), "pulse trains contain non-finite values"
+    assert np.isfinite(post.pulse_trains).all(), "pulse trains contain non-finite values"
     roi_start, roi_end = roi
     silent = [
         i
-        for i, raw in enumerate(post.distime)
+        for i, raw in enumerate(post.spike_times)
         if not np.any((np.asarray(raw) >= roi_start) & (np.asarray(raw) < roi_end))
     ]
     assert len(silent) <= _MAX_ROI_SILENT_FRAC * n_mu, (
@@ -147,7 +147,7 @@ def _assert_structure(
     )
 
     refractory = int(np.round(fsamp * min_isi_sec))
-    for i, raw in enumerate(post.distime):
+    for i, raw in enumerate(post.spike_times):
         d = np.asarray(raw)
         if d.size == 0:
             continue
@@ -166,8 +166,8 @@ def _record_dedup_effect(
     variants: dict[str, Any],
 ) -> None:
     """Measure how much the default dedup threshold removed, and check invariants."""
-    n_on = len(post_on.distime)
-    n_off = len(post_off.distime)
+    n_on = len(post_on.spike_times)
+    n_off = len(post_off.spike_times)
     pre = variants["pre_dedup_count"]
 
     record(
@@ -243,7 +243,7 @@ class TestBatchSeamDetection:
             fsamp=fsamp, ex_factor=1, batch_ms=100, adapt_wh=False, adapt_sv=False, adapt_sd=False
         )
         rng = np.random.default_rng(0)
-        _ipts, spikes, _losses = run_adaptive_decomposition(
+        _pulse_trains, spikes, _losses = run_adaptive_decomposition(
             emg=emg,
             whitening=np.eye(1, dtype=np.float32),
             sep_vectors=np.ones((1, 1), dtype=np.float32),

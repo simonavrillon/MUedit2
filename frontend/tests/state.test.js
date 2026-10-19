@@ -153,7 +153,7 @@ describe("edit slice", () => {
     actions.setEditSession(state, sessionFrame());
     const e = state.edit;
     assert.equal(e.token, "tok");
-    assert.deepEqual(rows(e.distimes), [[10, 20], [30]]);
+    assert.deepEqual(rows(e.spikeTimes), [[10, 20], [30]]);
     assert.deepEqual(rows(e.artifactTimes), [[], [31]]);
     assert.deepEqual(e.flagged, [false, true]);
     assert.deepEqual(e.versions, [3, 4]);
@@ -183,7 +183,7 @@ describe("edit slice", () => {
       artifacts: [ints()],
     });
     const e = state.edit;
-    assert.deepEqual(rows(e.distimes), [[10], [30]]);
+    assert.deepEqual(rows(e.spikeTimes), [[10], [30]]);
     assert.deepEqual(e.versions, [9, 4]);
     assert.equal(e.dirty, true);
     assert.equal(e.canUndo, true);
@@ -213,7 +213,7 @@ describe("edit slice", () => {
       spikes: [ints(30)],
       artifacts: [ints()],
     });
-    assert.deepEqual(rows(state.edit.distimes), [[10, 20], [30], [30]]);
+    assert.deepEqual(rows(state.edit.spikeTimes), [[10, 20], [30], [30]]);
     actions.applyEditChange(state, {
       meta: {
         ...perMu(2),
@@ -225,20 +225,46 @@ describe("edit slice", () => {
       spikes: [],
       artifacts: [],
     });
-    assert.deepEqual(rows(state.edit.distimes), [[10, 20], [30]]);
+    assert.deepEqual(rows(state.edit.spikeTimes), [[10, 20], [30]]);
     assert.equal(state.edit.editHistory.length, 1);
+  });
+
+  test("a log tail keeps its server indices through edits and undo", () => {
+    const frame = sessionFrame();
+    frame.meta.edit_history = [{ type: "flag_mu" }, { type: "add_spikes" }];
+    frame.meta.edit_history_start = 40; // entries 40 and 41 of the server's log
+    actions.setEditSession(state, frame);
+    const change = (start, history) =>
+      actions.applyEditChange(state, {
+        meta: { ...frame.meta, changed: [], history_start: start, history },
+        spikes: [],
+        artifacts: [],
+      });
+    change(42, [{ type: "delete_spikes" }]);
+    assert.deepEqual(
+      state.edit.editHistory.map((h) => h.type),
+      ["flag_mu", "add_spikes", "delete_spikes"],
+    );
+    change(41, []); // undo back to entry 41
+    assert.deepEqual(
+      state.edit.editHistory.map((h) => h.type),
+      ["flag_mu"],
+    );
+    change(30, []); // undo past the tail: nothing left before entry 30
+    assert.deepEqual(state.edit.editHistory, []);
+    assert.equal(state.edit.editHistoryStart, 30);
   });
 
   test("keepEditMus reorders the times and follows the current MU", () => {
     Object.assign(state.edit, {
-      distimes: [ints(0), ints(1), ints(2)],
+      spikeTimes: [ints(0), ints(1), ints(2)],
       artifactTimes: [ints(30), ints(31), ints(32)],
       currentMu: 2,
       bookmarkPosition: { muIdx: 1, position: 50 },
     });
     actions.keepEditMus(state, [2, 1]);
     const e = state.edit;
-    assert.deepEqual(rows(e.distimes), [[2], [1]]);
+    assert.deepEqual(rows(e.spikeTimes), [[2], [1]]);
     assert.deepEqual(rows(e.artifactTimes), [[32], [31]]);
     assert.equal(e.currentMu, 0);
     assert.deepEqual(e.bookmarkPosition, { muIdx: 1, position: 50 });
@@ -246,7 +272,7 @@ describe("edit slice", () => {
 
   test("keepEditMus falls back to MU 0 and drops a bookmark on a removed MU", () => {
     Object.assign(state.edit, {
-      distimes: [ints(0), ints(1)],
+      spikeTimes: [ints(0), ints(1)],
       muUids: ["u0", "u1"],
       currentMu: 1,
       bookmarkPosition: { muIdx: 1, position: 5 },
@@ -270,14 +296,14 @@ describe("edit slice", () => {
       can_undo: false,
       edit_history: [{ type: "remove_flagged", on_save: true }],
     });
-    assert.deepEqual(rows(state.edit.distimes), [[10, 20]]);
+    assert.deepEqual(rows(state.edit.spikeTimes), [[10, 20]]);
     assert.deepEqual(state.edit.muUids, ["g0_mu0"]);
     assert.equal(state.edit.editHistory[0].type, "remove_flagged");
   });
 
   test("resetEditSlice returns a fresh slice", () => {
     state.edit.dirty = true;
-    state.edit.distimes.push(ints(1));
+    state.edit.spikeTimes.push(ints(1));
     actions.resetEditSlice(state);
     assert.deepEqual(state.edit, pristine.edit);
   });
@@ -296,13 +322,13 @@ describe("setFsamp", () => {
 
 describe("selectors", () => {
   test("MU indices without a grid mapping belong to every grid", () => {
-    state.edit.distimes = [ints(1), ints(2), ints(3)];
+    state.edit.spikeTimes = [ints(1), ints(2), ints(3)];
     state.edit.muGridIndex = [];
     assert.deepEqual(selectors.getEditMuIndicesForGrid(state, 4), [0, 1, 2]);
   });
 
   test("MU indices filter by grid, matching numeric strings", () => {
-    state.edit.distimes = [ints(1), ints(2), ints(3), ints(4)];
+    state.edit.spikeTimes = [ints(1), ints(2), ints(3), ints(4)];
     state.edit.muGridIndex = [0, "1", 1, 0];
     assert.deepEqual(selectors.getEditMuIndicesForGrid(state, 1), [1, 2]);
     assert.deepEqual(selectors.getEditMuIndicesForGrid(state, "0"), [0, 3]);

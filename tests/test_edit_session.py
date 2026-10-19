@@ -16,18 +16,20 @@ from starlette.testclient import TestClient
 from muedit.api import cache
 from muedit.api.binary import FRAME_MEDIA_TYPE, unpack_frame
 from muedit.api.schemas import EDIT_OPS
-from muedit.decomp.decomposition_file import save_decomposition_npz, unpack_csr
+from muedit.api.services import editing_service
+from muedit.decomp.decomposition_file import load_decomposition, save_decomposition_npz, unpack_csr
 from muedit.decomp.preprocess import preprocess_step
 from muedit.decomp.types import DecompositionParameters, LoadStepOutput
+from muedit.editing import edit_log
+from muedit.editing import session as session_module
 from muedit.editing.edit_log import EditLog, find_recoverable
 from muedit.editing.operations import (
-    add_artifact_in_roi,
     add_spikes_in_roi,
     delete_spikes_in_roi,
     remove_discharge_rate_outliers,
     update_motor_unit_filter_window,
 )
-from muedit.editing.session import EditError, EditSession
+from muedit.editing.session import EditError, EditSession, initial_mu_uids, next_mu_uid
 from muedit.models import EditSignalContext, SignalImport
 from muedit.storage import SessionStore
 from tests._platform import deleted
@@ -68,7 +70,7 @@ def _session(
         store=SessionStore.create("test-edit"),
         fsamp=FSAMP,
         total_samples=N_SAMPLES,
-        spikes=spikes,
+        spike_times=spikes,
         pulse=pulse,
         mu_grid_index=grids or [0] * len(spikes),
         mu_uids=[f"g0_mu{i}" for i in range(len(spikes))],
@@ -99,32 +101,34 @@ def edit(pulse: np.ndarray) -> Iterator[EditSession]:
 class TestParity:
     @pytest.mark.parametrize("roi", [(900, 1100), (0, 400), (N_SAMPLES - 300, N_SAMPLES + 50)])
     def test_add_spikes(self, edit: EditSession, pulse: np.ndarray, roi: tuple[int, int]) -> None:
-        before = edit.spikes[1].tolist()
+        before = edit.spike_times[1].tolist()
         expected = add_spikes_in_roi(pulse[1].astype(float), before, FSAMP, *roi, 0.6)
         edit.apply("add-spikes", {"mu": 1, "x_start": roi[0], "x_end": roi[1], "y_min": 0.6})
-        assert edit.spikes[1].tolist() == expected.tolist()
-        assert edit.spikes[1].dtype == np.int32
+        assert edit.spike_times[1].tolist() == expected.tolist()
+        assert edit.spike_times[1].dtype == np.int32
 
     def test_add_artifact(self, edit: EditSession, pulse: np.ndarray) -> None:
-        expected = add_artifact_in_roi(pulse[0].astype(float), [], FSAMP, 2000, 4000, 0.6)
+        expected = add_spikes_in_roi(pulse[0].astype(float), [], FSAMP, 2000, 4000, 0.6)
         edit.apply("add-artifact", {"mu": 0, "x_start": 2000, "x_end": 4000, "y_min": 0.6})
         assert edit.artifacts[0].tolist() == expected.tolist()
 
     def test_delete_spikes(self, edit: EditSession, pulse: np.ndarray) -> None:
-        before = edit.spikes[2].tolist()
+        before = edit.spike_times[2].tolist()
         expected = delete_spikes_in_roi(pulse[2].astype(float), before, 1000, 6000, 0.0, 0.15)
         edit.apply(
             "delete-spikes", {"mu": 2, "x_start": 1000, "x_end": 6000, "y_min": 0.0, "y_max": 0.15}
         )
-        assert edit.spikes[2].tolist() == expected.tolist()
+        assert edit.spike_times[2].tolist() == expected.tolist()
         assert edit.history[-1]["type"] == "delete_spikes"
 
     def test_remove_outliers(self, edit: EditSession, pulse: np.ndarray) -> None:
-        edit.spikes[0] = np.asarray(sorted({*edit.spikes[0].tolist(), 4020}), dtype=np.int32)
-        before = edit.spikes[0].tolist()
+        edit.spike_times[0] = np.asarray(
+            sorted({*edit.spike_times[0].tolist(), 4020}), dtype=np.int32
+        )
+        before = edit.spike_times[0].tolist()
         expected = remove_discharge_rate_outliers(pulse[0].astype(float), before, FSAMP)
         change = edit.apply("remove-outliers", {"mu": 0})
-        assert edit.spikes[0].tolist() == expected.tolist()
+        assert edit.spike_times[0].tolist() == expected.tolist()
         assert change.info["removed_count"] == len(before) - len(expected)
 
     def test_drawn_trains_without_pulse(self) -> None:
@@ -133,7 +137,7 @@ class TestParity:
             assert not edit.has_pulse(0)
             np.testing.assert_array_equal(np.flatnonzero(edit.values(0, 0, 1000)), [100, 200, 300])
             edit.apply("delete-spikes", {"mu": 0, "x_start": 150, "x_end": 250, "y_max": 1.0})
-            assert edit.spikes[0].tolist() == [100, 300]
+            assert edit.spike_times[0].tolist() == [100, 300]
         finally:
             edit.close()
 
@@ -151,7 +155,7 @@ def _emg_signal(
         data=data.astype(np.float32),
         fsamp=FSAMP,
         grid_names=["GR08MM1305"],
-        emgmask=[np.zeros(64, dtype=int)],
+        discard_channels=[np.zeros(64, dtype=int)],
         artifact_mask=mask,
     )
 
@@ -161,11 +165,11 @@ def _decomposition_filtered(ctx: EditSignalContext) -> np.ndarray:
     signal = SignalImport(
         data=ctx.data,
         fsamp=ctx.fsamp,
-        gridname=list(ctx.grid_names),
-        auxiliary=np.zeros((0, ctx.data.shape[1])),
+        grid_names=list(ctx.grid_names),
+        aux_data=np.zeros((0, ctx.data.shape[1])),
     )
     prep = preprocess_step(
-        loaded=LoadStepOutput("x", "x", signal, signal.data, signal.fsamp),
+        loaded=LoadStepOutput("x", signal, signal.data, signal.fsamp),
         duration=None,
         manual_roi=False,
         roi=None,
@@ -210,7 +214,7 @@ class TestUpdateFilter:
             )
             assert pt is not None
             edit.apply("update-filter", {"mu": 0, "view_start": VIEW_START, "view_end": VIEW_END})
-            assert edit.spikes[0].tolist() == expected.tolist()
+            assert edit.spike_times[0].tolist() == expected.tolist()
             row = edit.values(0, 0, N_SAMPLES)
             np.testing.assert_array_equal(
                 row[VIEW_START + EDGE : VIEW_END - EDGE],
@@ -218,7 +222,7 @@ class TestUpdateFilter:
             )
             assert not row[: VIEW_START + EDGE].any()
             truth = _in_view(synthetic_mu["target"])
-            assert _match_count(truth, _in_view(edit.spikes[0])) >= 0.5 * truth.size
+            assert _match_count(truth, _in_view(edit.spike_times[0])) >= 0.5 * truth.size
             # The file's train is untouched: the MU got its own copy.
             assert edit.owned[0] and edit.rows[0] != ("base", 0)
             assert not edit.arrays["base"].any()
@@ -269,7 +273,7 @@ class TestUpdateFilter:
         )
         try:
             edit.apply("update-filter", {"mu": 0, "view_start": VIEW_START, "view_end": VIEW_END})
-            spikes = edit.spikes[0]
+            spikes = edit.spike_times[0]
             assert not ((spikes >= 4000) & (spikes < 5000)).any()
             assert not edit.values(0, 4000, 5000).any()
         finally:
@@ -294,6 +298,42 @@ class TestUpdateFilter:
         finally:
             edit.close()
 
+    @pytest.mark.parametrize(
+        ("args", "expected"),
+        [
+            ({}, (500, 0.03, "float64")),
+            ({"nbextchan": 800, "compute_dtype": "float32"}, (800, 0.03, "float32")),
+        ],
+        ids=["run-settings", "request-overrides"],
+    )
+    def test_refit_follows_the_run_settings(
+        self,
+        synthetic_mu: dict[str, np.ndarray],
+        monkeypatch: pytest.MonkeyPatch,
+        args: dict[str, Any],
+        expected: tuple[int, float, str],
+    ) -> None:
+        seen: dict[str, Any] = {}
+
+        def spy(*a: Any, **kw: Any) -> tuple[None, np.ndarray]:
+            seen.update(kw)
+            return None, np.asarray(a[2], dtype=np.int64)
+
+        monkeypatch.setattr(session_module, "update_motor_unit_filter_window", spy)
+        edit = _session([synthetic_mu["target"].tolist()], signal=_emg_signal(synthetic_mu))
+        edit.meta["parameters"] = {
+            "nbextchan": 500,
+            "peel_off_win": 0.03,
+            "compute_dtype": "float64",
+        }
+        try:
+            edit.apply(
+                "update-filter", {"mu": 0, "view_start": VIEW_START, "view_end": VIEW_END, **args}
+            )
+            assert (seen["nbextchan"], seen["peeloff_win"], seen["compute_dtype"]) == expected
+        finally:
+            edit.close()
+
     def test_no_emg_is_an_error(self) -> None:
         edit = _session([[100]])
         try:
@@ -308,7 +348,7 @@ class TestUpdateFilter:
 
 def _state(edit: EditSession) -> tuple[Any, ...]:
     return (
-        [s.tolist() for s in edit.spikes],
+        [s.tolist() for s in edit.spike_times],
         [a.tolist() for a in edit.artifacts],
         list(edit.flagged),
         list(edit.mu_uids),
@@ -393,17 +433,88 @@ class TestUndo:
         assert key in edit.arrays
         assert edit.values(3, 100, 150).tolist() == [7.0] * 50
 
+    def test_a_failed_edit_changes_nothing(
+        self, edit: EditSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        edit.apply("flag", {"mu": 1})
+        before, depth = _state(edit), len(edit.undo_stack)
+
+        def fail(*args: Any, **kwargs: Any) -> None:  # after the spikes were written
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(edit, "_entry", fail)
+        with pytest.raises(RuntimeError):
+            edit.apply("add-spikes", {"mu": 0, "x_start": 0, "x_end": N_SAMPLES - 1})
+        monkeypatch.undo()
+        assert _state(edit) == before
+        assert len(edit.undo_stack) == depth
+        assert edit.unsaved == 1
+
+    def test_a_failed_duplicate_keeps_every_mu(
+        self, edit: EditSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        before = _state(edit)
+
+        def fail(grid: int) -> str:
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(edit, "_new_uid", fail)
+        with pytest.raises(RuntimeError):
+            edit.apply("duplicate", {"mu": 0})
+        assert _state(edit) == before
+        assert not edit.can_undo
+
+    def test_a_failed_undo_keeps_its_step(
+        self, edit: EditSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _write_patch(edit, 0, 100, np.full(50, 7.0, np.float32))
+        _write_patch(edit, 0, 100, np.full(50, 3.0, np.float32))
+
+        def fail(mu: int) -> None:
+            raise OSError("disk full")
+
+        monkeypatch.setattr(edit, "_own_row", fail)
+        with pytest.raises(OSError):
+            edit.apply("undo", {})
+        monkeypatch.undo()
+        assert len(edit.undo_stack) == 2
+        edit.apply("undo", {})
+        assert edit.values(0, 100, 150).tolist() == [7.0] * 50
+
+    def test_a_train_only_a_forgotten_step_used_is_deleted(
+        self, edit: EditSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(session_module, "MAX_UNDO", 1)
+        _write_patch(edit, 0, 100, np.full(50, 7.0, np.float32))
+        row = edit.rows[0]
+        assert row is not None
+        edit.apply("reset", {"mu": 0})
+        assert row[0] in edit.arrays
+        edit.apply("flag", {"mu": 1})
+        assert set(edit.arrays) == {"base"}
+
+    def test_a_closed_session_takes_no_edit(self) -> None:
+        edit = _session([[100]], _noisy_pulse(1))
+        edit.close()
+        with pytest.raises(EditError) as err:
+            edit.apply("flag", {"mu": 0})
+        assert err.value.field == "token"
+        assert edit.signal is None
+
+    def test_the_pulse_train_is_read_only(self, edit: EditSession) -> None:
+        assert not edit.values(0, 0, 10).flags.writeable
+
     def test_reset_restores_the_file_train_and_spikes(
         self, edit: EditSession, pulse: np.ndarray
     ) -> None:
-        spikes = edit.spikes[0].copy()
+        spikes = edit.spike_times[0].copy()
         _write_patch(edit, 0, 100, np.full(50, 7.0, np.float32))
         edit.apply("delete-spikes", {"mu": 0, "x_start": 0, "x_end": N_SAMPLES, "y_max": 5.0})
         was_dirty = edit.dirty
         assert was_dirty
         edit.apply("reset", {"mu": 0})
         np.testing.assert_array_equal(edit.values(0, 0, N_SAMPLES), pulse[0])
-        np.testing.assert_array_equal(edit.spikes[0], spikes)
+        np.testing.assert_array_equal(edit.spike_times[0], spikes)
         assert edit.dirty  # the reset is an unsaved edit too
         assert edit.history[-1]["type"] == "reset_mu"
 
@@ -415,7 +526,7 @@ class TestUndo:
             ("duplicate", {"mu": 0}),
         ],
     )
-    def test_an_edit_that_keeps_the_discharge_times_is_unsaved_too(
+    def test_an_edit_that_keeps_the_spike_times_is_unsaved_too(
         self, edit: EditSession, op: str, args: dict[str, Any]
     ) -> None:
         states = [edit.dirty]
@@ -538,6 +649,32 @@ class TestEditLog:
         assert find_recoverable(source, set()) is None
         assert not list((cache_dir / "edit-logs").iterdir())
 
+    def test_a_log_that_fails_keeps_what_it_holds(self, cache_dir: Path, tmp_path: Path) -> None:
+        source = tmp_path / "rec_decomp.npz"
+        source.write_bytes(b"decomposition")
+        edit = _session([[100], [200]])
+        log = EditLog.create(source, "tab")
+        assert log is not None
+        edit.log = log
+        edit.apply("flag", {"mu": 0})
+        log._fh.close()
+        edit.apply("flag", {"mu": 1})
+        assert edit.unsaved == 2
+        edit.close()
+        found = find_recoverable(source, set())
+        assert found is not None and found.edits == 1
+
+    def test_a_log_without_edits_is_left_for_its_session(
+        self, cache_dir: Path, tmp_path: Path
+    ) -> None:
+        source = tmp_path / "rec_decomp.npz"
+        source.write_bytes(b"decomposition")
+        opening = EditLog.create(source, "other-tab")
+        assert opening is not None
+        assert find_recoverable(source, set()) is None
+        assert opening.path.exists()
+        opening.close(keep=False)
+
     def test_a_live_sessions_log_is_not_recoverable(self, cache_dir: Path, tmp_path: Path) -> None:
         source = tmp_path / "rec_decomp.npz"
         source.write_bytes(b"decomposition")
@@ -574,11 +711,11 @@ def decomp_file(tmp_path: Path) -> Path:
     save_decomposition_npz(
         path,
         pulse_trains=_noisy_pulse(3),
-        distimes=[_spike_train(10.0, seed=s) for s in (1, 2, 3)],
+        spike_times=[_spike_train(10.0, seed=s) for s in (1, 2, 3)],
         fsamp=FSAMP,
         grid_names=["GR08MM1305"],
         mu_grid_index=[0, 0, 0],
-        muscles=["ta"],
+        muscle_names=["ta"],
         parameters={"duplicatesthresh": 0.3},
         total_samples=N_SAMPLES,
     )
@@ -608,6 +745,16 @@ def _op(api: TestClient, token: str, op: str, tab: str = "tab-edit", **args: Any
 
 
 class TestSessionApi:
+    def test_a_session_whose_edits_cannot_be_logged_says_so(
+        self, api: TestClient, decomp_file: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        blocker = tmp_path / "not-a-folder"
+        blocker.write_text("")
+        monkeypatch.setattr(edit_log, "edit_logs_dir", lambda: blocker / "edit_logs")
+        meta = _open(api, decomp_file)[0]
+        assert meta["crash_recovery"] is False
+        assert _op(api, meta["token"], "flag", mu=0, flag=True)[0]["crash_recovery"] is False
+
     def test_open_sends_fields_and_csr_spikes_not_pulse_trains(
         self, api: TestClient, decomp_file: Path
     ) -> None:
@@ -617,6 +764,7 @@ class TestSessionApi:
         assert meta["has_pulse"] == [True, True, True]
         assert meta["dirty"] is False and meta["can_undo"] is False
         assert meta["recoverable_edits"] == 0
+        assert meta["crash_recovery"] is True
         assert set(arrays) == {"spikes", "spike_offsets", "artifacts", "artifact_offsets"}
         assert arrays["spikes"].dtype == np.int32
         rows = unpack_csr(arrays["spikes"], arrays["spike_offsets"])
@@ -652,16 +800,23 @@ class TestSessionApi:
 
     def test_bad_requests(self, api: TestClient, decomp_file: Path) -> None:
         token = _open(api, decomp_file)[0]["token"]
-        resp = api.post(f"{API}/edit/ops/flag", json={"token": token, "mu": 9})
-        assert resp.status_code == 400
+        for mu in (9, -1):
+            resp = api.post(f"{API}/edit/ops/flag", json={"token": token, "mu": mu})
+            assert resp.status_code == 400
+            err = resp.json()["error"]
+            assert (err["message"], err["detail"]) == (
+                f"mu {mu} is out of range [0, 3)",
+                {"field": "mu"},
+            )
         resp = api.post(f"{API}/edit/ops/explode", json={"token": token})
         assert resp.status_code == 422
         # Each op's body is checked before the session sees it.
         resp = api.post(f"{API}/edit/ops/add-spikes", json={"token": token, "mu": 0, "x_end": 9})
         assert resp.status_code == 422
         assert resp.json()["error"]["detail"][0]["loc"] == ["body", "x_start"]
-        resp = api.post(f"{API}/edit/ops/flag", json={"token": token, "mu": "first"})
-        assert resp.status_code == 422
+        for bad_mu in ("first", "1", True, 1.0):
+            resp = api.post(f"{API}/edit/ops/flag", json={"token": token, "mu": bad_mu})
+            assert resp.status_code == 422, bad_mu
         resp = api.post(f"{API}/edit/ops/flag", json={"token": "gone", "mu": 0})
         assert resp.status_code == 400
         resp = api.post(
@@ -715,6 +870,35 @@ class TestSessionApi:
         slot = cache._EDIT_SESSIONS.slots[token]
         assert slot.session == "tab-after"
 
+    def test_state_carries_the_log_tail_back_to_the_oldest_undo(
+        self, api: TestClient, decomp_file: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(editing_service, "HISTORY_TAIL", 1)
+        token = _open(api, decomp_file)[0]["token"]
+        for mu in range(3):
+            _op(api, token, "flag", mu=mu)
+        edit = cache._get_edit_session(token)
+        assert edit is not None
+        n, first_undo = len(edit.history), edit.undo_stack[0].history_len
+
+        def state() -> dict[str, Any]:
+            return _frame(
+                api.get(
+                    f"{API}/edit/session",
+                    params={"token": token},
+                    headers={SESSION_HEADER: "tab-edit"},
+                )
+            )[0]
+
+        # All three flags can be undone, so the client holds the log back to the first.
+        meta = state()
+        assert meta["edit_history_start"] == first_undo
+        assert meta["edit_history"] == edit.history[first_undo:]
+        edit.undo_stack.clear()
+        meta = state()
+        assert meta["edit_history_start"] == n - 1
+        assert meta["edit_history"] == edit.history[-1:]
+
     def test_save_writes_the_edits_and_makes_them_the_baseline(
         self, api: TestClient, decomp_file: Path, tmp_path: Path
     ) -> None:
@@ -725,7 +909,7 @@ class TestSessionApi:
         _op(api, token, "duplicate", mu=2)
         edit = cache._get_edit_session(token)
         assert edit is not None
-        kept_spikes = [edit.spikes[0].tolist(), edit.spikes[2].tolist()]
+        kept_spikes = [edit.spike_times[0].tolist(), edit.spike_times[2].tolist()]
         resp = api.post(
             f"{API}/edit/session/save",
             json={"token": token, "project": "proj", "entity_label": "sub-01_task-edit"},
@@ -885,7 +1069,10 @@ class TestSessionApi:
             json={"path": str(broken)},
             headers={SESSION_HEADER: "tab-edit"},
         )
-        assert resp.status_code >= 400
+        assert resp.status_code == 400
+        err = resp.json()["error"]
+        assert err["message"] == "Cannot read broken_decomp.npz: File is not a zip file"
+        assert err["detail"] == {"field": "path"}
         meta, _ = _op(api, token, "flag", mu=0, flag=True)
         assert meta["flagged"][0] is True
         replaced = _open(api, decomp_file)[0]["token"]
@@ -900,11 +1087,11 @@ class TestSessionApi:
         save_decomposition_npz(
             path,
             pulse_trains=None,
-            distimes=[[100, 200]],
+            spike_times=[[100, 200]],
             fsamp=FSAMP,
             grid_names=["GR08MM1305"],
             mu_grid_index=[0],
-            muscles=[],
+            muscle_names=[],
             parameters={},
             total_samples=N_SAMPLES,
         )
@@ -924,3 +1111,50 @@ def test_delete_in_roi_matches_on_a_drawn_pulse() -> None:
     """The ROI helpers the session calls still work on a plain array."""
     pulse = _pulse_with_peaks({100: 0.5, 200: 0.5, 300: 0.5}, n=1000)
     assert delete_spikes_in_roi(pulse, [100, 200], 150, 400, 0.2, 0.8).tolist() == [100]
+
+
+def test_mu_uids_are_numbered_per_grid_and_never_reused() -> None:
+    assert initial_mu_uids([0, 0, 1, 0]) == ["g0_mu0", "g0_mu1", "g1_mu0", "g0_mu2"]
+    assert next_mu_uid(0, ["g0_mu4", "g1_mu9", "g0_extra"]) == "g0_mu5"
+    assert next_mu_uid(2, []) == "g2_mu0"
+
+
+def test_detach_copies_what_is_mapped_from_the_file(tmp_path: Path) -> None:
+    """Windows cannot replace a mapped file: before a save over it, both maps move to the store."""
+    n_samples = 3001
+    path = tmp_path / "d.npz"
+    save_decomposition_npz(
+        path,
+        pulse_trains=np.random.default_rng(1).random((2, n_samples)),
+        spike_times=[[10, 20], [30]],
+        fsamp=2048.0,
+        grid_names=["GR08MM1305"],
+        mu_grid_index=[0, 0],
+        muscle_names=[],
+        parameters={},
+        total_samples=n_samples,
+        emg_data=np.random.default_rng(0).standard_normal((64, n_samples)),
+    )
+    store = SessionStore.create("edit")
+    decomp, ctx = load_decomposition(str(path), store, binary_trains=False)
+    edit = EditSession(
+        store=store,
+        fsamp=2048.0,
+        total_samples=n_samples,
+        spike_times=decomp.spike_times,
+        pulse=decomp.pulse_trains_full,
+        mu_grid_index=decomp.mu_grid_index,
+        mu_uids=["g0_mu0", "g0_mu1"],
+        signal=ctx,
+    )
+    assert edit.signal is not None
+    mapped = (edit.arrays["base"], edit.signal.data)
+    assert all(Path(getattr(arr, "filename", "")) == path for arr in mapped)
+
+    edit.detach(str(tmp_path / "other.npz"))  # another file: nothing moves
+    assert edit.arrays["base"] is mapped[0] and edit.signal.data is mapped[1]
+
+    edit.detach(str(path))
+    for arr, before in zip((edit.arrays["base"], edit.signal.data), mapped, strict=True):
+        assert Path(getattr(arr, "filename", "")).parent.resolve() == store.path.resolve()
+        np.testing.assert_array_equal(arr, before)

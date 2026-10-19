@@ -13,9 +13,10 @@ from typing import Any
 
 import numpy as np
 
+from muedit.errors import SignalLoadError
 from muedit.io._bids_layout import BidsEntities, dataset_root, entity_pairs
 from muedit.models import SignalImport
-from muedit.signal.grid import format_hdemg_signal, is_known_grid
+from muedit.signal.grid import is_known_grid
 from muedit.signal.segmentation import aux_kinds
 from muedit.storage import ArrayStore, RamStore
 
@@ -49,6 +50,15 @@ def _ensure_pyedflib() -> Any:
             "pyedflib is required for BIDS EMG (EDF/BDF). Install it with `pip install pyedflib`."
         ) from exc
     return pyedflib
+
+
+def _open_edf(path: Path) -> Any:
+    """A ``pyedflib.EdfReader`` on ``path``; a file pyedflib cannot read is a ``SignalLoadError``."""
+    pyedflib = _ensure_pyedflib()
+    try:
+        return pyedflib.EdfReader(str(path))
+    except OSError as exc:
+        raise SignalLoadError(f"Cannot read {path.name} as EDF/BDF: {exc}") from exc
 
 
 def _parse_tsv_number(value: float | str | None) -> float | str:
@@ -116,7 +126,10 @@ def _read_sidecar(emg_path: Path, entity_label: str) -> dict[str, Any]:
     merged: dict[str, Any] = {}
     for path in _inherited(emg_path, entity_label, "emg.json"):
         with path.open("r", encoding="utf-8") as f:
-            merged.update(json.load(f))
+            try:
+                merged.update(json.load(f))
+            except json.JSONDecodeError as exc:
+                raise SignalLoadError(f"{path.name} is not valid JSON: {exc}") from exc
     return merged
 
 
@@ -130,7 +143,7 @@ def resolve_bids_emg_path(bids_root: Path, entity_label: str) -> Path:
     candidates = list(emg_dir.glob(f"{entity_label}_emg.*"))
     if candidates:
         return candidates[0]
-    raise FileNotFoundError(f"Cannot find EMG file for {entity_label} in {emg_dir}")
+    raise SignalLoadError(f"Cannot find EMG file for {entity_label} in {emg_dir}")
 
 
 def resolve_bids_channels_tsv(emg_dir: Path, entity_label: str) -> Path:
@@ -141,7 +154,7 @@ def resolve_bids_channels_tsv(emg_dir: Path, entity_label: str) -> Path:
     ]:
         if candidate.exists():
             return candidate
-    raise FileNotFoundError(f"Cannot find channels.tsv for {entity_label} in {emg_dir}")
+    raise SignalLoadError(f"Cannot find channels.tsv for {entity_label} in {emg_dir}")
 
 
 def _blank(value: str | None) -> bool:
@@ -203,7 +216,7 @@ def _grid_layouts(rows: list[dict[str, str]], sidecar: dict[str, Any]) -> list[_
         known = next((n for n in named if is_known_grid(n)), None)
         if known is None:
             given = f" (unknown model {', '.join(repr(n) for n in named)})" if named else ""
-            raise ValueError(
+            raise SignalLoadError(
                 f"Cannot determine the grid model of group '{label}'{given}: add the grid to "
                 "_GRID_CATALOG in signal/grid.py, then name it in the 'grid_name' column of "
                 "channels.tsv or in 'ElectrodeManufacturersModelName' of the EMG JSON sidecar."
@@ -213,7 +226,7 @@ def _grid_layouts(rows: list[dict[str, str]], sidecar: dict[str, Any]) -> list[_
 
 
 @dataclass
-class _Recording:
+class _BidsRecording:
     """A recording's channels.tsv rows, merged sidecar and grids."""
 
     emg_path: Path
@@ -227,14 +240,14 @@ class _Recording:
         return np.array([1 if s == "bad" else 0 for s in statuses], dtype=int)
 
 
-def _read_recording(emg_path: Path, entity_label: str, channels_tsv: Path) -> _Recording:
+def _read_recording(emg_path: Path, entity_label: str, channels_tsv: Path) -> _BidsRecording:
     """Channels, sidecar and grid layouts of one BIDS EMG recording."""
     _, rows = read_tsv(channels_tsv)
     sidecar = _read_sidecar(emg_path, entity_label)
     layouts = _grid_layouts(rows, sidecar)
     if not layouts:
-        raise ValueError(f"No EMG grid channels found in {channels_tsv}")
-    return _Recording(emg_path, rows, sidecar, layouts)
+        raise SignalLoadError(f"No EMG grid channels found in {channels_tsv}")
+    return _BidsRecording(emg_path, rows, sidecar, layouts)
 
 
 def _signal_index(edf_reader: Any, rows: list[dict[str, str]]) -> list[int]:
@@ -246,42 +259,16 @@ def _signal_index(edf_reader: Any, rows: list[dict[str, str]]) -> list[int]:
     return list(range(len(rows)))
 
 
-def _grid(bids_root: Path, entity_label: str, grid_index: int) -> tuple[_Recording, _GridLayout]:
+def _grid(
+    bids_root: Path, entity_label: str, grid_index: int
+) -> tuple[_BidsRecording, _GridLayout]:
     """The recording of ``entity_label`` and its grid ``grid_index``."""
     emg_path = resolve_bids_emg_path(bids_root, entity_label)
     channels_tsv = resolve_bids_channels_tsv(emg_path.parent, entity_label)
     recording = _read_recording(emg_path, entity_label, channels_tsv)
     if not 0 <= grid_index < len(recording.layouts):
-        raise ValueError(f"No EMG grid {grid_index + 1} in {channels_tsv}")
+        raise SignalLoadError(f"No EMG grid {grid_index + 1} in {channels_tsv}")
     return recording, recording.layouts[grid_index]
-
-
-def load_bids_emg_grid(
-    bids_root: Path,
-    entity_label: str,
-    grid_index: int,
-    read_start: int = 0,
-    read_n: int | None = None,
-) -> tuple[np.ndarray, float, np.ndarray]:
-    """Load EMG samples, sampling rate, and bad-mask for a single BIDS grid."""
-    recording, layout = _grid(bids_root, entity_label, grid_index)
-
-    pyedflib = _ensure_pyedflib()
-    reader = pyedflib.EdfReader(str(recording.emg_path))
-    try:
-        index = _signal_index(reader, recording.rows)
-        channels = [index[r] for r in layout.rows]
-        fsamp = float(reader.getSampleFrequency(channels[0]))
-        signals = [reader.readSignal(ch, start=read_start, n=read_n) for ch in channels]
-        data = np.vstack(signals)
-    finally:
-        reader.close()
-
-    if read_n is None:
-        declared = _declared_sample_count(recording.sidecar, fsamp)
-        if declared is not None:
-            data = data[:, : max(0, declared - read_start)]
-    return data, fsamp, recording.bad_mask(layout)
 
 
 def read_bids_emg_grid(
@@ -290,8 +277,7 @@ def read_bids_emg_grid(
     """One BIDS grid over the whole recording as writable float32 rows of ``store``, a channel at a time."""
     recording, layout = _grid(bids_root, entity_label, grid_index)
 
-    pyedflib = _ensure_pyedflib()
-    reader = pyedflib.EdfReader(str(recording.emg_path))
+    reader = _open_edf(recording.emg_path)
     try:
         index = _signal_index(reader, recording.rows)
         channels = [index[r] for r in layout.rows]
@@ -420,14 +406,15 @@ def _muscle(row: dict[str, str]) -> str:
 
 def load_bids_signal(filepath: str, store: ArrayStore | None = None) -> SignalImport:
     """Load a BIDS EMG recording (BDF/EDF + sidecars) as a ``SignalImport``, written into ``store``."""
+    store = store if store is not None else RamStore()
     emg_path = Path(filepath)
 
     if emg_path.is_dir():
         candidates = sorted(emg_path.glob("*_emg.bdf")) + sorted(emg_path.glob("*_emg.edf"))
         if not candidates:
-            raise FileNotFoundError(f"No BIDS EMG file found in directory: {emg_path}")
+            raise SignalLoadError(f"No BIDS EMG file found in directory: {emg_path}")
         if len(candidates) > 1:
-            raise ValueError(
+            raise SignalLoadError(
                 f"Multiple BIDS EMG files found in {emg_path}; provide a specific file path."
             )
         emg_path = candidates[0]
@@ -437,9 +424,8 @@ def load_bids_signal(filepath: str, store: ArrayStore | None = None) -> SignalIm
 
     channels_tsv = resolve_bids_channels_tsv(emg_path.parent, entity_label)
     recording = _read_recording(emg_path, entity_label, channels_tsv)
-    rows, bids_sidecar, layouts = recording.rows, recording.sidecar, recording.layouts
-    fsamp = float(bids_sidecar.get("SamplingFrequency") or 0.0)
-    hardware_filters = bids_sidecar.get("HardwareFilters") or ["n/a"]
+    rows, sidecar, layouts = recording.rows, recording.sidecar, recording.layouts
+    fsamp = float(sidecar.get("SamplingFrequency") or 0.0)
 
     grid_rows = [r for layout in layouts for r in layout.rows]
     in_grid = set(grid_rows)
@@ -448,17 +434,16 @@ def load_bids_signal(filepath: str, store: ArrayStore | None = None) -> SignalIm
     def column(name: str, picked: list[int]) -> list[float | str]:
         return [_parse_tsv_number(rows[r].get(name) or "n/a") for r in picked]
 
-    store = store if store is not None else RamStore()
-    pyedflib = _ensure_pyedflib()
-    edf_reader = pyedflib.EdfReader(str(emg_path))
+    edf_reader = _open_edf(emg_path)
     try:
         index = _signal_index(edf_reader, rows)
+        acquisition_date = edf_reader.getStartdatetime().isoformat()
         if fsamp == 0.0:
             fsamp = float(edf_reader.getSampleFrequency(index[grid_rows[0]]))
         n_samples = int(edf_reader.getNSamples()[index[min(grid_rows + aux_rows)]])
 
         # Drop the zero padding filling the last data record.
-        declared = _declared_sample_count(bids_sidecar, fsamp)
+        declared = _declared_sample_count(sidecar, fsamp)
         if declared is not None and 0 < declared < n_samples:
             n_samples = declared
 
@@ -466,75 +451,60 @@ def load_bids_signal(filepath: str, store: ArrayStore | None = None) -> SignalIm
         data = store.allocate("emg", (len(grid_rows), n_samples), np.float32)
         for i, r in enumerate(grid_rows):
             data[i] = edf_reader.readSignal(index[r], n=n_samples)
-        auxiliary = store.allocate("aux", (len(aux_rows), n_samples), np.float32)
+        aux_data = store.allocate("aux", (len(aux_rows), n_samples), np.float32)
         for i, r in enumerate(aux_rows):
-            auxiliary[i] = edf_reader.readSignal(index[r], n=n_samples)
+            aux_data[i] = edf_reader.readSignal(index[r], n=n_samples)
     finally:
         edf_reader.close()
     data = store.seal(data)
-    auxiliary = store.seal(auxiliary)
+    aux_data = store.seal(aux_data)
 
     event_files = _inherited(emg_path, entity_label, "events.tsv")
     segments = segments_from_events(event_files[-1], fsamp, n_samples) if event_files else []
 
-    grid_type_names = [layout.name for layout in layouts]
-    coordinates, ieds, discard_vecs, emg_types = format_hdemg_signal(grid_type_names)
     aux_units = [_parse_unit(rows[r].get("units")) or "n/a" for r in aux_rows]
     aux_names = [_aux_name(rows[r], r) for r in aux_rows]
     aux_digital = [(rows[r].get("type") or "").strip().upper() == "TRIG" for r in aux_rows]
 
+    # Read back what export_bids_emg wrote, so export -> re-import -> re-export keeps it.
     metadata: dict[str, Any] = {
-        "device_name": bids_sidecar.get("ManufacturersModelName"),
-        "hardware_filters": hardware_filters,
-        "coordinates": coordinates,
-        "ieds": ieds,
-        "discard_channels": discard_vecs,
-        "emg_types": emg_types,
+        "acquisition_date": acquisition_date,
+        "manufacturer": sidecar.get("Manufacturer"),
+        "device_name": sidecar.get("ManufacturersModelName"),
+        "software_versions": sidecar.get("SoftwareVersions"),
+        "hardware_filters": sidecar.get("HardwareFilters") or ["n/a"],
+        "powerline_freq": sidecar.get("PowerLineFrequency"),
+        # Without these a re-export falls back to mV and relabels recordings in other units.
+        "units": _parse_unit(rows[grid_rows[0]].get("units")),
+        "gains": column("gain", grid_rows),
+        "emg_hpf": column("low_cutoff", grid_rows),
+        "emg_lpf": column("high_cutoff", grid_rows),
+        "aux_units": _collapse_units(aux_units),
+        "aux_gains": column("gain", aux_rows),
+        "aux_hpf": column("low_cutoff", aux_rows),
+        "aux_lpf": column("high_cutoff", aux_rows),
+        "aux_kinds": aux_kinds(aux_names, aux_digital),
+        "recording_type": sidecar.get("RecordingType"),
+        "software_filters": sidecar.get("SoftwareFilters"),
+        "placement_scheme": sidecar.get("EMGPlacementScheme"),
+        "placement_scheme_description": sidecar.get("EMGPlacementSchemeDescription"),
+        "ground_location": sidecar.get("EMGGround"),
+        "reference_location": reference_location(sidecar.get("EMGReference")),
         "bad_channels_per_grid": [recording.bad_mask(layout).tolist() for layout in layouts],
         "grid_labels": [layout.label for layout in layouts],
         # Target phases the recording's events.tsv lists, drawn on the QC page as segments.
         "segments": segments,
         "bids_entity_label": entity_label,
         "bids_emg_path": str(emg_path),
-        # Per-channel amplifier metadata read back from channels.tsv so the
-        # BIDS round-trip (export → re-import → re-export) preserves them.
-        "gains": column("gain", grid_rows),
-        "emg_hpf": column("low_cutoff", grid_rows),
-        "emg_lpf": column("high_cutoff", grid_rows),
-        "aux_gains": column("gain", aux_rows),
-        "aux_hpf": column("low_cutoff", aux_rows),
-        "aux_lpf": column("high_cutoff", aux_rows),
-        # Without these a re-export falls back to uV and relabels mV recordings.
-        "units": _parse_unit(rows[grid_rows[0]].get("units")),
-        "aux_units": _collapse_units(aux_units),
-        "aux_kinds": aux_kinds(aux_names, aux_digital),
-        # Round-trip fields — all keys that export_bids_emg can write
-        "software_versions": bids_sidecar.get("SoftwareVersions"),
-        "recording_type": bids_sidecar.get("RecordingType"),
-        "software_filters": bids_sidecar.get("SoftwareFilters"),
-        "manufacturer": bids_sidecar.get("Manufacturer"),
-        "manufacturers_model_name": bids_sidecar.get("ManufacturersModelName"),
-        "gain": bids_sidecar.get("Gain"),
-        "powerline_freq": bids_sidecar.get("PowerLineFrequency"),
-        "placement_scheme": bids_sidecar.get("EMGPlacementScheme"),
-        "placement_scheme_description": bids_sidecar.get("EMGPlacementSchemeDescription"),
-        "skin_preparation": bids_sidecar.get("SkinPreparation"),
-        "ground_location": bids_sidecar.get("EMGGround"),
-        "reference_location": reference_location(bids_sidecar.get("EMGReference")),
-        "institution_name": bids_sidecar.get("InstitutionName"),
-        "institution_address": bids_sidecar.get("InstitutionAddress"),
-        "institutional_department_name": bids_sidecar.get("InstitutionalDepartmentName"),
-        "task_description": bids_sidecar.get("TaskDescription"),
-        "instructions": bids_sidecar.get("Instructions"),
     }
 
     return SignalImport.build(
         data=data,
         fsamp=fsamp,
-        gridname=grid_type_names,
-        muscle=[_muscle(rows[min(layout.rows)]) for layout in layouts],
-        auxiliary=auxiliary,
-        auxiliaryname=aux_names,
+        grid_names=[layout.name for layout in layouts],
+        muscle_names=[_muscle(rows[min(layout.rows)]) for layout in layouts],
+        aux_data=aux_data,
+        aux_names=aux_names,
         metadata=metadata,
     )
 
@@ -561,10 +531,17 @@ def read_channels_summary(channels_tsv: Path) -> tuple[list[str], list[str], flo
     grid_names = [by_group[group][0] for group in groups]
     if not all(grid_names):
         grid_names = []  # a group label alone is no model the grid catalogue can lay out
-    muscles = [by_group[group][1] for group in groups]
-    while muscles and not muscles[-1]:
-        muscles.pop()
-    return grid_names, muscles, fsamp
+    muscle_names = [by_group[group][1] for group in groups]
+    while muscle_names and not muscle_names[-1]:
+        muscle_names.pop()
+    return grid_names, muscle_names, fsamp
+
+
+def read_channel_groups(channels_tsv: Path) -> list[str]:
+    """The ``group`` of each grid's EMG channels in a channels.tsv, grid by grid."""
+    return grid_group_order(
+        _cell(row, "group") for row in read_tsv(channels_tsv)[1] if is_grid_row(row)
+    )
 
 
 def read_sidecar_meta(bids_root: Path, entity_label: str) -> dict[str, Any]:

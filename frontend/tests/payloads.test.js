@@ -11,8 +11,8 @@ describe("normalizePreviewPayload", () => {
       "grid_names",
       "channel_means",
       "coordinates",
-      "muscle",
-      "auxiliary_names",
+      "muscle_names",
+      "aux_names",
     ]) {
       assert.deepEqual(out[key], [], key);
     }

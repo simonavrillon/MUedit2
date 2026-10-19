@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import itertools
 import json
+import logging
 import re
 import subprocess
 from collections.abc import Callable, Iterator
@@ -20,8 +21,16 @@ from starlette.testclient import TestClient
 from muedit.api import cache
 from muedit.api.binary import FRAME_FORMAT, FRAME_MEDIA_TYPE, unpack_frame
 from muedit.decomp.decomposition_file import unpack_csr
+from muedit.errors import SignalLoadError
+from tests._io_files import write_mat
 from tests._synthetic_emg import motor_unit_emg
 from tests.conftest import REPO_ROOT
+
+
+def _run_result(token: str | None) -> cache.RunResult | None:
+    with cache._held_run_result(token) as run:
+        return run
+
 
 FSAMP = 2000.0
 N_CHANNELS = 64
@@ -153,11 +162,11 @@ def decomp_npz(workspace: Path, emg: np.ndarray) -> Path:
     save_decomposition_npz(
         path,
         pulse_trains=np.random.default_rng(1).random((2, N_SAMPLES)).astype(np.float32),
-        distimes=[[1000, 1400, 1800, 2200], [1200, 2000]],
+        spike_times=[[1000, 1400, 1800, 2200], [1200, 2000]],
         fsamp=FSAMP,
         grid_names=[GRID],
         mu_grid_index=[0, 0],
-        muscles=["ta"],
+        muscle_names=["ta"],
         parameters={},
         total_samples=N_SAMPLES,
         emg_data=emg,
@@ -273,6 +282,50 @@ def _unpack_frame_response(resp: Response) -> tuple[dict[str, Any], dict[str, np
 # ── Route table ──────────────────────────────────────────────────────────────
 
 
+class TestErrorHandlers:
+    @pytest.fixture
+    def failing(self) -> Iterator[TestClient]:
+        from muedit.api.app_factory import create_app
+
+        app = create_app()
+
+        @app.get("/fixable")
+        def fixable() -> None:
+            raise SignalLoadError("pick another file")
+
+        @app.get("/bug")
+        def bug() -> None:
+            raise RuntimeError("secret internal detail")
+
+        with TestClient(app, raise_server_exceptions=False) as c:
+            yield c
+
+    def test_a_user_fixable_error_is_400_with_its_message(
+        self, failing: TestClient, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.INFO, logger="muedit.api.errors"):
+            err = _err(failing.get("/fixable"), 400)
+        assert err == {
+            "code": "http_400",
+            "message": "pick another file",
+            "detail": {"field": "path"},
+        }
+        (logged,) = [r for r in caplog.records if r.name == "muedit.api.errors"]
+        assert (logged.levelno, logged.exc_info) == (logging.INFO, None)
+        assert logged.getMessage() == "GET /fixable: 400 pick another file"
+
+    def test_a_bug_is_a_generic_500_logged_with_its_traceback(
+        self, failing: TestClient, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.ERROR, logger="muedit.api.errors"):
+            err = _err(failing.get("/bug"), 500, "internal_error")
+        assert err == {"code": "internal_error", "message": "Internal server error"}
+        logged = [r for r in caplog.records if r.name == "muedit.api.errors"]
+        assert len(logged) == 1
+        assert logged[0].exc_info is not None
+        assert str(logged[0].exc_info[1]) == "secret internal detail"
+
+
 class TestRouteTable:
     def test_every_live_endpoint_is_registered(self, client: TestClient) -> None:
         app = client.app
@@ -364,9 +417,11 @@ class TestSessions:
         sessions = _ok(client.get(f"{API}/debug/memory"))["budget"]["sessions"]
         assert "tab-closing" not in {s["id"] for s in sessions}
 
-    def test_malformed_session_ids_are_ignored(self, client: TestClient) -> None:
-        resp = client.post(f"{API}/session/close", params={"session": "../default"})
-        assert resp.status_code == 204
+    def test_malformed_session_ids_are_refused(self, client: TestClient) -> None:
+        closing = client.post(f"{API}/session/close", params={"session": "../default"})
+        assert _err(closing, 400)["detail"] == {"field": "session"}
+        tagged = client.get(f"{API}/health", headers={SESSION_HEADER: "../default"})
+        assert _err(tagged, 400)["detail"] == {"field": "X-MUedit-Session"}
         assert _err(client.post(f"{API}/session/close"), 422, "validation_error")
 
     def test_a_request_with_a_session_makes_it_active(self, client: TestClient) -> None:
@@ -431,7 +486,8 @@ class TestDialog:
         pick: Callable[[object], None],
     ) -> None:
         pick(RuntimeError("no display"))
-        assert _err(client.get(f"{API}/dialog/open-file"), 500)["message"] == "no display"
+        err = _err(client.get(f"{API}/dialog/open-file"), 500)
+        assert err["message"] == "Could not open the file dialog; see the server log"
 
 
 # ── /preview-by-path ─────────────────────────────────────────────────────────
@@ -444,8 +500,8 @@ PREVIEW_KEYS = {
     "channel_means",
     "coordinates",
     "metadata",
-    "muscle",
-    "auxiliary_names",
+    "muscle_names",
+    "aux_names",
 }
 
 
@@ -477,14 +533,53 @@ class TestPreview:
     def test_by_path_nonexistent_file_is_404(self, client: TestClient, workspace: Path) -> None:
         missing = str(workspace / "nope.mat")
         err = _err(client.post(f"{API}/preview-by-path", json={"path": missing}), 404)
-        assert err["detail"] == {"field": "path", "reason": f"File not found: {missing}"}
+        assert (err["message"], err["detail"]) == (f"File not found: {missing}", {"field": "path"})
 
     def test_by_path_unsupported_format_is_400(self, client: TestClient, workspace: Path) -> None:
         path = workspace / "notes.txt"
         path.write_text("not a recording")
         err = _err(client.post(f"{API}/preview-by-path", json={"path": str(path)}), 400)
-        assert err["detail"]["field"] == "path"
-        assert "Unsupported file format" in err["detail"]["reason"]
+        assert err["detail"] == {"field": "path"}
+        assert "Unsupported file format" in err["message"]
+
+    def test_by_path_unknown_grid_is_400(
+        self, client: TestClient, workspace: Path, emg: np.ndarray
+    ) -> None:
+        path = workspace / "unknown_grid.mat"
+        scipy.io.savemat(
+            path,
+            {"signal": {"data": emg, "fsamp": FSAMP, "gridname": "NOT-A-GRID", "muscle": "ta"}},
+        )
+        err = _err(client.post(f"{API}/preview-by-path", json={"path": str(path)}), 400)
+        assert err["message"].startswith("Unknown grid model 'NOT-A-GRID'")
+
+    def test_by_path_corrupt_recording_is_400(self, client: TestClient, workspace: Path) -> None:
+        path = workspace / "corrupt.otb+"
+        path.write_bytes(b"not an archive")
+        err = _err(client.post(f"{API}/preview-by-path", json={"path": str(path)}), 400)
+        assert err["detail"] == {"field": "path"}
+        assert err["message"].startswith("Failed to extract OTB+ file")
+
+    @pytest.mark.parametrize("version", ["v5", "v7.3"])
+    @pytest.mark.parametrize(
+        ("struct", "reason"),
+        [
+            ("emg", "Key 'signal' not found in MAT file."),
+            (
+                "signal",
+                "MAT file is a MUedit decomposition (signal.Pulsetrain + signal.Dischargetimes); "
+                "open it in edit mode.",
+            ),
+        ],
+        ids=["no-signal-struct", "decomposition-fields"],
+    )
+    def test_by_path_mat_without_a_recording_is_400(
+        self, client: TestClient, workspace: Path, version: str, struct: str, reason: str
+    ) -> None:
+        fields = {"Pulsetrain": np.zeros((1, 10)), "Dischargetimes": np.zeros((1, 3))}
+        path = write_mat(workspace / f"{struct}_{version}.mat", version, struct, fields)
+        err = _err(client.post(f"{API}/preview-by-path", json={"path": str(path)}), 400)
+        assert (err["message"], err["detail"]) == (reason, {"field": "path"})
 
 
 # ── /series/emg, /series/overview, /series/aux ───────────────────────────────
@@ -509,6 +604,17 @@ class TestSeries:
         assert arrays["min"].dtype == np.float32
         assert arrays["min"].shape == arrays["max"].shape == (N_CHANNELS, 100)
         assert (arrays["min"] <= arrays["max"]).all()
+
+    @pytest.mark.parametrize("grid", [-1, 1])
+    def test_grid_out_of_range_is_400(
+        self, client: TestClient, upload_token: str, grid: int
+    ) -> None:
+        resp = client.get(f"{API}/series/emg", params={"upload_token": upload_token, "grid": grid})
+        err = _err(resp, 400)
+        assert (err["message"], err["detail"]) == (
+            f"grid {grid} is out of range [0, 1)",
+            {"field": "grid"},
+        )
 
     def test_emg_samples_when_zoomed_in(self, client: TestClient, upload_token: str) -> None:
         meta, arrays = _series(
@@ -618,38 +724,31 @@ class TestDecomposeStream:
         assert stages[0] == "start"
         assert stages[-1] == "done"
         assert set(stages) <= {"start", "progress", "done"}
-        assert all("pct" in e for e in stream_events)
 
     def test_done_event_shape(self, stream_events: list[dict[str, Any]]) -> None:
         done = stream_events[-1]
-        assert {"summary", "preview", "pct", "message"} <= set(done)
-        assert done["pct"] == 100
+        assert {"summary", "preview", "message"} <= set(done)
         summary = done["summary"]
-        assert {
-            "fsamp",
-            "grid_names",
-            "mu_count",
-            "discard_channels",
-            "parameters",
-        } <= set(summary)
+        assert set(summary) == {"grid_names", "mu_count", "save_path", "parameters"}
         assert summary["parameters"]["niter"] == 5
         # The page shows the recording already; nothing of it comes back with the run.
         assert set(done["preview"]) == {"mu_grid_index"}  # no motor units, nothing to save
 
     def test_full_run_keeps_its_pulse_trains_for_the_save(self, mu_run: dict[str, Any]) -> None:
         token = mu_run["preview"]["run_result_token"]
-        pulse = cache._get_run_result(token)
-        assert pulse is not None
+        entry = _run_result(token)
+        assert entry is not None
+        pulse = entry.pulse_trains
         assert pulse.dtype == np.float32
         assert pulse.shape == (mu_run["summary"]["mu_count"], MU_RUN_SAMPLES)
 
-    def test_discharge_times_stay_on_the_server(self, mu_run: dict[str, Any]) -> None:
+    def test_spike_times_stay_on_the_server(self, mu_run: dict[str, Any]) -> None:
         preview = mu_run["preview"]
         assert set(preview) == {"mu_grid_index", "run_result_token"}
         assert len(preview["mu_grid_index"]) == mu_run["summary"]["mu_count"]
-        run = cache._get_run_result_entry(preview["run_result_token"])
+        run = _run_result(preview["run_result_token"])
         assert run is not None
-        assert len(run.spikes) == mu_run["summary"]["mu_count"]
+        assert len(run.spike_times) == mu_run["summary"]["mu_count"]
 
     def test_artifact_regions_accepted(self, client: TestClient, upload_token: str) -> None:
         resp = client.post(
@@ -687,6 +786,13 @@ class TestDecomposeStream:
         err = _err(client.post(f"{API}/decompose_stream", json={"upload_token": "gone"}), 400)
         assert err["detail"]["field"] == "upload_token"
 
+    def test_grid_with_every_channel_discarded_is_400(
+        self, client: TestClient, upload_token: str
+    ) -> None:
+        body = {"upload_token": upload_token, "discard_channels": [[1] * N_CHANNELS]}
+        err = _err(client.post(f"{API}/decompose_stream", json=body), 400)
+        assert err["detail"]["field"] == "discard_channels"
+
     def test_persisted_output_lands_next_to_source(
         self, client: TestClient, upload_token: str, signal_mat: Path
     ) -> None:
@@ -710,7 +816,7 @@ class TestRunPulseTrains:
         self, client: TestClient, mu_run: dict[str, Any]
     ) -> None:
         token = mu_run["preview"]["run_result_token"]
-        run = cache._get_run_result_entry(token)
+        run = _run_result(token)
         assert run is not None
         meta, arrays = _unpack_frame_response(
             client.get(f"{API}/series/pulse", params={"token": token, "mu": 0, "bins": 500})
@@ -718,8 +824,16 @@ class TestRunPulseTrains:
         assert meta["kind"] == "envelope"
         row = np.asarray(run.pulse_trains[0])
         assert arrays["max"][0].max() == row.max() and arrays["min"][0].min() == row.min()
-        np.testing.assert_array_equal(arrays["spikes"], run.spikes[0])
-        np.testing.assert_array_equal(arrays["spike_values"], row[run.spikes[0]])
+        np.testing.assert_array_equal(arrays["spikes"], run.spike_times[0])
+        np.testing.assert_array_equal(arrays["spike_values"], row[run.spike_times[0]])
+
+    @pytest.mark.parametrize("mu", [-1, 10_000])
+    def test_mu_out_of_range_is_400(
+        self, client: TestClient, mu_run: dict[str, Any], mu: int
+    ) -> None:
+        token = mu_run["preview"]["run_result_token"]
+        resp = client.get(f"{API}/series/pulse", params={"token": token, "mu": mu})
+        assert _err(resp, 400)["detail"]["field"] == "mu"
 
 
 # ── /edit/session ────────────────────────────────────────────────────────────
@@ -786,7 +900,8 @@ class TestEditSession:
         path = workspace / "recording.otb4"
         path.write_bytes(b"")
         err = _err(client.post(f"{API}/edit/session/open", json={"path": str(path)}), 400)
-        assert "Expected .mat or .npz" in err["detail"]["reason"]
+        assert "Expected .mat or .npz" in err["message"]
+        assert err["detail"] == {"field": "path"}
 
     def test_session_save_exports_the_embedded_emg(
         self, client: TestClient, edit_token: str, workspace: Path
@@ -828,7 +943,7 @@ class TestEditSave:
             client.post(
                 f"{API}/edit/save",
                 json={
-                    "distimes": [[1000, 1400], [1200]],
+                    "spike_times": [[1000, 1400], [1200]],
                     "total_samples": N_SAMPLES,
                     "fsamp": FSAMP,
                     "grid_names": [GRID],
@@ -854,14 +969,14 @@ class TestEditSave:
     ) -> None:
         preview = mu_run["preview"]
         token = preview["run_result_token"]
-        stored = np.array(cache._get_run_result(token))
-        entry = cache._get_run_result_entry(token)
+        entry = _run_result(token)
         assert entry is not None
+        stored = np.array(entry.pulse_trains)
         data = _ok(
             client.post(
                 f"{API}/edit/save",
                 json={
-                    "distimes": [s.tolist() for s in entry.spikes],
+                    "spike_times": [s.tolist() for s in entry.spike_times],
                     "remove_duplicates": False,
                     "total_samples": MU_RUN_SAMPLES,  # the page sends the length it shows
                     "fsamp": FSAMP,
@@ -877,13 +992,13 @@ class TestEditSave:
         with np.load(data["path"]) as z:
             np.testing.assert_array_equal(z["pulse_trains"], stored)
         # The run explorer still reads it after the save.
-        assert cache._get_run_result(token) is not None
+        assert _run_result(token) is not None
 
-    def test_run_save_takes_the_discharge_times_from_the_run(
+    def test_run_save_takes_the_spike_times_from_the_run(
         self, client: TestClient, mu_run: dict[str, Any]
     ) -> None:
         preview = mu_run["preview"]
-        run = cache._get_run_result_entry(preview["run_result_token"])
+        run = _run_result(preview["run_result_token"])
         assert run is not None
         data = _ok(
             client.post(
@@ -901,7 +1016,7 @@ class TestEditSave:
         )
         with np.load(data["path"]) as z:
             rows = unpack_csr(z["spike_times"], z["spike_offsets"])
-        assert [r.tolist() for r in rows] == [s.tolist() for s in run.spikes]
+        assert [r.tolist() for r in rows] == [s.tolist() for s in run.spike_times]
 
     def test_run_save_with_an_expired_run_is_400_and_writes_nothing(
         self, client: TestClient, workspace: Path
@@ -936,7 +1051,7 @@ class TestEditSave:
             client.post(
                 f"{API}/edit/save",
                 json={
-                    "distimes": [[100, 200]],
+                    "spike_times": [[100, 200]],
                     "total_samples": N_SAMPLES,
                     "fsamp": FSAMP,
                     "project": "smoke",
@@ -950,10 +1065,23 @@ class TestEditSave:
         assert after == before
 
     def test_missing_total_samples_is_422(self, client: TestClient) -> None:
-        _err(client.post(f"{API}/edit/save", json={"distimes": [[1]]}), 422, "validation_error")
+        _err(
+            client.post(f"{API}/edit/save", json={"spike_times": [[1]]}),
+            422,
+            "validation_error",
+        )
 
-    def test_zero_total_samples_is_400(self, client: TestClient) -> None:
-        _err(client.post(f"{API}/edit/save", json={"distimes": [[1]], "total_samples": 0}), 400)
+    @pytest.mark.parametrize(
+        ("body", "field"),
+        [({"total_samples": 0, "fsamp": FSAMP}, "total_samples"), ({"total_samples": 10}, "fsamp")],
+        ids=["zero-samples", "no-fsamp"],
+    )
+    def test_the_schema_refuses_a_save_without_its_timebase(
+        self, client: TestClient, body: dict[str, Any], field: str
+    ) -> None:
+        resp = client.post(f"{API}/edit/save", json={"spike_times": [[1]], **body})
+        err = _err(resp, 422, "validation_error")
+        assert err["detail"][0]["loc"] == ["body", field]
 
 
 # ── Origin and host restrictions (serve_api) ─────────────────────────────────

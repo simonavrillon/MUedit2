@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 import numpy as np
 import pytest
@@ -13,10 +14,7 @@ from starlette.testclient import TestClient
 from muedit.editing import operations
 from muedit.editing.operations import (
     FilterUpdateResult,
-    add_artifact_in_roi,
     add_spikes_in_roi,
-    delete_artifacts_in_roi,
-    delete_high_discharge_rate_spikes_in_roi,
     delete_spikes_in_roi,
     remove_discharge_rate_outliers,
     update_motor_unit_filter_window,
@@ -91,92 +89,48 @@ def _pulse_with_peaks(peaks: dict[int, float], n: int = N_SAMPLES) -> np.ndarray
     return pulse
 
 
-# ── add_spikes_in_roi / add_artifact_in_roi ──────────────────────────────────
+# ── add_spikes_in_roi ────────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("op", [add_spikes_in_roi, add_artifact_in_roi])
 class TestAddInRoi:
-    """Both add operations share the same peak-picking semantics."""
-
-    def test_adds_peaks_above_threshold_inside_roi(self, op: Callable[..., np.ndarray]) -> None:
+    def test_adds_peaks_above_threshold_inside_roi(self) -> None:
         pulse = _pulse_with_peaks({1000: 1.0, 1500: 0.2, 3000: 1.0})
-        out = op(pulse, [500], FSAMP, 900, 2000, 0.5)
+        out = add_spikes_in_roi(pulse, [500], FSAMP, 900, 2000, 0.5)
         assert out.tolist() == [500, 1000]
 
-    def test_roi_bounds_are_inclusive(self, op: Callable[..., np.ndarray]) -> None:
+    def test_roi_bounds_are_inclusive(self) -> None:
         pulse = _pulse_with_peaks({1000: 1.0, 2000: 1.0})
-        assert op(pulse, [], FSAMP, 1000, 2000, 0.5).tolist() == [1000, 2000]
+        assert add_spikes_in_roi(pulse, [], FSAMP, 1000, 2000, 0.5).tolist() == [1000, 2000]
 
-    def test_no_peak_returns_sorted_unique_input(self, op: Callable[..., np.ndarray]) -> None:
+    def test_no_peak_returns_sorted_unique_input(self) -> None:
         pulse = np.zeros(N_SAMPLES)
-        assert op(pulse, [30, 10, 30], FSAMP, 0, 100, 0.5).tolist() == [10, 30]
+        assert add_spikes_in_roi(pulse, [30, 10, 30], FSAMP, 0, 100, 0.5).tolist() == [10, 30]
 
-    def test_existing_spike_not_duplicated(self, op: Callable[..., np.ndarray]) -> None:
+    def test_existing_spike_not_duplicated(self) -> None:
         pulse = _pulse_with_peaks({1000: 1.0})
-        assert op(pulse, [1000], FSAMP, 0, 2000, 0.5).tolist() == [1000]
+        assert add_spikes_in_roi(pulse, [1000], FSAMP, 0, 2000, 0.5).tolist() == [1000]
 
-    def test_refractory_period_keeps_one_of_close_peaks(
-        self, op: Callable[..., np.ndarray]
-    ) -> None:
+    def test_refractory_period_keeps_one_of_close_peaks(self) -> None:
         pulse = _pulse_with_peaks({1000: 1.0, 1005: 0.8})
-        assert op(pulse, [], FSAMP, 0, 2000, 0.5).tolist() == [1000]
+        assert add_spikes_in_roi(pulse, [], FSAMP, 0, 2000, 0.5).tolist() == [1000]
 
 
-# ── delete_spikes_in_roi / delete_artifacts_in_roi ───────────────────────────
+# ── delete_spikes_in_roi ─────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("op", [delete_spikes_in_roi, delete_artifacts_in_roi])
 class TestDeleteInRoi:
-    """Both delete operations share the same box semantics."""
-
-    def test_deletes_only_spikes_inside_box(self, op: Callable[..., np.ndarray]) -> None:
+    def test_deletes_only_spikes_inside_box(self) -> None:
         pulse = _pulse_with_peaks({100: 0.5, 200: 0.5, 300: 5.0, 900: 0.5})
-        out = op(pulse, [100, 200, 300, 900], 150, 400, 0.2, 0.8)
+        out = delete_spikes_in_roi(pulse, [100, 200, 300, 900], 150, 400, 0.2, 0.8)
         assert out.tolist() == [100, 300, 900]
 
-    def test_y_bounds_order_is_irrelevant(self, op: Callable[..., np.ndarray]) -> None:
+    def test_y_bounds_order_is_irrelevant(self) -> None:
         pulse = _pulse_with_peaks({200: 0.5})
-        assert op(pulse, [200], 0, 400, 0.8, 0.2).tolist() == []
+        assert delete_spikes_in_roi(pulse, [200], 0, 400, 0.8, 0.2).tolist() == []
 
-    def test_x_bounds_are_inclusive(self, op: Callable[..., np.ndarray]) -> None:
+    def test_x_bounds_are_inclusive(self) -> None:
         pulse = _pulse_with_peaks({150: 0.5, 400: 0.5})
-        assert op(pulse, [150, 400], 150, 400, 0.2, 0.8).tolist() == []
-
-
-# ── delete_high_discharge_rate_spikes_in_roi ─────────────────────────────────
-
-
-class TestDeleteHighDischargeRate:
-    def test_removes_weaker_spike_of_fast_pair(self) -> None:
-        spikes = [1000, 2000, 2040, 3000]
-        pulse = _pulse_with_peaks({1000: 1.0, 2000: 1.0, 2040: 0.3, 3000: 1.0})
-        out = delete_high_discharge_rate_spikes_in_roi(pulse, spikes, FSAMP, 1500, 2500, 20.0)
-        assert out.tolist() == [1000, 2000, 3000]
-
-    def test_keeps_stronger_spike_when_left_is_weaker(self) -> None:
-        spikes = [2000, 2040]
-        pulse = _pulse_with_peaks({2000: 0.3, 2040: 1.0})
-        out = delete_high_discharge_rate_spikes_in_roi(pulse, spikes, FSAMP, 0, 5000, 20.0)
-        assert out.tolist() == [2040]
-
-    def test_pair_midpoint_outside_roi_untouched(self) -> None:
-        spikes = [2000, 2040]
-        pulse = _pulse_with_peaks({2000: 1.0, 2040: 0.3})
-        out = delete_high_discharge_rate_spikes_in_roi(pulse, spikes, FSAMP, 3000, 5000, 20.0)
-        assert out.tolist() == spikes
-
-    def test_rate_below_threshold_untouched(self) -> None:
-        spikes = [2000, 2040]
-        pulse = _pulse_with_peaks({2000: 1.0, 2040: 0.3})
-        out = delete_high_discharge_rate_spikes_in_roi(pulse, spikes, FSAMP, 0, 5000, 60.0)
-        assert out.tolist() == spikes
-
-    def test_fewer_than_two_spikes(self) -> None:
-        pulse = np.zeros(10)
-        assert delete_high_discharge_rate_spikes_in_roi(pulse, [5], FSAMP, 0, 10, 1.0).tolist() == [
-            5
-        ]
-        assert delete_high_discharge_rate_spikes_in_roi(pulse, [], FSAMP, 0, 10, 1.0).tolist() == []
+        assert delete_spikes_in_roi(pulse, [150, 400], 150, 400, 0.2, 0.8).tolist() == []
 
 
 # ── remove_discharge_rate_outliers ───────────────────────────────────────────
@@ -406,12 +360,12 @@ def _post(client: TestClient, route: str, body: dict) -> dict:
     return resp.json()["data"]
 
 
-def _kept(distimes: list[list[int]], grids: list[int] | None = None, **params: Any) -> list[int]:
+def _kept(spike_times: list[list[int]], grids: list[int] | None = None, **params: Any) -> list[int]:
     """MUs the edit stage's duplicate removal keeps."""
     from muedit.api.services.editing_service import _dedup
 
-    grids = grids or [0] * len(distimes)
-    return _dedup([np.asarray(d) for d in distimes], grids, params, FSAMP, N_SAMPLES)
+    grids = grids or [0] * len(spike_times)
+    return _dedup([np.asarray(d) for d in spike_times], grids, params, FSAMP, N_SAMPLES)
 
 
 class TestEditRoutes:
@@ -443,7 +397,7 @@ class TestEditRoutes:
 
     @pytest.mark.parametrize("bgrids", [False, True])
     def test_remove_duplicates_matches_decomposition(self, bgrids: bool) -> None:
-        from muedit.decomp.decomposition_file import build_pulse_trains_from_distimes
+        from muedit.decomp.decomposition_file import build_pulse_trains_from_spike_times
         from muedit.decomp.postprocess import remove_duplicates_by_grid
         from muedit.decomp.types import DecompositionParameters
 
@@ -451,17 +405,17 @@ class TestEditRoutes:
         b = _spike_train(8.0, seed=4).tolist()
         c = _spike_train(12.0, seed=5).tolist()
         noisy_a = sorted([*a, (a[5] + a[6]) // 2])
-        distimes = [a, b, noisy_a, c, a, b]
+        spike_times = [a, b, noisy_a, c, a, b]
         grids = [0, 0, 1, 1, 1, 2]
         _, _, _, pipeline_kept = remove_duplicates_by_grid(
-            build_pulse_trains_from_distimes(distimes, N_SAMPLES),
-            [np.asarray(d) for d in distimes],
+            build_pulse_trains_from_spike_times(spike_times, N_SAMPLES),
+            [np.asarray(d) for d in spike_times],
             grids,
             3,
             DecompositionParameters(duplicatesbgrids=bgrids),
             FSAMP,
         )
-        assert _kept(distimes, grids, duplicatesbgrids=bgrids) == sorted(pipeline_kept)
+        assert _kept(spike_times, grids, duplicatesbgrids=bgrids) == sorted(pipeline_kept)
 
     def test_save_without_dedup_keeps_duplicates(self, api_client: TestClient) -> None:
         a = _spike_train(10.0, seed=3).tolist()
@@ -469,7 +423,7 @@ class TestEditRoutes:
             api_client,
             "save",
             {
-                "distimes": [a, a],
+                "spike_times": [a, a],
                 "remove_duplicates": False,
                 "total_samples": N_SAMPLES,
                 "fsamp": FSAMP,
@@ -478,3 +432,23 @@ class TestEditRoutes:
         )
         assert data["kept_indices"] == [0, 1]
         assert data["edit_history"] == []
+
+
+@pytest.mark.parametrize("bandpass", [True, False])
+def test_update_filter_bandpasses_only_raw_emg(bandpass: bool) -> None:
+    """EMG embedded already filtered (a v1 file) is not band-passed a second time."""
+    emg = np.random.default_rng(0).standard_normal((5, 3001)) * 100
+    with mock.patch.object(
+        operations, "bandpass_signals", side_effect=lambda x, _fs: x
+    ) as bandpass_mock:
+        operations.update_motor_unit_filter_window(
+            emg,
+            np.zeros(5, dtype=int),
+            [500, 900, 1300, 1700, 2100],
+            2048.0,
+            0,
+            3001,
+            nbextchan=20,
+            bandpass=bandpass,
+        )
+    assert bandpass_mock.called == bandpass

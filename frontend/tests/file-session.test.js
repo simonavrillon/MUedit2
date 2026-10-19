@@ -27,7 +27,6 @@ describe("session form", () => {
       subject: "01",
       task: "mvc",
       acquisition: "ramp",
-      powerline_freq: 50,
       placement_scheme: "Other",
     });
   });
@@ -47,6 +46,29 @@ describe("session form", () => {
       serviceWith({}).withBidsSaveFields({}).reference_location,
       null,
     );
+  });
+
+  test("a recording in a BIDS dataset sets its placement", () => {
+    const session = serviceWith({
+      bidsPlacementScheme: "Other",
+      bidsPlacementDescription: "",
+    });
+    session.applyPreviewMetadata({
+      metadata: { placement_scheme: "Measured" },
+      placement_scheme_description: "measured with a tape",
+    });
+    const run = session.collectBidsEntities();
+    assert.equal(run.placement_scheme, "Measured");
+    assert.equal(run.placement_scheme_description, "measured with a tape");
+    // A file that records none leaves the form's.
+    session.applyPreviewMetadata({ metadata: {} });
+    assert.equal(session.collectBidsEntities().placement_scheme, "Measured");
+  });
+
+  test("an unknown power line frequency is sent as unknown, not as 50", () => {
+    const session = serviceWith({ bidsPowerlineFreq: "" });
+    assert.equal("powerline_freq" in session.collectBidsEntities(), false);
+    assert.equal(session.withBidsSaveFields({}).powerline_freq, null);
   });
 
   test("a run and a save clean the labels the same way", () => {

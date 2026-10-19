@@ -37,7 +37,11 @@ export function updateWorkflowStepper(app, targetStage) {
     { key: "import", el: els.stepImport, complete: !!state.file },
     { key: "qc", el: els.stepQc, complete: !!state.gridSeries?.length },
     { key: "run", el: els.stepRun, complete: !!state.runResultToken },
-    { key: "edit", el: els.stepEdit, complete: !!state.edit.distimes?.length },
+    {
+      key: "edit",
+      el: els.stepEdit,
+      complete: !!state.edit.spikeTimes?.length,
+    },
   ];
   steps.forEach((step) => {
     if (!step.el) return;
@@ -95,7 +99,7 @@ export function updateStepAvailability(app) {
   const hasFile = !!state.file;
   const hasPreview = !!state.gridSeries?.length;
   const hasRunResults = !!state.runResultToken;
-  const hasEditData = !!state.edit.distimes?.length;
+  const hasEditData = !!state.edit.spikeTimes?.length;
 
   if (els.stepRun) {
     // The run page only has something to show once a run has started; the QC
@@ -203,7 +207,9 @@ export function handleKeyboardNavigation(app, e) {
   if (!action) return;
   if (action === "zoom_out") setShowBookmark(state, true);
 
-  const total = state.edit.distimes?.length ? state.edit.totalSamples || 0 : 0;
+  const total = state.edit.spikeTimes?.length
+    ? state.edit.totalSamples || 0
+    : 0;
   if (!total) return;
   if (!state.edit.view) setEditView(state, { start: 0, end: total });
   const view = state.edit.view;

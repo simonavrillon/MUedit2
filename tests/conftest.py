@@ -29,6 +29,7 @@ DATA_FIXTURES = frozenset(
         "openephys_dir",
         "decomp_mat_file",
         "novecento_otb4_file",
+        "passiflore_otb4_file",
         "simulation_mat_files",
         "real_reference",
     }
@@ -103,6 +104,12 @@ def novecento_otb4_file() -> Path:
 
 
 @pytest.fixture(scope="session")
+def passiflore_otb4_file() -> Path:
+    """OT Bioelettronica ``.otb4`` archive (Quattrocento, 6x GR08MM1305, a trapezoid track)."""
+    return require_sample(DATA_DIR / "Passiflore_03_6_trap20.otb4")
+
+
+@pytest.fixture(scope="session")
 def novecento_emg(novecento_otb4_file: Path) -> SignalImport:
     """Loaded Novecento signal — 384 channels (6x HD08MM1305), 2000 Hz."""
     from muedit.io import load_signal
@@ -119,9 +126,9 @@ _REAL_EMG_SECONDS = 5.0
 @pytest.fixture(scope="session")
 def real_emg_mat_file(decomp_mat_file: Path, tmp_path_factory: pytest.TempPathFactory) -> Path:
     """A pure-signal ``.mat`` carrying genuine EMG from the Novecento recording."""
-    from muedit.decomp.decomposition_file import load_decomposition_signal_context
+    from muedit.decomp.decomposition_file import load_decomposition
 
-    ctx = load_decomposition_signal_context(str(decomp_mat_file))
+    _, ctx = load_decomposition(str(decomp_mat_file))
     assert ctx is not None, "decomp mat did not yield an embedded signal context"
 
     fsamp = ctx.fsamp

@@ -9,7 +9,9 @@ origin and no CORS headers are sent. A `project` that is not a single folder nam
 Each browser tab sends its session id in `X-MUedit-Session` (`common.request_session`). A request
 that carries one makes that session the active one. The caches, the run and the edit session a tab
 holds are scoped to it (see [In-Memory Cache](#in-memory-cache-cachepy)), and `/session/close`
-drops them when the tab closes. A request without the header uses the `default` session.
+drops them when the tab closes. A request without the header uses the `default` session; a
+malformed id (not 1–64 letters, digits or `-`) is a 400 on `X-MUedit-Session`, or on `session`
+for `/session/close`.
 
 ---
 
@@ -24,7 +26,7 @@ Signals and decompositions are always opened by server path. `/decompose_stream`
 | Method | Path | Accepts | Returns | Service |
 |---|---|---|---|---|
 | GET | `/health` | — | `{status: "ok"}` | — |
-| POST | `/preview-by-path` | JSON: `PathPayload` | JSON: `{upload_token, grid_names, total_samples, fsamp, channel_means, coordinates, metadata, muscle, auxiliary_names, target_index}` (`target_index`: the aux channel named as a target, or `null`) + BIDS sidecar metadata and `project` (`config.project_of` of the file's BIDS root) when the file lies in a BIDS dataset | `build_preview_from_path(path)` |
+| POST | `/preview-by-path` | JSON: `PathPayload` | JSON: `{upload_token, grid_names, total_samples, fsamp, channel_means, coordinates, metadata, muscle_names, aux_names, target_index}` (`target_index`: the aux channel named as a target, or `null`) + BIDS sidecar metadata and `project` (`config.project_of` of the file's BIDS root) when the file lies in a BIDS dataset | `build_preview_from_path(path)` |
 | POST | `/qc/auto` | JSON: `QcAutoPayload` | JSON: `{bad_channels_per_grid, artifact_regions}` (per grid, 0/1 per channel; `[start, end)` sample pairs) | `run_auto_qc_on_token(payload)` |
 | POST | `/qc/segment` | JSON: `SegmentPayload` | JSON: `{target_index, target_name, segments}` | `segment_target_on_token(payload)` |
 
@@ -33,6 +35,12 @@ session store what the QC stage draws. That is min/max pyramids of the bandpasse
 grid's smoothed mean |EMG| (the overview) and of the aux channels, with levels at bins of 16, 64,
 256, … samples. The bandpassed EMG itself is not stored. `/qc/auto` bandpasses it again into a
 temporary store file.
+
+`/qc/auto` runs `run_auto_qc` on bandpassed EMG only, with **no notch filter**. A run with
+`auto_mask_artifacts` (the CLI's `--auto-mask-artifacts`) runs it on notched and bandpassed EMG
+(see the engine doc, Stage 2). The two can therefore flag different bad channels and artifact
+regions for the same recording, most visibly on one with strong powerline interference. The app
+never sets `auto_mask_artifacts`, so its runs use the QC page's result as sent.
 
 `/qc/segment` splits the target channel (`aux_index`, or the first aux channel
 `find_target_channel` names as a target) into `segments`, each
@@ -62,7 +70,7 @@ of its range plus at most one level bin of its neighbours.
 A pulse frame is built the same way from the MU's full-length pulse train (a train drawn from
 the discharge times when the file has none). It adds `spikes` `i4` (the discharges in view) and
 `spike_values` `f4` (the train's value at each). For an edit session it also adds `artifacts` and
-`artifact_values`, and its meta carries `version`, `flagged`, `has_pulse` and `fsamp`. `version`
+`artifact_values`. Its meta carries `version` and `flagged` (0 and false for a run result). `version`
 changes with every edit of the MU, so the client caches frames by it.
 
 ### Decompose Router (`routes/decompose.py`)
@@ -80,12 +88,14 @@ processes. Progress comes back over a pipe as NDJSON events — each carries its
 events add their position (`grid`, `window`, `niter`) and one outcome letter per iteration since
 the last event (`k` kept, `r` rejected, `f` too few spikes), so the run page can draw the search
 without parsing message text. The stream ends with `done`, `error` (also when the worker process dies),
-or `cancelled`. A run is cancelled by `/decompose/cancel`, by the client disconnecting, by
+or `cancelled`. An `error` event is `{stage, message, detail}`: `detail` is the message of a
+`MueditError` the run raised, else `"Internal error; see the server log"`; the traceback goes to
+`muedit.log` only. A run is cancelled by `/decompose/cancel`, by the client disconnecting, by
 `/session/close` for its session, and at server shutdown; cancelling terminates the worker process.
 
 The `done` event's preview carries only `mu_grid_index` (`DONE_PREVIEW_KEYS`): the page already
 shows the recording the rest of the run's preview describes, and neither `pulse_trains_full` nor
-`distime_all` crosses to the client. When the run has a full-length pulse matrix (`full_preview`),
+`spike_times` crosses to the client. When the run has a full-length pulse matrix (`full_preview`),
 the preview also carries `run_result_token`: the server keeps the matrix and the discharge times (the session's latest run,
 until the session closes) for `/series/pulse` and the run save, which sends the token instead of the
 data. A save naming a token the server no longer holds, and no discharge times, is refused with 400
@@ -110,8 +120,10 @@ fetches pulse trains through `/series/pulse`.
 
 **Operations** (`/edit/ops/{op}`): `add-spikes`, `add-artifact`, `delete-spikes`,
 `remove-outliers`, `update-filter`, `flag`, `reset`, `duplicate`, `remove-duplicates`, `undo`.
-An operation the session refuses (bad MU index, empty window, no EMG to refit on) is a 400. An
-expired token is a 400 with `field: token`.
+An operation the session refuses (empty window, no EMG to refit on) is a 400. An index outside
+the session's MUs or grids is a 400 with the message `<field> <index> is out of range [0, <n>)`
+and `detail: {field: "mu" | "grid"}`; `/series/emg` and `/series/pulse` answer their `grid` and `mu` alike (a
+wrong type stays a 422). An expired token is a 400 with `field: token`.
 
 **State frame** (open, state, recover). Meta: the file fields (`file_label`, `source_path`,
 `fsamp`, `total_samples`, `grid_names`, `rois`, `parameters`, `muscle`, `sil`, `project` and the
@@ -125,13 +137,17 @@ appends `history`), `kept_indices` when MUs were removed or reordered, and opera
 (`removed_count`, `fsamp`, `undone`). Arrays: CSR spikes and artifacts of the `changed` MUs only.
 
 **Per-MU fields**, in every state and change frame and in the session save result: `n_mu`,
-`mu_uids`, `mu_grid_index`, `flagged`, `versions`, `has_pulse`, `dirty`, `can_undo`.
+`mu_uids`, `mu_grid_index`, `flagged`, `versions`, `has_pulse`, `dirty`, `can_undo`,
+`crash_recovery` (false once the session's edit log cannot be written: unsaved edits would not
+survive a crash; the page warns).
 
 **Saves.** `/edit/session/save` writes the session's edits (flagged MUs and duplicates removed
 unless `remove_flagged` / `remove_duplicates` are false). The saved file becomes the session's
 baseline, and its edit log starts over. `/edit/save` is the run save: it writes the run held under
-`run_result_token` (its discharge times, unless `distimes` are sent, and its pulse trains). Both
-return `{saved, path, kept_indices, mu_uids, edit_history, bids_emg_paths?, bids_deriv_paths?}`.
+`run_result_token` (its discharge times, unless `spike_times` are sent, its pulse trains, SIL,
+windows and target segments). Both return `{saved, path, kept_indices, mu_uids, edit_history,
+bids_emg_paths?, bids_emg_error?, bids_deriv_paths?, bids_warnings?}`: `bids_emg_error` says why the
+BIDS EMG was not written, `bids_warnings` which other BIDS side outputs were not.
 
 ### Dialog Router (`routes/dialog.py`)
 
@@ -183,8 +199,9 @@ The session form's fields, shared by both saves.
 | `project` | `str \| None` | `None` |
 | `file_label` | `str \| None` | `None` |
 | `entity_label` | `str \| None` | `None` |
-| `participant_meta` | `dict[str, Any] \| None` | `None` |
-| `powerline_freq` | `float \| None` | `None` |
+| `participant_meta` | `ParticipantMeta \| None` (`age`, `sex`, `handedness`; empty or `n/a` = not given; `age` a whole number 0–150) | `None` |
+| `powerline_freq` | `float \| None`, in `(0, 1000]` | `None` |
+| `units` | `str \| None` (of the EMG, over the loader's) | `None` |
 | `manufacturer` | `str \| None` | `None` |
 | `manufacturers_model_name` | `str \| None` | `None` |
 | `placement_scheme` | `str \| None` | `None` |
@@ -197,12 +214,12 @@ The session form's fields, shared by both saves.
 ### `EditSavePayload` (`BidsSaveFields` +)
 | Field | Type | Default |
 |---|---|---|
-| `distimes` | `list[list[int]] \| None` | `None` (the run's, from `run_result_token`) |
+| `spike_times` | `list[list[int]] \| None`, each in `[0, 2**31)` | `None` (the run's, from `run_result_token`) |
 | `run_result_token` | `str \| None` | `None` |
-| `total_samples` | `int` | (required) |
-| `fsamp` | `float \| None` | `None` (400 when missing) |
+| `total_samples` | `int`, `> 0` | (required) |
+| `fsamp` | `float`, `> 0` | (required) |
 | `grid_names` | `list[str] \| None` | `None` |
-| `mu_grid_index` | `list[int] \| None` | `None` |
+| `mu_grid_index` | `list[int] \| None`, each `>= 0` | `None` |
 | `parameters` | `dict[str, Any] \| None` | `None` |
 | `artifact_regions` | `list[Any] \| None` | `None` (`[start, end]` pairs or `{start, end}` objects) |
 
@@ -233,8 +250,9 @@ The session form's fields, shared by both saves.
 | `project` | `str \| None` | `None` |
 | `bids_entities`, `bids_metadata` | `dict[str, Any] \| None` | `None` |
 
-`Span` is `{start: int, end: int}`. A model validator checks `params.adapt_batch_ms > 0`, and
-`<= edges_sec * 1000` with `use_adaptive`.
+`Span` is `{start: int ≥ 0, end: int > start}` (else a 422); an end past the recording is
+clamped to it. `params` is range-checked by `DecompositionParameters` itself
+(see the engine doc); a rejected value is a 422 on `params`.
 
 ### Edit operations (`EDIT_OPS`)
 
@@ -245,7 +263,7 @@ not passed, so the session method's defaults apply.
 |---|---|---|
 | `add-spikes`, `add-artifact` | `RoiAddPayload` | `mu`, `x_start`, `x_end`, `y_min: float \| None` |
 | `delete-spikes` | `RoiDeletePayload` | as `RoiAddPayload`, plus `y_max: float \| None` |
-| `update-filter` | `FilterUpdatePayload` | `mu`, `view_start`, `view_end`, `use_peeloff=False`, `lock_spikes=False`, `project`, `nbextchan=1000`, `peel_off_win=0.025` |
+| `update-filter` | `FilterUpdatePayload` | `mu`, `view_start`, `view_end`, `use_peeloff=False`, `lock_spikes=False`, `project`, `nbextchan`, `peel_off_win`, `compute_dtype` (left out: the run's own) |
 | `flag` | `FlagPayload` | `mu`, `flag=True` |
 | `remove-outliers`, `reset`, `duplicate` | `MuOpPayload` | `mu` |
 | `remove-duplicates`, `undo` | `EditOpPayload` | — |
@@ -271,9 +289,26 @@ Returns `{"data": <data>, "meta": {"api_version": "v1"}}`.
 |---|---|---|---|
 | `http_exception_handler` | `HTTPException` | `http_{status}` | exc.status_code |
 | `validation_exception_handler` | `RequestValidationError` | `validation_error` | 422 |
+| `muedit_exception_handler` | `MueditError` | `http_{status}` | exc.status (400; 404 for `NotFoundError`) |
 | `unhandled_exception_handler` | any uncaught `Exception` | `internal_error` | 500 |
 
-Registered via `register_exception_handlers(app)`. Never leaks tracebacks.
+Registered via `register_exception_handlers(app)`.
+
+`MueditError` (`muedit/errors.py`, a `ValueError`) is an error the user can fix: its message is
+the envelope's `message`, and `detail` is `{field}` when it names the request field at fault
+(`upload_token`, `token`, `path`, …). Every 400 and 404 is one; services raise it and let the
+handler answer. Its subclasses: `NotFoundError` (404, a missing file), `SignalLoadError` (a
+recording any loader refuses, `field: path`, a MAT decomposition opened as a signal among them),
+`DecompositionFileError` (`field: path`), `BidsFieldError` (`field: bids_entities`) and
+`EditError`. `HTTPException` is left to the routing-level 408 (dialog timeout), 409 (a run is
+already going) and the dialog's 500. Anything else is a bug: a 500 with the generic message and
+no detail.
+
+Logging (`muedit.log`): a user error is one INFO line with its message, no traceback (the
+handler logs the request's method, path and status; a run's relay logs its error event); a
+degradation the request survives (an unreadable sidecar, edit log or `settings.xml`, a failed BIDS
+side output) is one WARNING naming what was lost and why, with the traceback only where a broad
+`except Exception` could hide a bug; a bug is an ERROR with its traceback.
 
 ---
 
@@ -313,18 +348,19 @@ Every cache is a `BudgetedLRU` counted against one `MemoryBudget` (`cache.BUDGET
 their heap bytes: arrays memory-mapped from a session store cost nothing.
 
 Each entry belongs to the session that stored it. Inserting an entry that does not fit evicts
-other sessions' entries, least recently used first; the active session's entries are never
-evicted, and may exceed the budget. A sweep thread (every 60 s) drops expired entries and closes
+other sessions' entries, least recently used first; the active session's entries, and entries a
+request or run holds (`BudgetedLRU.hold`), are never evicted, and may exceed the budget. A held
+entry is still dropped explicitly (a new file, a closed tab). A sweep thread (every 60 s) closes
 sessions idle for 20 minutes, except the active one. `per_session=1` means a session's next entry
 replaces its previous one. `on_drop` releases what an entry holds outside the heap (its store).
 
 ### Caches
 
-| Cache | Per session | TTL | Holds | On drop |
-|---|---|---|---|---|
-| `_UPLOADS` | 1 | — | The opened recording (`SignalImport`, memory-mapped from its store) and its `SignalViews` | Closes the store |
-| `_RUN_RESULTS` | 1 | — | The last run's pulse trains (in the run store) and discharge times | Closes the store |
-| `_EDIT_SESSIONS` | 1 | — | The open `EditSession` | `EditSession.close()` (keeps its log only with unsaved edits) |
+| Cache | Per session | Holds | On drop |
+|---|---|---|---|
+| `_UPLOADS` | 1 | The opened recording (`SignalImport`, memory-mapped from its store) and its `SignalViews` | Closes the store |
+| `_RUN_RESULTS` | 1 | The last run's pulse trains (in the run store) and discharge times | Closes the store |
+| `_EDIT_SESSIONS` | 1 | The open `EditSession` | `EditSession.close()` (keeps its log only with unsaved edits) |
 
 ### Cache Functions
 
@@ -333,17 +369,15 @@ replaces its previous one. `on_drop` releases what an entry holds outside the he
 | `close_session(session)` | Drop everything the session holds |
 | `_release_upload(session)` | Drop the session's upload before it loads the next file. A file opened while another loads in the same tab is pinned only once built, so a drop never deletes a store still being written: the upload pinned last stays, the other answers 400 (`field: upload_token`) |
 | `_store_upload_signal(signal, source_path, session, store, views) -> token` | Keep a signal and the QC stage's views, once both are built; with `store`, take over the store they were written in, else keep a copy |
-| `_get_upload_signal(token)` / `_get_upload_source_path(token)` | A read-only view of the signal / the file it came from |
-| `_hold_upload(token) -> HeldUpload \| None` | Signal, source path, store and views of an upload, the store held until `release()`; used by runs, `/qc/auto` and `/series/*` |
-| `_get_signal_views(token)` | The QC stage's pyramids and overview of an upload |
+| `_hold_upload(token) -> HeldUpload \| None` | Signal, source path, store and views of an upload, kept from eviction and the store held until `release()`; used by runs, `/qc/auto` and `/series/*` |
 | `_store_run_result(pulse_trains, session, store, spikes) -> token` | Keep a finished run, taking over its run store |
-| `_get_run_result_entry(token) -> RunResult \| None` | The run, its pulse trains read-only; `_get_run_result(token)` returns the trains only |
+| `_held_run_result(token)` | Context manager: the run (or None), its pulse trains read-only, its store held until the block ends; used by `/series/pulse` and `save_edits` |
 | `_store_edit_session(edit, session) -> token` | Keep an edit session in place of the session's last, which closes |
 | `_get_edit_session(token, session=None)` | The edit session; with `session`, it moves to that tab |
 | `_resize_edit_session(token)` | Recount its bytes after an edit |
 | `_live_edit_logs()` | The edit logs open sessions are writing (not offered for recovery) |
 
-Uploads are stored once (a copy, or the store the loader wrote). Reads return `readonly_view()`:
+Uploads are stored once (a copy, or the store the loader wrote). Holds return `readonly_view()`:
 the arrays are shared with the cache but not writable, and lists and metadata dicts are fresh
 copies.
 
@@ -351,7 +385,9 @@ copies.
 
 A `SessionStore` is a folder of `.npy` files under `<cache dir>/sessions/`, one per upload, run or
 edit session, holding its full-length arrays as memory maps. `close()` deletes the folder (after
-the last `hold()` is released). An array that would leave less than 1 GB free on disk
+the last `hold()` is released); once it was asked for, `hold()` raises `StoreClosedError`, and a
+`release()` without a `hold()` is logged and ignored. `seal()` returns a read-only map, but
+`RamStore.seal()` returns the array itself, still writable. An array that would leave less than 1 GB free on disk
 (`MUEDIT_DISK_RESERVE_MB`) stays on the heap instead. Each folder names its owner process;
 `purge_stale_sessions()` deletes the folders of exited processes at startup. `RamStore` is the
 heap stand-in used when no store is given.

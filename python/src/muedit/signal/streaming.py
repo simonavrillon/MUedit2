@@ -89,7 +89,10 @@ class StreamedExtender:
 
 
 def extend_mask(mask: BoolArray, ex_factor: int) -> BoolArray:
-    """Mask of the extended samples: sample ``t`` is masked if any of ``t - ex_factor + 1 .. t`` is."""
+    """Mask of the extended samples: sample ``t`` is masked if any of ``t - ex_factor + 1 .. t`` is.
+
+    Same length as ``mask``; ``decomp_primitives.extend_signal_mask`` adds the padded tail.
+    """
     out = np.array(mask, dtype=bool)
     for m in range(1, ex_factor):
         out[m:] |= mask[:-m]

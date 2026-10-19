@@ -89,7 +89,6 @@ describe("decomposition cancel", () => {
     app.state.runLive = createRunLive(0);
     app.handleStreamMessage({
       stage: "cancelled",
-      pct: 0,
       message: "Decomposition cancelled",
     });
     assert.deepEqual(app.setStatus.calls, [

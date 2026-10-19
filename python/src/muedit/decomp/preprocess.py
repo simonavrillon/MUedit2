@@ -11,10 +11,13 @@ from typing import Any
 import numpy as np
 
 from muedit.decomp.types import DecompositionParameters, LoadStepOutput, PreprocessStepOutput
+from muedit.errors import MueditError
 from muedit.io.bids import (
-    BidsEntities,
+    bids_emg_fields,
     export_bids_emg,
     export_bids_events,
+    form_entities,
+    form_over_loader_meta,
     resolve_bids_emg_path,
     write_participant,
 )
@@ -101,7 +104,7 @@ def _resolve_roi_list(
     """Resolve the analysis ROI from the various supported input methods."""
     total_len = data.shape[1]
     if total_len == 0:
-        raise ValueError("Input signal contains zero samples; cannot define ROI.")
+        raise MueditError("Input signal contains zero samples; cannot define ROI.")
     explicit_rois = bool(rois)
     n_rois = len(rois) if rois is not None else 0
     if explicit_rois and nwindows > 1 and n_rois != nwindows:
@@ -125,8 +128,8 @@ def _resolve_roi_list(
         s, e = select_roi_interactively(data, fsamp)
         roi_list = [(s, e)]
     elif duration is not None:
-        ltime = max(1, min(total_len, int(duration * fsamp)))
-        roi_list = [(0, ltime)]
+        total_samples = max(1, min(total_len, int(duration * fsamp)))
+        roi_list = [(0, total_samples)]
     else:
         roi_list = [(0, total_len)]
 
@@ -203,9 +206,7 @@ def load_step(
     filename = file_label or Path(filepath).name
     logger.info("Processing %s...", filename)
     if progress_cb:
-        progress_cb(
-            "start", {"message": "Loading signal", "pct": 5, "file": filename, "phase": "load"}
-        )
+        progress_cb("start", {"message": "Loading signal", "file": filename, "phase": "load"})
 
     signal = (
         preloaded_signal.readonly_view() if preloaded_signal is not None else load_signal(filepath)
@@ -213,7 +214,6 @@ def load_step(
     logger.info("Loaded data: %s, Fs=%s", signal.data.shape, signal.fsamp)
     return LoadStepOutput(
         full_path=filepath,
-        filename=filename,
         signal=signal,
         data=signal.data,
         fsamp=signal.fsamp,
@@ -241,17 +241,17 @@ def build_manual_artifact_mask(
 
 def _target_segments(signal: SignalImport, target_index: int | None) -> dict[str, Any] | None:
     """The segments of the auxiliary channel the user segmented, or ``None``."""
-    n_aux = signal.auxiliary.shape[0] if signal.auxiliary.ndim == 2 else 0
+    n_aux = signal.aux_data.shape[0] if signal.aux_data.ndim == 2 else 0
     if target_index is None or not 0 <= target_index < n_aux:
         return None
     # Deterministic: the default settings give the segments the QC page showed.
-    segments = segment_target(np.asarray(signal.auxiliary[target_index]), signal.fsamp)
+    segments = segment_target(np.asarray(signal.aux_data[target_index]), signal.fsamp)
     if not segments:
         return None
     units = signal.metadata.get("aux_units")
     if isinstance(units, list):
         units = units[target_index] if target_index < len(units) else None
-    names = signal.auxiliaryname
+    names = signal.aux_names
     return {
         "target_index": target_index,
         "target_name": names[target_index] if target_index < len(names) else "",
@@ -283,10 +283,10 @@ def preprocess_step(
     data = store.allocate("filtered", loaded.data.shape, params.work_dtype)
     for lo in range(0, data.shape[0], FILTER_BLOCK_ROWS):
         data[lo : lo + FILTER_BLOCK_ROWS] = loaded.data[lo : lo + FILTER_BLOCK_ROWS]
-    grid_names = loaded.signal.gridname
+    grid_names = loaded.signal.grid_names
     if not grid_names:
-        raise ValueError(
-            "Signal has no grid name. Set signal.gridname to a name present in "
+        raise MueditError(
+            "Signal has no grid name. Set signal.grid_names to a name present in "
             "_GRID_CATALOG (signal/grid.py) before decomposing."
         )
     coordinates, ied, discard_channels, emg_type = format_hdemg_signal(
@@ -295,7 +295,7 @@ def preprocess_step(
     )
     total_declared_channels = sum(c.shape[0] for c in coordinates)
     if total_declared_channels > data.shape[0]:
-        raise ValueError(
+        raise MueditError(
             f"Grid catalogue declares {total_declared_channels} channels "
             f"({', '.join(grid_names)}) but the signal has only {data.shape[0]} "
             f"channels. Check that the grid name matches the recording."
@@ -310,7 +310,6 @@ def preprocess_step(
     ngrid = len(grid_names)
 
     artifact_mask: BoolArray | None = None
-    bad_channel_masks: list[BoolArray] | None = None
     if params.auto_mask_artifacts:
         grid_channel_counts = [c.shape[0] for c in coordinates]
         qc_result = run_auto_qc(
@@ -321,9 +320,8 @@ def preprocess_step(
             store=store,
         )
         artifact_mask = qc_result.artifact_mask
-        bad_channel_masks = qc_result.bad_channel_masks
 
-        for i, auto_bad in enumerate(bad_channel_masks):
+        for i, auto_bad in enumerate(qc_result.bad_channel_masks):
             if auto_bad.any():
                 discard_channels[i] = np.maximum(
                     discard_channels[i].astype(int),
@@ -335,6 +333,12 @@ def preprocess_step(
                     int(auto_bad.sum()),
                     int(discard_channels[i].sum()),
                 )
+
+    for i, mask in enumerate(discard_channels):
+        if mask.all():
+            raise MueditError(
+                f"Grid {i + 1} ({grid_names[i]}) has every channel discarded; keep at least one."
+            )
 
     manual_mask = build_manual_artifact_mask(artifact_regions, data.shape[1])
     if manual_mask is not None:
@@ -355,13 +359,12 @@ def preprocess_step(
         coordinates=coordinates,
         ied=ied,
         discard_channels=discard_channels,
-        muscles=loaded.signal.muscle,
+        muscle_names=loaded.signal.muscle_names,
         loader_meta=loaded.signal.metadata,
         roi_list=roi_list,
         ngrid=ngrid,
         coordinates_plateau=_build_coordinates_plateau(ngrid, roi_list),
         artifact_mask=artifact_mask,
-        bad_channel_masks=bad_channel_masks,
         target_segments=_target_segments(loaded.signal, target_index),
         declared_discard_channels=declared_discard,
     )
@@ -376,9 +379,14 @@ def bids_export_step(
 ) -> PreprocessStepOutput:
     """Export the raw EMG, its sidecars and events to ``bids_root``; the run then saves there too."""
     entities = bids_entities or {}
+    names = form_entities(entities)
     loader_meta = prep.loader_meta
-    emg_meta: dict[str, Any] = {"Muscles": prep.muscles} if any(prep.muscles) else {}
-    emg_meta.update(bids_metadata or {})
+    fields = bids_emg_fields(
+        form_over_loader_meta(loader_meta, entities),
+        entities.get("target_muscle") or prep.muscle_names,
+        entities.get("task_description"),
+    )
+    fields["emg_json_extra"] = {**(fields["emg_json_extra"] or {}), **(bids_metadata or {})}
     skip_existing = bool(loader_meta.get("bids_emg_path"))
     if skip_existing:
         logger.info(
@@ -395,64 +403,32 @@ def bids_export_step(
         prep.declared_discard_channels,
         Path(bids_root),
         ied=prep.ied,
-        subject=entities.get("subject", "01"),
-        task=entities.get("task", "task"),
-        run=entities.get("run"),
-        session=entities.get("session"),
-        acquisition=entities.get("acquisition"),
-        recording=entities.get("recording"),
-        emg_json_extra=emg_meta,
-        powerline_freq=float(entities.get("powerline_freq") or 50.0),
-        placement_scheme=entities.get("placement_scheme")
-        or loader_meta.get("placement_scheme")
-        or "Other",
-        placement_scheme_description=entities.get("placement_scheme_description")
-        or loader_meta.get("placement_scheme_description"),
-        reference_location=entities.get("reference_location")
-        or loader_meta.get("reference_location"),
-        ground_location=entities.get("ground_location") or loader_meta.get("ground_location"),
-        units=entities.get("units") or loader_meta.get("units") or "uV",
-        target_muscle=entities.get("target_muscle")
-        or next((m for m in prep.muscles if m.strip()), None),
+        subject=names.subject,
+        task=names.task or "task",
+        run=names.run,
+        session=names.session,
+        acquisition=names.acquisition,
+        recording=names.recording,
         file_format=entities.get("file_format", "edf"),
-        hardware_filters=loader_meta.get("hardware_filters", "n/a"),
-        gain=loader_meta.get("gains"),
-        low_cutoff=loader_meta.get("emg_hpf"),
-        high_cutoff=loader_meta.get("emg_lpf"),
-        aux_data=signal.auxiliary,
-        aux_names=signal.auxiliaryname,
-        aux_gain=loader_meta.get("aux_gains"),
-        aux_low_cutoff=loader_meta.get("aux_hpf"),
-        aux_high_cutoff=loader_meta.get("aux_lpf"),
-        aux_units=loader_meta.get("aux_units"),
-        aux_kinds=loader_meta.get("aux_kinds"),
-        grid_labels=loader_meta.get("grid_labels"),
-        manufacturer=entities.get("manufacturer") or loader_meta.get("manufacturer"),
-        manufacturers_model_name=entities.get("manufacturers_model_name")
-        or loader_meta.get("device_name"),
-        task_description=entities.get("task_description"),
-        software_versions=loader_meta.get("software_versions"),
+        aux_data=signal.aux_data,
+        aux_names=signal.aux_names,
         skip_existing=skip_existing,
+        auto_discard_channels=prep.discard_channels,
+        **fields,
     )
     # The events are refreshed even when the source is already BIDS: they are merged, not skipped.
     export_bids_events(
-        out["edf"], loaded.fsamp, aux_data=signal.auxiliary, target_segments=prep.target_segments
+        out["edf"], loaded.fsamp, aux_data=signal.aux_data, target_segments=prep.target_segments
     )
-    write_participant(
-        Path(bids_root), entities.get("subject", "01"), entities.get("participant_meta")
-    )
+    write_participant(Path(bids_root), names.subject, entities.get("participant_meta"))
 
-    label = BidsEntities(
-        subject=entities.get("subject", "01"),
-        session=entities.get("session"),
-        task=entities.get("task", "task"),
-        acquisition=entities.get("acquisition"),
-        run=entities.get("run"),
-        recording=entities.get("recording"),
-    ).label
-    emg_path = resolve_bids_emg_path(Path(bids_root), label)
+    emg_path = resolve_bids_emg_path(Path(bids_root), names.label)
     # export_step saves the .npz in this file's derivatives.
     return replace(
         prep,
-        loader_meta={**loader_meta, "bids_entity_label": label, "bids_emg_path": str(emg_path)},
+        loader_meta={
+            **loader_meta,
+            "bids_entity_label": names.label,
+            "bids_emg_path": str(emg_path),
+        },
     )

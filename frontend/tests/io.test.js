@@ -39,12 +39,12 @@ describe("normalizeGridNames", () => {
   test("fills blanks and pads to the minimum count", () => {
     assert.deepEqual(
       normalizeGridNames(["A", "  ", null], { minimumCount: 4 }),
-      ["A", "Grid 2", "Grid 3", "Grid 4"],
+      ["A", "Grid2", "Grid3", "Grid4"],
     );
   });
 
   test("a non-array gives one default name", () => {
-    assert.deepEqual(normalizeGridNames(undefined), ["Grid 1"]);
+    assert.deepEqual(normalizeGridNames(undefined), ["Grid1"]);
   });
 
   test("trims names", () => {
@@ -167,7 +167,7 @@ describe("buildBidsMuscleRowsModel", () => {
     const rows = buildBidsMuscleRowsModel({
       currentStage: "run",
       gridNames: ["GR08MM1305", "GR04MM1305"],
-      muscle: ["TA"],
+      muscleNames: ["TA"],
       edit: { gridNames: [] },
     });
     assert.deepEqual(rows, [
@@ -180,7 +180,7 @@ describe("buildBidsMuscleRowsModel", () => {
     const rows = buildBidsMuscleRowsModel({
       currentStage: "edit",
       gridNames: ["run grid"],
-      muscle: [],
+      muscleNames: [],
       edit: { gridNames: ["A"], muGridIndex: [0, 2] },
     });
     assert.deepEqual(
@@ -205,7 +205,7 @@ describe("buildSessionInfoFromDecomposition", () => {
       { name: "sub-07_ses-post_task-ramp_decomp.npz" },
       {
         fsamp: 2048.4,
-        muscle: ["TA"],
+        muscle_names: ["TA"],
         parameters: { target_muscle: "GM" },
         participant_meta: { age: "31", sex: "n/a" },
         manufacturer: "OT Bioelettronica",

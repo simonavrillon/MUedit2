@@ -21,7 +21,6 @@ import numpy as np
 from numpy.typing import DTypeLike
 
 from muedit.models import FloatArray, SignalImport
-from muedit.paths import CACHE_DIR_ENV as CACHE_DIR_ENV
 from muedit.paths import cache_dir
 
 logger = logging.getLogger(__name__)
@@ -53,6 +52,10 @@ def sample_blocks(n_samples: int, n_rows: int, itemsize: int = 8) -> Iterator[tu
         yield start, min(start + step, n_samples)
 
 
+class StoreClosedError(RuntimeError):
+    """A ``hold`` on a store whose ``close`` was already asked for."""
+
+
 class ArrayStore(Protocol):
     """Where a loader or a decomposition run puts its full-length arrays."""
 
@@ -60,6 +63,8 @@ class ArrayStore(Protocol):
         self, name: str, shape: tuple[int, ...], dtype: DTypeLike, *, zero: bool = False
     ) -> np.ndarray: ...
 
+    # Read-only from a SessionStore, ``arr`` itself (writable) from a RamStore. The caller
+    # drops ``arr`` afterwards: on Windows its writable map keeps the file from being deleted.
     def seal(self, arr: np.ndarray) -> np.ndarray: ...
 
     def discard(self, arr: np.ndarray) -> None: ...
@@ -90,7 +95,7 @@ class SessionStore:
         self._warned_full = False
         self._lock = threading.Lock()
         self._holds = 0
-        self._close_pending = False
+        self._closing = False  # ``close`` was asked for; it runs once the last hold is released
 
     @classmethod
     def create(cls, label: str = "session") -> SessionStore:
@@ -160,14 +165,20 @@ class SessionStore:
 
     def hold(self) -> None:
         """Keep the folder while another process reads it: ``close`` waits for ``release``."""
+        # ``close`` deletes outside the lock, so no hold may start once it was asked for.
         with self._lock:
+            if self._closing:
+                raise StoreClosedError(f"Session store {self.path.name} is closed")
             self._holds += 1
 
     def release(self) -> None:
         """End one ``hold``, and do a ``close`` that was asked for meanwhile."""
         with self._lock:
+            if self._holds == 0:
+                logger.warning("Session store %s released more often than held", self.path.name)
+                return
             self._holds -= 1
-            close = self._holds == 0 and self._close_pending
+            close = self._holds == 0 and self._closing
         if close:
             self.close()
 
@@ -177,16 +188,10 @@ class SessionStore:
         What Windows still maps is removed by the next ``purge_stale_sessions``.
         """
         with self._lock:
+            self._closing = True
             if self._holds:
-                self._close_pending = True
                 return
-            self._close_pending = False
         shutil.rmtree(self.path, ignore_errors=True)
-
-    @property
-    def disk_bytes(self) -> int:
-        """Bytes the store's files take on disk."""
-        return _folder_bytes(self.path)
 
 
 def copy_into(store: ArrayStore, name: str, arr: FloatArray) -> FloatArray:
@@ -198,11 +203,11 @@ def copy_into(store: ArrayStore, name: str, arr: FloatArray) -> FloatArray:
 
 
 def store_signal(signal: SignalImport, store: ArrayStore) -> SignalImport:
-    """``signal`` with its EMG and auxiliary arrays copied into ``store`` as float32."""
+    """``signal`` with its EMG and aux arrays copied into ``store`` as float32."""
     return replace(
         signal,
         data=copy_into(store, "emg", signal.data),
-        auxiliary=copy_into(store, "aux", signal.auxiliary),
+        aux_data=copy_into(store, "aux", signal.aux_data),
     )
 
 

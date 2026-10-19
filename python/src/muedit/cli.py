@@ -26,12 +26,14 @@ from muedit.decomp.types import (
     ContrastFunc,
     DecompositionParameters,
 )
+from muedit.errors import MueditError
+from muedit.io.factory import supported_extensions
 from muedit.paths import frontend_dir, log_dir, repo_root
 
 _DEFAULT_PARAMS = DecompositionParameters()
 
 
-def _parse_roi(value: str) -> tuple[int, int]:
+def _parse_roi_arg(value: str) -> tuple[int, int]:
     """Parse a single ROI argument in ``start,end`` sample format."""
     parts = value.split(",")
     if len(parts) != 2:
@@ -44,13 +46,13 @@ def _parse_roi(value: str) -> tuple[int, int]:
     return start, end
 
 
-def _parse_rois(value: str) -> list[tuple[int, int]]:
+def _parse_roi_args(value: str) -> list[tuple[int, int]]:
     """Parse multiple ROI ranges separated by ``;``."""
     rois: list[tuple[int, int]] = []
     for part in value.split(";"):
         if not part.strip():
             continue
-        rois.append(_parse_roi(part))
+        rois.append(_parse_roi_arg(part))
     if not rois:
         raise argparse.ArgumentTypeError("ROIs must include at least one 'start,end'.")
     return rois
@@ -91,7 +93,10 @@ def run_decomposition_cli(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "filepath",
         nargs="?",
-        help="Input file path (.mat, .otb+, .otb4). If omitted, uses sample data.",
+        help=(
+            f"Recording file ({', '.join(supported_extensions())}) or a BIDS EMG, Intan or "
+            "Open Ephys recording folder. If omitted, uses sample data."
+        ),
     )
     parser.add_argument(
         "--duration",
@@ -106,13 +111,13 @@ def run_decomposition_cli(argv: list[str] | None = None) -> None:
     )
     parser.add_argument(
         "--roi",
-        type=_parse_roi,
+        type=_parse_roi_arg,
         default=None,
         help="Single ROI in samples: 'start,end'.",
     )
     parser.add_argument(
         "--rois",
-        type=_parse_rois,
+        type=_parse_roi_args,
         default=None,
         help="Multiple ROIs in samples: 'start,end;start,end'.",
     )
@@ -172,10 +177,10 @@ def run_decomposition_cli(argv: list[str] | None = None) -> None:
         help="Type of the filtered EMG and the extended/whitened windows (float32 halves their memory).",
     )
     parser.add_argument(
-        "--initialization",
+        "--random-init",
         action=argparse.BooleanOptionalAction,
-        default=_DEFAULT_PARAMS.initialization,
-        help="Enable/disable ICA initialization (app setting: Initialization).",
+        default=_DEFAULT_PARAMS.random_init,
+        help="Seed each ICA filter randomly instead of from the most active sample.",
     )
     parser.add_argument(
         "--peel-off",
@@ -281,28 +286,35 @@ def run_decomposition_cli(argv: list[str] | None = None) -> None:
         parser.error("Use either --bids-metadata or --bids-metadata-file, not both.")
     if (args.bids_metadata or args.bids_metadata_file) and not args.bids_root:
         parser.error("--bids-metadata* requires --bids-root.")
-    if args.niter < 1:
-        parser.error("--niter must be >= 1.")
-    if args.nwindows < 1:
-        parser.error("--nwindows must be >= 1.")
-    if args.peel_off_window_ms <= 0:
-        parser.error("--peel-off-window-ms must be > 0.")
-    if args.adapt_batch_ms <= 0:
-        parser.error("--adapt-batch-ms must be > 0.")
-    if postprocess_flags["use_adaptive"] and args.adapt_batch_ms > _DEFAULT_PARAMS.edges_sec * 1000:
-        parser.error(
-            f"--adapt-batch-ms must be <= {_DEFAULT_PARAMS.edges_sec * 1000:.0f} "
-            f"(edges_sec * 1000) when adaptive mode is enabled; larger batches "
-            f"exceed the calibration window and produce a loss-tracking gap."
+
+    try:
+        params = DecompositionParameters(
+            niter=args.niter,
+            nwindows=args.nwindows,
+            nbextchan=DEFAULT_NBEXTCHAN,
+            duplicatesthresh=args.duplicatesthresh,
+            sil_thr=(float("-inf") if not args.sil_filter else args.sil_thr),
+            cov_thr=args.cov_thr,
+            covfilter=args.cov_filter,
+            contrast_func=args.contrast_func,
+            random_init=args.random_init,
+            peel_off_enabled=args.peel_off,
+            peel_off_win=args.peel_off_window_ms / 1000.0,
+            use_adaptive=postprocess_flags["use_adaptive"],
+            adapt_batch_ms=args.adapt_batch_ms,
+            adapt_wh=args.adapt_wh,
+            adapt_sv=args.adapt_sv,
+            adapt_sd=args.adapt_sd,
+            adapt_wh_learning_rate=args.adapt_wh_learning_rate,
+            adapt_sv_learning_rate=args.adapt_sv_learning_rate,
+            adapt_cov_alpha=args.adapt_cov_alpha,
+            adapt_spike_prev_weight=args.adapt_spike_prev_weight,
+            full_trace=postprocess_flags["full_trace"],
+            auto_mask_artifacts=args.auto_mask_artifacts,
+            compute_dtype=args.compute_dtype,
         )
-    if args.adapt_wh_learning_rate <= 0:
-        parser.error("--adapt-wh-learning-rate must be > 0.")
-    if args.adapt_sv_learning_rate <= 0:
-        parser.error("--adapt-sv-learning-rate must be > 0.")
-    if not (0.0 < args.adapt_cov_alpha <= 1.0):
-        parser.error("--adapt-cov-alpha must be in (0, 1].")
-    if args.adapt_spike_prev_weight < 0:
-        parser.error("--adapt-spike-prev-weight must be >= 0.")
+    except ValueError as exc:
+        parser.error(str(exc))
 
     if args.filepath:
         full_path = Path(args.filepath)
@@ -361,44 +373,21 @@ def run_decomposition_cli(argv: list[str] | None = None) -> None:
                 parser.error("--bids-metadata-file must decode to a JSON object")
             bids_metadata = parsed_meta
 
-    params = DecompositionParameters(
-        niter=args.niter,
-        nwindows=args.nwindows,
-        nbextchan=DEFAULT_NBEXTCHAN,
-        duplicatesthresh=args.duplicatesthresh,
-        sil_thr=(float("-inf") if not args.sil_filter else args.sil_thr),
-        cov_thr=args.cov_thr,
-        covfilter=args.cov_filter,
-        contrast_func=args.contrast_func,
-        initialization=args.initialization,
-        peel_off_enabled=args.peel_off,
-        peel_off_win=args.peel_off_window_ms / 1000.0,
-        use_adaptive=postprocess_flags["use_adaptive"],
-        adapt_batch_ms=args.adapt_batch_ms,
-        adapt_wh=args.adapt_wh,
-        adapt_sv=args.adapt_sv,
-        adapt_sd=args.adapt_sd,
-        adapt_wh_learning_rate=args.adapt_wh_learning_rate,
-        adapt_sv_learning_rate=args.adapt_sv_learning_rate,
-        adapt_cov_alpha=args.adapt_cov_alpha,
-        adapt_spike_prev_weight=args.adapt_spike_prev_weight,
-        full_trace=postprocess_flags["full_trace"],
-        auto_mask_artifacts=args.auto_mask_artifacts,
-        compute_dtype=args.compute_dtype,
-    )
-
-    run_decomposition(
-        str(full_path),
-        duration=args.duration,
-        manual_roi=args.manual_roi,
-        roi=args.roi,
-        rois=args.rois,
-        params=params,
-        bids_root=args.bids_root,
-        bids_entities=bids_entities,
-        bids_metadata=bids_metadata,
-        file_label=file_label,
-    )
+    try:
+        run_decomposition(
+            str(full_path),
+            duration=args.duration,
+            manual_roi=args.manual_roi,
+            roi=args.roi,
+            rois=args.rois,
+            params=params,
+            bids_root=args.bids_root,
+            bids_entities=bids_entities,
+            bids_metadata=bids_metadata,
+            file_label=file_label,
+        )
+    except MueditError as exc:
+        parser.exit(1, f"muedit: {exc}\n")
 
 
 def main() -> None:

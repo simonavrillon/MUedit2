@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from muedit.errors import MueditError
 from muedit.models import FloatArray, IntArray
 
 
@@ -272,6 +273,11 @@ def _find_spec(grid_name: str) -> GridSpec | None:
     return None
 
 
+def fallback_grid_name(index: int) -> str:
+    """Name of grid ``index`` when the source gives none; ``Grid<n>`` is also a valid BIDS label."""
+    return f"Grid{index + 1}"
+
+
 def is_known_grid(grid_name: str) -> bool:
     """Whether :func:`format_hdemg_signal` can lay out *grid_name*."""
     return _find_spec(grid_name or "") is not None
@@ -284,14 +290,14 @@ def format_hdemg_signal(
     """Infer grid geometry and channel masks for HD-EMG recordings."""
     coordinates: list[FloatArray] = []
     ied: list[float] = []
-    discard_channels_vec: list[IntArray] = []
+    discard_channels: list[IntArray] = []
     emg_type: list[int] = []
 
     for i, grid_name in enumerate(grid_names):
         spec = _find_spec(grid_name)
 
         if spec is None:
-            raise ValueError(
+            raise MueditError(
                 f"Unknown grid model '{grid_name}'. "
                 "Add an entry to _GRID_CATALOG in signal/grid.py or correct the grid name."
             )
@@ -309,16 +315,16 @@ def format_hdemg_signal(
         if discard_overrides and i < len(discard_overrides):
             mask_arr = np.array(discard_overrides[i], dtype=int)
             if mask_arr.size != nbelectrodes:
-                raise ValueError(
+                raise MueditError(
                     f"discard_overrides[{i}] has {mask_arr.size} elements but "
                     f"grid '{grid_name}' has {nbelectrodes} channels. "
                     f"Provide a full-length binary mask (1 = discard, 0 = keep)."
                 )
             discard_mask = mask_arr
 
-        discard_channels_vec.append(discard_mask)
+        discard_channels.append(discard_mask)
 
-    return coordinates, ied, discard_channels_vec, emg_type
+    return coordinates, ied, discard_channels, emg_type
 
 
 def get_grid_electrode_metadata(grid_name: str) -> dict[str, str]:

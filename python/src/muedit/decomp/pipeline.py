@@ -12,6 +12,7 @@ from muedit.decomp.core import decompose_step
 from muedit.decomp.postprocess import export_step, postprocess_step
 from muedit.decomp.preprocess import bids_export_step, load_step, preprocess_step
 from muedit.decomp.types import DecompositionParameters, DecompositionResult
+from muedit.io.bids import run_decomp_path
 from muedit.models import FloatArray, SignalImport, resident_nbytes
 from muedit.storage import ArrayStore, RamStore, copy_into
 
@@ -46,7 +47,7 @@ def run_decomposition(
 
     loaded = load_step(filepath, file_label, preloaded_signal, progress_cb)
     if progress_cb:
-        progress_cb("progress", {"message": "Filtering signal", "pct": 8, "phase": "preprocess"})
+        progress_cb("progress", {"message": "Filtering signal", "phase": "preprocess"})
     preprocessed = preprocess_step(
         loaded=loaded,
         duration=duration,
@@ -64,7 +65,8 @@ def run_decomposition(
             loaded, preprocessed, bids_root, bids_entities, bids_metadata
         )
     # A file saved outside a BIDS dataset embeds the raw EMG; BIDS has its own copy.
-    raw_emg = _raw_emg_for_file(loaded.data, store) if save_npz and not bids_root else None
+    _, in_dataset = run_decomp_path(loaded.full_path, preprocessed.loader_meta)
+    raw_emg = _raw_emg_for_file(loaded.data, store) if save_npz and not in_dataset else None
     # Only the filtered copy is needed from here on; let the raw samples go.
     loaded = replace(loaded, signal=preprocessed.signal, data=preprocessed.signal.data)
     decomposed = decompose_step(

@@ -11,7 +11,7 @@ import pytest
 from starlette.testclient import TestClient
 
 from muedit.decomp.decomposition_file import (
-    load_decomposition_signal_context,
+    load_decomposition,
     save_decomposition_npz,
 )
 from muedit.decomp.preprocess import build_manual_artifact_mask, preprocess_step
@@ -40,13 +40,12 @@ def _loaded(data: np.ndarray, grids: list[str]) -> LoadStepOutput:
     signal = SignalImport(
         data=data,
         fsamp=FSAMP,
-        gridname=grids,
-        muscle=["ta"] * len(grids),
-        auxiliary=np.zeros((0, data.shape[1])),
+        grid_names=grids,
+        muscle_names=["ta"] * len(grids),
+        aux_data=np.zeros((0, data.shape[1])),
     )
     return LoadStepOutput(
         full_path="synthetic.mat",
-        filename="synthetic.mat",
         signal=signal,
         data=data,
         fsamp=FSAMP,
@@ -102,7 +101,6 @@ class TestPreprocessArtifactMask:
         assert int(prep.artifact_mask.sum()) == 600
         assert prep.artifact_mask[1000:1500].all()
         assert prep.artifact_mask[9000:9100].all()
-        assert prep.bad_channel_masks is None
 
     def test_auto_qc_merges_dead_channel_with_user_discards(self) -> None:
         data = _raw_emg()
@@ -111,9 +109,7 @@ class TestPreprocessArtifactMask:
         override[40] = 1
         params = DecompositionParameters(auto_mask_artifacts=True)
         prep = _preprocess(data, [GRID], params=params, discard_overrides=[override])
-        assert prep.bad_channel_masks is not None
         assert prep.artifact_mask is not None
-        assert prep.bad_channel_masks[0][12]
         assert {12, 40} <= set(np.flatnonzero(prep.discard_channels[0]).tolist())
         assert prep.artifact_mask.shape == (N_SAMPLES,)
 
@@ -149,6 +145,23 @@ class TestPreprocessArtifactMask:
         assert np.flatnonzero(np.diff(prep.artifact_mask.astype(int))).tolist() == [99, 299]
         assert not prep.discard_channels[0].any()
         assert np.flatnonzero(prep.discard_channels[1]).tolist() == [3]
+
+    def test_grid_left_without_channels_is_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Auto-QC marking a whole grid bad stops the run with a reason, not a division by zero."""
+        import muedit.decomp.preprocess as preprocess
+
+        def all_bad(
+            data: np.ndarray, fsamp: float, counts: list[int], **_: Any
+        ) -> QCPipelineResult:
+            return QCPipelineResult(
+                artifact_mask=np.zeros(N_SAMPLES, bool),
+                bad_channel_masks=[np.ones(c, bool) for c in counts],
+            )
+
+        monkeypatch.setattr(preprocess, "run_auto_qc", all_bad)
+        params = DecompositionParameters(auto_mask_artifacts=True)
+        with pytest.raises(ValueError, match=r"Grid 1 .* every channel discarded"):
+            _preprocess(_raw_emg(), [GRID], params=params)
 
 
 # ── mask_to_intervals ────────────────────────────────────────────────────────
@@ -215,16 +228,16 @@ class TestQcAutoRoute:
 
 
 def _save_npz(path: Path, **extras: Any) -> None:
-    distimes = [[100, 300], [200]]
+    spike_times = [[100, 300], [200]]
     pulse = np.zeros((2, 1000))
     save_decomposition_npz(
         path,
         pulse_trains=pulse,
-        distimes=distimes,
+        spike_times=spike_times,
         fsamp=FSAMP,
         grid_names=[GRID],
         mu_grid_index=[0, 0],
-        muscles=["ta"],
+        muscle_names=["ta"],
         parameters={},
         total_samples=1000,
         **extras,
@@ -237,7 +250,7 @@ class TestNpzArtifactMask:
         mask[400:450] = True
         path = tmp_path / "d.npz"
         _save_npz(path, artifact_mask=mask)
-        ctx = load_decomposition_signal_context(str(path))
+        ctx = load_decomposition(str(path))[1]
         assert ctx is not None
         assert ctx.data.size == 0
         assert ctx.artifact_mask is not None
@@ -255,7 +268,7 @@ class TestNpzArtifactMask:
             discard_channels=[np.array([0, 1, 0])],
             artifact_mask=mask,
         )
-        ctx = load_decomposition_signal_context(str(path))
+        ctx = load_decomposition(str(path))[1]
         assert ctx is not None
         np.testing.assert_array_equal(ctx.data, emg)
         assert not ctx.prefiltered
@@ -263,5 +276,5 @@ class TestNpzArtifactMask:
         assert ctx.grid_names == [GRID]
         assert ctx.artifact_mask is not None
         np.testing.assert_array_equal(ctx.artifact_mask, mask)
-        assert len(ctx.emgmask) == 1
-        np.testing.assert_array_equal(ctx.emgmask[0], [0, 1, 0])
+        assert len(ctx.discard_channels) == 1
+        np.testing.assert_array_equal(ctx.discard_channels[0], [0, 1, 0])

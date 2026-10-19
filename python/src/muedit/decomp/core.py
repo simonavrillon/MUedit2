@@ -12,7 +12,6 @@ from muedit.decomp.algorithm import (
     FIXED_POINT_MAXITER,
     column_energy,
     compute_silhouette,
-    extend_signal,
     fixed_point_alg,
     get_spikes,
     minimize_isi_covariance,
@@ -23,7 +22,13 @@ from muedit.decomp.algorithm import (
 )
 from muedit.decomp.types import DecomposeStepOutput, DecompositionParameters, PreprocessStepOutput
 from muedit.models import FloatArray, IntArray
-from muedit.signal.decomp_primitives import DECOMP_MIN_ISI_SEC, isi_cov
+from muedit.signal.decomp_primitives import (
+    DECOMP_MIN_ISI_SEC,
+    extend_signal,
+    extend_signal_mask,
+    extension_factor,
+    isi_cov,
+)
 from muedit.signal.filters import demean
 
 logger = logging.getLogger(__name__)
@@ -37,7 +42,6 @@ def decompose_step(
 ) -> DecomposeStepOutput:
     """Run decomposition iterations over every grid and ROI window."""
     nwindows = len(prep.roi_list)
-    total_windows = prep.ngrid * nwindows
 
     coordinates_plateau = list(prep.coordinates_plateau)
     mu_filters: dict[int, FloatArray] = {}
@@ -62,7 +66,6 @@ def decompose_step(
 
         for nwin in range(nwindows):
             win_global = i * nwindows + nwin
-            span = 80 / total_windows
             logger.info(
                 "Processing Grid %d (%s), Window %d",
                 i + 1,
@@ -84,7 +87,6 @@ def decompose_step(
                     "progress",
                     {
                         "message": f"Grid {i + 1}/{prep.ngrid} • Window {nwin + 1}/{nwindows}",
-                        "pct": min(90, int(10 + win_global * span)),
                         **where,
                         "iter": 0,
                         "outcomes": "",
@@ -96,7 +98,7 @@ def decompose_step(
             grid_block = prep.data[ch_idx : ch_idx + n_channels_grid, start:end]
             win_data_arr = grid_block[keep_idx, :]
 
-            ex_factor = int(round(params.nbextchan / win_data_arr.shape[0]))
+            ex_factor = extension_factor(params.nbextchan, win_data_arr.shape[0])
             win_means[win_global] = np.mean(win_data_arr, axis=1, dtype=np.float64)
             e_sig = extend_signal(demean(win_data_arr), ex_factor, dtype=params.work_dtype)
 
@@ -109,11 +111,7 @@ def decompose_step(
             clean_cols: IntArray | None = None
             win_clean = None
             if prep.artifact_mask is not None:
-                win_mask_raw = np.asarray(prep.artifact_mask[start:end], dtype=bool)
-                n_win = win_mask_raw.size
-                win_mask_ext = np.zeros(n_win + ex_factor - 1, dtype=bool)
-                for m in range(ex_factor):
-                    win_mask_ext[m : m + n_win] |= win_mask_raw
+                win_mask_ext = extend_signal_mask(prep.artifact_mask[start:end], ex_factor)
                 if trim:
                     win_mask_ext = win_mask_ext[trim:-trim]
                 if win_mask_ext.any() and not win_mask_ext.all():
@@ -134,7 +132,7 @@ def decompose_step(
             cov_scores = np.zeros(params.niter)
             fitted = np.zeros(params.niter, dtype=bool)
 
-            use_activity_init = not params.initialization
+            use_activity_init = not params.random_init
             refractory = max(1, int(round(prep.fsamp * DECOMP_MIN_ISI_SEC)))
             consumed = np.zeros(x.shape[1] if use_activity_init else 0, dtype=bool)
             energy = column_energy(x) if use_activity_init else None
@@ -212,7 +210,6 @@ def decompose_step(
                 iters_done = j + 1
 
                 if progress_cb and (j % 5 == 4 or j == params.niter - 1):
-                    pct_iter = 10 + win_global * span + ((j + 1) / params.niter) * span
                     progress_cb(
                         "progress",
                         {
@@ -221,7 +218,6 @@ def decompose_step(
                                 f"Window {nwin + 1}/{nwindows} • "
                                 f"Iter {j + 1}/{params.niter}"
                             ),
-                            "pct": min(90, int(pct_iter)),
                             **where,
                             "iter": iters_done,
                             "outcomes": "".join(outcomes),
@@ -239,14 +235,12 @@ def decompose_step(
             del e_sig, x
 
             if progress_cb:
-                pct = min(90, int(10 + (win_global + 1) * span))
                 progress_cb(
                     "progress",
                     {
                         "message": (
                             f"Grid {i + 1}/{prep.ngrid} • Window {nwin + 1}/{nwindows} completed"
                         ),
-                        "pct": pct,
                         "sil": sil_by_window[win_global],
                         **where,
                         "iter": iters_done,

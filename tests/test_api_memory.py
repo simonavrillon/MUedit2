@@ -10,6 +10,7 @@ import pytest
 
 from muedit.api import memory
 from muedit.api.memory import MIB, BudgetedLRU, MemoryBudget
+from muedit.errors import MueditError
 
 
 @dataclass
@@ -60,19 +61,16 @@ def test_platform_memory_readers() -> None:
     assert peak is None or peak >= held // 2
 
 
-@pytest.mark.parametrize(
-    ("header", "session"),
-    [
-        (None, memory.DEFAULT_SESSION),
-        ("", memory.DEFAULT_SESSION),
-        (" 3f2a-bc ", "3f2a-bc"),
-        ("a" * 64, "a" * 64),
-        ("a" * 65, memory.DEFAULT_SESSION),
-        ("../etc", memory.DEFAULT_SESSION),
-    ],
-)
-def test_session_id_or_default(header: str | None, session: str) -> None:
-    assert memory.session_id_or_default(header) == session
+@pytest.mark.parametrize(("raw", "session"), [(" 3f2a-bc ", "3f2a-bc"), ("a" * 64, "a" * 64)])
+def test_a_well_formed_session_id_is_taken(raw: str, session: str) -> None:
+    assert memory.parse_session_id(raw, "session") == session
+
+
+@pytest.mark.parametrize("raw", ["", "a" * 65, "../etc"])
+def test_a_malformed_session_id_is_refused(raw: str) -> None:
+    with pytest.raises(MueditError) as refused:
+        memory.parse_session_id(raw, "X-MUedit-Session")
+    assert refused.value.field == "X-MUedit-Session"
 
 
 class TestBudgetedLRU:
@@ -104,6 +102,24 @@ class TestBudgetedLRU:
         assert lru.get(tokens[1]) is None
         assert budget.used_bytes == 1200
 
+    def test_held_entries_are_not_evicted_until_unheld(self, budget: MemoryBudget) -> None:
+        lru = BudgetedLRU[Blob]("session", budget)
+        held = lru.pin(Blob(600), "tab-a")
+        assert lru.hold(held) is not None
+        lru.pin(Blob(600), "tab-b")
+        assert held in lru.slots
+        lru.unhold(held)
+        lru.pin(Blob(300), "tab-c")
+        assert held not in lru.slots
+
+    def test_a_held_entry_is_still_dropped_explicitly(self, budget: MemoryBudget) -> None:
+        lru = BudgetedLRU[Blob]("session", budget)
+        held = lru.pin(Blob(1), "tab-a")
+        lru.hold(held)
+        lru.release_session("tab-a")
+        assert held not in lru.slots
+        lru.unhold(held)
+
     def test_per_session_limit_replaces_the_oldest(self, budget: MemoryBudget) -> None:
         lru = BudgetedLRU[Blob]("session", budget, per_session=2)
         a1, a2 = lru.pin(Blob(1), "a"), lru.pin(Blob(1), "a")
@@ -123,32 +139,14 @@ class TestBudgetedLRU:
         assert lru.slots[token].nbytes == 850
         assert budget.used_bytes == 850
 
-    def test_time_to_live(self, budget: MemoryBudget) -> None:
-        clock = budget.clock
-        assert isinstance(clock, Clock)
-        lru = BudgetedLRU[Blob]("short", budget, ttl_sec=10)
-        token = lru.pin(Blob(1))
-        clock.now = 9.9
-        assert lru.get(token) is not None
-        clock.now = 10
-        assert lru.get(token) is None
-
-    def test_pop_and_discard(self, budget: MemoryBudget) -> None:
-        lru = BudgetedLRU[Blob]("once", budget)
-        blob = Blob(5)
-        token = lru.pin(blob)
-        assert lru.pop(token) is blob
-        assert lru.pop(token) is None
-        token = lru.pin(blob)
-        lru.discard(token)
-        lru.discard(None)
-        assert budget.used_bytes == 0
-
 
 def test_sweeper_thread_runs_until_stopped() -> None:
-    budget = MemoryBudget(1000)
-    lru = BudgetedLRU[Blob]("short", budget, ttl_sec=0)
-    lru.pin(Blob(1))
+    clock = Clock()
+    budget = MemoryBudget(1000, clock=clock)
+    lru = BudgetedLRU[Blob]("idle", budget)
+    lru.pin(Blob(1), "a")
+    budget.touch("b")
+    clock.now += memory.SESSION_IDLE_SEC
     budget.start_sweeper(interval_sec=0.01)
     budget.start_sweeper(interval_sec=0.01)
     deadline = time.monotonic() + 5
@@ -159,14 +157,12 @@ def test_sweeper_thread_runs_until_stopped() -> None:
 
 
 class TestOnDrop:
-    def test_runs_when_an_entry_leaves_but_not_on_pop(self, budget: MemoryBudget) -> None:
+    def test_runs_when_an_entry_leaves(self, budget: MemoryBudget) -> None:
         dropped: list[Blob] = []
         cache: BudgetedLRU[Blob] = BudgetedLRU("c", budget, on_drop=dropped.append)
-        evicted, popped, released = Blob(600), Blob(10), Blob(20)
+        evicted, released = Blob(600), Blob(20)
         cache.pin(evicted, "a")
         cache.pin(Blob(600), "b")  # the active session's pin evicts the other one
-        token = cache.pin(popped, "b")
-        assert cache.pop(token) is popped
         cache.pin(released, "c")
         cache.release_session("c")
         assert dropped == [evicted, released]
@@ -177,12 +173,12 @@ class TestOnDrop:
 
         cache: BudgetedLRU[Blob] = BudgetedLRU("c", budget, on_drop=boom)
         token = cache.pin(Blob(10), "a")
-        cache.discard(token)
+        cache.drop(token)
         assert token not in cache.slots
 
     @pytest.mark.parametrize(
         "leave",
-        ["evict", "per_session", "release_session", "close_session", "sweep", "clear", "discard"],
+        ["evict", "per_session", "release_session", "close_session", "sweep", "clear", "drop"],
     )
     def test_runs_after_the_budget_lock_is_released(self, budget: MemoryBudget, leave: str) -> None:
         # A release can wait on a lock a request holds while that request asks the budget.
@@ -220,7 +216,7 @@ class TestOnDrop:
         elif leave == "clear":
             budget.clear()
         else:
-            cache.discard(token)
+            cache.drop(token)
         assert seen == [True]
 
     def test_runs_when_the_hold_that_dropped_it_raises(self, budget: MemoryBudget) -> None:

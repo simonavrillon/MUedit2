@@ -49,7 +49,7 @@ function seriesApi() {
           [0, 1],
         ],
       ],
-      auxiliary_names: ["force"],
+      aux_names: ["force"],
     }),
   };
 }

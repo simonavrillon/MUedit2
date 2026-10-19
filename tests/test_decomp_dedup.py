@@ -10,7 +10,7 @@ import pytest
 from muedit.decomp.algorithm import (
     DEDUP_JITTER,
     DEDUP_MAXLAG_RATIO,
-    rem_duplicates,
+    unique_mu_indices,
 )
 from muedit.decomp.postprocess import remove_duplicates_by_grid
 from muedit.decomp.types import DecompositionParameters
@@ -155,7 +155,7 @@ def _select_distinct_originals(
     for m in candidates:
         trial = [*selected, m]
         dist = [_gt_in_roi(sim, i) for i in trial]
-        kept = rem_duplicates(dist, dist, maxlag, DEDUP_JITTER, tol, fsamp, n_samples)
+        kept = unique_mu_indices(dist, dist, maxlag, DEDUP_JITTER, tol, fsamp, n_samples)
         if len(kept) == len(trial):
             selected.append(m)
         if len(selected) >= n_needed:
@@ -204,11 +204,11 @@ def within_grid_dataset(dedup_ctx: dict[str, Any]) -> dict[str, Any]:
         dist.append(_subset(o, rng, 0.1))
         mu_grid_index.extend([0] * 5)
 
-    pulse_t = np.array([_make_pulse_train(d, n_samples, fsamp) for d in dist])
+    pulse_trains = np.array([_make_pulse_train(d, n_samples, fsamp) for d in dist])
     original_trains = [_gt_in_roi(sim, m) for m in dedup_ctx["originals"]]
     return {
-        "pulse_t": pulse_t,
-        "distime": dist,
+        "pulse_trains": pulse_trains,
+        "spike_times": dist,
         "mu_grid_index": mu_grid_index,
         "original_trains": original_trains,
         "n_originals": len(dedup_ctx["originals"]),
@@ -238,11 +238,11 @@ def between_grid_dataset(dedup_ctx: dict[str, Any]) -> dict[str, Any]:
     dist.append(_gt_in_roi(sim, distinct_mu))
     mu_grid_index.append(1)
 
-    pulse_t = np.array([_make_pulse_train(d, n_samples, fsamp) for d in dist])
+    pulse_trains = np.array([_make_pulse_train(d, n_samples, fsamp) for d in dist])
     original_trains = [_gt_in_roi(sim, m) for m in grid0_mus] + [_gt_in_roi(sim, distinct_mu)]
     return {
-        "pulse_t": pulse_t,
-        "distime": dist,
+        "pulse_trains": pulse_trains,
+        "spike_times": dist,
         "mu_grid_index": mu_grid_index,
         "original_trains": original_trains,
         "n_originals": 4,
@@ -251,18 +251,18 @@ def between_grid_dataset(dedup_ctx: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-# ── 1. Core rem_duplicates on small synthetic spike trains ───────────────────
+# ── 1. Core unique_mu_indices on small synthetic spike trains ───────────────────
 
 
 class TestRemDuplicatesCore:
-    """Precise behavioural checks of ``rem_duplicates`` on crafted spike trains."""
+    """Precise behavioural checks of ``unique_mu_indices`` on crafted spike trains."""
 
     FSAMP = 10240.0
     N_SAMPLES = 6000
     MAXLAG = round(FSAMP / DEDUP_MAXLAG_RATIO)
 
     def _run(self, dist: list[np.ndarray]) -> tuple[int, list[int]]:
-        kept = rem_duplicates(
+        kept = unique_mu_indices(
             dist, dist, self.MAXLAG, DEDUP_JITTER, _DEDUP_TOL, self.FSAMP, self.N_SAMPLES
         )
         return len(kept), [int(k) for k in kept]
@@ -332,25 +332,25 @@ class TestWithinGridDedup:
     ) -> None:
         """The 5 duplicate groups (5 members each) collapse to exactly 5 survivors."""
         params = DecompositionParameters(duplicatesthresh=_DEDUP_TOL, duplicatesbgrids=False)
-        pulse_t, distime, gidx, _ = remove_duplicates_by_grid(
-            within_grid_dataset["pulse_t"],
-            within_grid_dataset["distime"],
+        pulse_trains, spike_times, gidx, _ = remove_duplicates_by_grid(
+            within_grid_dataset["pulse_trains"],
+            within_grid_dataset["spike_times"],
             within_grid_dataset["mu_grid_index"],
             ngrid=1,
             params=params,
             fsamp=dedup_ctx["fsamp"],
         )
-        n_surv = len(distime)
+        n_surv = len(spike_times)
         assert n_surv == within_grid_dataset["n_originals"], (
             f"within-grid dedup left {n_surv} MUs, expected {within_grid_dataset['n_originals']}"
         )
-        assert pulse_t.shape[0] == n_surv
+        assert pulse_trains.shape[0] == n_surv
         assert len(gidx) == n_surv and all(g == 0 for g in gidx), (
             "survivors should all remain in grid 0"
         )
 
         _assert_one_survivor_per_original(
-            [np.asarray(d) for d in distime],
+            [np.asarray(d) for d in spike_times],
             within_grid_dataset["original_trains"],
             dedup_ctx["maxlag"],
             dedup_ctx["n_samples"],
@@ -369,17 +369,17 @@ class TestBetweenGridDedup:
     ) -> None:
         """With ``duplicatesbgrids=False`` cross-grid duplicates are *not* removed."""
         params = DecompositionParameters(duplicatesthresh=_DEDUP_TOL, duplicatesbgrids=False)
-        _, distime, gidx, _ = remove_duplicates_by_grid(
-            between_grid_dataset["pulse_t"],
-            between_grid_dataset["distime"],
+        _, spike_times, gidx, _ = remove_duplicates_by_grid(
+            between_grid_dataset["pulse_trains"],
+            between_grid_dataset["spike_times"],
             between_grid_dataset["mu_grid_index"],
             ngrid=2,
             params=params,
             fsamp=dedup_ctx["fsamp"],
         )
-        assert len(distime) == between_grid_dataset["n_no_cross"], (
+        assert len(spike_times) == between_grid_dataset["n_no_cross"], (
             f"cross-grid-off should keep {between_grid_dataset['n_no_cross']} MUs, "
-            f"got {len(distime)}"
+            f"got {len(spike_times)}"
         )
         assert gidx.count(0) == 4 and gidx.count(1) == 5, (
             f"grid index counts wrong with cross-grid off: {gidx}"
@@ -390,15 +390,15 @@ class TestBetweenGridDedup:
     ) -> None:
         """With ``duplicatesbgrids=True`` the 4 cross-grid lagged copies collapse."""
         params = DecompositionParameters(duplicatesthresh=_DEDUP_TOL, duplicatesbgrids=True)
-        pulse_t, distime, gidx, _ = remove_duplicates_by_grid(
-            between_grid_dataset["pulse_t"],
-            between_grid_dataset["distime"],
+        pulse_trains, spike_times, gidx, _ = remove_duplicates_by_grid(
+            between_grid_dataset["pulse_trains"],
+            between_grid_dataset["spike_times"],
             between_grid_dataset["mu_grid_index"],
             ngrid=2,
             params=params,
             fsamp=dedup_ctx["fsamp"],
         )
-        n_surv = len(distime)
+        n_surv = len(spike_times)
         assert n_surv == between_grid_dataset["n_distinct"], (
             f"cross-grid-on should leave {between_grid_dataset['n_distinct']} MUs, got {n_surv}"
         )
@@ -406,10 +406,10 @@ class TestBetweenGridDedup:
         # stays in grid 1.
         assert gidx.count(0) == 4, f"expected 4 grid-0 survivors, got {gidx}"
         assert gidx.count(1) == 1, f"expected 1 grid-1 survivor (the distinct MU), got {gidx}"
-        assert pulse_t.shape[0] == n_surv
+        assert pulse_trains.shape[0] == n_surv
 
         _assert_one_survivor_per_original(
-            [np.asarray(d) for d in distime],
+            [np.asarray(d) for d in spike_times],
             between_grid_dataset["original_trains"],
             dedup_ctx["maxlag"],
             dedup_ctx["n_samples"],

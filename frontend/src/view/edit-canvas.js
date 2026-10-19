@@ -233,7 +233,7 @@ export function drawEditPulse(els, state) {
   const shown =
     state.edit.pulseView?.mu === muIdx ? state.edit.pulseView : null;
   const canvasEl = els.editPulseCanvas;
-  const hasData = !!(state.edit.distimes?.length && total);
+  const hasData = !!(state.edit.spikeTimes?.length && total);
   if (shown) {
     const { trace, spikeValues, artifactValues, range } = displayedPulse(
       shown,
@@ -278,7 +278,7 @@ export function drawEditPulse(els, state) {
 export function drawEditRates(els, state) {
   const canvas = els.editDrCanvas;
   const muIdx = state.edit.currentMu ?? 0;
-  const spikes = state.edit.distimes?.[muIdx] || [];
+  const spikes = state.edit.spikeTimes?.[muIdx] || [];
   const total = state.edit.totalSamples || 0;
   if (state.edit.flagged?.[muIdx] || !total || !spikes.length) {
     drawTrace(canvas, null, { start: 0, end: 0 });
@@ -321,7 +321,7 @@ export function bindEditCanvas(app) {
 
   const hasMu = () =>
     !!state.edit.totalSamples &&
-    state.edit.distimes?.[state.edit.currentMu ?? 0] !== undefined;
+    state.edit.spikeTimes?.[state.edit.currentMu ?? 0] !== undefined;
 
   const pxToSample = (/** @type {number} */ px) =>
     pxToViewSample(
@@ -416,7 +416,9 @@ export function drawEditTimeline(els, state) {
   const { ctx, width } = prepared;
 
   const muIdx = state.edit.currentMu ?? 0;
-  const total = state.edit.distimes?.[muIdx] ? state.edit.totalSamples || 0 : 0;
+  const total = state.edit.spikeTimes?.[muIdx]
+    ? state.edit.totalSamples || 0
+    : 0;
   if (!total) return;
 
   const bw = Math.max(1, width - TIMELINE_PAD_L - TIMELINE_PAD_R);
@@ -448,7 +450,7 @@ export function drawEditTimeline(els, state) {
 
   // Current spike positions (faint purple, drawn on top of history)
   ctx.fillStyle = COLORS.timelineSpikes;
-  fillTicks(ctx, state.edit.distimes?.[muIdx] || [], total, bw);
+  fillTicks(ctx, state.edit.spikeTimes?.[muIdx] || [], total, bw);
 
   // View window
   const view = state.edit.view || { start: 0, end: total };

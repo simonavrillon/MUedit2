@@ -87,8 +87,7 @@ class EditLog:
     def __init__(self, path: Path, handle: TextIO) -> None:
         self.path = path
         self._fh = handle
-        self.records = 0
-        self.net = 0
+        self.net = 0  # edits the log holds, less the undos: what ``close`` keeps it for
 
     @classmethod
     def create(cls, source: str | Path, token: str) -> EditLog | None:
@@ -101,21 +100,21 @@ class EditLog:
             handle = path.open("w", encoding="utf-8")
             handle.write(json.dumps(header) + "\n")
             handle.flush()
-        except OSError:
-            logger.warning("Cannot write the edit log %s; edits will not be recoverable", path)
+        except OSError as exc:
+            logger.warning(
+                "Cannot write the edit log %s; edits will not be recoverable: %s", path, exc
+            )
             return None
         return cls(path, handle)
 
     def append(self, op: str, args: dict[str, Any]) -> None:
-        """Record one operation; flushed, so it survives a crash of the app."""
+        """Record one operation; flushed, so it survives a crash of the app. Raises ``OSError``."""
         record = {"op": op, "args": args, "t": time.time()}
         try:
             self._fh.write(json.dumps(record) + "\n")
             self._fh.flush()
-        except (OSError, ValueError):
-            logger.warning("Writing the edit log %s failed", self.path, exc_info=True)
-            return
-        self.records += 1
+        except ValueError as exc:  # the file is closed
+            raise OSError(f"Edit log {self.path} is closed") from exc
         self.net = max(0, self.net - 1) if op == "undo" else self.net + 1
 
     def close(self, *, keep: bool) -> None:
@@ -129,7 +128,8 @@ class EditLog:
 def find_recoverable(source: str | Path, live: set[Path]) -> RecoverableLog | None:
     """The newest log of unsaved edits to ``source`` that no open session is writing.
 
-    Logs written against another version of the file are deleted.
+    Logs written against another version of the file are deleted. Those without net edits
+    are left to ``purge_old_logs``: one may belong to a session another tab is opening.
     """
     folder = edit_logs_dir()
     if not folder.is_dir():
@@ -147,9 +147,10 @@ def find_recoverable(source: str | Path, live: set[Path]) -> RecoverableLog | No
             mtime = path.stat().st_mtime
         except OSError:
             continue
-        same_file = all(header.get(k) == current[k] for k in ("source", "size", "mtime_ns"))
-        if not same_file or net_edits(records) == 0:
+        if not all(header.get(k) == current[k] for k in ("source", "size", "mtime_ns")):
             path.unlink(missing_ok=True)
+            continue
+        if net_edits(records) == 0:
             continue
         found.append((mtime, RecoverableLog(path, records)))
     if not found:

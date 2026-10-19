@@ -8,30 +8,40 @@ Covers the file loading layer, signal filtering, grid geometry inference, and th
 
 ### Loader Output
 
-All built-in loaders return a `SignalImport` (see `models.py`), built with
-`SignalImport.build(...)`, which applies the shared coercion rules:
+Every loader is `load_<format>(filepath, store=None) -> SignalImport` (see `models.py`):
+it writes the full-length EMG and auxiliary arrays into `store` block by block, and builds
+its result with `SignalImport.build(...)`, which applies the shared coercion rules:
 
 ```python
 SignalImport.build(
     data=...,           # -> FloatArray (n_channels, n_samples); 1-D input is one channel
     fsamp=...,          # -> float; None becomes 0.0
-    gridname=...,       # -> list[str]; a single name becomes a one-item list
-    muscle=...,         # -> list[str]
-    auxiliary=...,      # -> FloatArray (n_aux, n_samples), padded/truncated to data
-    auxiliaryname=...,  # -> list[str]
-    metadata=...,       # -> dict[str, Any] (device, filters, coordinates, IEDs, ...)
+    grid_names=...,     # -> list[str]; a single name becomes a one-item list
+    muscle_names=...,   # -> list[str]
+    aux_data=...,       # -> FloatArray (n_aux, n_samples), padded/truncated to data
+    aux_names=...,      # -> list[str]
+    metadata=...,       # -> dict[str, Any]: device, filters, gains, start date, ...
 )
 ```
 
-Loaders registered with `register_loader` may still return a plain dict with these
-keys; `load_signal` converts it with `SignalImport.from_mapping`, which applies the
-same rules.
+Each loader module has the same shape: a recording dataclass named for its module
+(`_IntanRecording`, `_OpenEphysRecording`, `_BidsRecording`; or the format's parsed header),
+`_resolve_<format>_recording`/`_resolve_<format>_grids` helpers, then a short `load_<format>`
+that allocates
+into the store and ends with `SignalImport.build`. Every loader's metadata carries the same
+keys, in the same order: `acquisition_date`, `manufacturer`, `device_name`,
+`software_versions`, `hardware_filters`, `powerline_freq`, `units`, `gains`, `emg_hpf`,
+`emg_lpf`, `aux_units`, `aux_gains`, `aux_hpf`, `aux_lpf`, `aux_kinds` (when digital lines
+are known), `recording_type`, `software_filters`; Intan adds `electrode_impedances` (kOhm),
+the BIDS reader adds what a round trip needs (`placement_*`, `ground_location`,
+`reference_location`, `bad_channels_per_grid`, `grid_labels`, `segments`, `bids_*`).
+Grid geometry is not metadata: callers compute it with `format_hdemg_signal(grid_names)`.
 
 ### Loader Registry (`factory.py`)
 
 | Extension | Loader | Source Module |
 |---|---|---|
-| `.mat` | `load_mat` | `mat.py` |
+| `.mat` | `load_mat` | `_mat.py` |
 | `.otb+` | `load_otb_plus` | `_otb.py` |
 | `.otb4` | `load_otb4` | `_otb.py` |
 | `.bdf` | `load_bids_signal` | `_bids_reader.py` |
@@ -45,8 +55,8 @@ same rules.
   - Globs for `*_emg.bdf` / `*_emg.edf` -> returns `load_bids_signal`
   - Globs for `*.rhd` -> returns `load_intan`
   - Holds `structure.oebin` -> returns `load_openephys`
-  - Otherwise raises `ValueError`
-- If a **file**: looks up `path.suffix.lower()` in `_LOADERS`; raises `ValueError` if not found.
+  - Otherwise raises `SignalLoadError`
+- If a **file**: looks up `path.suffix.lower()` in `_LOADERS`; raises `SignalLoadError` if not found.
 
 #### Public functions
 
@@ -55,49 +65,49 @@ same rules.
 | `register_loader` | `(ext, loader, *, overwrite=False) -> None` | Register a custom loader |
 | `supported_extensions` | `() -> tuple[str, ...]` | List supported extensions |
 | `get_loader` | `(filepath) -> LoaderFn` | Resolve loader for a path |
-| `load_signal` | `(filepath) -> SignalImport` | Load a signal and normalize loader output to `SignalImport` |
+| `load_signal` | `(filepath, store=None) -> SignalImport` | Load a signal with the loader of its extension |
 
-### MATLAB `.mat` (`mat.py`)
+### MATLAB `.mat` (`_mat.py`)
 
 ```python
-def load_mat(filepath: str) -> SignalImport
+def load_mat(filepath: str, store=None) -> SignalImport
 ```
-Tries `scipy.io.loadmat` (MAT v5) first; if HDF5 (v7.3), falls back to `_load_mat73_signal`. Expects a `signal` struct with fields: `data`, `fsamp`, `gridname`, `muscle`, `auxiliary`, `auxiliaryname`, `device_name`. Detects and rejects decomposition files (pulse train + discharge time fields) loaded as raw signals.
+Reads a v7.3 (HDF5) file with `_load_mat73` (numeric EMG in slices straight into the store), any other with `_load_mat5` (`scipy.io.loadmat`). Both feed one builder, `_signal_import`, from a `signal` struct with fields: `data`, `fsamp`, `gridname`, `muscle`, `auxiliary`, `auxiliaryname`, `device_name`. Rejects a decomposition (`signal.Pulsetrain` + `signal.Dischargetimes`) with a `SignalLoadError`.
 
-Key helpers: `_parse_text`, `parse_text_list` (public), `_parse_numeric_array`, `mat73_read` (recursive HDF5, public), `_align_to_n_samples`, `_has_decomposition_markers`, `_load_mat73_signal`.
+Helpers shared with `decomp/decomposition_file.py`: `parse_text_list`, `parse_name_list`, `mat73_read` (recursive HDF5).
 
 ### Intan RHD (`_intan.py`)
 
 ```python
-def load_intan(filepath: str, grid_names=None, muscles=None) -> SignalImport
+def load_intan(filepath: str, grid_names=None, muscle_names=None, store=None) -> SignalImport
 ```
 Accepts a recording directory, its `info.rhd`, or a single-file `.rhd`. Supports three save layouts:
 - **traditional**: `.rhd` file contains header + data blocks
 - **per_channel**: header-only `info.rhd` + one `.dat` per channel (e.g. `amp-A-000.dat`)
 - **per_signal_type**: header-only + one `.dat` per signal type (e.g. `amplifier.dat`)
 
-Scales amplifier data to millivolts (0.195 uV/bit x amplifier gain 192), scales auxiliary streams to physical units, groups amplifier channels into one grid per port, resolves grid model names (from args -> `muedit_grids.json` sidecar -> channel-count default), calls `format_hdemg_signal` for coordinates/IEDs.
+Scales amplifier data to millivolts (0.195 uV/bit x amplifier gain 192), scales auxiliary streams to physical units, groups amplifier channels into one grid per port, resolves grid model names (from args -> `muedit_grids.json` sidecar -> channel-count default). Each amplifier channel's measured impedance becomes `electrode_impedances` (kOhm, `None` when never measured), which the BIDS export writes to `electrodes.tsv`. The RHD header records no start date.
 
-Key structures: `_IntanChannel`, `_IntanHeader` (with `enabled_channels()`, `samples_per_block`), `_Recording`. Magic: `_RHD_MAGIC = 0xC6912702`. Default grids: `{64: "INTAN64-1305"}`.
+Key structures: `_IntanChannel`, `_IntanHeader` (with `enabled_channels()`, `samples_per_block`), `_IntanRecording`. Magic: `_RHD_MAGIC = 0xC6912702`. Default grids: `{64: "INTAN64-1305"}`.
 
 ### Open Ephys (`_openephys.py`)
 
 ```python
-def load_openephys(filepath: str, grid_names=None, muscles=None, store=None) -> SignalImport
+def load_openephys(filepath: str, grid_names=None, muscle_names=None, store=None) -> SignalImport
 ```
-Accepts `structure.oebin` or the recording directory holding it (GUI binary format). Picks the continuous stream with the most ephys (`type` 0) channels and reads its interleaved int16 `continuous.dat` in blocks. Ephys channels are scaled by their `bit_volts` to millivolts; the stream's other channels (ADC, AUX) are scaled to volts, and TTL lines with edges (`events/<stream>/TTL`) become 0/1 auxiliary rows `TTL<n>`. Grid names come from args -> the nearest `muedit_grids.json` (recording, experiment, then Record Node folder) -> one default per headstage that `settings.xml` lists (`HSOPTIONS` slots flagged `full_channels`, 32 channels each -> `MYOMNP-1x32`), else `INTAN64-1305` per 64 channels; a single name is repeated, and the grids must cover every ephys channel. Filter cutoffs come from the source processor's `EDITOR` in the Record Node's `settings.xml` (`settings_<n>.xml` for `experiment<n>`); the acquisition date comes from `sync_messages.txt`.
+Accepts `structure.oebin` or the recording directory holding it (GUI binary format). Picks the continuous stream with the most ephys (`type` 0) channels and reads its interleaved int16 `continuous.dat` in blocks. Ephys channels are scaled by their `bit_volts` to millivolts; the stream's other channels (ADC, AUX) are scaled to volts, and TTL lines with edges (`events/<stream>/TTL`) become 0/1 auxiliary rows `TTL<n>`. Grid names come from args -> the nearest `muedit_grids.json` (recording, experiment, then Record Node folder) -> one default per headstage that `settings.xml` lists (`HSOPTIONS` slots flagged `full_channels`, 32 channels each -> `MYOMNP-1x32`), else `INTAN64-1305` per 64 channels; a single name is repeated, and the grids must cover every ephys channel. Filter cutoffs come from the source processor's `EDITOR` in the Record Node's `settings.xml` (`settings_<n>.xml` for `experiment<n>`); the acquisition date comes from `sync_messages.txt` (UTC) and becomes the EDF start time on export.
 
 ### OT Bioelettronica (`_otb.py`)
 
 ```python
-def load_otb_plus(filepath: str) -> SignalImport
+def load_otb_plus(filepath: str, store=None) -> SignalImport
 ```
-Loads OTB+ archives (`.otb+` tar or `.zip`). Extracts to temp dir, parses XML metadata (device name, sample frequency, AD bits, adapter/channel tree), reads `.sig` binary (int16 or int32), applies device-specific ADC-to-mV scaling for: `QUATTROCENTO`, `QUATTRO`, `DUE`, `DUE+`, `QUATTRO+`, `SESSANTAQUATTRO`, `SESSANTAQUATTRO+`, `SYNCSTATION`, and a generic fallback.
+Loads OTB+ archives (tar files) in one pass over the adapters: `_channel_kind` sorts each channel into grid EMG (32/64-channel inputs), auxiliary, or dropped (bipolar, 16-channel), and `_grid_position` assigns it to a grid. The start date is the device's `@Date`, else the `YYYYMMDDhhmmss` the `.sig` file is named after. Extracts to temp dir, parses XML metadata (device name, sample frequency, AD bits, adapter/channel tree), reads the `.sig` binary (int16 or int32; an archive with several loads the first by name and logs a warning naming the others; its `.xml` of the same name is required), applies device-specific ADC-to-mV scaling for: `QUATTROCENTO`, `QUATTRO`, `DUE`, `DUE+`, `QUATTRO+`, `SESSANTAQUATTRO`, `SESSANTAQUATTRO+`, `SYNCSTATION`, and a generic fallback.
 
 ```python
-def load_otb4(filepath: str) -> SignalImport
+def load_otb4(filepath: str, store=None) -> SignalImport
 ```
-Loads OTB4 archives (`.zip` or `.tar`). Extracts, finds `Tracks_000.xml`, parses `ArrayOfTrackInfo`, dispatches to `_parse_otb4_novecento` or `_parse_otb4_generic` based on device field. Refines grid names from `OriginalSensor` in `StringsDescriptions`. Sanitizes arrays (NaN/Inf replacement).
+Loads OTB4 archives (tar files). Finds `Tracks_000.xml`, parses `ArrayOfTrackInfo`, and turns it into a list of `_Track`s with `_novecento_tracks` (Novecento+: int32 files per stream) or `_generic_tracks` (one int16 file); one writer then stacks the EMG and auxiliary tracks and the feedback traces. An archive with no EMG track is refused. Grid names `IN…`/`Channel…` take the first track's `OriginalSensor`. The start date is the first track's `StringsDescriptions/StartDate` that is a date.
 
 ### BIDS EMG Reading (`_bids_reader.py`)
 
@@ -109,9 +119,9 @@ Accepts a `.bdf`/`.edf` file path or directory containing one. Reads:
 - `*_channels.tsv` -> per-grid channel grouping, bad-channel masks, filter/gain values, auxiliary channels
 - EDF/BDF signal data via `pyedflib.EdfReader`
 
-Groups channels by BIDS `group` column (e.g. `Grid1`, `Grid2`), reads all signals, vstacks EMG grids, extracts auxiliary (non-EMG) channels, calls `format_hdemg_signal(grid_names)` for coordinates/IEDs/discard-vectors. A grid's model comes from `grid_name`, else `ElectrodeManufacturersModelName`, and must be in `_GRID_CATALOG`; otherwise the load fails naming the group (no layout is built from `electrodes.tsv`).
+Groups channels by BIDS `group` column (e.g. `Grid1`, `Grid2`), reads all signals, vstacks EMG grids, extracts auxiliary (non-EMG) channels, and reads the start date from the EDF header. A grid's model comes from `grid_name`, else `ElectrodeManufacturersModelName`, and must be in `_GRID_CATALOG`; otherwise the load fails naming the group (no layout is built from `electrodes.tsv`).
 
-Key functions: `resolve_bids_emg_path`, `resolve_bids_channels_tsv(emg_dir, entity_label)`, `select_grid_channels`, `load_bids_emg_grid(root, entity_label, grid_index, read_start, read_n) -> (data, fsamp, bad_mask)`, `read_channels_summary(channels_tsv) -> (grid_names, muscles, fsamp)` and `read_sidecar_meta(root, entity_label)` (the participant and hardware fields the session form shows).
+Key functions: `resolve_bids_emg_path`, `resolve_bids_channels_tsv(emg_dir, entity_label)`, `read_bids_emg_grid(root, entity_label, grid_index, store) -> (data, fsamp, bad_mask)`, `read_channels_summary(channels_tsv) -> (grid_names, muscle_names, fsamp)` and `read_sidecar_meta(root, entity_label)` (the participant and hardware fields the session form shows).
 
 ### BIDS Layout (`_bids_layout.py`)
 
@@ -128,12 +138,12 @@ Writes a full BIDS EMG dataset:
 - `_electrodes.tsv`
 - Per-space `_coordsystem.json` files
 
-Supports extensive parameters: subject, task, run, session, acquisition, recording, IED, powerline_freq, placement_scheme, units, target_muscle, file_format (bdf/edf), hardware_filters, gain, low/high cutoff, aux data/names, manufacturer, model name, task description, notch, software versions, recording type.
+Supports extensive parameters: subject, task, run, session, acquisition, recording, IED, powerline_freq, placement_scheme, units, target_muscle, file_format (bdf/edf), hardware_filters, gain, low/high cutoff, aux data/names, manufacturer, model name, task description, software versions, recording type, start_time (the EDF start date, from the loader's `acquisition_date`), impedance (kOhm per electrode, from `electrode_impedances`).
 
 #### `write_bids_dataset_description(bids_root, *, subject, age, sex, handedness) -> None`
 Creates/updates `dataset_description.json`, `participants.tsv`, `participants.json`, `.bidsignore`. Idempotent.
 
-#### `export_bids_mu_derivatives(distimes, fsamp, bids_root, entities, pipeline_name, desc, mu_uids, mu_grid_index, grid_labels) -> dict[str, Path]`
+#### `export_bids_mu_derivatives(spike_times, fsamp, bids_root, entity_label, pipeline_name, desc, mu_uids, mu_grid_index, grid_labels) -> dict[str, Path]`
 Writes motor unit discharge times as BIDS derivatives `events.tsv` + `events.json` under `derivatives/<pipeline_name>/`. Each discharge -> one row with `onset`, `duration`, `sample`, `unit_id`, `event_type` (`motor-unit-spike`), `group` (the unit's grid, as in the raw `channels.tsv`), sorted by onset. Also writes or merges the derivative `dataset_description.json` (`GeneratedBy` with the MUedit version, `DatasetLinks` `raw` → `../../`, `SourceDatasets` `bids:raw:`) and the `desc-<desc>` row of `descriptions.tsv`.
 
 File names and folders come from `BidsEntities` (see BIDS Layout above).
@@ -184,6 +194,11 @@ Moving average with window size in ms (convolution, `"same"` mode).
 def extend_signal(signal, exfactor, samples_first=False) -> np.ndarray
 ```
 Delay-embedding channel extension for convolutive source separation. Hankel-style block embedding (or column tiling if `samples_first=True`).
+
+`extension_factor(nbextchan, n_channels)` is the one place the number of delays is chosen
+(`round(nbextchan / n_channels)`, at least 1). `extend_signal_mask(mask, exfactor)` marks the
+`n + exfactor - 1` channels-first columns that read a masked sample; `streaming.extend_mask` is
+the same rule over the first `n` columns, for samples-first streams.
 
 ```python
 def signed_square(x) -> np.ndarray
@@ -258,7 +273,7 @@ Orchestrates bad-channel detection and artifact masking in three stages, where e
 
 ```
 Stage 0: preliminary bad channels (structural_only: flat/saturated)
-    -> _select_kept_channels (drop bad channels)
+    -> _kept_channel_rows (drop bad channels)
 Stage 1: detect_artifact_masks (kept channels only)
 Stage 2: detect_bad_channels_per_grid(..., keep=~artifact_mask)
     -> OR preliminary + final masks

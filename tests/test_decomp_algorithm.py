@@ -89,17 +89,17 @@ def test_windowed_filters_give_the_per_filter_projections(dtype: type) -> None:
         1: rng.standard_normal((60, 1)),
     }
     starts = [100, 5_100, 6_000, 10_000]
-    ltime = 10_500
-    pulse, _ = batch_process_filters(filters, windows, starts, ltime, FSAMP)
+    total_samples = 10_500
+    pulse, _ = batch_process_filters(filters, windows, starts, total_samples, FSAMP)
 
     row = 0
     for nwin in (0, 1):
         start = starts[2 * nwin]
         for j in range(filters[nwin].shape[1]):
-            expected = np.zeros(ltime)
+            expected = np.zeros(total_samples)
             expected[start : start + windows[nwin].shape[1]] = vec_mat(
                 filters[nwin][:, j], windows[nwin]
-            )[: ltime - start]
+            )[: total_samples - start]
             # Pulse trains are stored as float32 whatever the window's dtype.
             peak = float(np.max(expected**2))
             np.testing.assert_allclose(

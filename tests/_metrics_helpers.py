@@ -125,10 +125,10 @@ def central_roi(data: np.ndarray, fsamp: float, width_sec: float) -> tuple[int, 
     return (center - half, center + half)
 
 
-def filter_to_roi(distime: list[np.ndarray], roi: tuple[int, int]) -> list[np.ndarray]:
+def filter_to_roi(spike_times: list[np.ndarray], roi: tuple[int, int]) -> list[np.ndarray]:
     """Restrict each MU's discharge times to ``[roi_start, roi_end)``."""
     lo, hi = roi
-    return [d[(d >= lo) & (d < hi)] for d in distime]
+    return [d[(d >= lo) & (d < hi)] for d in spike_times]
 
 
 def restrict_reference_to_roi(
@@ -144,9 +144,9 @@ def active_reference_count(gt_spike_times: list[np.ndarray], roi: tuple[int, int
     return sum(1 for s in restrict_reference_to_roi(gt_spike_times, roi) if s.size > 0)
 
 
-def discharge_times(result: DecompositionResult) -> list[np.ndarray]:
+def spike_times(result: DecompositionResult) -> list[np.ndarray]:
     """Extract the per-MU discharge-time arrays from a ``run_decomposition`` result."""
-    return [np.asarray(d) for d in result.discharge_times]
+    return [np.asarray(d) for d in result.spike_times]
 
 
 def build_signal(sim: dict[str, Any]) -> SignalImport:
@@ -154,7 +154,7 @@ def build_signal(sim: dict[str, Any]) -> SignalImport:
     return SignalImport(
         data=sim["data"],
         fsamp=float(sim["fsamp"]),
-        gridname=["GR08MM1305"],
-        muscle=["simulated"],
-        auxiliary=np.zeros((0, sim["data"].shape[1])),
+        grid_names=["GR08MM1305"],
+        muscle_names=["simulated"],
+        aux_data=np.zeros((0, sim["data"].shape[1])),
     )

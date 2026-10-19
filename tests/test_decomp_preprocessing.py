@@ -7,8 +7,9 @@ import pytest
 
 from muedit.decomp.algorithm import pca_extended_signal, whiten_extended_signal
 from muedit.models import SignalImport
-from muedit.signal.decomp_primitives import extend_signal
+from muedit.signal.decomp_primitives import extend_signal, extend_signal_mask, extension_factor
 from muedit.signal.filters import bandpass_signals, notch_signals
+from muedit.signal.streaming import extend_mask
 
 # Band edges for the surface-EMG bandpass (emg_type=1), used to partition the
 # spectrum when checking real-data filtering.
@@ -118,6 +119,24 @@ class TestConvolutiveSphering:
         np.testing.assert_allclose(extended[0:n_ch, 0:n_samples], grid0_window)
         np.testing.assert_allclose(extended[n_ch : 2 * n_ch, 1 : 1 + n_samples], grid0_window)
         assert np.all(extended[n_ch : 2 * n_ch, 0] == 0.0)
+
+    @pytest.mark.parametrize("exfactor", [1, 3])
+    def test_mask_follows_the_extended_columns(self, exfactor: int) -> None:
+        """A column is masked when any sample it delays is; both conventions agree on the first n."""
+        mask = np.zeros(10, dtype=bool)
+        mask[[0, 6]] = True
+        signal = np.where(mask, 1.0, 0.0)[None, :]
+        touched = extend_signal(signal, exfactor).any(axis=0)
+        padded = extend_signal_mask(mask, exfactor)
+        np.testing.assert_array_equal(padded, touched)
+        np.testing.assert_array_equal(padded[: mask.size], extend_mask(mask, exfactor))
+
+    @pytest.mark.parametrize(
+        ("nbextchan", "n_channels", "expected"),
+        [(1000, 64, 16), (1000, 8, 125), (10, 64, 1), (1000, 0, 1000)],
+    )
+    def test_extension_factor(self, nbextchan: int, n_channels: int, expected: int) -> None:
+        assert extension_factor(nbextchan, n_channels) == expected
 
     def test_whitening_on_real_emg_decorrelates(self, grid0_window: np.ndarray) -> None:
         """Convolutive sphering on real EMG: whitened covariance is a projector."""

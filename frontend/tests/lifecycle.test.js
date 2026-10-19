@@ -131,7 +131,7 @@ describe("switchStage", () => {
   });
 
   test("leaving Edit clears the armed edit mode", () => {
-    app.state.edit.distimes = [[1]];
+    app.state.edit.spikeTimes = [[1]];
     app.switchStage("edit");
     app.setEditMode("add", "Drag a box on pulse train to add spikes");
     app.setStatus = recorder();
@@ -141,10 +141,10 @@ describe("switchStage", () => {
   });
 
   test("leaving Edit keeps the loaded decomposition", () => {
-    app.state.edit.distimes = [[1, 2]];
+    app.state.edit.spikeTimes = [[1, 2]];
     app.switchStage("edit");
     app.switchStage("qc");
-    assert.deepEqual(app.state.edit.distimes, [[1, 2]]);
+    assert.deepEqual(app.state.edit.spikeTimes, [[1, 2]]);
   });
 
   test("re-selecting the current stage runs no hooks", () => {
@@ -206,7 +206,7 @@ describe("renderActiveStage", () => {
     app.switchStage("edit");
     renderActiveStage(app);
     assert.equal(app.renderEditExplorer.calls.length, 0);
-    app.state.edit.distimes = [[1]];
+    app.state.edit.spikeTimes = [[1]];
     renderActiveStage(app);
     assert.equal(app.renderEditExplorer.calls.length, 1);
   });

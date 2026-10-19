@@ -32,13 +32,13 @@ export function roiEnd(roi, fallback = /** @type {F} */ (0)) {
 // Return the MU indices belonging to a given grid. When no grid mapping is
 // available, every MU is treated as belonging to the requested grid.
 /**
- * @param {ArrayLike<number>[] | null | undefined} distimes one entry per MU
+ * @param {ArrayLike<number>[] | null | undefined} spikeTimes one entry per MU
  * @param {number[] | null | undefined} mapping
  * @param {number} gridIdx
  * @returns {number[]}
  */
-function muIndicesForGrid(distimes, mapping, gridIdx) {
-  const mus = distimes || [];
+function muIndicesForGrid(spikeTimes, mapping, gridIdx) {
+  const mus = spikeTimes || [];
   if (!mus.length) return [];
   const map = mapping || [];
   if (!map.length) {
@@ -55,5 +55,9 @@ function muIndicesForGrid(distimes, mapping, gridIdx) {
  * @param {number} gridIdx
  */
 export function getEditMuIndicesForGrid(state, gridIdx) {
-  return muIndicesForGrid(state.edit.distimes, state.edit.muGridIndex, gridIdx);
+  return muIndicesForGrid(
+    state.edit.spikeTimes,
+    state.edit.muGridIndex,
+    gridIdx,
+  );
 }

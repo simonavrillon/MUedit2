@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
 import numpy as np
-from fastapi import HTTPException
 
 from muedit.api import config
 from muedit.api.cache import (
@@ -17,6 +17,7 @@ from muedit.api.cache import (
 from muedit.api.common import (
     dataset_root_of,
     make_json_safe,
+    missing_upload,
     parse_entity_label,
     require_existing_path,
 )
@@ -28,7 +29,8 @@ from muedit.api.services.series_service import (
     grid_emg_type,
     grid_rows,
 )
-from muedit.io._bids_reader import read_sidecar_meta
+from muedit.errors import MueditError
+from muedit.io.bids import read_sidecar_meta
 from muedit.io.factory import get_loader, load_signal
 from muedit.models import FloatArray, SignalImport
 from muedit.signal.artifact_mask import mask_to_intervals
@@ -37,6 +39,8 @@ from muedit.signal.grid import format_hdemg_signal
 from muedit.signal.qc_pipeline import run_auto_qc
 from muedit.signal.segmentation import find_target_channel, segment_target
 from muedit.storage import ArrayStore, RamStore, SessionStore
+
+logger = logging.getLogger(__name__)
 
 
 def _build_preview_core(filepath: str, session: str = DEFAULT_SESSION) -> dict[str, Any]:
@@ -49,7 +53,7 @@ def _build_preview_core(filepath: str, session: str = DEFAULT_SESSION) -> dict[s
     store = SessionStore.create("upload")
     try:
         signal = load_signal(filepath, store=store)
-        coordinates, _, _, emg_type = format_hdemg_signal(signal.gridname)
+        coordinates, _, _, emg_type = format_hdemg_signal(signal.grid_names)
         views, channel_means = build_signal_views(
             signal, store, [c.shape[0] for c in coordinates], emg_type
         )
@@ -63,45 +67,25 @@ def _build_preview_core(filepath: str, session: str = DEFAULT_SESSION) -> dict[s
     return make_json_safe(
         {
             "upload_token": upload_token,
-            "grid_names": signal.gridname,
+            "grid_names": signal.grid_names,
             "total_samples": int(signal.data.shape[1]),
             "fsamp": signal.fsamp,
             "channel_means": [means.tolist() for means in channel_means],
             "coordinates": [coords.tolist() for coords in coordinates],
             "metadata": signal.metadata,
-            "muscle": signal.muscle,
-            "auxiliary_names": signal.auxiliaryname,
+            "muscle_names": signal.muscle_names,
+            "aux_names": signal.aux_names,
             "segments": signal.metadata.get("segments") or [],
-            "target_index": find_target_channel(
-                signal.auxiliaryname, signal.metadata.get("aux_kinds")
-            ),
+            "target_index": find_target_channel(signal.aux_names, signal.metadata.get("aux_kinds")),
         }
-    )
-
-
-def _decomp_artifact_error(field: str) -> HTTPException:
-    return HTTPException(
-        status_code=400,
-        detail={
-            "field": field,
-            "reason": "This MAT file is a decomposition artifact; load it in edit mode.",
-        },
     )
 
 
 def build_preview_from_path(filepath: str, session: str = DEFAULT_SESSION) -> dict[str, Any]:
     """Build preview payload from a file path already available on disk."""
     require_existing_path(filepath)
-    try:
-        get_loader(filepath)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail={"field": "path", "reason": str(exc)}) from exc
-    try:
-        result = _build_preview_core(filepath, session)
-    except (OSError, ValueError) as exc:
-        if "contains decomposition fields" in str(exc):
-            raise _decomp_artifact_error("path") from exc
-        raise
+    get_loader(filepath)  # an unsupported file leaves the tab's upload in place
+    result = _build_preview_core(filepath, session)
 
     # Best-effort: enrich with participant and hardware info from BIDS sidecars.
     try:
@@ -110,8 +94,9 @@ def build_preview_from_path(filepath: str, session: str = DEFAULT_SESSION) -> di
             result["project"] = config.project_of(bids_root)
             entity_label = parse_entity_label(Path(filepath).name)
             result.update(read_sidecar_meta(bids_root, entity_label))
-    except Exception:  # noqa: BLE001, S110
-        pass  # best-effort; never block the preview on sidecar errors
+    except Exception:  # noqa: BLE001
+        # Best-effort; never block the preview on sidecar errors.
+        logger.warning("Cannot read the BIDS sidecars of %s", filepath, exc_info=True)
 
     return result
 
@@ -120,6 +105,7 @@ def _bandpassed_grids(
     signal: SignalImport, grid_counts: list[int], emg_types: list[int], store: ArrayStore
 ) -> FloatArray:
     """The grid channels bandpassed into one float32 array of ``store``, a few rows at once."""
+    # No notch, unlike the in-run auto-QC (preprocess_step): results can differ on powerline noise.
     n_rows, n_samples = sum(grid_counts), signal.data.shape[1]
     out = store.allocate("qc-auto", (n_rows, n_samples), np.float32)
     for grid, (first, stop) in enumerate(grid_rows(grid_counts, n_rows)):
@@ -132,21 +118,11 @@ def _bandpassed_grids(
     return store.seal(out)
 
 
-def _missing_upload() -> HTTPException:
-    return HTTPException(
-        status_code=400,
-        detail={
-            "field": "upload_token",
-            "reason": "Missing or expired upload; request /api/v1/preview-by-path first",
-        },
-    )
-
-
 def run_auto_qc_on_token(payload: QcAutoPayload) -> dict[str, Any]:
     """Run the automatic QC pipeline over the upload's grid channels, bandpassed for the run."""
     held = _hold_upload(payload.upload_token)
     if held is None:
-        raise _missing_upload()
+        raise missing_upload()
     try:
         return _auto_qc(held.signal, held.store if held.store is not None else RamStore())
     finally:
@@ -154,20 +130,14 @@ def run_auto_qc_on_token(payload: QcAutoPayload) -> dict[str, Any]:
 
 
 def _auto_qc(signal: SignalImport, store: ArrayStore) -> dict[str, Any]:
-    coordinates, _, _, emg_type = format_hdemg_signal(signal.gridname)
+    coordinates, _, _, emg_type = format_hdemg_signal(signal.grid_names)
     grid_channel_counts = [int(c.shape[0]) for c in coordinates]
     total_declared = sum(grid_channel_counts)
     n_rows = signal.data.shape[0]
     if total_declared > n_rows:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "field": "upload_token",
-                "reason": (
-                    f"Grid catalogue declares {total_declared} channels but the cached "
-                    f"signal has {n_rows}"
-                ),
-            },
+        raise MueditError(
+            f"Grid catalogue declares {total_declared} channels but the cached signal has {n_rows}",
+            "upload_token",
         )
 
     data = _bandpassed_grids(signal, grid_channel_counts, emg_type, store)
@@ -187,19 +157,19 @@ def _auto_qc(signal: SignalImport, store: ArrayStore) -> dict[str, Any]:
     }
 
 
-def _aux_error(reason: str) -> HTTPException:
-    return HTTPException(status_code=400, detail={"field": "aux_index", "reason": reason})
+def _aux_error(reason: str) -> MueditError:
+    return MueditError(reason, "aux_index")
 
 
 def segment_target_on_token(payload: SegmentPayload) -> dict[str, Any]:
     """Split the upload's target channel into ramps, plateaus, sinusoids and irregular blocks."""
     held = _hold_upload(payload.upload_token)
     if held is None:
-        raise _missing_upload()
+        raise missing_upload()
     try:
         signal = held.signal
-        names = signal.auxiliaryname
-        n_aux = signal.auxiliary.shape[0]
+        names = signal.aux_names
+        n_aux = signal.aux_data.shape[0]
         if n_aux == 0:
             raise _aux_error("This recording has no auxiliary channels")
         index = (
@@ -213,7 +183,7 @@ def segment_target_on_token(payload: SegmentPayload) -> dict[str, Any]:
             )
         if not 0 <= index < n_aux:
             raise _aux_error(f"Auxiliary channel {index} does not exist")
-        segments = segment_target(np.asarray(signal.auxiliary[index]), signal.fsamp)
+        segments = segment_target(np.asarray(signal.aux_data[index]), signal.fsamp)
         if not segments:
             raise _aux_error("The target holds no contraction to segment")
         return {

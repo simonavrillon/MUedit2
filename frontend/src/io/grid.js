@@ -40,7 +40,7 @@ export function normalizeGridNames(gridNames, { minimumCount = 1 } = {}) {
   const count = Math.max(1, Number(minimumCount) || 1, source.length);
   return Array.from({ length: count }, (_, i) => {
     const raw = String(source[i] || "").trim();
-    return raw || `Grid ${i + 1}`;
+    return raw || `Grid${i + 1}`; // the backend's fallback_grid_name
   });
 }
 

@@ -58,7 +58,7 @@ export async function autoSaveRunDecomposition(app) {
     grid_names: state.gridNames,
     mu_grid_index: live.summary.muGridIndex,
     parameters: state.parameters || {},
-    muscle: getBidsMuscleNames(),
+    muscle_names: getBidsMuscleNames(),
     artifact_regions: state.artifactRegions,
     file_label: suggestedName,
   };

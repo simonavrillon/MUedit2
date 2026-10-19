@@ -23,8 +23,8 @@ logger = logging.getLogger(__name__)
 
 _CALIB_CHUNK = 4096
 
-#: ``sink(start, ipts, spikes)`` receives each processed segment: samples
-#: ``[start, start + len(ipts))``, ipts ``(n, n_mu)`` float32, spikes ``(n, n_mu)`` 0/1.
+#: ``sink(start, pulse_trains, spikes)`` receives each processed segment: samples
+#: ``[start, start + len(pulse_trains))``, pulse_trains ``(n, n_mu)`` in ``Config.dtype``, spikes ``(n, n_mu)`` 0/1.
 BatchSink = Callable[[int, np.ndarray, np.ndarray], None]
 
 
@@ -41,13 +41,13 @@ class Calibration:
     spikes_centr: np.ndarray | None = None
 
 
-def calibration_centroids(ipts_sq: np.ndarray, fsamp: float) -> tuple[np.ndarray, np.ndarray]:
+def calibration_centroids(pulse_trains: np.ndarray, fsamp: float) -> tuple[np.ndarray, np.ndarray]:
     """Baseline and spike centroids of each MU's squared calibration pulse train ``(n_mu, n)``."""
-    n_mu = ipts_sq.shape[0]
+    n_mu = pulse_trains.shape[0]
     base_centr = np.zeros(n_mu, dtype=np.float32)
     spikes_centr = np.ones(n_mu, dtype=np.float32)
     for j in range(n_mu):
-        pt = ipts_sq[j]
+        pt = pulse_trains[j]
         peaks = find_refractory_peaks(pt, fsamp, min_isi_sec=POSTPROC_MIN_ISI_SEC)
         if len(peaks) > 1:
             _, centroids, _ = split_by_amplitude(pt, peaks)
@@ -76,16 +76,17 @@ class AdaptiveDecomp:
         """Set up one pass; ``emg_calib`` is raw samples, a sample range of ``emg``, or a ``Calibration``."""
         # Centroids left None come from the calibration: fitted on its window, or the ones it carries.
         self.config = config
-        self.whitening = whitening.astype(np.float32, copy=True)
-        self.sep_vectors = sep_vectors.astype(np.float32, copy=True)
+        self.dtype = np.dtype(config.dtype)
+        self.whitening = whitening.astype(self.dtype, copy=True)
+        self.sep_vectors = sep_vectors.astype(self.dtype, copy=True)
         if base_centr is not None and spikes_centr is not None:
             self._set_centroids(base_centr, spikes_centr)
         fit_centroids = base_centr is None or spikes_centr is None
         self.n_motor_units = sep_vectors.shape[0]
         self.n_extended = whitening.shape[0]
-        self.identity = np.eye(self.n_extended, dtype=np.float32)
+        self.identity = np.eye(self.n_extended, dtype=self.dtype)
 
-        # A samples-first float32 extender carries its own artifact mask.
+        # A samples-first extender carries its own artifact mask.
         if isinstance(emg, StreamedExtender):
             if emg.ex_factor != max(1, config.ex_factor):
                 raise ValueError("extender ex_factor differs from config.ex_factor")
@@ -94,11 +95,14 @@ class AdaptiveDecomp:
             self.source = StreamedExtender(
                 np.asarray(emg).T,
                 config.ex_factor,
-                dtype=np.float32,
+                dtype=self.dtype,
                 samples_first=True,
                 artifact_mask=artifact_mask,
             )
         self.n_samples = self.source.n_samples
+        # Fitted only with config.compute_loss.
+        self.contrast_calib_mean: np.ndarray | None = None
+        self.contrast_calib_std: np.ndarray | None = None
 
         # The centroids are projected with the filters as given (float64 from the decomposition).
         centroid_filters = np.asarray(sep_vectors, dtype=np.float64) if fit_centroids else None
@@ -118,17 +122,17 @@ class AdaptiveDecomp:
         elif isinstance(emg_calib, tuple):
             self._calibrate(self.source, *emg_calib, centroid_filters=centroid_filters)
         else:
-            calib = np.asarray(emg_calib, dtype=np.float32)
+            calib = np.asarray(emg_calib, dtype=self.dtype)
             source = StreamedExtender(
-                calib.T, config.ex_factor, dtype=np.float32, samples_first=True
+                calib.T, config.ex_factor, dtype=self.dtype, samples_first=True
             )
             self._calibrate(source, 0, source.n_samples, centroid_filters=centroid_filters)
         self.calibration = Calibration(
             whitening_covariance=self.whitening_covariance.copy(),
             kl_div_calib_mean=self.kl_div_calib_mean,
             kl_div_calib_std=self.kl_div_calib_std,
-            contrast_calib_mean=getattr(self, "contrast_calib_mean", None),
-            contrast_calib_std=getattr(self, "contrast_calib_std", None),
+            contrast_calib_mean=self.contrast_calib_mean,
+            contrast_calib_std=self.contrast_calib_std,
             base_centr=self.base_centr.copy(),
             spikes_centr=self.spikes_centr.copy(),
         )
@@ -141,8 +145,8 @@ class AdaptiveDecomp:
 
     def _set_centroids(self, base_centr: np.ndarray, spikes_centr: np.ndarray) -> None:
         """Start from these baseline and spike centroids, and the threshold between them."""
-        self.base_centr = np.array(base_centr, dtype=np.float32)
-        self.spikes_centr = np.array(spikes_centr, dtype=np.float32)
+        self.base_centr = np.array(base_centr, dtype=self.dtype)
+        self.spikes_centr = np.array(spikes_centr, dtype=self.dtype)
         self.height = self.spikes_centr - (self.spikes_centr - self.base_centr) / 2
 
     def _calibrate(
@@ -161,28 +165,30 @@ class AdaptiveDecomp:
         # calibration never holds more than one chunk of the extended window.
         total = np.zeros(self.n_extended)
         outer = np.zeros((self.n_extended, self.n_extended))
-        ipts_sq = None if centroid_filters is None else np.empty((self.n_motor_units, n))
+        pulse_trains = None if centroid_filters is None else np.empty((self.n_motor_units, n))
         for lo in range(start, stop, _CALIB_CHUNK):
             hi = min(lo + _CALIB_CHUNK, stop)
             whitened = (source.read(lo, hi) @ self.whitening.T).astype(np.float64)
             total += whitened.sum(axis=0)
             outer += whitened.T @ whitened
-            if centroid_filters is not None and ipts_sq is not None:
+            if centroid_filters is not None and pulse_trains is not None:
                 # The centroids come from the same read, not a pass of their own.
-                ipts_sq[:, lo - start : hi - start] = signed_square(centroid_filters @ whitened.T)
+                pulse_trains[:, lo - start : hi - start] = signed_square(
+                    centroid_filters @ whitened.T
+                )
         mean = total / n
         self.whitening_covariance = ((outer - n * np.outer(mean, mean)) / max(n - 1, 1)).astype(
-            np.float32
+            self.dtype
         )
-        if ipts_sq is not None:
-            self._set_centroids(*calibration_centroids(ipts_sq, config.fsamp))
+        if pulse_trains is not None:
+            self._set_centroids(*calibration_centroids(pulse_trains, config.fsamp))
 
         kl_divs: list[float] = []
         contrast_values: list[np.ndarray] = []
         batch_size = config.batch_size
         for lo in range(start, stop - batch_size + 1, batch_size):
             whitened = self.whitening @ source.read(lo, lo + batch_size).T
-            batch_cov = np.cov(whitened).astype(np.float32)
+            batch_cov = np.cov(whitened).astype(self.dtype)
             self.whitening_covariance = (
                 1 - config.cov_alpha
             ) * self.whitening_covariance + config.cov_alpha * batch_cov
@@ -190,11 +196,11 @@ class AdaptiveDecomp:
                 kl = self._kl_divergence()
                 if not np.isnan(kl):
                     kl_divs.append(kl)
-                ipts_batch = self._separate(whitened)
+                pulse_trains_batch = self._separate(whitened)
                 spikes_batch = self._detect_spikes(
-                    signed_square(ipts_batch), update_centroids=False
+                    signed_square(pulse_trains_batch), update_centroids=False
                 )
-                contrast_values.append(self._contrast_value(ipts_batch, spikes_batch))
+                contrast_values.append(self._contrast_value(pulse_trains_batch, spikes_batch))
 
         if config.compute_loss and kl_divs:
             self.kl_div_calib_mean = float(np.mean(kl_divs))
@@ -207,12 +213,12 @@ class AdaptiveDecomp:
             return
         if contrast_values:
             arr = np.stack(contrast_values, axis=0)  # (n_batches, n_mu)
-            self.contrast_calib_mean = np.nanmean(arr, axis=0).astype(np.float32)
-            self.contrast_calib_std = np.nanstd(arr, axis=0).astype(np.float32)
+            self.contrast_calib_mean = np.nanmean(arr, axis=0).astype(self.dtype)
+            self.contrast_calib_std = np.nanstd(arr, axis=0).astype(self.dtype)
             self.contrast_calib_std[self.contrast_calib_std == 0] = 1.0
         else:
-            self.contrast_calib_mean = np.zeros(self.n_motor_units, dtype=np.float32)
-            self.contrast_calib_std = np.ones(self.n_motor_units, dtype=np.float32)
+            self.contrast_calib_mean = np.zeros(self.n_motor_units, dtype=self.dtype)
+            self.contrast_calib_std = np.ones(self.n_motor_units, dtype=self.dtype)
 
     def _batch_bounds(self, start: int, stop: int, reverse: bool) -> list[tuple[int, int]]:
         """Batches of ``[start, stop)`` in processing order; the partial one is processed last."""
@@ -235,7 +241,14 @@ class AdaptiveDecomp:
         reverse: bool = False,
         sink: BatchSink | None = None,
     ) -> dict[str, Any]:
-        """Adapt over ``[start, stop)`` forward or backward; returns per-batch losses in processing order."""
+        """Adapt over ``[start, stop)`` forward or backward; returns per-batch losses in processing order.
+
+        Only a full, artifact-free batch adapts everything (whitening, separation vectors,
+        centroids) and records a loss. The trailing partial batch is too short for a covariance:
+        it keeps the whitening and has no loss, but still adapts the centroids and, without an
+        artifact, the separation vectors. A full batch with an artifact adapts nothing, so the
+        artifact cannot steer the model.
+        """
         stop = self.n_samples if stop is None else stop
         bounds = self._batch_bounds(start, stop, reverse)
         n_batches = len(bounds)
@@ -244,9 +257,9 @@ class AdaptiveDecomp:
         sv_losses: np.ndarray | None = None
         total_losses: np.ndarray | None = None
         if self.config.compute_loss:
-            wh_losses = np.full(n_batches, np.nan, dtype=np.float32)
-            sv_losses = np.full((n_batches, self.n_motor_units), np.nan, dtype=np.float32)
-            total_losses = np.full(n_batches, np.nan, dtype=np.float32)
+            wh_losses = np.full(n_batches, np.nan, dtype=self.dtype)
+            sv_losses = np.full((n_batches, self.n_motor_units), np.nan, dtype=self.dtype)
+            total_losses = np.full(n_batches, np.nan, dtype=self.dtype)
 
         for batch_idx, (batch_start, seg_end) in enumerate(bounds):
             full_batch = seg_end - batch_start == self.config.batch_size
@@ -273,32 +286,34 @@ class AdaptiveDecomp:
 
             if not full_batch:
                 whitened_batch = self.whitening @ batch.T
-                ipts_batch = self._separate(whitened_batch)
+                pulse_trains_batch = self._separate(whitened_batch)
                 spikes_batch = self._detect_spikes_with_context(
-                    ipts_batch, edges, update_centroids=True
+                    pulse_trains_batch, edges, update_centroids=True
                 )
                 if batch_mask is not None:
                     spikes_batch[batch_mask] = 0
                 if self.config.adapt_sv and not batch_artifact:
-                    self._update_separation_vectors(whitened_batch, ipts_batch, spikes_batch)
+                    self._update_separation_vectors(
+                        whitened_batch, pulse_trains_batch, spikes_batch
+                    )
             elif batch_artifact:
                 whitened_batch = self.whitening @ batch.T
-                ipts_batch = self._separate(whitened_batch)
+                pulse_trains_batch = self._separate(whitened_batch)
                 spikes_batch = self._detect_spikes_with_context(
-                    ipts_batch, edges, update_centroids=False
+                    pulse_trains_batch, edges, update_centroids=False
                 )
                 spikes_batch[batch_mask] = 0
             else:
                 whitened_batch = self._whiten(batch)
-                ipts_batch = self._separate(whitened_batch)
+                pulse_trains_batch = self._separate(whitened_batch)
                 spikes_batch = self._detect_spikes_with_context(
-                    ipts_batch, edges, update_centroids=True
+                    pulse_trains_batch, edges, update_centroids=True
                 )
 
                 if wh_losses is not None and sv_losses is not None and total_losses is not None:
                     kl = self._kl_divergence()
                     whl = self._wh_loss(kl)
-                    svl = self._sv_loss(self._contrast_value(ipts_batch, spikes_batch))
+                    svl = self._sv_loss(self._contrast_value(pulse_trains_batch, spikes_batch))
                     wh_losses[batch_idx] = whl
                     sv_losses[batch_idx] = svl
                     total_losses[batch_idx] = (0.0 if np.isnan(whl) else whl) + float(
@@ -306,10 +321,12 @@ class AdaptiveDecomp:
                     )
 
                 if self.config.adapt_sv:
-                    self._update_separation_vectors(whitened_batch, ipts_batch, spikes_batch)
+                    self._update_separation_vectors(
+                        whitened_batch, pulse_trains_batch, spikes_batch
+                    )
 
             if sink is not None:
-                sink(seg_start, ipts_batch, spikes_batch)
+                sink(seg_start, pulse_trains_batch, spikes_batch)
 
         if not self.config.compute_loss:
             return {}
@@ -320,7 +337,7 @@ class AdaptiveDecomp:
         whitened_signal = self.whitening @ emg_batch.T
 
         if self.config.adapt_wh or self.config.compute_loss:
-            current_covariance = np.cov(whitened_signal).astype(np.float32)
+            current_covariance = np.cov(whitened_signal).astype(self.dtype)
             self.whitening_covariance = (
                 1 - self.config.cov_alpha
             ) * self.whitening_covariance + self.config.cov_alpha * current_covariance
@@ -342,34 +359,36 @@ class AdaptiveDecomp:
 
     def _detect_spikes_with_context(
         self,
-        ipts_batch: np.ndarray,
+        pulse_trains_batch: np.ndarray,
         edges: tuple[np.ndarray | None, np.ndarray | None],
         update_centroids: bool = True,
     ) -> np.ndarray:
         """Detect spikes on a batch padded with its flanking samples."""
         lo, hi = edges
-        parts = [part for part in (lo, ipts_batch, hi) if part is not None]
-        ipts_sq = signed_square(np.concatenate(parts, axis=0))
+        parts = [part for part in (lo, pulse_trains_batch, hi) if part is not None]
+        pulse_trains = signed_square(np.concatenate(parts, axis=0))
         start = 0 if lo is None else lo.shape[0]
-        stop = start + ipts_batch.shape[0]
-        spikes = self._detect_spikes(ipts_sq, update_centroids=update_centroids, core=(start, stop))
+        stop = start + pulse_trains_batch.shape[0]
+        spikes = self._detect_spikes(
+            pulse_trains, update_centroids=update_centroids, core=(start, stop)
+        )
         return spikes[start:stop]
 
     def _detect_spikes(
         self,
-        ipts_squared: np.ndarray,
+        pulse_trains: np.ndarray,
         update_centroids: bool = True,
         core: tuple[int, int] | None = None,
     ) -> np.ndarray:
         """Spike detection with amplitude-bounded peak finding and midpoint threshold."""
-        spikes = np.zeros(ipts_squared.shape, dtype=np.int32)
-        core_lo, core_hi = core if core is not None else (0, ipts_squared.shape[0])
+        spikes = np.zeros(pulse_trains.shape, dtype=np.int32)
+        core_lo, core_hi = core if core is not None else (0, pulse_trains.shape[0])
 
         for unit_idx in range(self.n_motor_units):
             min_h = float(self.base_centr[unit_idx] / self.config.spike_height_mult)
             max_h = float(self.config.spike_height_mult * self.spikes_centr[unit_idx])
             peak_indices = find_refractory_peaks(
-                ipts_squared[:, unit_idx],
+                pulse_trains[:, unit_idx],
                 self.config.fsamp,
                 min_isi_sec=self.config.spike_dist_ms / 1000.0,
                 height=(min_h, max_h),
@@ -378,7 +397,7 @@ class AdaptiveDecomp:
             if len(peak_indices) == 0:
                 continue
 
-            peak_values = ipts_squared[peak_indices, unit_idx]
+            peak_values = pulse_trains[peak_indices, unit_idx]
             labels = (peak_values > self.height[unit_idx]).astype(np.int32)
             spikes[peak_indices, unit_idx] = labels
 
@@ -426,26 +445,29 @@ class AdaptiveDecomp:
             return np.nan
         return float(((kl_div - self.kl_div_calib_mean) / (self.kl_div_calib_std + 1e-12)) ** 2)
 
-    def _contrast_value(self, ipts_batch: np.ndarray, spikes_batch: np.ndarray) -> np.ndarray:
+    def _contrast_value(
+        self, pulse_trains_batch: np.ndarray, spikes_batch: np.ndarray
+    ) -> np.ndarray:
         """Mean logcosh contrast value at spike positions, per MU (nan when no spikes)."""
         n_spikes = spikes_batch.sum(axis=0).astype(float)
-        mean_ipts = (ipts_batch * spikes_batch).sum(axis=0) / (n_spikes + 1e-6)
-        mean_ipts = mean_ipts.copy()
-        mean_ipts[n_spikes == 0] = np.nan
-        return np.log(np.cosh(mean_ipts))
+        mean_pulse = (pulse_trains_batch * spikes_batch).sum(axis=0) / (n_spikes + 1e-6)
+        mean_pulse = mean_pulse.copy()
+        mean_pulse[n_spikes == 0] = np.nan
+        return np.log(np.cosh(mean_pulse))
 
     def _sv_loss(self, contrast: np.ndarray) -> np.ndarray:
         """Normalised separation vector loss (squared z-score against calibration contrast)."""
+        assert self.contrast_calib_mean is not None and self.contrast_calib_std is not None
         return ((contrast - self.contrast_calib_mean) / (self.contrast_calib_std + 1e-12)) ** 2
 
     def _update_separation_vectors(
         self,
         whitened_signal: np.ndarray,
-        ipts: np.ndarray,
+        pulse_trains: np.ndarray,
         spikes: np.ndarray,
     ) -> None:
         """Gradient ascent on the logcosh contrast with Gram-Schmidt deflation."""
-        gradients_all = np.tanh(ipts) * spikes
+        gradients_all = np.tanh(pulse_trains) * spikes
 
         spike_counts = spikes.sum(axis=0)
         gradients = whitened_signal @ gradients_all / np.maximum(spike_counts, 1)
@@ -469,6 +491,15 @@ class AdaptiveDecomp:
             self.sep_vectors[active] = separation_vectors_new[active]
 
 
+def drop_partial_batch_loss(
+    losses: dict[str, Any], n_samples: int, batch_size: int
+) -> dict[str, Any]:
+    """Losses of ``n_samples`` processed forward, one per full batch: the trailing partial one has none."""
+    if losses and n_samples % batch_size:
+        return {k: v[:-1] for k, v in losses.items()}
+    return losses
+
+
 def run_adaptive_decomposition(
     emg: np.ndarray,
     whitening: np.ndarray,
@@ -490,15 +521,12 @@ def run_adaptive_decomposition(
         config=config,
         artifact_mask=artifact_mask,
     )
-    ipts = np.zeros((model.n_samples, model.n_motor_units), dtype=np.float32)
+    pulse_trains = np.zeros((model.n_samples, model.n_motor_units), dtype=model.dtype)
     spikes = np.zeros((model.n_samples, model.n_motor_units), dtype=np.int32)
 
-    def _dense(start: int, ipts_batch: np.ndarray, spikes_batch: np.ndarray) -> None:
-        ipts[start : start + len(ipts_batch)] = ipts_batch
+    def _dense(start: int, pulse_trains_batch: np.ndarray, spikes_batch: np.ndarray) -> None:
+        pulse_trains[start : start + len(pulse_trains_batch)] = pulse_trains_batch
         spikes[start : start + len(spikes_batch)] = spikes_batch
 
     losses = model.run(sink=_dense)
-    if losses and model.n_samples % config.batch_size:
-        # The trailing partial batch never has a loss; keep one entry per full batch.
-        losses = {k: v[:-1] for k, v in losses.items()}
-    return ipts, spikes, losses
+    return pulse_trains, spikes, drop_partial_batch_loss(losses, model.n_samples, config.batch_size)

@@ -70,7 +70,7 @@ function editApp({
   const state = structuredClone(pristine);
   Object.assign(state.edit, {
     token: "tok",
-    distimes: [Int32Array.from([100, 200])],
+    spikeTimes: [Int32Array.from([100, 200])],
     artifactTimes: [new Int32Array(0)],
     flagged: [false],
     muUids: ["g0_mu0"],
@@ -313,7 +313,7 @@ describe("timeline", () => {
 
   test("draws the last edit, the spikes and the view window", () => {
     Object.assign(app.state.edit, {
-      distimes: [Int32Array.from([0, 1500])],
+      spikeTimes: [Int32Array.from([0, 1500])],
       editHistory: [
         { mu_uid: "g0_mu0", spikes_added: [900] },
         { mu_uid: "g0_mu1", spikes_added: [1200] },
@@ -456,7 +456,7 @@ describe("MU dropdowns", () => {
       stage: true,
     });
     Object.assign(app.state.edit, {
-      distimes: [Int32Array.from([100]), Int32Array.from([200])],
+      spikeTimes: [Int32Array.from([100]), Int32Array.from([200])],
       muGridIndex: [0, 0],
       gridNames: ["A"],
     });

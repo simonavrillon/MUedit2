@@ -65,8 +65,9 @@ test("an error response keeps the envelope's code and field", async () => {
       JSON.stringify({
         error: {
           code: "http_400",
-          message: "Request failed",
-          detail: { field: "upload_token", reason: "Token expired" },
+          message:
+            "Missing or expired upload; request /api/v1/preview-by-path first",
+          detail: { field: "upload_token" },
         },
       }),
       { status: 400 },
@@ -74,10 +75,40 @@ test("an error response keeps the envelope's code and field", async () => {
   try {
     await assert.rejects(apiFetch("http://api/x"), {
       name: "ApiError",
-      message: "Request failed: upload_token Token expired",
+      message:
+        "Missing or expired upload; request /api/v1/preview-by-path first",
       status: 400,
       code: "http_400",
       field: "upload_token",
+    });
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("a 422 names the first field validation refused", async () => {
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    new Response(
+      JSON.stringify({
+        error: {
+          code: "validation_error",
+          message: "Request validation failed",
+          detail: [
+            { loc: ["body", "mu"], msg: "Input should be a valid integer" },
+          ],
+        },
+      }),
+      { status: 422 },
+    );
+  try {
+    await assert.rejects(apiFetch("http://api/x"), {
+      name: "ApiError",
+      message:
+        "Request validation failed: body.mu Input should be a valid integer",
+      status: 422,
+      code: "validation_error",
+      field: "",
     });
   } finally {
     globalThis.fetch = realFetch;

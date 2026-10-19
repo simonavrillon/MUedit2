@@ -59,16 +59,12 @@ describe("buildDecomposeParams", () => {
     assert.deepEqual(buildDecomposeParams(raw), {
       niter: 150,
       nwindows: 2,
-      nbextchan: 1000,
       duplicatesthresh: 0.3,
       sil_thr: 0.9,
       cov_thr: 0.5,
       covfilter: 1,
-      contrast_func: "skew",
-      initialization: 0,
       peel_off_enabled: 0,
       peel_off_win: 0.025,
-      auto_mask_artifacts: 0,
       use_adaptive: 0,
       full_trace: 1,
     });

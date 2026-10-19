@@ -52,7 +52,7 @@
  * @property {FileRef | null} file
  * @property {string} filename
  * @property {string} token The server's edit session.
- * @property {Int32Array[]} distimes
+ * @property {Int32Array[]} spikeTimes
  * @property {Int32Array[]} artifactTimes
  * @property {number[]} versions Per MU; changes whenever the server edits it.
  * @property {string[]} gridNames
@@ -67,13 +67,15 @@
  * @property {EditMode | null} mode
  * @property {boolean} dirty
  * @property {boolean} canUndo
+ * @property {boolean} crashRecovery The server logs the edits, so unsaved ones survive a crash.
  * @property {boolean} busy An edit or a save is on its way to the server.
  * @property {JsonObject | null} parameters
  * @property {boolean[]} flagged
  * @property {string} project
  * @property {PulseView | null} pulseView
  * @property {string[]} muUids
- * @property {EditHistoryEntry[]} editHistory
+ * @property {EditHistoryEntry[]} editHistory The log's tail; older entries stay on the server.
+ * @property {number} editHistoryStart Index in the server's log of `editHistory[0]`.
  * @property {Bookmark | null} bookmarkPosition
  * @property {boolean} showBookmark
  * @property {string | null} softwareVersions
@@ -94,7 +96,7 @@
  * @property {number[][]} discardMasks Per grid, per channel: 1 = discarded.
  * @property {ChannelTrace[][]} channelTraces Per grid, per channel.
  * @property {JsonObject} metadata
- * @property {string[]} muscle
+ * @property {string[]} muscleNames
  * @property {StageKey} currentStage
  * @property {number} currentGrid
  * @property {import("../decomp/live.js").RunLive | null} runLive The latest decomposition, as the run page shows it.
@@ -121,7 +123,7 @@ export function createEditSlice() {
     file: null,
     filename: "",
     token: "",
-    distimes: [],
+    spikeTimes: [],
     artifactTimes: [],
     versions: [],
     gridNames: [],
@@ -136,6 +138,7 @@ export function createEditSlice() {
     mode: null,
     dirty: false,
     canUndo: false,
+    crashRecovery: true,
     busy: false,
     parameters: null,
     flagged: [],
@@ -143,6 +146,7 @@ export function createEditSlice() {
     pulseView: null,
     muUids: [],
     editHistory: [],
+    editHistoryStart: 0,
     bookmarkPosition: null,
     showBookmark: false,
     softwareVersions: null,
@@ -164,7 +168,7 @@ export const state = {
   discardMasks: [],
   channelTraces: [],
   metadata: {},
-  muscle: [],
+  muscleNames: [],
   currentStage: "qc",
   currentGrid: 0,
   runLive: null,

@@ -85,10 +85,10 @@ export function setEditProject(state, value) {
 
 /**
  * @param {State} state
- * @param {string[]} muscle
+ * @param {string[]} muscleNames
  */
-export function setMuscle(state, muscle) {
-  state.muscle = muscle;
+export function setMuscle(state, muscleNames) {
+  state.muscleNames = muscleNames;
 }
 
 /**
@@ -201,12 +201,12 @@ export function setMetadata(state, metadata) {
 
 /**
  * @param {State} state
- * @param {ChannelTrace[]} auxiliary
- * @param {string[]} auxiliaryNames
+ * @param {ChannelTrace[]} auxSeries
+ * @param {string[]} auxNames
  */
-export function setAuxData(state, auxiliary, auxiliaryNames) {
-  state.auxSeries = auxiliary;
-  state.auxNames = auxiliaryNames;
+export function setAuxData(state, auxSeries, auxNames) {
+  state.auxSeries = auxSeries;
+  state.auxNames = auxNames;
 }
 
 /**
@@ -456,7 +456,7 @@ export function keepEditMus(state, keptIdx) {
   const e = state.edit;
   /** @param {Int32Array[]} times */
   const pick = (times) => keptIdx.map((i) => times[i] ?? new Int32Array(0));
-  e.distimes = pick(e.distimes);
+  e.spikeTimes = pick(e.spikeTimes);
   e.artifactTimes = pick(e.artifactTimes);
   e.currentMu = Math.max(0, keptIdx.indexOf(e.currentMu ?? 0));
   const bookmarkIdx = e.bookmarkPosition
@@ -488,6 +488,7 @@ function setEditPerMu(state, meta) {
   e.versions = fill(meta.versions, () => 0).map(Number);
   e.dirty = !!meta.dirty;
   e.canUndo = !!meta.can_undo;
+  e.crashRecovery = meta.crash_recovery !== false;
 }
 
 /**
@@ -499,10 +500,11 @@ function setEditPerMu(state, meta) {
 export function setEditSession(state, { meta, spikes, artifacts }) {
   const e = state.edit;
   e.token = String(meta.token || "");
-  e.distimes = spikes;
+  e.spikeTimes = spikes;
   e.artifactTimes = spikes.map((_, i) => artifacts[i] ?? new Int32Array(0));
   setEditPerMu(state, meta);
   e.editHistory = Array.isArray(meta.edit_history) ? meta.edit_history : [];
+  e.editHistoryStart = Number(meta.edit_history_start) || 0;
   e.fsamp = meta.fsamp ?? null;
   e.totalSamples = Number(meta.total_samples) || 0;
   e.parameters =
@@ -523,20 +525,22 @@ export function applyEditChange(state, { meta, spikes, artifacts }) {
   const e = state.edit;
   if (Array.isArray(meta.kept_indices)) keepEditMus(state, meta.kept_indices);
   const n = Number(meta.n_mu) || 0;
-  while (e.distimes.length < n) e.distimes.push(new Int32Array(0));
+  while (e.spikeTimes.length < n) e.spikeTimes.push(new Int32Array(0));
   while (e.artifactTimes.length < n) e.artifactTimes.push(new Int32Array(0));
-  e.distimes.length = n;
+  e.spikeTimes.length = n;
   e.artifactTimes.length = n;
   (Array.isArray(meta.changed) ? meta.changed : []).forEach((mu, i) => {
-    e.distimes[mu] = spikes[i] ?? new Int32Array(0);
+    e.spikeTimes[mu] = spikes[i] ?? new Int32Array(0);
     e.artifactTimes[mu] = artifacts[i] ?? new Int32Array(0);
   });
   setEditPerMu(state, meta);
   const start = Math.max(0, Number(meta.history_start) || 0);
+  const offset = e.editHistoryStart || 0;
   e.editHistory = [
-    ...(e.editHistory || []).slice(0, start),
+    ...(e.editHistory || []).slice(0, Math.max(0, start - offset)),
     ...(Array.isArray(meta.history) ? meta.history : []),
   ];
+  e.editHistoryStart = Math.min(offset, start);
 }
 
 /**
@@ -552,6 +556,7 @@ export function applyEditSave(state, saved) {
   setEditPerMu(state, saved);
   if (Array.isArray(saved.edit_history)) {
     state.edit.editHistory = saved.edit_history;
+    state.edit.editHistoryStart = Number(saved.edit_history_start) || 0;
   }
 }
 

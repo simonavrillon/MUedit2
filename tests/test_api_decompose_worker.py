@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import threading
 import time
@@ -11,7 +12,7 @@ from collections.abc import Callable, Iterator
 from multiprocessing.connection import Connection
 from multiprocessing.reduction import ForkingPickler
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, TypeVar, cast
 
 import numpy as np
 import pytest
@@ -20,16 +21,17 @@ from starlette.testclient import TestClient
 
 from muedit.api import cache
 from muedit.api.schemas import DecomposePayload
-from muedit.api.services import decompose_service
+from muedit.api.services import decompose_service, decompose_worker
 from muedit.api.services.decompose_service import (
     active_run,
     decomposition_event_stream,
     start_decomposition,
 )
-from muedit.api.services.decompose_worker import RunJob
+from muedit.api.services.decompose_worker import INTERNAL_ERROR_DETAIL, RunJob
 from muedit.decomp.types import DecompositionParameters
-from muedit.models import resident_nbytes
-from muedit.storage import sessions_dir
+from muedit.errors import MueditError
+from muedit.models import SignalImport, resident_nbytes
+from muedit.storage import RamStore, sessions_dir
 from tests._platform import deleted
 from tests._synthetic_emg import motor_unit_emg
 
@@ -46,6 +48,19 @@ T = TypeVar("T")
 def _die(job: RunJob, store_path: str, conn: Connection) -> None:
     """A worker that crashes as soon as it starts."""
     os._exit(3)
+
+
+def _fail_with_a_traceback(job: RunJob, store_path: str, conn: Connection) -> None:
+    """A worker whose run failed on a bug: its error event carries the traceback."""
+    conn.send(
+        {
+            "stage": "error",
+            "message": "Decomposition failed",
+            "detail": INTERNAL_ERROR_DETAIL,
+            "traceback": "Traceback (most recent call last): ...",
+        }
+    )
+    conn.close()
 
 
 @pytest.fixture(scope="module")
@@ -165,8 +180,10 @@ class TestWorkerProcess:
     def test_the_upload_goes_to_the_worker_as_file_locations(
         self, client: TestClient, recording: Path
     ) -> None:
-        signal = cache._get_upload_signal(_upload(client, recording, "locations"))
-        assert signal is not None
+        held = cache._hold_upload(_upload(client, recording, "locations"))
+        assert held is not None
+        held.release()
+        signal = held.signal
         job = RunJob(run_path="x", signal=signal, params=DecompositionParameters())
         assert len(ForkingPickler.dumps(job)) < 16 * 1024 < signal.data.nbytes
 
@@ -194,9 +211,67 @@ class TestWorkerProcess:
         before = _run_folders()
         monkeypatch.setattr(decompose_service, "_preview_spikes", broken)
         last = _run(client, token, "relay", QUICK)[-1]
-        assert last["stage"] == "error"
-        assert last["detail"] == "result packing broke"
+        assert last == {
+            "stage": "error",
+            "message": "Decomposition failed",
+            "detail": INTERNAL_ERROR_DETAIL,
+        }
         assert _run_folders() == before
+
+
+class TestErrorEvents:
+    def _execute_raising(
+        self, monkeypatch: pytest.MonkeyPatch, exc: Exception
+    ) -> list[dict[str, Any]]:
+        def fail(*_: Any, **__: Any) -> None:
+            raise exc
+
+        monkeypatch.setattr(decompose_worker, "run_decomposition", fail)
+        sent: list[dict[str, Any]] = []
+        job = RunJob(
+            run_path="x", signal=cast("SignalImport", None), params=DecompositionParameters()
+        )
+        decompose_worker.execute(job, RamStore(), sent.append)
+        return sent
+
+    def test_a_user_fixable_failure_says_what_to_change(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        sent = self._execute_raising(monkeypatch, MueditError("Unknown grid model 'X'"))
+        assert sent == [
+            {
+                "stage": "error",
+                "message": "Decomposition failed",
+                "detail": "Unknown grid model 'X'",
+            }
+        ]
+
+    def test_a_bug_keeps_its_message_and_traceback_for_the_server(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (event,) = self._execute_raising(monkeypatch, RuntimeError("secret internal detail"))
+        assert event["detail"] == INTERNAL_ERROR_DETAIL
+        assert "secret internal detail" in event["traceback"]
+
+    def test_the_traceback_is_logged_and_never_reaches_the_client(
+        self,
+        client: TestClient,
+        recording: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        token = _upload(client, recording, "traceback")
+        monkeypatch.setattr(decompose_service, "child_main", _fail_with_a_traceback)
+        with caplog.at_level(logging.INFO, logger=decompose_service.logger.name):
+            last = _run(client, token, "traceback", QUICK)[-1]
+        assert last == {
+            "stage": "error",
+            "message": "Decomposition failed",
+            "detail": INTERNAL_ERROR_DETAIL,
+        }
+        failed = [r for r in caplog.records if r.getMessage().startswith("Decomposition failed")]
+        assert [r.levelno for r in failed] == [logging.ERROR]
+        assert "Traceback (most recent call last)" in failed[0].getMessage()
 
 
 class TestOneRunAtATime:

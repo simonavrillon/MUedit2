@@ -92,10 +92,12 @@ addopts = ["-ra", "--strict-markers"]
 # CI runs ``-m "not data"``: runners have no recordings under data/.  That
 # tier is also the fast one (~1.5 min), since the decomposition benchmark and
 # simulation tests all need recordings.  Run everything locally with a plain
-# ``pytest``.  conftest.py applies ``data`` to any test that depends on a
-# sample-file fixture, so it never needs hand-marking.
+# ``pytest``.  conftest.py applies ``data`` to any test that declares a
+# sample-file fixture; a test that fetches one with ``request.getfixturevalue``
+# is invisible to that and marks its cases by hand
+# (``pytest.param(..., marks=pytest.mark.data)``).
 markers = [
-  "data: needs git-ignored sample recordings under data/ (auto-applied)",
+  "data: needs git-ignored sample recordings under data/ (auto-applied to declared fixtures)",
 ]
 
 [tool.ruff]

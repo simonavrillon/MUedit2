@@ -2,45 +2,20 @@
 
 from __future__ import annotations
 
-import inspect
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
-from muedit.io.loaders import (
-    load_bids_signal,
-    load_intan,
-    load_mat,
-    load_openephys,
-    load_otb4,
-    load_otb_plus,
-)
+from muedit.errors import SignalLoadError
+from muedit.io._bids_reader import load_bids_signal
+from muedit.io._intan import load_intan
+from muedit.io._mat import load_mat
+from muedit.io._openephys import load_openephys
+from muedit.io._otb import load_otb4, load_otb_plus
 from muedit.models import SignalImport
-from muedit.storage import ArrayStore, store_signal
+from muedit.storage import ArrayStore
 
-LoaderFn = Callable[..., SignalImport | dict[str, Any]]
-
-
-def _normalize_extension(ext: str) -> str:
-    """Normalize extension values to lower-case dotted form."""
-    text = str(ext or "").strip().lower()
-    if not text:
-        raise ValueError("Loader extension cannot be empty")
-    if not text.startswith("."):
-        text = "." + text
-    return text
-
-
-def _as_signal_import(loaded: SignalImport | dict[str, Any]) -> SignalImport:
-    """Normalize loader output to ``SignalImport``."""
-    if isinstance(loaded, SignalImport):
-        return loaded
-    if isinstance(loaded, dict):
-        return SignalImport.from_mapping(loaded)
-    raise TypeError(
-        f"Loader returned unsupported type {type(loaded).__name__}; expected dict or SignalImport"
-    )
-
+#: ``loader(filepath, store=None)``: the signal, its arrays written into ``store`` when given.
+LoaderFn = Callable[..., SignalImport]
 
 _LOADERS: dict[str, LoaderFn] = {
     ".mat": load_mat,
@@ -55,7 +30,9 @@ _LOADERS: dict[str, LoaderFn] = {
 
 def register_loader(ext: str, loader: LoaderFn, *, overwrite: bool = False) -> None:
     """Register a loader function for a file extension."""
-    key = _normalize_extension(ext)
+    key = "." + ext.strip().lower().lstrip(".")
+    if key == ".":
+        raise ValueError("Loader extension cannot be empty")
     if key in _LOADERS and not overwrite:
         raise ValueError(
             f"Loader already registered for '{key}'. Use overwrite=True to replace it."
@@ -65,21 +42,20 @@ def register_loader(ext: str, loader: LoaderFn, *, overwrite: bool = False) -> N
 
 def supported_extensions() -> tuple[str, ...]:
     """Return sorted tuple of currently registered loader extensions."""
-    return tuple(sorted(_LOADERS.keys()))
+    return tuple(sorted(_LOADERS))
 
 
 def get_loader(filepath: str | Path) -> LoaderFn:
     """Return loader function for filepath extension; accepts BIDS EMG, Intan or Open Ephys directories."""
     path = Path(filepath)
     if path.is_dir():
-        candidates = sorted(path.glob("*_emg.bdf")) + sorted(path.glob("*_emg.edf"))
-        if candidates:
+        if any(path.glob("*_emg.bdf")) or any(path.glob("*_emg.edf")):
             return load_bids_signal
-        if sorted(path.glob("*.rhd")):
+        if any(path.glob("*.rhd")):
             return load_intan
         if (path / "structure.oebin").is_file():
             return load_openephys
-        raise ValueError(
+        raise SignalLoadError(
             "Directory does not contain a recognized BIDS EMG, Intan RHD or Open Ephys "
             f"structure.oebin file: {path}"
         )
@@ -87,30 +63,12 @@ def get_loader(filepath: str | Path) -> LoaderFn:
     loader = _LOADERS.get(ext)
     if loader is None:
         supported = ", ".join(supported_extensions())
-        raise ValueError(
+        raise SignalLoadError(
             f"Unsupported file format: {ext or '<no extension>'}. Supported formats: {supported}"
         )
     return loader
 
 
-def load_signal(filepath: str, store: ArrayStore | None = None) -> SignalImport:
-    """Load a raw signal file with the loader registered for its extension.
-
-    With a ``store``, the EMG and auxiliary arrays are written into it: built-in
-    loaders write there block by block, other registered loaders are copied in.
-    """
-    loader_fn = get_loader(filepath)
-    if store is None:
-        return _as_signal_import(loader_fn(str(filepath)))
-    if "store" in inspect.signature(loader_fn).parameters:
-        return _as_signal_import(loader_fn(str(filepath), store=store))
-    return store_signal(_as_signal_import(loader_fn(str(filepath))), store)
-
-
-__all__ = [
-    "LoaderFn",
-    "get_loader",
-    "load_signal",
-    "register_loader",
-    "supported_extensions",
-]
+def load_signal(filepath: str | Path, store: ArrayStore | None = None) -> SignalImport:
+    """Load a raw signal file with the loader registered for its extension, into ``store`` when given."""
+    return get_loader(filepath)(str(filepath), store=store)

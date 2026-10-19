@@ -1,4 +1,4 @@
-import { inferGridCount } from "./grid.js";
+import { inferGridCount, normalizeGridNames } from "./grid.js";
 
 /** @typedef {import("../state/state.js").State} State */
 /** @typedef {import("../state/state.js").FileRef} FileRef */
@@ -106,16 +106,11 @@ export function buildBidsMuscleRowsModel(state) {
       ? state.gridNames
       : [];
 
-  let gridNames;
-  if (inEditStage) {
-    gridNames = editGridNames.length ? editGridNames : ["Grid 1"];
-  } else if (editGridNames.length) {
-    gridNames = editGridNames;
-  } else {
-    gridNames = runGridNames.length ? runGridNames : ["Grid 1"];
-  }
+  const gridNames = normalizeGridNames(
+    inEditStage || editGridNames.length ? editGridNames : runGridNames,
+  );
 
-  const muscles = Array.isArray(state.muscle) ? state.muscle : [];
+  const muscles = Array.isArray(state.muscleNames) ? state.muscleNames : [];
   const rowCount = inferGridCount({
     gridNames,
     muGridIndex: inEditStage ? state.edit?.muGridIndex : [],
@@ -144,11 +139,11 @@ export function naToEmpty(v) {
 export function buildSessionInfoFromDecomposition(file, data, deps) {
   const { parseBidsEntitiesFromLabel, listifyMuscles } = deps;
   const fileLabel = file?.name || data?.file_label || "decomposition";
-  const fs = Number(data?.fsamp);
+  const fsamp = Number(data?.fsamp);
   const entities = parseBidsEntitiesFromLabel(fileLabel);
 
   const fromParams = data?.parameters?.target_muscle;
-  const fromPayload = data?.muscle;
+  const fromPayload = data?.muscle_names ?? data?.muscle;
   const muscles = listifyMuscles(fromPayload).length
     ? listifyMuscles(fromPayload)
     : listifyMuscles(fromParams);
@@ -157,7 +152,8 @@ export function buildSessionInfoFromDecomposition(file, data, deps) {
 
   return {
     fileLabel,
-    fsampText: Number.isFinite(fs) && fs > 0 ? String(Math.round(fs)) : "",
+    fsampText:
+      Number.isFinite(fsamp) && fsamp > 0 ? String(Math.round(fsamp)) : "",
     entities,
     muscles,
     participant: {

@@ -78,8 +78,8 @@ def _signal() -> SignalImport:
     return SignalImport(
         data=rng.normal(size=(20, N_SAMPLES)).astype(np.float32),
         fsamp=FSAMP,
-        gridname=["A", "B"],
-        auxiliary=rng.normal(size=(2, N_SAMPLES)).astype(np.float32),
+        grid_names=["A", "B"],
+        aux_data=rng.normal(size=(2, N_SAMPLES)).astype(np.float32),
     )
 
 
@@ -113,7 +113,7 @@ class TestSignalViews:
         assert views.grid_rows == [(0, 12), (12, 20)]
         # The EMG pyramid is the pyramid of the bandpassed copy the QC stage used to keep.
         np.testing.assert_array_equal(views.emg.levels[0], _pyramid_of(qc).levels[0])
-        np.testing.assert_array_equal(views.aux.levels[0], _pyramid_of(signal.auxiliary).levels[0])
+        np.testing.assert_array_equal(views.aux.levels[0], _pyramid_of(signal.aux_data).levels[0])
 
 
 def _pyramid_of(x: np.ndarray) -> MinMaxPyramid:

@@ -108,4 +108,6 @@ def open_file_dialog() -> dict[str, Any]:
         raise HTTPException(status_code=408, detail="File dialog timed out") from None
     except Exception as exc:
         logger.exception("Native file dialog failed")
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=500, detail="Could not open the file dialog; see the server log"
+        ) from exc

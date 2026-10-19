@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import logging
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
@@ -12,16 +13,14 @@ from typing import Any
 
 import numpy as np
 
-from muedit.io._intan import (
-    _GRID_SIDECAR,
-    _RHD_AMPLIFIER_GAIN,
-    _as_list,
-    _read_grid_sidecar,
-)
-from muedit.models import SignalImport
+from muedit.errors import SignalLoadError
+from muedit.io._common import _AMPLIFIER_GAIN, _GRID_SIDECAR, _read_grid_sidecar, _resolve_muscles
+from muedit.models import SignalImport, _as_name_list
 from muedit.signal.grid import format_hdemg_signal
 from muedit.signal.segmentation import aux_kinds
 from muedit.storage import ArrayStore, RamStore, sample_blocks
+
+logger = logging.getLogger(__name__)
 
 _OEBIN = "structure.oebin"
 
@@ -47,7 +46,6 @@ class _Channel:
     bit_volts: float
     units: str
     kind: int
-    history: str
 
 
 @dataclass
@@ -61,7 +59,7 @@ class _TtlLine:
 
 
 @dataclass
-class _Recording:
+class _OpenEphysRecording:
     """A resolved Open Ephys recording: the ephys stream and where its samples live."""
 
     directory: Path
@@ -70,7 +68,6 @@ class _Recording:
     channels: list[_Channel]
     data_path: Path
     n_samples: int
-    first_sample: int
     ttl: list[_TtlLine]
 
 
@@ -80,17 +77,17 @@ def _read_structure(filepath: str | Path) -> tuple[Path, dict[str, Any]]:
     if path.is_dir():
         path = path / _OEBIN
         if not path.exists():
-            raise FileNotFoundError(
+            raise SignalLoadError(
                 f"No {_OEBIN} found in Open Ephys recording folder: {path.parent}"
             )
     elif path.suffix.lower() != ".oebin":
-        raise ValueError(f"Not an Open Ephys recording: {path}")
+        raise SignalLoadError(f"Not an Open Ephys recording: {path}")
     try:
         structure = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        raise OSError(f"Cannot read Open Ephys structure file {path}: {exc}") from exc
+        raise SignalLoadError(f"Cannot read Open Ephys structure file {path}: {exc}") from exc
     if not isinstance(structure, dict):
-        raise OSError(f"{path} is not an Open Ephys structure file")
+        raise SignalLoadError(f"{path} is not an Open Ephys structure file")
     return path.parent, structure
 
 
@@ -102,7 +99,6 @@ def _parse_channels(stream: dict[str, Any]) -> list[_Channel]:
             bit_volts=float(c.get("bit_volts", 1.0)),
             units=str(c.get("units", "")),
             kind=int(c.get("type", _EPHYS)),
-            history=str(c.get("history", "")),
         )
         for i, c in enumerate(stream.get("channels", []))
     ]
@@ -138,7 +134,7 @@ def _read_ttl(
     return lines
 
 
-def _resolve_recording(filepath: str | Path) -> _Recording:
+def _resolve_openephys_recording(filepath: str | Path) -> _OpenEphysRecording:
     """Pick the continuous stream holding ephys channels and check its data file."""
     directory, structure = _read_structure(filepath)
     candidates = []
@@ -148,7 +144,9 @@ def _resolve_recording(filepath: str | Path) -> _Recording:
         if n_ephys:
             candidates.append((n_ephys, stream, channels))
     if not candidates:
-        raise ValueError(f"Open Ephys recording holds no continuous ephys channels: {directory}")
+        raise SignalLoadError(
+            f"Open Ephys recording holds no continuous ephys channels: {directory}"
+        )
     # max() keeps the first of equals, so ties go to the stream listed first.
     _, stream, channels = max(candidates, key=lambda c: c[0])
 
@@ -156,16 +154,16 @@ def _resolve_recording(filepath: str | Path) -> _Recording:
     stream_dir = directory / "continuous" / folder
     data_path = stream_dir / "continuous.dat"
     if not data_path.exists():
-        raise FileNotFoundError(f"Missing continuous.dat for stream '{folder}' in {directory}")
+        raise SignalLoadError(f"Missing continuous.dat for stream '{folder}' in {directory}")
     declared = int(stream.get("num_channels", len(channels)))
     if declared != len(channels):
-        raise OSError(
+        raise SignalLoadError(
             f"{_OEBIN} declares {declared} channels for '{folder}' but lists {len(channels)}"
         )
     frame_bytes = len(channels) * np.dtype(np.int16).itemsize
     size = data_path.stat().st_size
     if size % frame_bytes:
-        raise OSError(
+        raise SignalLoadError(
             f"{data_path.name} holds {size} bytes, not a whole number of {len(channels)}-channel "
             "int16 frames; the file is truncated or structure.oebin is stale"
         )
@@ -177,11 +175,8 @@ def _resolve_recording(filepath: str | Path) -> _Recording:
         if numbers_path.exists()
         else np.arange(n_samples, dtype=np.int64)
     )
-    first_sample = int(sample_numbers[0]) if len(sample_numbers) else 0
     ttl = _read_ttl(directory, structure, folder + "/", sample_numbers)
-    return _Recording(
-        directory, structure, stream, channels, data_path, n_samples, first_sample, ttl
-    )
+    return _OpenEphysRecording(directory, structure, stream, channels, data_path, n_samples, ttl)
 
 
 def _settings_path(directory: Path) -> Path | None:
@@ -211,7 +206,8 @@ def _read_settings(directory: Path, source_id: int) -> tuple[dict[str, str], lis
     try:
         # Local file the user chose, not untrusted network input.
         root = ET.parse(path).getroot()  # noqa: S314
-    except ET.ParseError:
+    except ET.ParseError as exc:
+        logger.warning("Ignoring %s: %s", path, exc)
         return {}, []
     settings = {"version": root.findtext("INFO/VERSION", default="")}
     headstages: list[int] = []
@@ -244,22 +240,22 @@ def _acquisition_date(directory: Path) -> str | None:
 def _sidecar(directory: Path) -> tuple[list[str], list[str]]:
     """Read the nearest grid sidecar: the recording, its experiment, then its Record Node folder."""
     for folder in (directory, directory.parent, directory.parent.parent):
-        names, muscles = _read_grid_sidecar(folder / _GRID_SIDECAR)
-        if names or muscles:
-            return names, muscles
+        grid_names, muscle_names = _read_grid_sidecar(folder / _GRID_SIDECAR)
+        if grid_names or muscle_names:
+            return grid_names, muscle_names
     return [], []
 
 
-def _resolve_grids(
+def _resolve_openephys_grids(
     directory: Path,
     n_emg: int,
     headstages: list[int],
     grid_names: str | list[str] | None,
-    muscles: str | list[str] | None,
+    muscle_names: str | list[str] | None,
 ) -> tuple[list[str], list[str]]:
     """Split the ephys channels, in file order, across the grids that cover them."""
-    sidecar_names, sidecar_muscles = _sidecar(directory)
-    resolved = [str(g) for g in _as_list(grid_names)] or sidecar_names
+    sidecar_grid_names, sidecar_muscle_names = _sidecar(directory)
+    resolved = _as_name_list(grid_names) or sidecar_grid_names
     if not resolved:
         groups = headstages if sum(headstages) == n_emg else []
         if not groups:
@@ -269,33 +265,28 @@ def _resolve_grids(
             )
             groups = [per_grid] * (n_emg // per_grid) if per_grid else []
         if not groups or any(n not in _DEFAULT_GRIDS for n in groups):
-            raise ValueError(
+            raise SignalLoadError(
                 f"Cannot infer the electrode array for {n_emg} Open Ephys ephys channels: "
                 "neither structure.oebin nor settings.xml records one. Pass grid_names=... "
                 "to load_openephys, "
                 f"or write a '{_GRID_SIDECAR}' sidecar into {directory} (or its experiment or "
-                'Record Node folder) of the form {"gridname": ["GR08MM1305", ...], "muscle": '
+                'Record Node folder) of the form {"grid_names": ["GR08MM1305", ...], "muscle_names": '
                 '["ta", ...]}.'
             )
         resolved = [_DEFAULT_GRIDS[n] for n in groups]
 
-    _, _, discard, _ = format_hdemg_signal(resolved)
-    if len(resolved) == 1 and len(discard[0]) and n_emg % len(discard[0]) == 0:
-        resolved = resolved * (n_emg // len(discard[0]))
-        discard = discard * len(resolved)
-    covered = sum(len(d) for d in discard)
+    _, _, discard_channels, _ = format_hdemg_signal(resolved)
+    if len(resolved) == 1 and len(discard_channels[0]) and n_emg % len(discard_channels[0]) == 0:
+        resolved = resolved * (n_emg // len(discard_channels[0]))
+        discard_channels = discard_channels * len(resolved)
+    covered = sum(len(d) for d in discard_channels)
     if covered != n_emg:
-        raise ValueError(
+        raise SignalLoadError(
             f"Grid(s) {', '.join(resolved)} cover {covered} electrodes, but the Open Ephys "
             f"recording holds {n_emg} ephys channels."
         )
 
-    resolved_muscles = [str(m) for m in _as_list(muscles)] or sidecar_muscles
-    if len(resolved_muscles) == 1 and len(resolved) > 1:
-        resolved_muscles = resolved_muscles * len(resolved)
-    if resolved_muscles and len(resolved_muscles) != len(resolved):
-        raise ValueError(f"Got {len(resolved_muscles)} muscle label(s) for {len(resolved)} grid(s)")
-    return resolved, resolved_muscles
+    return resolved, _resolve_muscles(muscle_names, sidecar_muscle_names, len(resolved), "grid(s)")
 
 
 def _ttl_row(line: _TtlLine, start: int, stop: int) -> np.ndarray:
@@ -307,18 +298,21 @@ def _ttl_row(line: _TtlLine, start: int, stop: int) -> np.ndarray:
 def load_openephys(
     filepath: str,
     grid_names: str | list[str] | None = None,
-    muscles: str | list[str] | None = None,
+    muscle_names: str | list[str] | None = None,
     store: ArrayStore | None = None,
 ) -> SignalImport:
     """Load an Open Ephys binary recording as a ``SignalImport``, written into ``store`` block by block."""
-    rec = _resolve_recording(filepath)
+    store = store if store is not None else RamStore()
+    rec = _resolve_openephys_recording(filepath)
     channels = rec.channels
     emg_rows = [i for i, c in enumerate(channels) if c.kind == _EPHYS]
     aux_rows = [i for i, c in enumerate(channels) if c.kind != _EPHYS]
 
     unknown = sorted({channels[i].units for i in emg_rows} - set(_TO_MV))
     if unknown:
-        raise ValueError(f"Open Ephys ephys channels in unsupported units: {', '.join(unknown)}")
+        raise SignalLoadError(
+            f"Open Ephys ephys channels in unsupported units: {', '.join(unknown)}"
+        )
     emg_scale = np.array([channels[i].bit_volts * _TO_MV[channels[i].units] for i in emg_rows])
     # Channels in units with no volt equivalent (e.g. buffer usage in %) keep their own scale.
     aux_scale = np.array(
@@ -327,84 +321,66 @@ def load_openephys(
 
     stream = rec.stream
     settings, headstages = _read_settings(rec.directory, int(stream.get("source_processor_id", -1)))
-    resolved_grids, resolved_muscles = _resolve_grids(
-        rec.directory, len(emg_rows), headstages, grid_names, muscles
+    grid_names, muscle_names = _resolve_openephys_grids(
+        rec.directory, len(emg_rows), headstages, grid_names, muscle_names
     )
 
-    store = store if store is not None else RamStore()
     n_samples = rec.n_samples
-    n_aux = len(aux_rows) + len(rec.ttl)
     data = store.allocate("emg", (len(emg_rows), n_samples), np.float32)
-    auxiliary = store.allocate("aux", (n_aux, n_samples), np.float32)
+    aux_data = store.allocate("aux", (len(aux_rows) + len(rec.ttl), n_samples), np.float32)
     if n_samples:
         raw = np.memmap(rec.data_path, dtype="<i2", mode="r", shape=(n_samples, len(channels)))
         for start, stop in sample_blocks(n_samples, len(channels)):
             block = np.asarray(raw[start:stop]).T.astype(np.float64)
             data[:, start:stop] = block[emg_rows] * emg_scale[:, None]
-            auxiliary[: len(aux_rows), start:stop] = block[aux_rows] * aux_scale[:, None]
+            aux_data[: len(aux_rows), start:stop] = block[aux_rows] * aux_scale[:, None]
             for row, line in enumerate(rec.ttl, start=len(aux_rows)):
-                auxiliary[row, start:stop] = _ttl_row(line, start, stop)
+                aux_data[row, start:stop] = _ttl_row(line, start, stop)
         del raw
     data = store.seal(data)
-    auxiliary = store.seal(auxiliary)
+    aux_data = store.seal(aux_data)
     aux_names = [channels[i].name for i in aux_rows] + [f"TTL{line.line}" for line in rec.ttl]
-
-    coordinates, ieds, discard_vecs, emg_types = format_hdemg_signal(resolved_grids)
+    aux_digital = [False] * len(aux_rows) + [True] * len(rec.ttl)
 
     low_cut = float(settings["LowCut"]) if "LowCut" in settings else None
     high_cut = float(settings["HighCut"]) if "HighCut" in settings else None
     if low_cut is not None and settings.get("DSPOffset") == "1" and "DSPCutoffFreq" in settings:
         low_cut = max(low_cut, float(settings["DSPCutoffFreq"]))
-    high_pass: float | str = "n/a" if low_cut is None else low_cut
-    low_pass: float | str = "n/a" if high_cut is None else high_cut
     hardware_filter = (
         f"HP: {low_cut:.2f} Hz, LP: {high_cut:.2f} Hz, Notch: none"
         if low_cut is not None and high_cut is not None
         else "n/a"
     )
 
-    source = str(stream.get("source_processor_name", "")) or "Open Ephys"
+    device_name = str(stream.get("source_processor_name", "")) or "Open Ephys"
     gui_version = str(rec.structure.get("GUI version", "")) or settings.get("version", "")
-    n_emg = data.shape[0]
+    n_emg, n_aux = len(emg_rows), len(aux_names)
     metadata: dict[str, Any] = {
         "acquisition_date": _acquisition_date(rec.directory),
         "manufacturer": "Open Ephys",
-        "device_name": source,
-        "manufacturers_model_name": source,
+        "device_name": device_name,
         "software_versions": f"Open Ephys GUI {gui_version}" if gui_version else "Open Ephys GUI",
-        "ad_bits": 16,
-        "coordinates": coordinates,
-        "ieds": ieds,
-        "discard_channels": discard_vecs,
-        "emg_types": emg_types,
         "hardware_filters": [hardware_filter],
-        "channel_map_filters": {},
-        "gains": [_RHD_AMPLIFIER_GAIN] * n_emg,
-        "emg_hpf": [high_pass] * n_emg,
-        "emg_lpf": [low_pass] * n_emg,
-        "aux_gains": [1.0] * len(aux_names),
-        "aux_hpf": ["n/a"] * len(aux_names),
-        "aux_lpf": ["n/a"] * len(aux_names),
+        "powerline_freq": None,
         "units": "mV",
+        "gains": [_AMPLIFIER_GAIN] * n_emg,
+        "emg_hpf": ["n/a" if low_cut is None else low_cut] * n_emg,
+        "emg_lpf": ["n/a" if high_cut is None else high_cut] * n_emg,
         "aux_units": "V",
-        "aux_kinds": aux_kinds(aux_names, [False] * len(aux_rows) + [True] * len(rec.ttl)),
+        "aux_gains": [1.0] * n_aux,
+        "aux_hpf": ["n/a"] * n_aux,
+        "aux_lpf": ["n/a"] * n_aux,
+        "aux_kinds": aux_kinds(aux_names, aux_digital),
         "recording_type": "continuous",
         "software_filters": "n/a",
-        "powerline_freq": 50.0,
-        "openephys_stream": str(stream.get("folder_name", "")).strip("/\\"),
-        "openephys_record_node": stream.get("recorded_processor_id"),
-        "openephys_headstages": headstages,
-        "openephys_first_sample": rec.first_sample,
-        "openephys_channel_names": [channels[i].name for i in emg_rows],
-        "openephys_channel_history": channels[emg_rows[0]].history,
     }
 
     return SignalImport.build(
         data=data,
         fsamp=float(stream.get("sample_rate", 0.0)),
-        gridname=resolved_grids,
-        muscle=resolved_muscles,
-        auxiliary=auxiliary,
-        auxiliaryname=aux_names,
+        grid_names=grid_names,
+        muscle_names=muscle_names,
+        aux_data=aux_data,
+        aux_names=aux_names,
         metadata=metadata,
     )

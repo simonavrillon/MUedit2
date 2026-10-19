@@ -70,7 +70,7 @@ function editState() {
   const state = structuredClone(pristine);
   Object.assign(state.edit, {
     token: "tok",
-    distimes: [ints(2, 5, 8), ints(1, 4)],
+    spikeTimes: [ints(2, 5, 8), ints(1, 4)],
     artifactTimes: [ints(), ints()],
     flagged: [false, false],
     muUids: ["g0_mu0", "g0_mu1"],
@@ -356,7 +356,7 @@ describe("edits on the server", () => {
         { token: "tok", mu: 0, x_start: 4, x_end: 6, y_min: 1, y_max: 7 },
       ],
     ]);
-    assert.deepEqual(rows(state.edit.distimes), [
+    assert.deepEqual(rows(state.edit.spikeTimes), [
       [2, 8],
       [1, 4],
     ]);
@@ -379,7 +379,7 @@ describe("edits on the server", () => {
       ),
     });
     await undoEdit(app);
-    assert.deepEqual(rows(state.edit.distimes), [
+    assert.deepEqual(rows(state.edit.spikeTimes), [
       [2, 5, 8],
       [1, 4, 6],
     ]);
@@ -390,6 +390,27 @@ describe("edits on the server", () => {
     assert.equal(state.edit.canUndo, false);
     assert.equal(state.edit.selectionPulse, null);
     assert.deepEqual(app.setStatus.calls.at(-1), ["Undo applied", "success"]);
+  });
+
+  test("an edit the server cannot log warns that a crash would lose it", async () => {
+    state.edit.canUndo = true;
+    app.api = fakeApi({
+      undo: changeFrame(
+        {
+          changed: [1],
+          history_start: 0,
+          can_undo: false,
+          crash_recovery: false,
+        },
+        [[1, 4, 6]],
+      ),
+    });
+    await undoEdit(app);
+    assert.equal(state.edit.crashRecovery, false);
+    assert.deepEqual(app.setStatus.calls.at(-1), [
+      "Undo applied; unsaved edits will not survive a crash: save to keep them",
+      "error",
+    ]);
   });
 
   test("nothing to undo says so and asks nothing", async () => {
@@ -414,7 +435,7 @@ describe("edits on the server", () => {
     });
     await duplicateMu(app);
     assert.deepEqual(app.api.calls[0], ["duplicate", { token: "tok", mu: 1 }]);
-    assert.equal(state.edit.distimes.length, 3);
+    assert.equal(state.edit.spikeTimes.length, 3);
     assert.equal(state.edit.currentMu, 2);
     assert.deepEqual(app.setStatus.calls.at(-1), [
       "MU duplicated — now editing MU 3",
@@ -423,7 +444,7 @@ describe("edits on the server", () => {
   });
 
   test("removing duplicates keeps the MUs the server kept", async () => {
-    state.edit.distimes.push(ints(2, 5, 9));
+    state.edit.spikeTimes.push(ints(2, 5, 9));
     state.edit.artifactTimes.push(ints(7));
     state.edit.muUids.push("g0_mu2");
     state.edit.currentMu = 2;
@@ -436,7 +457,7 @@ describe("edits on the server", () => {
       }),
     });
     await removeDuplicateMus(app);
-    assert.deepEqual(rows(state.edit.distimes), [
+    assert.deepEqual(rows(state.edit.spikeTimes), [
       [1, 4],
       [2, 5, 9],
     ]);
@@ -473,13 +494,15 @@ describe("edits on the server", () => {
   });
 
   test("a failed edit reports it and leaves the state alone", async () => {
-    app.api = fakeApi({ reset: new Error("HTTP 400: mu_index out of range") });
+    app.api = fakeApi({
+      reset: new Error("HTTP 400: mu: mu 9 is out of range [0, 3)"),
+    });
     await resetCurrentMuEdits(app);
-    assert.deepEqual(rows(state.edit.distimes), [
+    assert.deepEqual(rows(state.edit.spikeTimes), [
       [2, 5, 8],
       [1, 4],
     ]);
-    assert.match(app.setStatus.calls.at(-1)[0], /mu_index out of range/);
+    assert.match(app.setStatus.calls.at(-1)[0], /mu 9 is out of range/);
   });
 });
 
@@ -510,7 +533,7 @@ describe("saveEditedFile", () => {
     await saveEditedFile(app);
     assert.deepEqual(payloads[0], {
       token: "tok",
-      muscle: ["TA"],
+      muscle_names: ["TA"],
       entity_label: "sub-01_task-x",
       file_label: "sub-01_task-x_decomp_edited.npz",
       software_versions: null,
@@ -538,7 +561,7 @@ describe("saveEditedFile", () => {
     });
     await saveEditedFile(app);
     assert.deepEqual(state.edit.muUids, ["g0_mu1"]);
-    assert.deepEqual(rows(state.edit.distimes), [[1, 4]]);
+    assert.deepEqual(rows(state.edit.spikeTimes), [[1, 4]]);
     assert.deepEqual(state.edit.flagged, [false]);
     assert.deepEqual(state.edit.editHistory, [saveEntry]);
     assert.equal(state.edit.dirty, false);
@@ -554,9 +577,9 @@ describe("a session left during an edit", () => {
         return changeFrame({ changed: [0] }, [[7]]);
       },
     };
-    const before = rows(state.edit.distimes);
+    const before = rows(state.edit.spikeTimes);
     await removeOutliers(app);
-    assert.deepEqual(rows(state.edit.distimes), before);
+    assert.deepEqual(rows(state.edit.spikeTimes), before);
     assert.match(
       app.setStatus.calls.at(-1)[0],
       /Another decomposition was opened meanwhile/,
@@ -577,7 +600,7 @@ describe("an edit the page gave up on", () => {
       editSessionState: async () => served,
     };
     await removeOutliers(app);
-    assert.deepEqual(rows(state.edit.distimes), [
+    assert.deepEqual(rows(state.edit.spikeTimes), [
       [2, 6],
       [1, 4],
     ]);
@@ -598,9 +621,9 @@ describe("an edit the page gave up on", () => {
         throw new Error("gone");
       },
     };
-    const before = rows(state.edit.distimes);
+    const before = rows(state.edit.spikeTimes);
     await removeOutliers(app);
-    assert.deepEqual(rows(state.edit.distimes), before);
+    assert.deepEqual(rows(state.edit.spikeTimes), before);
     assert.match(
       app.setStatus.calls.at(-1)[0],
       /Outlier removal failed: Request timed out$/,

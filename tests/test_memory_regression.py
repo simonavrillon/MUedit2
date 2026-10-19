@@ -170,9 +170,12 @@ def upload_token(mat_path: Path) -> str:
 @pytest.fixture(scope="session")
 def prepared(mat_path: Path, upload_token: str, run_store: SessionStore) -> Any:
     """``(loaded, prep)`` from the upload cache into the run's store, as the decompose run does."""
-    from muedit.api.cache import _get_upload_signal
+    from muedit.api.cache import _hold_upload
 
-    loaded = load_step(str(mat_path), None, _get_upload_signal(upload_token), None)
+    held = _hold_upload(upload_token)
+    assert held is not None
+    loaded = load_step(str(mat_path), None, held.signal, None)
+    held.release()
     prep = preprocess_step(
         loaded=loaded,
         duration=None,
@@ -223,7 +226,7 @@ def saved_decomposition(mat_path: Path, tmp_path_factory: pytest.TempPathFactory
     assert result.save_path is not None
     return {
         "npz": Path(result.save_path),
-        "distimes": result.discharge_times,
+        "spike_times": result.spike_times,
         "mu_grid_index": result.mu_grid_index,
         "fsamp": result.fsamp,
     }
@@ -275,10 +278,13 @@ def test_qc_auto_stage(upload_token: str) -> None:
 
 
 def test_preprocess_stage(mat_path: Path, upload_token: str, run_store: SessionStore) -> None:
-    from muedit.api.cache import _get_upload_signal
+    from muedit.api.cache import _hold_upload
 
     def _run() -> Any:
-        loaded = load_step(str(mat_path), None, _get_upload_signal(upload_token), None)
+        held = _hold_upload(upload_token)
+        assert held is not None
+        loaded = load_step(str(mat_path), None, held.signal, None)
+        held.release()
         return preprocess_step(
             loaded=loaded,
             duration=None,
@@ -402,7 +408,7 @@ def test_update_filter_stage(saved_decomposition: dict[str, Any]) -> None:
     from muedit.api.binary import unpack_frame
 
     saved = saved_decomposition
-    assert len(saved["distimes"]) > 0, "decomposition produced no motor units"
+    assert len(saved["spike_times"]) > 0, "decomposition produced no motor units"
     view_span = int(10.0 * saved["fsamp"])
     view_start = (ROI[0] + ROI[1]) // 2 - view_span // 2
 

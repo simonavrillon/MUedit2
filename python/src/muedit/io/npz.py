@@ -128,10 +128,6 @@ class NpzArchive:
     def close(self) -> None:
         self._zip.close()
 
-    @property
-    def files(self) -> list[str]:
-        return list(self._members)
-
     def __contains__(self, key: object) -> bool:
         return key in self._members
 

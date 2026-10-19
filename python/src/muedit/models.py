@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import mmap
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, TypeAlias, cast
 
 import numpy as np
@@ -93,10 +93,10 @@ class SignalImport:
 
     data: FloatArray
     fsamp: float
-    gridname: list[str] = field(default_factory=list)
-    muscle: list[str] = field(default_factory=list)
-    auxiliary: FloatArray = field(default_factory=lambda: np.zeros((0, 0), dtype=float))
-    auxiliaryname: list[str] = field(default_factory=list)
+    grid_names: list[str] = field(default_factory=list)
+    muscle_names: list[str] = field(default_factory=list)
+    aux_data: FloatArray = field(default_factory=lambda: np.zeros((0, 0), dtype=float))
+    aux_names: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -105,41 +105,28 @@ class SignalImport:
         *,
         data: Any,
         fsamp: Any = 0.0,
-        gridname: str | Iterable[Any] | None = None,
-        muscle: str | Iterable[Any] | None = None,
-        auxiliary: Any = None,
-        auxiliaryname: str | Iterable[Any] | None = None,
+        grid_names: str | Iterable[Any] | None = None,
+        muscle_names: str | Iterable[Any] | None = None,
+        aux_data: Any = None,
+        aux_names: str | Iterable[Any] | None = None,
         metadata: Any = None,
     ) -> SignalImport:
         """Construct from raw loader values, coercing types and filling defaults.
 
         ``data`` becomes a 2-D float array (a 1-D input is one channel), a missing
         ``fsamp`` becomes 0.0, a single name becomes a one-item list, and
-        ``auxiliary`` is padded or truncated to the EMG sample count.
+        ``aux_data`` is padded or truncated to the EMG sample count.
         """
         data_arr = _as_2d_float_array(data)
         n_samples = int(data_arr.shape[1]) if data_arr.ndim == 2 else 0
         return cls(
             data=data_arr,
             fsamp=float(fsamp) if fsamp is not None else 0.0,
-            gridname=_as_name_list(gridname),
-            muscle=_as_name_list(muscle),
-            auxiliary=_ensure_channel_matrix(auxiliary, n_samples),
-            auxiliaryname=_as_name_list(auxiliaryname),
+            grid_names=_as_name_list(grid_names),
+            muscle_names=_as_name_list(muscle_names),
+            aux_data=_ensure_channel_matrix(aux_data, n_samples),
+            aux_names=_as_name_list(aux_names),
             metadata=dict(cast(dict[str, Any], metadata)) if isinstance(metadata, dict) else {},
-        )
-
-    @classmethod
-    def from_mapping(cls, payload: dict[str, Any]) -> SignalImport:
-        """Construct from a loader dictionary; see :meth:`build` for the coercion rules."""
-        return cls.build(
-            data=payload.get("data", np.zeros((0, 0), dtype=float)),
-            fsamp=payload.get("fsamp", 0.0),
-            gridname=payload.get("gridname"),
-            muscle=payload.get("muscle"),
-            auxiliary=payload.get("auxiliary"),
-            auxiliaryname=payload.get("auxiliaryname"),
-            metadata=payload.get("metadata"),
         )
 
     def clone(self) -> SignalImport:
@@ -147,10 +134,10 @@ class SignalImport:
         return SignalImport(
             data=self.data.copy(),
             fsamp=self.fsamp,
-            gridname=list(self.gridname),
-            muscle=list(self.muscle),
-            auxiliary=self.auxiliary.copy(),
-            auxiliaryname=list(self.auxiliaryname),
+            grid_names=list(self.grid_names),
+            muscle_names=list(self.muscle_names),
+            aux_data=self.aux_data.copy(),
+            aux_names=list(self.aux_names),
             metadata=dict(self.metadata),
         )
 
@@ -159,45 +146,22 @@ class SignalImport:
         return SignalImport(
             data=_readonly(self.data),
             fsamp=self.fsamp,
-            gridname=list(self.gridname),
-            muscle=list(self.muscle),
-            auxiliary=_readonly(self.auxiliary),
-            auxiliaryname=list(self.auxiliaryname),
+            grid_names=list(self.grid_names),
+            muscle_names=list(self.muscle_names),
+            aux_data=_readonly(self.aux_data),
+            aux_names=list(self.aux_names),
             metadata=dict(self.metadata),
         )
 
     def without_data(self) -> SignalImport:
-        """Everything but the EMG samples, so a holder does not keep the recording alive."""
-        return SignalImport(
-            data=np.zeros((0, self.data.shape[1] if self.data.ndim == 2 else 0)),
-            fsamp=self.fsamp,
-            gridname=self.gridname,
-            muscle=self.muscle,
-            auxiliary=self.auxiliary,
-            auxiliaryname=self.auxiliaryname,
-            metadata=self.metadata,
-        )
+        """``readonly_view`` without the EMG samples, so a holder does not keep the recording alive."""
+        n_samples = self.data.shape[1] if self.data.ndim == 2 else 0
+        return replace(self.readonly_view(), data=np.zeros((0, n_samples)))
 
     @property
     def nbytes(self) -> int:
         """Heap size of the EMG and auxiliary arrays; memory-mapped ones count as 0."""
-        return resident_nbytes(self.data) + resident_nbytes(self.auxiliary)
-
-    def to_dict(self) -> dict[str, Any]:
-        """Serialise to a plain dictionary suitable for JSON or cache storage."""
-        return {
-            "data": self.data.copy(),
-            "fsamp": float(self.fsamp),
-            "gridname": list(self.gridname),
-            "muscle": list(self.muscle),
-            "auxiliary": self.auxiliary.copy(),
-            "auxiliaryname": list(self.auxiliaryname),
-            "metadata": dict(self.metadata),
-        }
-
-
-def _optional_nbytes(value: np.ndarray | None) -> int:
-    return int(value.nbytes) if value is not None else 0
+        return resident_nbytes(self.data) + resident_nbytes(self.aux_data)
 
 
 @dataclass
@@ -211,7 +175,9 @@ class EditSignalContext:
     data: FloatArray  # (n_channels, n_samples); (0, 0) when the file holds only a mask
     fsamp: float  # 0.0 when the file does not record it
     grid_names: list[str] = field(default_factory=list)
-    emgmask: list[IntArray] = field(default_factory=list)  # per grid, 1 = discarded channel
+    discard_channels: list[IntArray] = field(
+        default_factory=list
+    )  # per grid, 1 = discarded channel
     coordinates: list[FloatArray] = field(default_factory=list)  # per grid, (n_channels, 2)
     ied: list[float] | None = None  # per-grid inter-electrode distance, mm
     aux_data: FloatArray | None = None  # (n_aux, n_samples)
@@ -224,33 +190,17 @@ class EditSignalContext:
     # The target's segments the run decomposed with (target channel, units, settings, segments).
     target_segments: dict[str, Any] | None = None
 
-    def readonly_view(self) -> EditSignalContext:
-        """Share the arrays read-only; lists and metadata are independent copies."""
-        return EditSignalContext(
-            data=_readonly(self.data),
-            fsamp=self.fsamp,
-            grid_names=list(self.grid_names),
-            emgmask=[_readonly(m) for m in self.emgmask],
-            coordinates=[_readonly(c) for c in self.coordinates],
-            ied=list(self.ied) if self.ied is not None else None,
-            aux_data=_readonly(self.aux_data) if self.aux_data is not None else None,
-            aux_names=list(self.aux_names),
-            artifact_mask=_readonly(self.artifact_mask) if self.artifact_mask is not None else None,
-            loader_meta=dict(self.loader_meta),
-            prefiltered=self.prefiltered,
-            target_segments=self.target_segments,
-        )
-
     @property
     def nbytes(self) -> int:
         """Heap bytes of all arrays in the context; memory-mapped ones count 0."""
-        return (
-            resident_nbytes(self.data)
-            + (resident_nbytes(self.aux_data) if self.aux_data is not None else 0)
-            + _optional_nbytes(self.artifact_mask)
-            + sum(int(m.nbytes) for m in self.emgmask)
-            + sum(int(c.nbytes) for c in self.coordinates)
-        )
+        arrays = [
+            self.data,
+            self.aux_data,
+            self.artifact_mask,
+            *self.discard_channels,
+            *self.coordinates,
+        ]
+        return sum(resident_nbytes(a) for a in arrays if a is not None)
 
 
 @dataclass
@@ -258,12 +208,12 @@ class LoadedDecomposition:
     """Decomposition state loaded from a .npz or .mat file for the interactive editing stage."""
 
     pulse_trains_full: FloatArray = field(default_factory=lambda: np.zeros((0, 0)))  # (n_mu, T)
-    distime_all: list[IntArray] = field(default_factory=list)  # one spike_array per MU
+    spike_times: list[IntArray] = field(default_factory=list)  # one spike_array per MU
     fsamp: float | None = None
     grid_names: list[str] = field(default_factory=list)
     total_samples: int = 0
     mu_grid_index: list[int] = field(default_factory=list)
     rois: list[tuple[int, int]] = field(default_factory=list)
     parameters: dict[str, Any] = field(default_factory=dict)
-    muscle: list[str] = field(default_factory=list)
+    muscle_names: list[str] = field(default_factory=list)
     sil: list[float] = field(default_factory=list)

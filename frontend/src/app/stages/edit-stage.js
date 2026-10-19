@@ -165,7 +165,8 @@ export function createEditStageService(app) {
     const canvas = els.editPulseCanvas;
     const total = e.totalSamples || 0;
     const mu = e.currentMu ?? 0;
-    if (!e.token || !canvas || !total || e.distimes?.[mu] === undefined) return;
+    if (!e.token || !canvas || !total || e.spikeTimes?.[mu] === undefined)
+      return;
     const { start, end } = e.view || { start: 0, end: total };
     const bins = Math.max(1, Math.round(plotWidth(canvas)));
     const version = e.versions?.[mu] ?? 0;

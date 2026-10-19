@@ -39,6 +39,7 @@ python/src/muedit/
 ├── cli.py                                   CLI entry point (api serve, decompose)
 ├── paths.py                                 Per-user cache/log folders, checkout, frontend
 ├── app_log.py                               Server log file, shared with spawned workers
+├── errors.py                                MueditError (user-fixable, a 400), SignalLoadError
 ├── models.py                                SignalImport, LoadedDecomposition, spike_array
 ├── storage.py                               Session stores: full-length arrays as memory-mapped .npy files
 │
@@ -81,14 +82,13 @@ python/src/muedit/
 │
 ├── io/
 │   ├── factory.py                            Loader registry + dispatch
-│   ├── loaders.py                            Loader re-export facade
 │   ├── bids.py                               BIDS EMG export (EDF/BDF + sidecars + derivatives)
 │   ├── _bids_reader.py                       BIDS EMG reading (pyedflib + channels.tsv)
 │   ├── _bids_layout.py                       BidsEntities: BIDS file names, folders and dataset root
 │   ├── _bids_events.py                       events.tsv: trigger pulses + target segments, merged
 │   ├── _intan.py                             Intan RHD loader (3 save layouts)
 │   ├── _openephys.py                         Open Ephys binary-format loader
-│   ├── mat.py                                MATLAB .mat v5 + v7.3 (HDF5) loader
+│   ├── _mat.py                               MATLAB .mat v5 + v7.3 (HDF5) loader
 │   ├── _otb.py                               OT Bioelettronica OTB+ and OTB4 loaders
 │   └── npz.py                                Aligned .npz writer, memory-mapping reader, legacy unpickler
 │

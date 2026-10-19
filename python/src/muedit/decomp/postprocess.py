@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import asdict
-from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -15,8 +14,7 @@ from muedit.decomp.algorithm import (
     DEDUP_JITTER,
     DEDUP_MAXLAG_RATIO,
     batch_process_filters,
-    extend_signal,
-    rem_duplicates,
+    unique_mu_indices,
     whiten_inplace,
     window_trim,
 )
@@ -30,8 +28,9 @@ from muedit.decomp.types import (
     PostprocessStepOutput,
     PreprocessStepOutput,
 )
-from muedit.io._bids_layout import BidsEntities, dataset_root
+from muedit.io.bids import run_decomp_path, write_derivative_description
 from muedit.models import FloatArray, IntArray
+from muedit.signal.decomp_primitives import extend_signal, extension_factor
 from muedit.signal.filters import demean
 from muedit.signal.streaming import RowSelection
 from muedit.storage import ArrayStore
@@ -40,14 +39,18 @@ logger = logging.getLogger(__name__)
 
 
 def dedup_survivors(
-    distime: list[IntArray],
+    spike_times: list[IntArray],
     mu_grid_index: list[int],
     ngrid: int,
     params: DecompositionParameters,
     fsamp: float,
-    n_samples: int,
+    total_samples: int,
 ) -> tuple[list[int], list[int]]:
-    """Indices of the MUs kept by duplicate removal within and across grids, in output order, and their grids."""
+    """Indices of the MUs kept by duplicate removal within and across grids, ascending, and their grids."""
+    outside = [g for g in mu_grid_index if not 0 <= g < ngrid]
+    if outside:
+        # A grid no loop below visits would drop its MUs without a trace.
+        raise ValueError(f"mu_grid_index {outside[0]} is outside the {ngrid} grid(s)")
     maxlag = round(fsamp / DEDUP_MAXLAG_RATIO)
     kept: list[int] = []
     kept_grids: list[int] = []
@@ -56,48 +59,51 @@ def dedup_survivors(
         mu_indices = [idx for idx, g in enumerate(mu_grid_index) if g == g_idx]
         if not mu_indices:
             continue
-        dist_subset = [distime[idx] for idx in mu_indices]
-        kept_local = rem_duplicates(
+        dist_subset = [spike_times[idx] for idx in mu_indices]
+        kept_local = unique_mu_indices(
             dist_subset,
             dist_subset,
             maxlag,
             DEDUP_JITTER,
             params.duplicatesthresh,
             fsamp,
-            n_samples,
+            total_samples,
         )
         kept.extend(mu_indices[l] for l in kept_local)
         kept_grids.extend([g_idx] * len(kept_local))
 
     if params.duplicatesbgrids and kept:
-        dist_kept = [distime[idx] for idx in kept]
-        kept_idx = rem_duplicates(
+        dist_kept = [spike_times[idx] for idx in kept]
+        kept_idx = unique_mu_indices(
             dist_kept,
             dist_kept,
             maxlag,
             DEDUP_JITTER,
             params.duplicatesthresh,
             fsamp,
-            n_samples,
+            total_samples,
         )
-        return [kept[i] for i in kept_idx], [kept_grids[i] for i in kept_idx]
+        kept, kept_grids = [kept[i] for i in kept_idx], [kept_grids[i] for i in kept_idx]
 
-    return kept, kept_grids
+    order = sorted(range(len(kept)), key=kept.__getitem__)
+    return [kept[i] for i in order], [kept_grids[i] for i in order]
 
 
-def _kept_rows(pulse_t: FloatArray, kept: list[int], store: ArrayStore | None) -> FloatArray:
-    """``pulse_t[kept]``, copied row by row into ``store`` when one is given."""
+def _kept_mu_rows(
+    pulse_trains: FloatArray, kept: list[int], store: ArrayStore | None
+) -> FloatArray:
+    """``pulse_trains[kept]``, copied row by row into ``store`` when one is given."""
     if store is None:
-        return pulse_t[kept]
-    out = store.allocate("pulse_trains", (len(kept), pulse_t.shape[1]), pulse_t.dtype)
+        return pulse_trains[kept]
+    out = store.allocate("pulse_trains", (len(kept), pulse_trains.shape[1]), pulse_trains.dtype)
     for i, row in enumerate(kept):
-        out[i] = pulse_t[row]
+        out[i] = pulse_trains[row]
     return store.seal(out)
 
 
 def remove_duplicates_by_grid(
-    pulse_t: FloatArray,
-    distime: list[IntArray],
+    pulse_trains: FloatArray,
+    spike_times: list[IntArray],
     mu_grid_index: list[int],
     ngrid: int,
     params: DecompositionParameters,
@@ -108,15 +114,15 @@ def remove_duplicates_by_grid(
 
     The kept pulse trains are indexed once, into ``store`` when one is given.
     """
-    if len(distime) == 0:
+    if len(spike_times) == 0:
         return np.array([]), [], [], []
 
     logger.info("Removing duplicates...")
     kept, kept_grids = dedup_survivors(
-        distime, mu_grid_index, ngrid, params, fsamp, pulse_t.shape[1]
+        spike_times, mu_grid_index, ngrid, params, fsamp, pulse_trains.shape[1]
     )
-    pulse_t_out = _kept_rows(pulse_t, kept, store) if kept else np.array([])
-    return pulse_t_out, [distime[idx] for idx in kept], kept_grids, kept
+    pulse_trains_out = _kept_mu_rows(pulse_trains, kept, store) if kept else np.array([])
+    return pulse_trains_out, [spike_times[idx] for idx in kept], kept_grids, kept
 
 
 def _reconstruct_window_signal(
@@ -142,7 +148,7 @@ def _reconstruct_window_signal(
     grid_block = prep.data[ch_offset : ch_offset + n_ch_grid, start:end]
     win_data_arr = grid_block[keep_idx, :]
 
-    ex_factor = int(round(params.nbextchan / win_data_arr.shape[0]))
+    ex_factor = extension_factor(params.nbextchan, win_data_arr.shape[0])
     trim = window_trim(win_data_arr.shape[1], prep.fsamp, params.edges_sec, ex_factor)
 
     e_sig = extend_signal(demean(win_data_arr), ex_factor, dtype=params.work_dtype)
@@ -165,12 +171,9 @@ def postprocess_step(
     """
     logger.info("Batch processing...")
     if progress_cb:
-        progress_cb(
-            "progress", {"message": "Batch processing filters", "pct": 92, "phase": "postprocess"}
-        )
+        progress_cb("progress", {"message": "Batch processing filters", "phase": "postprocess"})
 
     nwindows = len(prep.roi_list)
-    adaptive_losses: dict[int, Any] = {}
 
     def get_w_sig(nwin: int) -> FloatArray:
         return _reconstruct_window_signal(prep, params, nwin, decomposed.whiten_mat[nwin])
@@ -184,7 +187,7 @@ def postprocess_step(
         ch_idx_g += mask.size
 
     if params.use_adaptive:
-        pulse_t, distime, adaptive_losses = adaptive_batch_process(
+        pulse_trains, spike_times, _ = adaptive_batch_process(
             decomposed.mu_filters,
             decomposed.whiten_mat,
             grid_data,
@@ -203,11 +206,12 @@ def postprocess_step(
             spike_prev_weight=params.adapt_spike_prev_weight,
             artifact_mask=prep.artifact_mask,
             store=store,
+            work_dtype=params.work_dtype,
         )
     else:
         if params.full_trace:
             logger.info("Applying MU filters over the full trace (dewhitened).")
-        pulse_t, distime = batch_process_filters(
+        pulse_trains, spike_times = batch_process_filters(
             decomposed.mu_filters,
             get_w_sig,
             decomposed.coordinates_plateau,
@@ -222,10 +226,10 @@ def postprocess_step(
             work_dtype=params.work_dtype,
         )
 
-    pulse_all = pulse_t
-    pulse_t, distime, mu_grid_index, kept_global = remove_duplicates_by_grid(
-        pulse_all,
-        distime,
+    pulse_trains_all = pulse_trains
+    pulse_trains, spike_times, mu_grid_index, kept_global = remove_duplicates_by_grid(
+        pulse_trains_all,
+        spike_times,
         decomposed.mu_grid_index,
         prep.ngrid,
         params,
@@ -233,8 +237,8 @@ def postprocess_step(
         store=store,
     )
     if store is not None:
-        store.discard(pulse_all)
-    del pulse_all
+        store.discard(pulse_trains_all)
+    del pulse_trains_all
 
     mu_window_map: list[tuple[int, int]] = [
         (nwin, j)
@@ -253,32 +257,15 @@ def postprocess_step(
                 sil_by_window.setdefault(win, []).append(old_sil[local])
 
     if progress_cb:
-        progress_cb("progress", {"message": "Finalizing output", "pct": 97, "phase": "postprocess"})
+        progress_cb("progress", {"message": "Finalizing output", "phase": "postprocess"})
 
     return PostprocessStepOutput(
-        pulse_t=pulse_t,
-        distime=distime,
+        pulse_trains=pulse_trains,
+        spike_times=spike_times,
         mu_grid_index=mu_grid_index,
         sil_by_window=sil_by_window,
         sil=sil_flat,
-        adaptive_losses=adaptive_losses,
     )
-
-
-def _decomp_path(full_path: str, loader_meta: dict[str, Any]) -> Path:
-    """Where a run's ``.npz`` goes: MUedit's derivatives of a BIDS recording, else beside the input."""
-    emg_path, label = loader_meta.get("bids_emg_path"), loader_meta.get("bids_entity_label")
-    root = dataset_root(Path(emg_path).resolve()) if emg_path and label else None
-    if root is not None:
-        try:
-            folder = BidsEntities.parse(str(label)).derivative_dir(root, "decomp")
-        except ValueError:
-            pass  # a file in a sub- folder whose name is no BIDS label
-        else:
-            folder.mkdir(parents=True, exist_ok=True)
-            return folder / f"{label}_decomp.npz"
-    source = Path(full_path)
-    return source.with_name(source.stem + "_decomp.npz")
 
 
 def export_step(
@@ -293,38 +280,39 @@ def export_step(
 ) -> DecompositionResult:
     """Build the run's result and preview, and optionally save the ``.npz``, with ``raw_emg``."""
     if progress_cb:
-        progress_cb("progress", {"message": "Writing output", "pct": 98, "phase": "export"})
+        progress_cb("progress", {"message": "Writing output", "phase": "export"})
     preview = build_preview_payload(
         data=prep.data,
         fsamp=prep.fsamp,
-        pulse_t=post.pulse_t,
-        distime=post.distime,
+        pulse_trains=post.pulse_trains,
+        spike_times=post.spike_times,
         grid_names=prep.grid_names,
         roi_list=prep.roi_list,
         discard_channels=prep.discard_channels,
         coordinates=prep.coordinates,
         mu_grid_index=post.mu_grid_index,
         loader_meta=prep.loader_meta,
-        muscles=prep.muscles,
+        muscle_names=prep.muscle_names,
         include_full_preview=include_full_preview,
     )
     save_path = None
     if save_npz:
-        save_path = str(_decomp_path(loaded.full_path, prep.loader_meta))
+        path, in_dataset = run_decomp_path(loaded.full_path, prep.loader_meta)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        save_path = str(path)
         with_emg = raw_emg is not None
         save_decomposition_npz(
             save_path,
-            pulse_trains=post.pulse_t,
-            distimes=post.distime,
+            pulse_trains=post.pulse_trains,
+            spike_times=post.spike_times,
             fsamp=prep.fsamp,
             grid_names=prep.grid_names,
             mu_grid_index=post.mu_grid_index,
-            muscles=prep.muscles,
+            muscle_names=prep.muscle_names,
             parameters=asdict(params),
             total_samples=prep.data.shape[1],
             sil=post.sil,
             sil_by_window=post.sil_by_window,
-            adaptive_losses=post.adaptive_losses,
             rois=prep.roi_list,
             artifact_mask=prep.artifact_mask,
             emg_data=raw_emg,
@@ -333,18 +321,23 @@ def export_step(
             loader_meta=prep.loader_meta if with_emg else None,
             target_segments=prep.target_segments,
         )
+        if in_dataset:
+            # <root>/derivatives/muedit/sub-…/[ses-…/]decomp/<file>
+            deriv_root = next(p for p in path.parents if p.parent.name == "derivatives")
+            write_derivative_description(deriv_root)
         logger.info("Saved to %s", save_path)
 
     return DecompositionResult(
         fsamp=prep.fsamp,
         grid_names=prep.grid_names,
-        pulse_trains=post.pulse_t,
-        discharge_times=post.distime,
+        pulse_trains=post.pulse_trains,
+        spike_times=post.spike_times,
         mu_grid_index=post.mu_grid_index,
         sil=post.sil,
         discard_channels=prep.discard_channels,
         parameters=asdict(params),
         preview=preview,
-        adaptive_losses=post.adaptive_losses,
         save_path=save_path,
+        target_segments=prep.target_segments,
+        rois=prep.roi_list,
     )

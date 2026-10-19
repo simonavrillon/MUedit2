@@ -34,20 +34,20 @@ def abs_means(data: FloatArray, keep: BoolArray | None = None) -> tuple[FloatArr
 def build_preview_payload(
     data: FloatArray,
     fsamp: float,
-    pulse_t: FloatArray,
-    distime: list[IntArray],
+    pulse_trains: FloatArray,
+    spike_times: list[IntArray],
     grid_names: list[str],
     roi_list: list[tuple[int, int]],
     discard_channels: list[IntArray],
     coordinates: list[FloatArray],
     mu_grid_index: list[int],
     loader_meta: dict[str, Any],
-    muscles: list[str],
+    muscle_names: list[str],
     include_full_preview: bool,
 ) -> dict[str, Any]:
     """Build the preview payload of a finished run.
 
-    With ``include_full_preview``, ``pulse_trains_full`` is ``pulse_t`` itself: the server
+    With ``include_full_preview``, ``pulse_trains_full`` is ``pulse_trains`` itself: the server
     keeps it for ``/series/pulse`` and the run save, and never sends it. Series the frontend
     draws for the recording come from the upload's ``/series/*`` endpoints, not from here.
     """
@@ -60,14 +60,16 @@ def build_preview_payload(
 
     return {
         "fsamp": fsamp,
-        "distime_all": [np.asarray(d, dtype=np.int32) for d in distime],
+        "spike_times": [np.asarray(d, dtype=np.int32) for d in spike_times],
         "total_samples": data.shape[1],
         "grid_names": grid_names,
         "rois": roi_list,
-        "pulse_trains_full": pulse_t if include_full_preview and pulse_t.size > 0 else None,
+        "pulse_trains_full": pulse_trains
+        if include_full_preview and pulse_trains.size > 0
+        else None,
         "mu_grid_index": mu_grid_index,
         "metadata": loader_meta,
-        "muscle": muscles,
+        "muscle_names": muscle_names,
         "channel_means": channel_means,
         "coordinates": [c.tolist() if hasattr(c, "tolist") else c for c in coordinates],
     }

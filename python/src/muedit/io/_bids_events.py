@@ -88,10 +88,10 @@ def _trigger_channels(channels_tsv: Path) -> list[tuple[int, str]]:
     if not channels_tsv.exists():
         return []
     _, rows = read_tsv(channels_tsv)
-    aux = [row for row in rows if not is_grid_row(row)]
+    aux_rows = [row for row in rows if not is_grid_row(row)]
     return [
         (i, (row.get("name") or "").strip())
-        for i, row in enumerate(aux)
+        for i, row in enumerate(aux_rows)
         if (row.get("type") or "").strip().upper() == "TRIG"
     ]
 
@@ -103,19 +103,19 @@ def _line_number(name: str, fallback: int) -> str:
 
 
 def _trigger_rows(
-    aux: np.ndarray, channels: list[tuple[int, str]], fsamp: float
+    aux_data: np.ndarray, channels: list[tuple[int, str]], fsamp: float
 ) -> tuple[list[dict[str, str]], list[str]]:
     """One row per pulse of each trigger channel, and the channels left out as clocks."""
     rows: list[dict[str, str]] = []
     clocks: list[str] = []
-    if aux.ndim != 2:
+    if aux_data.ndim != 2:
         return rows, clocks
-    n_samples = aux.shape[1]
+    n_samples = aux_data.shape[1]
     seconds = n_samples / fsamp if fsamp > 0 else 0.0
     for row, name in channels:
-        if row >= aux.shape[0] or seconds <= 0:
+        if row >= aux_data.shape[0] or seconds <= 0:
             continue
-        high = np.asarray(aux[row]) > 0.5
+        high = np.asarray(aux_data[row]) > 0.5
         edges = np.diff(high.astype(np.int8), prepend=np.int8(0), append=np.int8(0))
         starts, stops = np.flatnonzero(edges == 1), np.flatnonzero(edges == -1)
         if starts.size / seconds > MAX_TRIGGER_RATE_HZ:

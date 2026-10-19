@@ -9,9 +9,9 @@ from typing import Any
 import numpy as np
 import pytest
 
-from muedit.adapt_decomp.adaptation import AdaptiveDecomp
+from muedit.adapt_decomp.adaptation import AdaptiveDecomp, drop_partial_batch_loss
 from muedit.adapt_decomp.config import Config
-from muedit.decomp import algorithm
+from muedit.decomp import adaptive_batch, algorithm
 from muedit.decomp.algorithm import (
     column_energy,
     covariance,
@@ -169,7 +169,7 @@ def test_window_without_edges_drops_the_zero_padded_columns() -> None:
         nbextchan=64 * ex, edges_sec=0.0, niter=1, compute_dtype="float64"
     )
     prep = PreprocessStepOutput(
-        signal=SignalImport(data=np.zeros((0, 0)), fsamp=2000.0, gridname=["GR08MM1305"]),
+        signal=SignalImport(data=np.zeros((0, 0)), fsamp=2000.0, grid_names=["GR08MM1305"]),
         data=data,
         fsamp=2000.0,
         grid_names=["GR08MM1305"],
@@ -177,7 +177,7 @@ def test_window_without_edges_drops_the_zero_padded_columns() -> None:
         ied=[8.0],
         discard_channels=[np.zeros(64, dtype=int)],
         declared_discard_channels=[np.zeros(64, dtype=int)],
-        muscles=[],
+        muscle_names=[],
         loader_meta={},
         roi_list=[(start, end)],
         ngrid=1,
@@ -217,21 +217,23 @@ def test_backward_pass_reads_complete_lookback(raw: np.ndarray) -> None:
     emg, state, config = _adaptive_setup(raw, adapt_wh=False, adapt_sv=False, adapt_sd=False)
     model = AdaptiveDecomp(emg=emg, config=config, **state)
     starts: list[int] = []
-    ipts = np.full((len(emg), model.n_motor_units), np.nan, dtype=np.float32)
+    pulse_trains = np.full((len(emg), model.n_motor_units), np.nan, dtype=np.float32)
 
     def sink(start: int, batch: np.ndarray, _spikes: np.ndarray) -> None:
         starts.append(start)
-        ipts[start : start + len(batch)] = batch
+        pulse_trains[start : start + len(batch)] = batch
 
     stop = 2345  # not a multiple of the batch size: the partial batch is processed last
     model.run(0, stop, reverse=True, sink=sink)
 
     assert starts == sorted(starts, reverse=True)
     assert starts[-1] == EX - 1, "the recording start is never processed"
-    assert np.isnan(ipts[: EX - 1]).all() and np.isnan(ipts[stop:]).all()
+    assert np.isnan(pulse_trains[: EX - 1]).all() and np.isnan(pulse_trains[stop:]).all()
     ext = extend_signal(emg, EX, samples_first=True)
     want = (model.sep_vectors @ (model.whitening @ ext[EX - 1 : stop].T)).T
-    np.testing.assert_allclose(ipts[EX - 1 : stop], want, rtol=1e-4, atol=1e-5 * np.abs(want).max())
+    np.testing.assert_allclose(
+        pulse_trains[EX - 1 : stop], want, rtol=1e-4, atol=1e-5 * np.abs(want).max()
+    )
 
 
 # ── Filters and previews by channel block ───────────────────────────────────
@@ -282,7 +284,7 @@ def synthetic_signal() -> SignalImport:
     """One float32 64-channel recording, as loaders now return it."""
     emg = motor_unit_emg(seed=5, n_samples=40_000, fsamp=FSAMP, activity=_STORE_ROI)
     return SignalImport(
-        data=emg.astype(np.float32), fsamp=FSAMP, gridname=["GR08MM1305"], muscle=["ta"]
+        data=emg.astype(np.float32), fsamp=FSAMP, grid_names=["GR08MM1305"], muscle_names=["ta"]
     )
 
 
@@ -340,15 +342,15 @@ def test_pulse_trains_in_the_store_match_the_heap(store_prep: dict, mode: Postpr
         progress_cb=None,
         store=store,
     )
-    assert len(heap.distime) > 0
-    np.testing.assert_array_equal(stored.pulse_t, heap.pulse_t)
-    assert stored.pulse_t.dtype == np.float32
-    assert len(stored.distime) == len(heap.distime)
-    for got, want in zip(stored.distime, heap.distime, strict=True):
+    assert len(heap.spike_times) > 0
+    np.testing.assert_array_equal(stored.pulse_trains, heap.pulse_trains)
+    assert stored.pulse_trains.dtype == np.float32
+    assert len(stored.spike_times) == len(heap.spike_times)
+    for got, want in zip(stored.spike_times, heap.spike_times, strict=True):
         np.testing.assert_array_equal(got, want)
     assert stored.mu_grid_index == heap.mu_grid_index
-    assert resident_nbytes(stored.pulse_t) == 0
-    assert MAPPED_FILES_STAY or "pulse_all" not in _store_files(store)
+    assert resident_nbytes(stored.pulse_trains) == 0
+    assert MAPPED_FILES_STAY or "pulse_trains_all" not in _store_files(store)
 
 
 def test_run_in_a_store_matches_the_heap_run(
@@ -369,7 +371,7 @@ def test_run_in_a_store_matches_the_heap_run(
     store = SessionStore.create("run")
     stored = run(store)
     np.testing.assert_array_equal(stored.pulse_trains, heap.pulse_trains)
-    for got, want in zip(stored.discharge_times, heap.discharge_times, strict=True):
+    for got, want in zip(stored.spike_times, heap.spike_times, strict=True):
         np.testing.assert_array_equal(got, want)
     assert resident_nbytes(stored.preview["pulse_trains_full"]) == 0
     # Only the kept pulse trains outlive the run: the filtered EMG and the
@@ -410,3 +412,51 @@ def test_backward_pass_starts_from_the_calibration_centroids(raw: np.ndarray) ->
     bwd = AdaptiveDecomp(emg=source(), emg_calib=fwd.calibration, config=config, **common)
     np.testing.assert_array_equal(bwd.base_centr, fitted[0])
     np.testing.assert_array_equal(bwd.spikes_centr, fitted[1])
+
+
+@pytest.mark.parametrize("dtype", [np.float32, np.float64])
+def test_adaptive_route_computes_in_the_work_dtype(
+    raw: np.ndarray, dtype: type[np.floating[Any]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``compute_dtype`` reaches the adaptive state and the extended signal it reads."""
+    whitening, filters, win_mean = _calibration_case(raw)
+    seen: list[tuple[np.dtype[Any], ...]] = []
+
+    class Spy(AdaptiveDecomp):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            super().__init__(*args, **kwargs)
+            seen.append((self.whitening.dtype, self.sep_vectors.dtype, self.source.dtype))
+
+    monkeypatch.setattr(adaptive_batch, "AdaptiveDecomp", Spy)
+    adaptive_batch.adaptive_batch_process(
+        {0: filters},
+        {0: whitening},
+        {0: raw},
+        [200, 2600],
+        raw.shape[1],
+        2000,
+        1,
+        {0: win_mean},
+        batch_ms=50,
+        work_dtype=dtype,
+    )
+    assert len(seen) == 2  # forward and backward passes
+    assert all(dtypes == (np.dtype(dtype),) * 3 for dtypes in seen)
+
+
+@pytest.mark.parametrize("compute_loss", [False, True])
+def test_calibration_loss_baselines_exist_only_with_compute_loss(
+    raw: np.ndarray, compute_loss: bool
+) -> None:
+    emg, state, config = _adaptive_setup(raw, compute_loss=compute_loss)
+    calibration = AdaptiveDecomp(emg=emg, config=config, **state).calibration
+    fitted = (calibration.contrast_calib_mean, calibration.contrast_calib_std)
+    assert all((value is not None) == compute_loss for value in fitted)
+
+
+@pytest.mark.parametrize(("n_samples", "kept"), [(250, 2), (300, 3)], ids=["partial", "whole"])
+def test_partial_batch_has_no_loss(n_samples: int, kept: int) -> None:
+    losses = {"wh_loss": np.arange(3.0), "sv_loss": np.ones((3, 2))}
+    trimmed = drop_partial_batch_loss(losses, n_samples, batch_size=100)
+    assert [len(v) for v in trimmed.values()] == [kept, kept]
+    assert drop_partial_batch_loss({}, n_samples, batch_size=100) == {}

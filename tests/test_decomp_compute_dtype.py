@@ -139,5 +139,5 @@ def test_single_mu_adaptive_separation_ignores_stale_output_memory() -> None:
     for _ in range(20):
         stale = np.full((1, n), np.nan, dtype=np.float32)
         del stale
-        ipts = model._separate(whitened)
-        assert ipts.shape == (n, 1) and np.isfinite(ipts).all()
+        pulse_trains = model._separate(whitened)
+        assert pulse_trains.shape == (n, 1) and np.isfinite(pulse_trains).all()

@@ -7,11 +7,29 @@ from numpy.typing import DTypeLike
 from scipy.cluster.vq import ClusterError, kmeans2
 from scipy.signal import find_peaks
 
-from muedit.models import FloatArray, IntArray
+from muedit.models import BoolArray, FloatArray, IntArray
 
 KMEANS_ITER: int = 10
 DECOMP_MIN_ISI_SEC: float = 0.02
 POSTPROC_MIN_ISI_SEC: float = 0.005
+
+
+def extend_signal_mask(mask: BoolArray, exfactor: int) -> BoolArray:
+    """Mask of ``extend_signal``'s ``n + exfactor - 1`` channels-first columns, padded tail included.
+
+    Column ``t`` is masked if any of samples ``t - exfactor + 1 .. t`` is; ``streaming.extend_mask``
+    is the same rule over the first ``n`` columns, for samples-first streams.
+    """
+    n = mask.size
+    out = np.zeros(n + exfactor - 1, dtype=bool)
+    for m in range(exfactor):
+        out[m : m + n] |= mask
+    return out
+
+
+def extension_factor(nbextchan: int, n_channels: int) -> int:
+    """Delays per channel that bring ``n_channels`` closest to ``nbextchan`` extended channels."""
+    return max(1, int(round(nbextchan / max(n_channels, 1))))
 
 
 def extend_signal(

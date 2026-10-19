@@ -62,7 +62,7 @@ describe("edit commands", () => {
   });
 
   test("an edit's key shows its button busy while it runs", async () => {
-    app.state.edit.distimes = [Int32Array.from([1, 5, 9, 13])];
+    app.state.edit.spikeTimes = [Int32Array.from([1, 5, 9, 13])];
     app.state.edit.token = "tok";
     /** @type {(value: unknown) => void} */
     let answer = () => {};
@@ -81,7 +81,7 @@ describe("edit commands", () => {
   });
 
   test("a second edit waits for the first to finish", async () => {
-    app.state.edit.distimes = [Int32Array.from([1, 5, 9, 13])];
+    app.state.edit.spikeTimes = [Int32Array.from([1, 5, 9, 13])];
     app.state.edit.token = "tok";
     app.state.edit.totalSamples = 20;
     /** @type {(value: unknown) => void} */
@@ -134,7 +134,7 @@ describe("edit commands", () => {
   });
 
   test("arrow keys still zoom the view", () => {
-    app.state.edit.distimes = [Int32Array.from([1])];
+    app.state.edit.spikeTimes = [Int32Array.from([1])];
     app.state.edit.totalSamples = 1000;
     press("ArrowUp");
     assert.deepEqual(app.state.edit.view, { start: 100, end: 900 });

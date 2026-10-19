@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import re
+from pathlib import Path
 from typing import Any, get_args
 
 import pytest
 from pydantic import ValidationError
 
 from muedit.api.schemas import DecomposePayload
+from muedit.cli import run_decomposition_cli
 from muedit.decomp.types import ContrastFunc, DecompositionParameters
 
 
@@ -27,9 +30,14 @@ def test_unknown_contrast_func_rejected() -> None:
 
 
 def test_frontend_values_are_coerced() -> None:
-    params = _payload(niter=5, covfilter=1, initialization=0, unknown_key=3).params
+    params = _payload(niter=5, covfilter=1, random_init=0).params
     assert isinstance(params, DecompositionParameters)
-    assert (params.niter, params.covfilter, params.initialization) == (5, True, False)
+    assert (params.niter, params.covfilter, params.random_init) == (5, True, False)
+
+
+def test_unknown_params_rejected() -> None:
+    with pytest.raises(ValidationError, match="unknown parameters: initialization, nitre"):
+        _payload(nitre=5, initialization=0)
 
 
 def test_missing_params_are_the_defaults() -> None:
@@ -38,10 +46,55 @@ def test_missing_params_are_the_defaults() -> None:
 
 
 @pytest.mark.parametrize(
-    "params",
-    [{"adapt_batch_ms": 0}, {"use_adaptive": True, "edges_sec": 0.05, "adapt_batch_ms": 100}],
-    ids=["non-positive", "longer-than-edges"],
+    ("params", "field"),
+    [
+        ({"niter": 0}, "niter"),
+        ({"nwindows": 0}, "nwindows"),
+        ({"peel_off_win": 0}, "peel_off_win"),
+        ({"adapt_batch_ms": 0}, "adapt_batch_ms"),
+        ({"use_adaptive": True, "edges_sec": 0.05, "adapt_batch_ms": 100}, "adapt_batch_ms"),
+        ({"adapt_wh_learning_rate": -1e-3}, "adapt_wh_learning_rate"),
+        ({"adapt_sv_learning_rate": 0}, "adapt_sv_learning_rate"),
+        ({"adapt_cov_alpha": 0}, "adapt_cov_alpha"),
+        ({"adapt_cov_alpha": 1.5}, "adapt_cov_alpha"),
+        ({"adapt_spike_prev_weight": -1}, "adapt_spike_prev_weight"),
+    ],
 )
-def test_adaptive_batch_must_fit(params: dict[str, Any]) -> None:
-    with pytest.raises(ValidationError, match="adapt_batch_ms"):
+def test_out_of_range_params_rejected(params: dict[str, Any], field: str) -> None:
+    with pytest.raises(ValidationError, match=field) as exc_info:
         _payload(**params)
+    assert exc_info.value.errors()[0]["loc"] == ("params",)
+
+
+def test_cli_reports_a_file_it_cannot_load_without_a_traceback(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    notes = tmp_path / "notes.txt"
+    notes.write_text("not a recording")
+    with pytest.raises(SystemExit) as exited:
+        run_decomposition_cli([str(notes)])
+    assert exited.value.code == 1
+    err = capsys.readouterr().err
+    assert err.startswith("muedit: Unsupported file format: .txt")
+    assert "Traceback" not in err
+
+
+def test_cli_rejects_through_the_same_checks(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit):
+        run_decomposition_cli(["--niter", "0"])
+    assert "niter must be >= 1" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("span", "message"),
+    [
+        ({"start": 5, "end": 5}, "end (5) must be greater than start (5)"),
+        ({"start": 9, "end": 2}, "end (2) must be greater than start (9)"),
+        ({"start": -1, "end": 2}, "greater than or equal to 0"),
+    ],
+    ids=["empty", "reversed", "negative"],
+)
+def test_a_window_must_hold_samples(span: dict[str, int], message: str) -> None:
+    with pytest.raises(ValidationError, match=re.escape(message)) as exc_info:
+        DecomposePayload.model_validate({"upload_token": "t", "rois": [span]})
+    assert exc_info.value.errors()[0]["loc"][:2] == ("rois", 0)

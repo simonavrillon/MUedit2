@@ -96,7 +96,7 @@ does not load SciPy.
 | `muedit.decomp` | `DecompositionParameters`, `DecompositionResult`, `run_decomposition` |
 | `muedit.io` | `LoaderFn`, `get_loader`, `load_signal`, `register_loader`, `supported_extensions` |
 | `muedit.signal` | `bandpass_signals`, `demean`, `format_hdemg_signal`, `notch_signals`, `run_auto_qc`, `QCPipelineResult` |
-| `muedit.editing` | `FilterUpdateResult`, `SpikeTimes`, `add_artifact_in_roi`, `add_spikes_in_roi`, `delete_artifacts_in_roi`, `delete_high_discharge_rate_spikes_in_roi`, `delete_spikes_in_roi`, `remove_discharge_rate_outliers`, `update_motor_unit_filter_window` |
+| `muedit.editing` | `FilterUpdateResult`, `SpikeTimes`, `add_spikes_in_roi`, `delete_spikes_in_roi`, `remove_discharge_rate_outliers`, `update_motor_unit_filter_window` |
 | `muedit.adapt_decomp` | `AdaptiveDecomp`, `Config`, `run_adaptive_decomposition` |
 | `muedit.api` | (none — empty, just a package marker) |
 
@@ -124,13 +124,13 @@ it, and it is passed as-is through the pipeline and the upload cache.
 |---|---|---|
 | `data` | `FloatArray` | (required) |
 | `fsamp` | `float` | (required) |
-| `gridname` | `list[str]` | `[]` |
-| `muscle` | `list[str]` | `[]` |
-| `auxiliary` | `FloatArray` | `np.zeros((0, 0))` |
-| `auxiliaryname` | `list[str]` | `[]` |
+| `grid_names` | `list[str]` | `[]` |
+| `muscle_names` | `list[str]` | `[]` |
+| `aux_data` | `FloatArray` | `np.zeros((0, 0))` |
+| `aux_names` | `list[str]` | `[]` |
 | `metadata` | `dict[str, Any]` | `{}` |
 
-Methods: `from_mapping(payload)` (normalizes loader dicts), `clone()`, `to_dict()`, `nbytes` (property)
+Methods: `clone()`, `readonly_view()`, `without_data()`, `nbytes` (property)
 
 ### `EditSignalContext`
 EMG embedded in a decomposition file (`.mat`/`.npz`), built by
@@ -153,17 +153,17 @@ session deletes.
 | `loader_meta` | `dict[str, Any]` | `{}` (the `LOADER_BIDS_META_KEYS` the file recorded) |
 | `prefiltered` | `bool` | `False`; `True` for a schema v1 `.npz`, whose EMG is notch- and bandpass-filtered: the filter update skips its bandpass and the BIDS export skips it |
 
-Methods: `readonly_view()` (shares arrays read-only), `nbytes` (property; memory-mapped EMG/aux count 0)
+Methods: `nbytes` (property; memory-mapped EMG/aux count 0)
 
 ### `LoadedDecomposition`
 Decomposition state loaded from `.npz`/`.mat` for editing. Returned by `load_decomposition()`
-(or `load_decomposition_file()` without the EMG); `open_edit_session` builds the
+(`with_signal=False` skips the EMG); `open_edit_session` builds the
 `EditSession` from it.
 
 | Field | Type | Default |
 |---|---|---|
 | `pulse_trains_full` | `FloatArray` `(n_mu, total_samples)` | empty `(0, 0)` |
-| `distime_all` | `list[IntArray]` (one `spike_array` per MU) | `[]` |
+| `spike_times` | `list[IntArray]` (one `spike_array` per MU) | `[]` |
 | `fsamp` | `float | None` | `None` |
 | `grid_names` | `list[str]` | `[]` |
 | `total_samples` | `int` | `0` |
@@ -232,13 +232,12 @@ Decomposition state loaded from `.npz`/`.mat` for editing. Returned by `load_dec
 | Component | Responsibility |
 |---|---|
 | `factory.py` | Loader registry, dispatch by extension, `load_signal()` |
-| `loaders.py` | Thin re-export of all 6 format loaders |
 | `bids.py` | BIDS EMG export (EDF/BDF + sidecars + derivatives) |
 | `_bids_reader.py` | BIDS EMG reading via pyedflib + channels.tsv |
 | `_bids_layout.py` | `BidsEntities`: BIDS file names, folders and dataset root |
 | `_intan.py` | Intan RHD loader (3 save layouts: traditional, per-channel, per-signal-type) |
 | `_openephys.py` | Open Ephys binary-format loader (`structure.oebin` + `continuous.dat`) |
-| `mat.py` | MATLAB .mat v5 (scipy) + v7.3 (h5py/HDF5) loader |
+| `_mat.py` | MATLAB .mat v5 (scipy) + v7.3 (h5py/HDF5) loader |
 | `_otb.py` | OT Bioelettronica OTB+ and OTB4 archive loaders |
 | `npz.py` | `NpzWriter` (aligned, uncompressed, written row block by row block), `NpzArchive` (one open, members memory-mapped), the restricted unpickler for legacy files |
 
@@ -250,7 +249,7 @@ Decomposition state loaded from `.npz`/`.mat` for editing. Returned by `load_dec
 | `downsample.py` | `moving_average_ms()` |
 | `pyramid.py` | `MinMaxPyramid` (min/max levels at bins of 16, 64, 256, … samples) and `view()`, the envelope of any window |
 | `streaming.py` | `StreamedExtender`: the extended signal read batch by batch instead of whole |
-| `decomp_primitives.py` | `extend_signal()`, `signed_square()`, `find_refractory_peaks()`, `split_by_amplitude()`, `isi_cov()` |
+| `decomp_primitives.py` | `extend_signal()`, `extension_factor()`, `extend_signal_mask()`, `signed_square()`, `find_refractory_peaks()`, `split_by_amplitude()`, `isi_cov()` |
 | `grid.py` | `GridSpec` catalog, `format_hdemg_signal()`, `get_grid_electrode_metadata()` |
 | `channel_qc.py` | Bad-channel detection (6 criteria: flat, saturated, noisy, low-SNR, intermittent, contact-loss) |
 | `artifact_mask.py` | Artifact region detection (two-stage robust amplitude detector with local baseline) |

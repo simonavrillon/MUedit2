@@ -156,14 +156,13 @@ describe("run stream handling", () => {
     const app = testApp();
     app.handleStreamMessage({
       stage: "done",
-      pct: 100,
       summary: { mu_count: 2, grid_names: ["A"], sil: [0.9, 0.92] },
       preview: {
         run_result_token: "run-1",
         mu_grid_index: [0, 0],
         total_samples: 10,
         rois: [],
-        muscle: [],
+        muscle_names: [],
         channel_means: [[1, 2]],
       },
     });
@@ -178,24 +177,23 @@ describe("run stream handling", () => {
   test("the done event leaves the recording and the session form as they are", () => {
     const app = testApp();
     Object.assign(app.state, {
-      muscle: ["tibialis anterior"],
+      muscleNames: ["tibialis anterior"],
       channelMeans: [[3, 4]],
       rois: [{ start: 2, end: 8 }],
     });
     const channelMeans = app.state.channelMeans;
     app.handleStreamMessage({
       stage: "done",
-      pct: 100,
       summary: { mu_count: 1, grid_names: ["A"], sil: [0.9] },
       preview: {
         run_result_token: "run-1",
         mu_grid_index: [0],
-        muscle: [],
+        muscle_names: [],
         channel_means: [[1, 2]],
         rois: [[0, 10]],
       },
     });
-    assert.deepEqual(app.state.muscle, ["tibialis anterior"]);
+    assert.deepEqual(app.state.muscleNames, ["tibialis anterior"]);
     assert.equal(app.state.channelMeans, channelMeans);
     assert.deepEqual(app.state.rois, [{ start: 2, end: 8 }]);
     assert.equal(app.renderBidsMuscleFields.calls.length, 0);

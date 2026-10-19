@@ -85,8 +85,8 @@ Response: {
     device_name?, bad_channels_per_grid?,
     manufacturer?, ...
   },
-  muscle: string[],
-  auxiliary_names: string[],
+  muscle_names: string[],
+  aux_names: string[],
   fsamp: number,
   participant_meta?: { age?, sex?, handedness? },
   ...
@@ -126,7 +126,7 @@ Request body (buildRunPayload):
   full_preview: true
 
 Response: NDJSON stream (one JSON object per line):
-  { pct: number, message: string, stage?: string,
+  { message: string, stage?: string,
     phase?: "load" | "preprocess" | "decompose" | "postprocess" | "export",
     grid?, ngrid?, window?, nwindows?, niter?,       // decompose search position
     iter?, outcomes?, window_done? }                 // outcomes: one letter per
@@ -135,12 +135,12 @@ Response: NDJSON stream (one JSON object per line):
                                                       //   f too few spikes)
   { stage: "done",                                    // the run's result, in one event
     preview: { run_result_token?, mu_grid_index },   // the token when units were kept
-    summary: { mu_count, grid_names, sil, parameters } }
+    summary: { mu_count, grid_names, parameters, save_path } }
   { stage: "error", message: string, detail?: string }
   { stage: "cancelled", message: string }   (after /decompose/cancel, a disconnect or tab close)
 
 The preview carries nothing of the recording the page already shows, and
-neither `pulse_trains_full` nor `distime_all`: both stay on the server under
+neither `pulse_trains_full` nor `spike_times`: both stay on the server under
 `run_result_token` (see `/edit/save`). A second run while one
 is active gets HTTP 409 before any stream starts.
 ```
@@ -169,19 +169,22 @@ and `artifacts` are `Int32Array` rows cut from CSR arrays.
 
 ```
 Every frame's meta carries the per-MU fields:
-  n_mu, mu_uids, mu_grid_index, flagged, versions, has_pulse, dirty, can_undo
+  n_mu, mu_uids, mu_grid_index, flagged, versions, has_pulse, dirty, can_undo,
+  crash_recovery (false: the status after each edit warns that a crash would lose
+  unsaved edits — withRecoveryNote)
 
 State frame (open, state, recover) — setEditSession(state, frame):
   meta: token, file_label, source_path, fsamp, total_samples, grid_names, rois,
         parameters, muscle, sil, project?, BIDS sidecar fields,
-        edit_history, recoverable_edits, recovered_edits? (recover)
+        edit_history (the log's tail), edit_history_start (its first entry's index),
+        recoverable_edits, recovered_edits? (recover)
   rows: every MU's spikes and artifacts
 
 Change frame (ops) — applyEditChange(state, frame):
   meta: changed (MU indices), history_start, history, kept_indices?
         (MUs were removed or reordered), removed_count?, fsamp?, undone?
   rows: spikes and artifacts of the `changed` MUs only
-  The client cuts editHistory at history_start and appends history.
+  The client cuts editHistory at history_start (less editHistoryStart) and appends history.
 ```
 
 ### POST /edit/session/open
@@ -212,8 +215,8 @@ Response: change frame
 ```
 Request: withBidsSaveFields({ token, muscle, entity_label, file_label, software_versions })
          plus the session form's fields (project, participant_meta, powerline_freq, …)
-Response: { saved, path, kept_indices, mu_uids, edit_history,
-            bids_emg_paths?, bids_deriv_paths?, …per-MU fields }
+Response: { saved, path, kept_indices, mu_uids, edit_history, edit_history_start,
+            bids_emg_paths?, bids_emg_error?, bids_deriv_paths?, bids_warnings?, …per-MU fields }
           applyEditSave mirrors the saved file: flagged and duplicate MUs are gone.
 ```
 
@@ -222,7 +225,7 @@ Response: { saved, path, kept_indices, mu_uids, edit_history,
 ```
 Request: {
   run_result_token: string,     // the run's pulse trains and discharge times stay on the server
-  distimes?: number[][],        // only when there is no token
+  spike_times?: number[][],        // only when there is no token
   total_samples: number,
   fsamp: number,
   grid_names: string[],
@@ -233,7 +236,8 @@ Request: {
   file_label: string,
   ...BIDS form fields (withBidsSaveFields)
 }
-Response: { saved, path, kept_indices, mu_uids, edit_history, bids_emg_paths?, bids_deriv_paths? }
+Response: { saved, path, kept_indices, mu_uids, edit_history, bids_emg_paths?, bids_emg_error?,
+            bids_deriv_paths?, bids_warnings? }
           400 (field: run_result_token) when the server no longer holds the run
 ```
 
@@ -247,18 +251,19 @@ Built by `buildDecomposeParams()` in `decomp/params.js`:
 |---|---|---|---|
 | `niter` | `raw.niter` | `#niter` | Iteration count (default 150) |
 | `nwindows` | `raw.nwindows` | `#nwindows` | Number of analysis windows (default 1) |
-| `nbextchan` | `1000` | hardcoded | Extension channels |
 | `duplicatesthresh` | `raw.duplicatesthresh` | `#duplicatesthresh` | Duplicate threshold (default 0.3) |
 | `sil_thr` | `raw.silVal` | `#silValue` | SIL threshold (default 0.9) |
 | `cov_thr` | `raw.covVal` | `#covValue` | CoV threshold (default 0.5) |
 | `covfilter` | `raw.covOn ? 1 : 0` | `#covToggle` | CoV filter on/off |
-| `contrast_func` | `"skew"` | hardcoded | Contrast function |
-| `initialization` | `0` | hardcoded | Init mode |
 | `peel_off_enabled` | `raw.peelOn ? 1 : 0` | `#peelOffToggle` | Peel-off toggle |
 | `peel_off_win` | `raw.peelWindow / 1000` | `#peelOffWindow` | Peel-off window (ms -> s) |
 | `use_adaptive` | 0/1 | `#postprocessMode` | From postprocess mode flags |
 | `full_trace` | 0/1 | `#postprocessMode` | From postprocess mode flags |
-| `auto_mask_artifacts` | `0` | hardcoded | Auto-QC runs only on demand via `POST /qc/auto` |
+
+Parameters without a control (`nbextchan`, `contrast_func`, `random_init`,
+`auto_mask_artifacts` — the app's auto-QC runs on demand via `POST /qc/auto` — and the adaptive
+tuning) are not sent: the backend's defaults apply. An
+unknown key is a 422.
 
 ### Post-processing Mode Flags
 
@@ -299,11 +304,11 @@ the tests build their input with `encodeFrame` in `tests/frames.js`.
 
 `apiFetch` throws an `ApiError` for a response that is not ok. `parseApiError` builds it from
 the error envelope:
-- `message`: `error.message`, followed by `detail` as a string, as the first Pydantic
-  validation error of a list, or as an object's `field` and `reason`
+- `message`: `error.message`; for a 422, followed by the first Pydantic validation error of
+  its `detail` list (`loc` and `msg`). Every other error carries its whole text in `message`.
 - `status`: the HTTP status
-- `code`: `error.code` (`http_400`, …)
-- `field`: `detail.field` when the detail is an object, e.g. `upload_token`
+- `code`: `error.code` (`http_400`, `validation_error`, …)
+- `field`: `detail.field` when the server names the request field at fault, e.g. `upload_token`
 
 A request that outlasts its timeout is aborted and throws `RequestTimeout` ("Request timed out"); the server may still carry it out. `requestEditOp` reloads the edit session's state when an edit times out.
 

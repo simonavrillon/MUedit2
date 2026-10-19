@@ -11,8 +11,8 @@
  *   channel_means: number[][],
  *   coordinates: number[][][],
  *   metadata: JsonObject,
- *   muscle: string[],
- *   auxiliary_names: string[],
+ *   muscle_names: string[],
+ *   aux_names: string[],
  *   total_samples: number,
  * }} PreviewPayload
  */
@@ -94,10 +94,16 @@ export function normalizePreviewPayload(payload) {
       source.metadata && typeof source.metadata === "object"
         ? source.metadata
         : {},
-    muscle: Array.isArray(source.muscle) ? source.muscle : [],
-    auxiliary_names: Array.isArray(source.auxiliary_names)
-      ? source.auxiliary_names
-      : [],
+    muscle_names: Array.isArray(source.muscle_names)
+      ? source.muscle_names
+      : Array.isArray(source.muscle)
+        ? source.muscle
+        : [],
+    aux_names: Array.isArray(source.aux_names)
+      ? source.aux_names
+      : Array.isArray(source.auxiliary_names)
+        ? source.auxiliary_names
+        : [],
     total_samples: toFiniteNumber(source.total_samples, 0),
   };
 }

@@ -11,7 +11,7 @@ from muedit.decomp.pipeline import run_decomposition
 from muedit.decomp.types import DecompositionParameters, DecompositionResult
 from muedit.models import SignalImport
 from muedit.signal.decomp_primitives import POSTPROC_MIN_ISI_SEC
-from tests._metrics_helpers import central_roi, discharge_times
+from tests._metrics_helpers import central_roi, spike_times
 
 # Keep the per-iteration budget modest so the real-data run finishes in well
 # under a minute while still exercising the full FastICA + CoV-ISI + peel-off
@@ -55,27 +55,27 @@ class TestDecompositionStructure:
 
     def test_counts_are_consistent(self, decomp_results: DecompositionResult) -> None:
         result = decomp_results
-        dt = discharge_times(result)
-        pulse_t = result.pulse_trains
+        dt = spike_times(result)
+        pulse_trains = result.pulse_trains
         sil = result.sil
         grid_idx = result.mu_grid_index
 
         n_mu = len(dt)
         assert n_mu > 0, "pipeline produced zero motor units"
-        assert pulse_t.shape[0] == n_mu
+        assert pulse_trains.shape[0] == n_mu
         assert len(sil) == n_mu
         assert len(grid_idx) == n_mu
 
     def test_pulse_trains_match_signal_length(
         self, decomp_results: DecompositionResult, novecento_emg: SignalImport
     ) -> None:
-        pulse_t = decomp_results.pulse_trains
+        pulse_trains = decomp_results.pulse_trains
         data = novecento_emg.data
-        assert pulse_t.ndim == 2
+        assert pulse_trains.ndim == 2
         # Pulse trains span the full signal; the ``roi`` argument only selects
         # the ROI window that gets *filled* with non-zero activity.
-        assert pulse_t.shape[1] == data.shape[1]
-        assert np.isfinite(pulse_t).all()
+        assert pulse_trains.shape[1] == data.shape[1]
+        assert np.isfinite(pulse_trains).all()
 
 
 # ── FastICA + min-CoV-ISI quality of detected motor units ────────────────────
@@ -85,7 +85,7 @@ class TestMotorUnitQuality:
     """Assert the separators the pipeline accepted are genuinely motor units."""
 
     def test_finds_multiple_motor_units(self, decomp_results: DecompositionResult) -> None:
-        dt = discharge_times(decomp_results)
+        dt = spike_times(decomp_results)
         assert len(dt) >= _MIN_MU_COUNT, f"expected >= {_MIN_MU_COUNT} motor units, got {len(dt)}"
 
     def test_sil_above_acceptance_threshold(self, decomp_results: DecompositionResult) -> None:
@@ -95,7 +95,7 @@ class TestMotorUnitQuality:
         assert sil, "no SIL scores returned"
         assert min(sil) >= sil_thr, f"min SIL {min(sil):.3f} below acceptance threshold {sil_thr}"
 
-    def test_discharge_times_respect_refractory(
+    def test_spike_times_respect_refractory(
         self, decomp_results: DecompositionResult, novecento_roi: tuple[int, int]
     ) -> None:
         """Every MU spike train is sorted, in-bounds, and refractory-clean."""
@@ -104,7 +104,7 @@ class TestMotorUnitQuality:
         n_samples = result.pulse_trains.shape[1]
         refractory = int(np.round(fsamp * POSTPROC_MIN_ISI_SEC))
 
-        for i, d in enumerate(discharge_times(result)):
+        for i, d in enumerate(spike_times(result)):
             if d.size == 0:
                 continue
             assert np.all(np.diff(d) >= 0), f"MU {i}: discharge times not sorted"

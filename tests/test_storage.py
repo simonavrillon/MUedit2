@@ -1,4 +1,4 @@
-"""T1 session store (``muedit.storage``) and the loaders that write into it."""
+"""T1 session store (``muedit.storage``), and the loaders writing into it block by block."""
 
 from __future__ import annotations
 
@@ -18,18 +18,18 @@ import scipy.io
 
 from muedit import storage as store
 from muedit.io import factory
-from muedit.io._otb import _fit_trace, _read_feedback_traces, _read_sip, _Trace
-from muedit.models import SignalImport, resident_nbytes
-from muedit.storage import RamStore, SessionStore
-from tests._platform import deleted
-from tests.test_io_intan import (
-    _GRID,
-    _reference_signals,
-    _write_header,
-    _write_per_channel,
-    _write_per_signal_type,
-    _write_traditional,
+from muedit.models import EditSignalContext, SignalImport, resident_nbytes
+from muedit.paths import CACHE_DIR_ENV
+from muedit.storage import RamStore, SessionStore, StoreClosedError
+from tests._io_files import (
+    INTAN_GRID,
+    intan_signals,
+    write_intan_header,
+    write_intan_per_channel,
+    write_intan_per_signal_type,
+    write_intan_traditional,
 )
+from tests._platform import deleted
 
 N_CH = 64
 N_SAMPLES = 20_011  # not a multiple of any block size
@@ -38,7 +38,7 @@ N_SAMPLES = 20_011  # not a multiple of any block size
 @pytest.fixture
 def cache_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     folder = tmp_path / "cache"
-    monkeypatch.setenv(store.CACHE_DIR_ENV, str(folder))
+    monkeypatch.setenv(CACHE_DIR_ENV, str(folder))
     monkeypatch.delenv(store.DISK_RESERVE_ENV, raising=False)
     return folder
 
@@ -70,7 +70,7 @@ class TestSessionStore:
         assert resident_nbytes(sealed[1:, 2:]) == 0
         assert not sealed.flags.writeable
         np.testing.assert_array_equal(sealed, np.arange(15).reshape(3, 5))
-        assert st.disk_bytes >= 15 * 4
+        assert store._folder_bytes(st.path) >= 15 * 4
 
     def test_a_reused_name_never_truncates_a_live_map(self, cache_dir: Path) -> None:
         st = SessionStore.create("t")
@@ -142,6 +142,21 @@ class TestSessionStore:
         st.close()
         assert not st.path.exists()
 
+    def test_an_unbalanced_release_does_not_block_the_close(self, cache_dir: Path) -> None:
+        st = SessionStore.create("t")
+        st.release()
+        st.close()
+        assert not st.path.exists()
+
+    def test_a_closing_store_takes_no_new_hold(self, cache_dir: Path) -> None:
+        st = SessionStore.create("t")
+        st.hold()
+        st.close()
+        with pytest.raises(StoreClosedError):
+            st.hold()
+        st.release()
+        assert not st.path.exists()
+
 
 class TestMemmapPickling:
     """Stored arrays cross to the worker process as file locations."""
@@ -209,7 +224,7 @@ class TestStaleSessions:
         mine.seal(mine.allocate("x", (16, 16), np.float32, zero=True))
         usage = store.store_usage()
         assert [s["name"] for s in usage["stores"]] == [mine.path.name]
-        assert usage["bytes"] == mine.disk_bytes > 0
+        assert usage["bytes"] == store._folder_bytes(mine.path) > 0
         assert usage["free_bytes"] > 0
 
     def test_own_pid_is_alive(self) -> None:
@@ -258,21 +273,21 @@ def recordings(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
         "mat_v5": _mat_v5(root / "v5.mat", data, aux),
         "mat_v73": _mat_v73(root / "v73.mat", data, aux),
     }
-    amp, aux_i, digital = _reference_signals()
+    amp, aux_i, digital = intan_signals()
     for name, writer in (
-        ("per_channel", _write_per_channel),
-        ("per_signal_type", _write_per_signal_type),
+        ("per_channel", write_intan_per_channel),
+        ("per_signal_type", write_intan_per_signal_type),
     ):
         folder = root / name
         folder.mkdir()
         writer(folder, amp, aux_i, digital)
         out[f"intan_{name}"] = folder
     (root / "traditional").mkdir()
-    _write_traditional(root / "traditional" / "rec.rhd", amp, aux_i, digital)
+    write_intan_traditional(root / "traditional" / "rec.rhd", amp, aux_i, digital)
     out["intan_traditional"] = root / "traditional" / "rec.rhd"
     for key in ("intan_per_channel", "intan_per_signal_type", "intan_traditional"):
         folder = out[key] if out[key].is_dir() else out[key].parent
-        (folder / "muedit_grids.json").write_text(json.dumps({"gridname": [_GRID]}))
+        (folder / "muedit_grids.json").write_text(json.dumps({"gridname": [INTAN_GRID]}))
     return out
 
 
@@ -291,24 +306,15 @@ def test_store_load_matches_the_heap_load(cache_dir: Path, recording: Path) -> N
 
     assert heap.data.dtype == stored.data.dtype == np.float32
     np.testing.assert_array_equal(stored.data, heap.data)
-    np.testing.assert_array_equal(stored.auxiliary, heap.auxiliary)
-    assert (stored.fsamp, stored.gridname, stored.auxiliaryname) == (
+    np.testing.assert_array_equal(stored.aux_data, heap.aux_data)
+    assert (stored.fsamp, stored.grid_names, stored.aux_names) == (
         heap.fsamp,
-        heap.gridname,
-        heap.auxiliaryname,
+        heap.grid_names,
+        heap.aux_names,
     )
     assert stored.nbytes == 0
     assert not stored.data.flags.writeable
     assert {p.name for p in st.path.glob("*.npy")} == {"emg.npy", "aux.npy"}
-
-
-def test_heap_load_scales_in_float64_then_rounds_once(recordings: dict[str, Path]) -> None:
-    """float32 output is exactly the float64 result the loaders used to return, rounded."""
-    rng = np.random.default_rng(0)
-    data = rng.normal(size=(N_CH, N_SAMPLES)) * 50.0
-    for key in ("mat_v5", "mat_v73"):
-        sig = factory.load_signal(str(recordings[key]))
-        np.testing.assert_array_equal(sig.data, data.astype(np.float32), err_msg=key)
 
 
 @pytest.fixture(scope="module")
@@ -326,7 +332,7 @@ def long_recordings(
 
     per_type = root / "per_signal_type"
     per_type.mkdir()
-    _write_header(per_type / "info.rhd")
+    write_intan_header(per_type / "info.rhd")
     np.arange(n, dtype=np.int32).tofile(per_type / "time.dat")
     amp.T.tofile(per_type / "amplifier.dat")
     aux[:, ::4].T.tofile(per_type / "auxiliary.dat")
@@ -334,7 +340,7 @@ def long_recordings(
 
     traditional = root / "traditional" / "rec.rhd"
     traditional.parent.mkdir()
-    _write_header(traditional)
+    write_intan_header(traditional)
     with open(traditional, "ab") as handle:
         for b in range(n_blocks):
             lo, hi = b * 128, (b + 1) * 128
@@ -343,7 +349,7 @@ def long_recordings(
             handle.write(aux[:, lo:hi:4].tobytes())
             handle.write(digital[lo:hi].tobytes())
     for folder in (per_type, traditional.parent):
-        (folder / "muedit_grids.json").write_text(json.dumps({"gridname": [_GRID]}))
+        (folder / "muedit_grids.json").write_text(json.dumps({"gridname": [INTAN_GRID]}))
     return {
         "mat_v73": recordings["mat_v73"],
         "intan_per_signal_type": per_type,
@@ -367,92 +373,39 @@ def test_streamed_loaders_hold_no_full_copy(
         assert peak < 0.25 * sig.data.size * 4, (key, peak)
 
 
-def test_a_loader_without_a_store_parameter_is_copied_in(
-    cache_dir: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    def plain_loader(path: str) -> SignalImport:
-        return SignalImport.build(data=np.ones((2, 10)), fsamp=100.0, gridname=["G"])
-
-    monkeypatch.setitem(factory._LOADERS, ".fake", plain_loader)
-    st = SessionStore.create("copy")
-    sig = factory.load_signal("rec.fake", store=st)
-    assert sig.data.dtype == np.float32
-    assert resident_nbytes(sig.data) == 0
-    np.testing.assert_array_equal(sig.data, 1)
-
-
 def test_build_keeps_float32_and_memory_maps(cache_dir: Path) -> None:
     st = SessionStore.create("build")
     mapped = st.seal(st.allocate("emg", (2, 8), np.float32, zero=True))
-    sig = SignalImport.build(data=mapped, auxiliary=np.ones((1, 4), dtype=np.float32))
+    sig = SignalImport.build(data=mapped, aux_data=np.ones((1, 4), dtype=np.float32))
     assert sig.data.dtype == np.float32
     assert np.shares_memory(sig.data, mapped)
-    assert sig.auxiliary.shape == (1, 8) and sig.auxiliary.dtype == np.float32
+    assert sig.aux_data.shape == (1, 8) and sig.aux_data.dtype == np.float32
     assert SignalImport.build(data=[[1, 2, 3]]).data.dtype == np.float64
 
 
-class TestSipTraces:
-    """OTB+ ``.sip`` target traces are fitted to the EMG length, never dropped for it."""
-
-    def _sip(self, tmp_path: Path, values: list[float]) -> str:
-        path = tmp_path / "trapezoidalpath_1.sip"
-        np.asarray(values, dtype=np.float64).tofile(path)
-        return str(path)
-
-    def test_longer_trace_is_cut(self, tmp_path: Path) -> None:
-        fitted = _read_sip(self._sip(tmp_path, [1.0, 2.0, 3.0, 4.0]), 3)
-        np.testing.assert_array_equal(fitted, [1.0, 2.0, 3.0])
-
-    def test_shorter_trace_holds_its_last_value(
-        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        fitted = _read_sip(self._sip(tmp_path, [0.0, 5.0, 10.0]), 6)
-        np.testing.assert_array_equal(fitted, [0.0, 5.0, 10.0, 10.0, 10.0, 10.0])
-        assert "holds 3 samples, the EMG 6" in caplog.text
-
-    def test_empty_trace_is_skipped_with_a_warning(
-        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        assert _read_sip(self._sip(tmp_path, []), 6) is None
-        assert "holds no samples" in caplog.text
+def test_without_data_shares_nothing_writable() -> None:
+    sig = SignalImport.build(
+        data=np.ones((2, 8)), grid_names=["G"], aux_data=np.ones((1, 8)), metadata={"k": 1}
+    )
+    bare = sig.without_data()
+    assert bare.data.shape == (0, 8)
+    bare.grid_names.append("other")
+    bare.metadata["k"] = 2
+    assert (sig.grid_names, sig.metadata["k"]) == (["G"], 1)
+    assert np.shares_memory(bare.aux_data, sig.aux_data)
+    assert not bare.aux_data.flags.writeable
 
 
-class TestOtb4FeedbackTraces:
-    """OTB4 feedback tracks (target and performed path) are read from their own track file."""
-
-    def _archive(self, tmp_path: Path, sample_size: int = 8) -> Path:
-        tracks = "".join(
-            f"<TrackInfo><Title>Trapezoidal track</Title><SubTitle>{sub}</SubTitle>"
-            f"<SignalStreamPath>FB.sig</SignalStreamPath><TotalChannelsInFile>2"
-            f"</TotalChannelsInFile><AcquisitionChannel>{col}</AcquisitionChannel>"
-            f"<NumberOfChannels>1</NumberOfChannels><SampleSize>{sample_size}</SampleSize>"
-            f"<SamplingFrequency>10</SamplingFrequency></TrackInfo>"
-            for col, sub in enumerate(["Performed Path", "Original Path"])
-        )
-        (tmp_path / "TrapezoidalTracks_010.xml").write_text(
-            f"<ArrayOfTrackInfo>{tracks}</ArrayOfTrackInfo>"
-        )
-        (tmp_path / "Tracks_000.xml").write_text("<ArrayOfTrackInfo/>")
-        np.array([[1.0, 0.0], [2.0, 5.0], [3.0, 10.0]]).tofile(tmp_path / "FB.sig")
-        return tmp_path
-
-    def test_reads_each_channel_by_its_column(self, tmp_path: Path) -> None:
-        traces = _read_feedback_traces(str(self._archive(tmp_path)))
-        assert [t.name for t in traces] == [
-            "Trapezoidal track - Performed Path",
-            "Trapezoidal track - Original Path",
-        ]
-        np.testing.assert_array_equal(traces[0].values, [1.0, 2.0, 3.0])
-        np.testing.assert_array_equal(traces[1].values, [0.0, 5.0, 10.0])
-        assert traces[0].fs == 10.0
-
-    def test_unknown_sample_size_is_skipped(
-        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        assert _read_feedback_traces(str(self._archive(tmp_path, sample_size=4))) == []
-        assert "not float64" in caplog.text
-
-    def test_fit_interpolates_and_holds_the_last_value(self) -> None:
-        trace = _Trace("t", np.array([0.0, 10.0]), fs=1.0)
-        fitted = _fit_trace(trace, fs_out=4.0, n_samples=8)
-        np.testing.assert_allclose(fitted, [0.0, 2.5, 5.0, 7.5, 10.0, 10.0, 10.0, 10.0])
+def test_edit_context_counts_every_mapped_array_as_zero(cache_dir: Path) -> None:
+    st = SessionStore.create("ctx")
+    sealed = [
+        st.seal(st.allocate(name, (64,), np.int64, zero=True)) for name in ("mask", "emgmask")
+    ]
+    ctx = EditSignalContext(
+        data=np.zeros((0, 64), np.float32),
+        fsamp=2048.0,
+        artifact_mask=sealed[0],
+        discard_channels=[sealed[1]],
+        coordinates=[np.zeros((64, 2))],
+    )
+    assert ctx.nbytes == 64 * 2 * 8  # the heap coordinates only

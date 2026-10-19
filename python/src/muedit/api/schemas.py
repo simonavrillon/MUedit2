@@ -2,15 +2,26 @@
 
 from __future__ import annotations
 
-from typing import Any
+from dataclasses import fields
+from typing import Annotated, Any
 
-from pydantic import BaseModel, Field, model_validator
-
-from muedit.decomp.types import (
-    DEFAULT_NBEXTCHAN,
-    DEFAULT_PEEL_OFF_WIN_SEC,
-    DecompositionParameters,
+import numpy as np
+from pydantic import (
+    BaseModel,
+    Field,
+    NonNegativeInt,
+    PositiveFloat,
+    PositiveInt,
+    StrictInt,
+    field_validator,
+    model_validator,
 )
+
+from muedit.decomp.types import ComputeDtype, DecompositionParameters
+from muedit.io.bids import parse_age
+
+#: A discharge time: a 0-based sample index the .npz stores as int32.
+SampleIndex = Annotated[int, Field(ge=0, le=np.iinfo(np.int32).max)]
 
 
 class PathPayload(BaseModel):
@@ -33,10 +44,16 @@ class SegmentPayload(BaseModel):
 
 
 class Span(BaseModel):
-    """A ``[start, end)`` sample range."""
+    """A ``[start, end)`` sample range; one past the recording's end is clamped to it."""
 
-    start: int
+    start: NonNegativeInt
     end: int
+
+    @model_validator(mode="after")
+    def _not_empty(self) -> Span:
+        if self.end <= self.start:
+            raise ValueError(f"end ({self.end}) must be greater than start ({self.start})")
+        return self
 
 
 class DecomposePayload(BaseModel):
@@ -55,30 +72,44 @@ class DecomposePayload(BaseModel):
     bids_entities: dict[str, Any] | None = None
     bids_metadata: dict[str, Any] | None = None
 
-    @model_validator(mode="after")
-    def _adaptive_batch_fits(self) -> DecomposePayload:
-        params = self.params
-        if params.adapt_batch_ms <= 0:
-            raise ValueError("params.adapt_batch_ms must be > 0")
-        edge_ms = params.edges_sec * 1000
-        if params.use_adaptive and params.adapt_batch_ms > edge_ms:
-            raise ValueError(
-                f"params.adapt_batch_ms must be <= {edge_ms:.0f} (edges_sec * 1000) "
-                "when use_adaptive is enabled"
-            )
-        return self
+    @field_validator("params", mode="before")
+    @classmethod
+    def _known_params(cls, value: Any) -> Any:
+        """Reject unknown parameter names, as the CLI does, rather than run without them."""
+        if isinstance(value, dict):
+            unknown = sorted(set(value) - {f.name for f in fields(DecompositionParameters)})
+            if unknown:
+                raise ValueError(f"unknown parameters: {', '.join(unknown)}")
+        return value
+
+
+class ParticipantMeta(BaseModel):
+    """A participant's row in ``participants.tsv``; empty or ``n/a`` fields are not given."""
+
+    age: int | None = None
+    sex: str | None = None
+    handedness: str | None = None
+
+    @field_validator("age", mode="before")
+    @classmethod
+    def _age(cls, value: Any) -> int | None:
+        return parse_age(value)
+
+
+#: Mains frequencies are 50 or 60 Hz; the bound only catches a value typed in the wrong unit.
+MAX_POWERLINE_HZ = 1000.0
 
 
 class BidsSaveFields(BaseModel):
     """Where and how a save writes its BIDS files: the session form's fields."""
 
-    muscle: list[str] | str | None = None
-    muscle_names: list[str] | str | None = None  # deprecated alias for ``muscle``
+    muscle_names: list[str] | str | None = None
     project: str | None = None
     file_label: str | None = None
     entity_label: str | None = None
-    participant_meta: dict[str, Any] | None = None
-    powerline_freq: float | None = None
+    participant_meta: ParticipantMeta | None = None
+    powerline_freq: float | None = Field(default=None, gt=0, le=MAX_POWERLINE_HZ)
+    units: str | None = None  # of the EMG samples, over what the loader recorded
     manufacturer: str | None = None
     manufacturers_model_name: str | None = None
     placement_scheme: str | None = None
@@ -97,12 +128,12 @@ class EditSavePayload(BidsSaveFields):
     The run also supplies the discharge times when none are sent.
     """
 
-    distimes: list[list[int]] | None = None
+    spike_times: list[list[SampleIndex]] | None = None
     run_result_token: str | None = None
-    total_samples: int
-    fsamp: float | None = None
+    total_samples: PositiveInt
+    fsamp: PositiveFloat
     grid_names: list[str] | None = None
-    mu_grid_index: list[int] | None = None
+    mu_grid_index: list[NonNegativeInt] | None = None
     parameters: dict[str, Any] | None = None
     artifact_regions: list[Span] | None = None
 
@@ -137,7 +168,7 @@ class EditOpPayload(BaseModel):
 class MuOpPayload(EditOpPayload):
     """An operation on one MU: ``remove-outliers``, ``reset``, ``duplicate``."""
 
-    mu: int
+    mu: StrictInt  # lax mode would read true as MU 1
 
 
 class FlagPayload(MuOpPayload):
@@ -168,8 +199,10 @@ class FilterUpdatePayload(MuOpPayload):
     use_peeloff: bool = False
     lock_spikes: bool = False
     project: str | None = None
-    nbextchan: int = DEFAULT_NBEXTCHAN
-    peel_off_win: float = DEFAULT_PEEL_OFF_WIN_SEC
+    # Left out, these are the run's own settings.
+    nbextchan: int | None = None
+    peel_off_win: float | None = Field(default=None, gt=0)
+    compute_dtype: ComputeDtype | None = None
 
 
 #: The body of each ``/edit/ops/{op}``; ``remove-duplicates`` and ``undo`` need only the token.

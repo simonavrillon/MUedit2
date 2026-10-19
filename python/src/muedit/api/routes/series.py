@@ -18,7 +18,7 @@ _END = Query(0, ge=0, description="Exclusive end sample; 0 is the end of the rec
 @router.get("/series/emg")
 def series_emg(
     upload_token: str,
-    grid: int = Query(0, ge=0),
+    grid: int = 0,
     start: int = _START,
     end: int = _END,
     bins: int = _BINS,
@@ -46,7 +46,7 @@ def series_aux(
 @router.get("/series/pulse")
 def series_pulse(
     token: str,
-    mu: int = Query(..., ge=0),
+    mu: int,
     start: int = _START,
     end: int = _END,
     bins: int = _BINS,

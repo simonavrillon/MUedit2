@@ -9,7 +9,6 @@ import numpy as np
 from numpy.typing import ArrayLike
 
 from muedit.decomp.algorithm import (
-    extend_signal,
     pca_extended_signal,
     subtract_mu_waveforms,
     vec_mat,
@@ -24,6 +23,8 @@ from muedit.decomp.types import (
 from muedit.models import BoolArray, FloatArray, IntArray, spike_array
 from muedit.signal.decomp_primitives import (
     POSTPROC_MIN_ISI_SEC,
+    extend_signal,
+    extension_factor,
     find_refractory_peaks,
     signed_square,
     split_by_amplitude,
@@ -60,7 +61,7 @@ def _whitened_window(
     compute_dtype: ComputeDtype,
 ) -> FloatArray:
     """The window extended and whitened; PCA skips the padded ends, the edges and artifacts."""
-    ex_factor = max(1, int(round(nbextchan / max(window_emg.shape[0], 1))))
+    ex_factor = extension_factor(nbextchan, window_emg.shape[0])
     e_sig = extend_signal(window_emg, ex_factor, dtype=compute_dtype)
     win_len = window_emg.shape[1]
     pca_keep = np.zeros(e_sig.shape[1], dtype=bool)
@@ -243,18 +244,6 @@ def add_spikes_in_roi(
     return spike_array(np.concatenate([spike_array(spike_times), peaks]))
 
 
-def add_artifact_in_roi(
-    pulse: FloatArray,
-    artifact_times: ArrayLike,
-    fsamp: float,
-    x_start: int,
-    x_end: int,
-    y_min: float,
-) -> SpikeTimes:
-    """Add the artifact peaks above ``y_min`` inside ``[x_start, x_end]``."""
-    return add_spikes_in_roi(pulse, artifact_times, fsamp, x_start, x_end, y_min)
-
-
 def delete_spikes_in_roi(
     pulse: FloatArray,
     spike_times: ArrayLike,
@@ -271,18 +260,6 @@ def delete_spikes_in_roi(
     return times[~in_box]
 
 
-def delete_artifacts_in_roi(
-    pulse: FloatArray,
-    artifact_times: ArrayLike,
-    x_start: int,
-    x_end: int,
-    y_min: float,
-    y_max: float,
-) -> SpikeTimes:
-    """Delete the artifacts inside ``[x_start, x_end]`` whose amplitude is within ``[y_min, y_max]``."""
-    return delete_spikes_in_roi(pulse, artifact_times, x_start, x_end, y_min, y_max)
-
-
 def _drop_weaker(pulse: FloatArray, ordered: IntArray, pairs: IntArray) -> SpikeTimes:
     """``ordered`` without the lower-amplitude spike of each pair ``(pairs[k], pairs[k] + 1)``."""
     values = _values_at(pulse, ordered)
@@ -290,24 +267,6 @@ def _drop_weaker(pulse: FloatArray, ordered: IntArray, pairs: IntArray) -> Spike
     keep = np.ones(ordered.size, dtype=bool)
     keep[drop] = False
     return ordered[keep]
-
-
-def delete_high_discharge_rate_spikes_in_roi(
-    pulse: FloatArray,
-    spike_times: ArrayLike,
-    fsamp: float,
-    x_start: int,
-    x_end: int,
-    y_min: float,
-) -> SpikeTimes:
-    """Delete one spike of each pair faster than ``y_min`` Hz whose midpoint is in the ROI."""
-    ordered = spike_array(spike_times)
-    if ordered.size < 2:
-        return ordered
-    isi = np.diff(ordered)
-    mids = ordered[1:] - isi // 2
-    fast = (mids >= x_start) & (mids <= x_end) & (fsamp / isi > y_min)
-    return _drop_weaker(pulse, ordered, np.flatnonzero(fast))
 
 
 def remove_discharge_rate_outliers(

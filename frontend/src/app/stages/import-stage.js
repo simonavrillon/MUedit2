@@ -1,4 +1,5 @@
 import { parseBidsEntitiesFromLabel } from "../../io/bids.js";
+import { handleError } from "../services/error-service.js";
 
 /** @typedef {import("../context.js").App} App */
 /** @typedef {import("../context.js").Els} Els */
@@ -128,8 +129,7 @@ async function handleNativeDialogOpen(app) {
   try {
     result = await api.openFileDialog();
   } catch (err) {
-    console.error("File dialog failed:", err);
-    setStatus("Failed to open file dialog", "error");
+    handleError(err, setStatus, "File dialog");
     return;
   }
 

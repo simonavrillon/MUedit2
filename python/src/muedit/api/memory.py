@@ -14,6 +14,8 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import Any, Generic, Protocol, TypeVar
 
+from muedit.errors import MueditError
+
 logger = logging.getLogger(__name__)
 
 MIB = 1024 * 1024
@@ -159,10 +161,12 @@ def peak_rss_bytes() -> int | None:
     return peak
 
 
-def session_id_or_default(value: str | None) -> str:
-    """The client's session id if it is well formed, else ``DEFAULT_SESSION``."""
-    value = (value or "").strip()
-    return value if _SESSION_ID.fullmatch(value) else DEFAULT_SESSION
+def parse_session_id(value: str, field: str) -> str:
+    """The client's session id from ``field``; a malformed one is refused."""
+    value = value.strip()
+    if not _SESSION_ID.fullmatch(value):
+        raise MueditError("Malformed session id: 1 to 64 letters, digits or '-'", field)
+    return value
 
 
 class _Sized(Protocol):
@@ -179,7 +183,7 @@ class _Slot(Generic[V]):
     nbytes: int
     session: str
     last_used: int
-    expires_at: float | None
+    holds: int = 0  # requests and runs reading the entry: budget pressure never evicts it
 
 
 class MemoryBudget:
@@ -252,10 +256,10 @@ class MemoryBudget:
                     (slot.last_used, cache, token)
                     for cache in self.caches.values()
                     for token, slot in cache.slots.items()
-                    if token != keep and slot.session != self.active_session
+                    if token != keep and slot.session != self.active_session and not slot.holds
                 ]
                 if not victims:
-                    return  # what is left belongs to the active session; it may exceed the budget
+                    return  # what is left is the active session's or in use; it may exceed the budget
                 _, cache, token = min(victims, key=lambda v: v[0])
                 evicted = cache.drop(token)
                 used -= evicted.nbytes
@@ -278,11 +282,9 @@ class MemoryBudget:
                 self.active_session = None
 
     def sweep(self) -> None:
-        """Drop expired entries and close idle sessions other than the active one."""
+        """Close idle sessions other than the active one."""
         with self.locked():
             now = self.clock()
-            for cache in self.caches.values():
-                cache.drop_expired(now)
             idle = [
                 session
                 for session, seen in self.sessions.items()
@@ -365,13 +367,11 @@ class BudgetedLRU(Generic[V]):
         budget: MemoryBudget,
         *,
         per_session: int | None = None,
-        ttl_sec: float | None = None,
         on_drop: Callable[[V], None] | None = None,
     ) -> None:
         self.name = name
         self.budget = budget
         self.per_session = per_session
-        self.ttl_sec = ttl_sec
         self.on_drop = on_drop  # releases what an entry holds outside the heap
         self.slots: dict[str, _Slot[V]] = {}
         budget.register(self)
@@ -382,7 +382,7 @@ class BudgetedLRU(Generic[V]):
         return sum(slot.nbytes for slot in self.slots.values())
 
     def drop(self, token: str) -> _Slot[V]:
-        """Remove the entry for ``token`` and release it; ``pop`` instead hands it to the caller.
+        """Remove the entry for ``token`` and release it.
 
         The release runs once the budget's outermost hold of its lock ends.
         """
@@ -416,25 +416,13 @@ class BudgetedLRU(Generic[V]):
                 nbytes=nbytes,
                 session=session,
                 last_used=self.budget.next_tick(),
-                expires_at=None if self.ttl_sec is None else self.budget.clock() + self.ttl_sec,
             )
         return token
-
-    def _live_slot(self, token: str | None) -> _Slot[V] | None:
-        if not token:
-            return None
-        slot = self.slots.get(token)
-        if slot is None:
-            return None
-        if slot.expires_at is not None and slot.expires_at <= self.budget.clock():
-            self.drop(token)
-            return None
-        return slot
 
     def get(self, token: str | None) -> V | None:
         """The value for ``token``, marked as just used, or None."""
         with self.budget.locked():
-            slot = self._live_slot(token)
+            slot = self.slots.get(token) if token else None
             if slot is None:
                 return None
             slot.last_used = self.budget.next_tick()
@@ -442,10 +430,25 @@ class BudgetedLRU(Generic[V]):
                 self.budget.sessions[slot.session] = self.budget.clock()
             return slot.value
 
+    def hold(self, token: str | None) -> V | None:
+        """``get``, and keep the entry from eviction until ``unhold``; a drop still removes it."""
+        with self.budget.locked():
+            value = self.get(token)
+            if value is not None and token is not None:
+                self.slots[token].holds += 1
+            return value
+
+    def unhold(self, token: str) -> None:
+        """End one ``hold``; nothing when the entry was dropped meanwhile."""
+        with self.budget.locked():
+            slot = self.slots.get(token)
+            if slot is not None and slot.holds > 0:
+                slot.holds -= 1
+
     def move(self, token: str | None, session: str) -> V | None:
         """The value for ``token``, now held by ``session`` (whose other entries here make room)."""
         with self.budget.locked():
-            slot = self._live_slot(token)
+            slot = self.slots.get(token) if token else None
             if slot is None or token is None:
                 return None
             if slot.session != session and self.per_session is not None:
@@ -456,21 +459,6 @@ class BudgetedLRU(Generic[V]):
             self.budget.touch(session)
             slot.last_used = self.budget.next_tick()
             return slot.value
-
-    def pop(self, token: str | None) -> V | None:
-        """Remove and return the value for ``token``, or None."""
-        with self.budget.locked():
-            slot = self._live_slot(token)
-            if slot is None or token is None:
-                return None
-            del self.slots[token]
-            return slot.value
-
-    def discard(self, token: str | None) -> None:
-        """Remove the entry for ``token`` if there is one."""
-        with self.budget.locked():
-            if token and token in self.slots:
-                self.drop(token)
 
     def resize(self, token: str) -> None:
         """Recount the entry for ``token`` after its value grew, evicting others to fit."""
@@ -486,15 +474,4 @@ class BudgetedLRU(Generic[V]):
         """Drop the entries ``session`` holds in this cache."""
         with self.budget.locked():
             for token in [t for t, slot in self.slots.items() if slot.session == session]:
-                self.drop(token)
-
-    def drop_expired(self, now: float) -> None:
-        """Remove the entries whose time to live has passed."""
-        with self.budget.locked():
-            expired = [
-                token
-                for token, slot in self.slots.items()
-                if slot.expires_at is not None and slot.expires_at <= now
-            ]
-            for token in expired:
                 self.drop(token)

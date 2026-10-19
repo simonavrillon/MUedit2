@@ -23,11 +23,14 @@ const { ApiError } = await import("../src/app/http.js");
 
 /** The error the backend answers for an upload it no longer holds. */
 const missingUpload = () =>
-  new ApiError("Request failed: upload_token Token expired or missing", {
-    status: 400,
-    code: "http_400",
-    field: "upload_token",
-  });
+  new ApiError(
+    "Missing or expired upload; request /api/v1/preview-by-path first",
+    {
+      status: 400,
+      code: "http_400",
+      field: "upload_token",
+    },
+  );
 
 const pristine = structuredClone(initialState);
 
@@ -141,7 +144,7 @@ describe("raw preview failure", () => {
 });
 
 describe("decomposition upload-token recovery", () => {
-  const streamBody = () => new Response('{"stage":"done","pct":100}\n').body;
+  const streamBody = () => new Response('{"stage":"done"}\n').body;
 
   test("re-mints the token from the file path and retries once", async () => {
     const state = loadedState();
@@ -169,9 +172,7 @@ describe("decomposition upload-token recovery", () => {
     // User selections survive the reload.
     assert.deepEqual(state.rois, [{ start: 0, end: 3 }]);
     assert.deepEqual(state.discardMasks, [[0, 1]]);
-    assert.deepEqual(app.handleStreamMessage.calls, [
-      [{ stage: "done", pct: 100 }],
-    ]);
+    assert.deepEqual(app.handleStreamMessage.calls, [[{ stage: "done" }]]);
     assert.equal(state.isRunning, false);
   });
 
@@ -193,7 +194,7 @@ describe("decomposition upload-token recovery", () => {
 
     assert.equal(previewCalls, 0);
     assert.deepEqual(app.setStatus.calls.at(-1), [
-      "Error: Request failed: upload_token Token expired or missing",
+      "Error: Missing or expired upload; request /api/v1/preview-by-path first",
       "error",
     ]);
     assert.equal(state.isRunning, false);

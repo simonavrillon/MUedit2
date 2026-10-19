@@ -155,7 +155,7 @@ def _run_branches(
     dataset: str,
     compare: Any,
 ) -> dict[str, dict[str, Any]]:
-    """Decompose once, then time and score each postprocess branch (with its ``distime``)."""
+    """Decompose once, then time and score each postprocess branch (with its ``spike_times``)."""
     rng = np.random.default_rng(base.random_seed)
     t0 = time.perf_counter()
     decomposed = decompose_step(prep=prep, params=base, rng=rng, progress_cb=None)
@@ -168,8 +168,8 @@ def _run_branches(
         post = postprocess_step(prep=prep, decomposed=decomposed, params=params, progress_cb=None)
         post_sec = round(time.perf_counter() - t0, 3)
 
-        distime = [np.asarray(d) for d in post.distime]
-        matches, n_units, n_ref = compare(label, distime)
+        spike_times = [np.asarray(d) for d in post.spike_times]
+        matches, n_units, n_ref = compare(label, spike_times)
         results = _summarize(matches, n_units, n_ref)
         results.update(
             postprocess_mode=label, duration_sec=post_sec, decompose_duration_sec=decompose_sec
@@ -177,7 +177,7 @@ def _run_branches(
 
         name = dataset if label == "windowed" else f"{dataset}_{label}"
         _log_result(name, params, results)
-        out[label] = {**results, "distime": distime}
+        out[label] = {**results, "spike_times": spike_times}
     return out
 
 
@@ -205,7 +205,7 @@ def real_reference() -> dict[str, Any]:
         else None
     )
     return {
-        "discharge_times": [np.asarray(x) for x in reference],
+        "spike_times": [np.asarray(x) for x in reference],
         "roi": tuple(int(x) for x in decomp["rois"][0]),
         "params": _parameters(decomp),
         "artifact_regions": artifact,
@@ -232,11 +232,11 @@ def real_benchmark(
     prep = _prepare(
         str(novecento_otb4_file), novecento_emg, roi, base, real_reference["artifact_regions"]
     )
-    ref_full = real_reference["discharge_times"]
+    ref_full = real_reference["spike_times"]
 
-    def compare(label: str, distime: list[np.ndarray]) -> Any:
+    def compare(label: str, spike_times: list[np.ndarray]) -> Any:
         ref = filter_to_roi(ref_full, roi) if label == "windowed" else ref_full
-        det = filter_to_roi(distime, roi) if label == "windowed" else distime
+        det = filter_to_roi(spike_times, roi) if label == "windowed" else spike_times
         active = [i for i, d in enumerate(ref) if d.size >= 2]
         candidates = score_pairs(
             det, ref, jitter=_REAL_JITTER, max_lag=_REAL_MAX_LAG, ref_indices=active
@@ -261,11 +261,11 @@ def sim_benchmarks(
 
         def compare(
             _label: str,
-            distime: list[np.ndarray],
+            spike_times: list[np.ndarray],
             gt_in_roi: list[np.ndarray] = gt_in_roi,
             n_ref: int = n_ref,
         ) -> Any:
-            det = filter_to_roi(distime, _SIM_ROI)
+            det = filter_to_roi(spike_times, _SIM_ROI)
             candidates = score_pairs(det, gt_in_roi, jitter=_JITTER, max_lag=_MAX_LAG)
             return greedy_one_to_one(candidates, _ROA_THRESHOLD), len(det), n_ref
 
@@ -297,7 +297,7 @@ def test_sim_matches_ground_truth(
     r = sim_benchmarks[pct]["windowed"]
     assert r["n_units"] >= 5, f"{pct}%: expected >= 5 MUs, got {r['n_units']}"
     refractory = int(np.round(simulation_loaded[pct]["fsamp"] * POSTPROC_MIN_ISI_SEC))
-    for i, d in enumerate(r["distime"]):
+    for i, d in enumerate(r["spike_times"]):
         assert np.all(np.diff(d) >= refractory), f"{pct}% MU {i}: unsorted or refractory violated"
     assert r["n_matched"] > 0, f"{pct}%: no GT matches"
     assert r["mean_roa"] >= _ROA_THRESHOLD, f"{pct}%: mean RoA {r['mean_roa']:.3f}"

@@ -1,6 +1,9 @@
 """Configuration dataclass for adaptive decomposition routines."""
 
 from dataclasses import dataclass, field
+from typing import Any
+
+import numpy as np
 
 
 @dataclass
@@ -19,6 +22,7 @@ class Config:
     cov_alpha: float = 0.1
 
     compute_loss: bool = False
+    dtype: type[np.floating[Any]] | np.dtype[np.floating[Any]] = np.float32
 
     spike_height_mult: int = 3
     spike_prev_weight: int = 5

@@ -24,23 +24,29 @@ Example:
 /data/session1/recording01_decomp.npz
 ```
 
+A recording that belongs to a BIDS dataset (loaded from one, or exported into one by the run, §2)
+is saved into that dataset's MUedit derivatives instead, without the raw EMG the dataset already
+holds.
+
 Keys (the schema is described in [NPZ file format](#npz-file-format) below):
 - the core keys every MUedit `.npz` holds: `schema_version`, `fsamp`, `total_samples`,
   `spike_times`, `spike_offsets`, `mu_grid_index`, `grid_names`, `muscle`, `parameters`
 - `pulse_trains` — the motor units' pulse trains (IPTs)
 - `sil` — silhouette score per MU
 - `sil_keys`, `sil_by_window`, `sil_by_window_offsets` — per-window SIL scores
-- `adaptive_losses` — adaptive decomposition losses
 - `rois` — the `(start, end)` analysis windows
 
 Conditional keys:
 - `emg_data`, `discard_channels` + `discard_channel_offsets`, `coordinates` +
-  `coordinate_offsets`, `loader_meta` (included only when BIDS export is not requested: the raw EMG then
-  travels with the decomposition, so the editor can update MU filters)
+  `coordinate_offsets`, `loader_meta` (included only when the file is saved outside a BIDS dataset:
+  the raw EMG then travels with the decomposition, so the editor can update MU filters)
 - `artifact_intervals` (included whenever an artifact mask was applied, with or without BIDS export)
+- `target_segments` (included when the target was segmented before the run)
 
 Notes:
 - CLI decomposition uses `save_npz=True` by default.
+- The run starts only if its BIDS form fields can be written: a placement scheme `Other` without a
+  description, or an age that is not a whole number, is refused (400) before anything is computed.
 - API decomposition persists this file when `persist_output=true` is set on the request or BIDS export is requested (then under `derivatives/muedit/.../decomp/`, see below).
 
 ## 2) BIDS Export During Decomposition
@@ -65,7 +71,13 @@ tree and dataset-level files at the dataset root.
 > **File format.** The signal is written as EDF+ (`_emg.edf`, 16-bit samples
 > scaled to each channel's range). If the destination already holds an
 > `_emg.bdf` or `_emg.edf` for the same recording, that file keeps its format,
-> so a recording never gets two signal files.
+> so a recording never gets two signal files. The file is encoded beside its
+> destination and renamed over it: a failed export leaves no partial signal file.
+
+> **Bad channels.** `channels.tsv` marks a channel `bad` when you excluded it
+> (`status_description` "manually excluded") or when the run's automatic QC
+> found it bad ("auto-detected"). Filter updates in the editor read this mask
+> back, so they leave out the channels the decomposition left out.
 
 > **Where `<bids_root>` is.** In the app you don't type a path — you name a
 > project in the **Project** field of the Settings panel, and MUedit saves under
@@ -145,7 +157,7 @@ draws them on the QC page. A ramp without `direction`, levels or `mvc_rate` take
 direction from its neighbour: down after a plateau, up otherwise. Other events (`ttl`,
 `cycle`, task events) are not drawn.
 
-`tests/test_bids_validator.py` runs the official validator (`jsr:@bids/validator@3.0.2`) on a
+`tests/test_bids_export.py` runs the official validator (`jsr:@bids/validator@3.0.2`) on a
 full MUedit export (two grids, target and trigger lines, events, motor unit derivatives) and
 asserts no errors; it is skipped when `deno` is not installed.
 
@@ -164,12 +176,12 @@ validator by `.bidsignore`):
   sub-<subject>/[ses-<session>/]decomp/<entity>_decomp.npz
 ```
 
-> The derivatives-level `dataset_description.json` under
-> `derivatives/muedit/` is **not** written by the decomposition pipeline — it
-> is created only during the edited-save flow (see §3 below).
+The run also writes the derivatives-level `dataset_description.json` under
+`derivatives/muedit/`. The motor unit discharge events (§3) are written by the
+edited save, which the app makes as soon as the run ends.
 
 The BIDS decomposition NPZ has the same keys as above, without `emg_data`,
-`discard_channels` and `coordinates`: the raw EMG lives in the BIDS `emg/` folder.
+`discard_channels`, `coordinates` and `loader_meta`: the raw EMG lives in the BIDS `emg/` folder.
 
 ## 3) Edited Decomposition Save (Web Edit Mode)
 
@@ -181,7 +193,12 @@ the request carries only the session token and the session form's fields. The ru
 
 Until they are saved, the session's edits are also logged to
 `<cache>/edit-logs/*.jsonl`. When the app or the page closes with unsaved edits, opening
-the same file again offers to restore them; the log is deleted when the file is saved.
+the same file again offers to restore them. Saving deletes the log and starts a new one for
+the saved file: from then on, it is reopening the `_edited.npz` that offers unsaved edits back.
+
+A save back into the BIDS dataset the file was opened from keeps the file's subject: an entity
+label naming another subject is refused (400), so a save never lands in another subject's
+folder. Choose another project to save it under a new subject.
 
 Primary outputs:
 
@@ -190,11 +207,16 @@ Primary outputs:
 <bids_root>/derivatives/muedit/sub-<subject>/[ses-<session>/]decomp/<entity>_edited.json   # edit log (below)
 ```
 
-Best-effort BIDS-facing side outputs (failures never block the primary save):
+The `.npz` and its edit log are written to temporary files and renamed into place together:
+a save that fails leaves the previous pair as it was.
+
+Best-effort BIDS-facing side outputs (failures never block the primary save; the response
+reports them, in `bids_emg_error` for the EMG export and `bids_warnings` for the rest, and the
+page shows both):
 
 ```text
 <bids_root>/dataset_description.json                                   # created if missing
-<bids_root>/participants.tsv | participants.json                      # subject row upserted from the form
+<bids_root>/participants.tsv | participants.json                      # subject row added, or its given fields updated
 <bids_root>/sub-<subject>/[ses-<session>/]emg/<entity>_*              # raw EMG sidecars re-exported (see §2)
 <bids_root>/derivatives/muedit/dataset_description.json              # GeneratedBy (MUedit version), links to the raw dataset
 <bids_root>/derivatives/muedit/descriptions.tsv                      # what desc-decomposition means
@@ -205,19 +227,33 @@ Best-effort BIDS-facing side outputs (failures never block the primary save):
 
 The events columns follow the MUniverse format (`onset`, `duration`, `sample`, `unit_id`,
 `event_type` = `motor-unit-spike`); `group` adds the grid each unit came from, as the `group`
-of its channels in the raw `*_channels.tsv`.
+of its channels in the raw `*_channels.tsv` (read from that file; `Grid<n>` when the dataset
+has none).
 
 The `events.tsv` derivative is the BIDS-facing representation of motor-unit
 spike times; the authoritative artefact remains the `_edited.npz` above.
 
 Edited NPZ keys:
-- the core keys (see [NPZ file format](#npz-file-format))
+- the core keys (see [NPZ file format](#npz-file-format)); `muscle` is the form's, else the
+  opened file's
 - `pulse_trains` (only when the pulse trains were known: after a run, or when the edited
   file had them. A file edited from spike times alone stores spike times only, and the
   editor draws binary trains from them)
 
-Conditional key:
+Conditional keys:
 - `artifact_intervals` (included only when artifact regions are provided)
+- `sil` (when every saved MU has a silhouette score: an MU made by duplicating another has none)
+- `rois`, `target_segments` (when the run or the opened file had them)
+- `loader_meta` (what the loader recorded, with the session form's hardware fields over it, so
+  a later save without them in the form keeps them)
+
+The edited file does not embed the raw EMG (`emg_data`), nor `discard_channels`, `coordinates`
+or `sil_by_window`: the EMG is in the BIDS dataset (exported at save), and filter updates read
+it, with its channel status, from there. If that export failed (`bids_emg_error`), filter
+updates of the reopened file have no EMG to read.
+
+When the file is opened, the recording's raw `channels.tsv` overrides the `.npz`'s grid names,
+muscles and sampling rate.
 
 ### Edit Log Sidecar
 
@@ -288,7 +324,7 @@ The sidecar contains:
 
 **`history`** — append-only log of all edit actions across all sessions. Carries over when the file is saved and reloaded for further editing.
 
-**`artifact_times`** — present when any MU has artifact markers. A list of lists — one entry per MU — containing the sample indices of all peaks marked as artifacts. Restored automatically on reload.
+**`artifact_times`** — present only when an MU has artifact markers. A list of lists — one entry per MU — containing the sample indices of all peaks marked as artifacts. Restored automatically on reload.
 
 Action types and their fields. Every entry also carries a `type` and an ISO-8601
 `timestamp`; fields marked `?` are present only when non-empty.
@@ -327,19 +363,18 @@ Each array's data starts on a 64-byte boundary, so large arrays (`pulse_trains`,
 | `total_samples` | int64, `()` | Recording length in samples |
 | `spike_times` | int32, `(n_spikes,)` | Discharge times of all MUs, concatenated; 0-based sample indices, sorted within each MU |
 | `spike_offsets` | int64, `(n_mu + 1,)` | MU `i`'s discharge times are `spike_times[spike_offsets[i]:spike_offsets[i + 1]]` |
-| `mu_grid_index` | int16, `(n_mu,)` | Grid of each MU |
+| `mu_grid_index` | int16, `(n_mu,)` | Grid of each MU, from 0 (a negative index refuses the file) |
 | `grid_names`, `muscle` | unicode, `()` | JSON list of strings |
 | `parameters` | unicode, `()` | JSON object: the decomposition parameters |
 | `pulse_trains` | float32, `(n_mu, total_samples)` | Pulse trains (IPTs), one row per MU |
 | `sil` | float64, `(n_mu,)` | Silhouette score per MU |
 | `sil_keys`, `sil_by_window`, `sil_by_window_offsets` | int64, float64, int64 | Per-window SIL scores, laid out like the spike times |
-| `adaptive_losses` | unicode, `()` | JSON |
 | `rois` | int64, `(k, 2)` | `[start, end)` analysis windows |
 | `artifact_intervals` | int64, `(k, 2)` | `[start, end)` sample ranges masked as artifacts |
 | `emg_data` | float32, `(n_channels, total_samples)` | The **raw, unfiltered** EMG |
 | `discard_channels`, `discard_channel_offsets` | uint8, int64 | Per grid, 1 = discarded channel |
 | `coordinates`, `coordinate_offsets` | float32 `(n, 2)`, int64 | Per grid, electrode coordinates |
-| `loader_meta` | unicode, `()` | JSON object: what the loader recorded about `emg_data` for its BIDS export (`units`, gains, hardware filters, device) |
+| `loader_meta` | unicode, `()` | JSON object: what the loader recorded about the recording for its BIDS export (`units`, gains, hardware filters, device, placement), with an edited save's form fields over it |
 | `target_segments` | unicode, `()` | JSON object: the segmented target (`target_index`, `target_name`, `target_units`, `config`, `segments`), when the run had one; carried into every edited save |
 
 Reading one in Python:
@@ -350,7 +385,7 @@ import numpy as np
 
 with np.load("recording_decomp.npz") as f:
     spikes, offsets = f["spike_times"], f["spike_offsets"]
-    discharge_times = [spikes[a:b] for a, b in zip(offsets[:-1], offsets[1:])]
+    spike_times = [spikes[a:b] for a, b in zip(offsets[:-1], offsets[1:])]
     grid_names = json.loads(str(f["grid_names"]))
 ```
 

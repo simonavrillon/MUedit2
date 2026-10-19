@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import contextlib
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from muedit.api.memory import (
     DEFAULT_SESSION,
@@ -61,16 +64,26 @@ class _UploadEntry:
 
 
 @dataclass
+class RunExtras:
+    """What a run's save writes besides the trains: per-MU SIL, windows and target segments."""
+
+    sil: list[float] = field(default_factory=list)
+    rois: list[tuple[int, int]] | None = None
+    target_segments: dict[str, Any] | None = None
+
+
+@dataclass
 class RunResult:
     """A finished run's pulse trains and discharge times, for its explorer and its save."""
 
     pulse_trains: FloatArray  # float32, (n_mu, n_samples)
     store: SessionStore | None = None
-    spikes: list[IntArray] = field(default_factory=list)  # sorted int32 per MU
+    spike_times: list[IntArray] = field(default_factory=list)  # sorted int32 per MU
+    extras: RunExtras = field(default_factory=RunExtras)
 
     @property
     def nbytes(self) -> int:
-        return resident_nbytes(self.pulse_trains) + sum(int(s.nbytes) for s in self.spikes)
+        return resident_nbytes(self.pulse_trains) + sum(int(s.nbytes) for s in self.spike_times)
 
 
 @dataclass
@@ -132,18 +145,6 @@ def _store_upload_signal(
     return _UPLOADS.pin(entry, session)
 
 
-def _get_upload_source_path(token: str | None) -> str | None:
-    """Return the on-disk path the upload for ``token`` was loaded from, if known."""
-    entry = _UPLOADS.get(token)
-    return entry.source_path if entry else None
-
-
-def _get_upload_signal(token: str | None) -> SignalImport | None:
-    """Resolve upload token to a read-only view of the stored signal."""
-    entry = _UPLOADS.get(token)
-    return entry.signal.readonly_view() if entry else None
-
-
 @dataclass
 class HeldUpload:
     """An upload taken for one request or run: its store stays until ``release``."""
@@ -152,60 +153,63 @@ class HeldUpload:
     source_path: str | None
     store: SessionStore | None
     views: SignalViews | None
+    token: str
 
     def release(self) -> None:
         """End the hold; a drop of the upload meanwhile deletes its store now."""
+        _UPLOADS.unhold(self.token)
         if self.store is not None:
             self.store.release()
 
 
 def _hold_upload(token: str | None) -> HeldUpload | None:
-    """The upload for ``token``, its store held until ``release``.
+    """The upload for ``token``, kept from eviction and its store held until ``release``.
 
-    Dropping the upload meanwhile (a new file, an eviction) closes the store only after.
+    Dropping the upload meanwhile (a new file, a closed tab) closes the store only after.
     """
     with BUDGET.locked():
-        entry = _UPLOADS.get(token)
-        if entry is None:
+        entry = _UPLOADS.hold(token)
+        if entry is None or token is None:
             return None
         if entry.store is not None:
             entry.store.hold()
-        return HeldUpload(entry.signal.readonly_view(), entry.source_path, entry.store, entry.views)
-
-
-def _get_signal_views(token: str | None) -> SignalViews | None:
-    """The pyramids and overview of the upload for ``token`` (sealed, so read-only)."""
-    entry = _UPLOADS.get(token)
-    return entry.views if entry is not None else None
+        signal = entry.signal.readonly_view()
+        return HeldUpload(signal, entry.source_path, entry.store, entry.views, token)
 
 
 def _store_run_result(
     pulse_trains: FloatArray,
     session: str = DEFAULT_SESSION,
     store: SessionStore | None = None,
-    spikes: list[IntArray] | None = None,
+    spike_times: list[IntArray] | None = None,
+    extras: RunExtras | None = None,
 ) -> str:
     """Keep a finished run's pulse trains and discharge times; the run save reads them back.
 
     With ``store`` (the run's T1 folder holding them), the entry deletes it when dropped.
     """
-    return _RUN_RESULTS.pin(RunResult(pulse_trains, store, list(spikes or [])), session)
+    result = RunResult(pulse_trains, store, list(spike_times or []), extras or RunExtras())
+    return _RUN_RESULTS.pin(result, session)
 
 
-def _get_run_result_entry(token: str | None) -> RunResult | None:
-    """The stored run for ``token``, its pulse trains read-only."""
-    stored = _RUN_RESULTS.get(token)
-    if stored is None:
-        return None
+@contextlib.contextmanager
+def _held_run_result(token: str | None) -> Iterator[RunResult | None]:
+    """The stored run for ``token``, pulse trains read-only, its store kept until the block ends."""
+    with BUDGET.locked():
+        stored = _RUN_RESULTS.hold(token)
+        if stored is not None and stored.store is not None:
+            stored.store.hold()
+    if stored is None or token is None:
+        yield None
+        return
     pulse = stored.pulse_trains.view()
     pulse.flags.writeable = False
-    return RunResult(pulse, None, stored.spikes)
-
-
-def _get_run_result(token: str | None) -> FloatArray | None:
-    """Read-only view of a stored run's pulse trains."""
-    stored = _get_run_result_entry(token)
-    return stored.pulse_trains if stored is not None else None
+    try:
+        yield RunResult(pulse, None, stored.spike_times, stored.extras)
+    finally:
+        _RUN_RESULTS.unhold(token)
+        if stored.store is not None:
+            stored.store.release()
 
 
 def _store_edit_session(edit: EditSession, session: str = DEFAULT_SESSION) -> str:
@@ -231,4 +235,5 @@ def _live_edit_logs() -> set[Path]:
     """The edit logs open sessions are writing."""
     with BUDGET.locked():
         entries = [slot.value.session for slot in _EDIT_SESSIONS.slots.values()]
-    return {edit.log.path for edit in entries if edit.log is not None}
+    logs = [edit.log for edit in entries]  # read once: a close sets it to None
+    return {log.path for log in logs if log is not None}

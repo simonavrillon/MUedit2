@@ -114,11 +114,7 @@ export function applySessionInfoToDom(els, payload) {
     els.bidsDeviceModel.value = payload.hardware.deviceModel;
 
   // Pre-fill BIDS recording metadata round-tripped from the EMG JSON sidecar.
-  if (
-    els.bidsPowerlineFreq &&
-    payload.bids?.powerlineFreq != null &&
-    payload.bids.powerlineFreq !== ""
-  )
+  if (els.bidsPowerlineFreq && Number(payload.bids?.powerlineFreq) > 0)
     els.bidsPowerlineFreq.value = String(payload.bids.powerlineFreq);
   if (els.bidsPlacementScheme && payload.bids?.placementScheme)
     els.bidsPlacementScheme.value = payload.bids.placementScheme;

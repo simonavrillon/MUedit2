@@ -9,7 +9,6 @@ import multiprocessing
 import queue
 import tempfile
 import threading
-import traceback
 from collections.abc import AsyncGenerator, Awaitable, Callable, Generator, Iterator
 from multiprocessing.connection import wait
 from multiprocessing.process import BaseProcess
@@ -21,17 +20,21 @@ from fastapi import HTTPException
 
 from muedit.api.cache import (
     HeldUpload,
+    RunExtras,
     _hold_upload,
     _store_run_result,
 )
-from muedit.api.common import bids_root_for, make_json_safe
+from muedit.api.common import bids_root_for, make_json_safe, missing_upload
 from muedit.api.memory import DEFAULT_SESSION
 from muedit.api.schemas import DecomposePayload, Span
 from muedit.api.services.decompose_worker import (
+    INTERNAL_ERROR_DETAIL,
     RESULT_STAGE,
     RunJob,
     child_main,
 )
+from muedit.errors import MueditError
+from muedit.io.bids import check_run_export
 from muedit.models import IntArray, spike_array
 from muedit.storage import SessionStore
 
@@ -45,7 +48,6 @@ DISCONNECT_POLL_SEC = 1.0
 SHUTDOWN_WAIT_SEC = 10.0
 CANCELLED_EVENT: dict[str, Any] = {
     "stage": "cancelled",
-    "pct": 0,
     "message": "Decomposition cancelled",
 }
 
@@ -62,7 +64,7 @@ def _as_matrix(value: Any) -> np.ndarray:
 
 def _preview_spikes(preview: dict[str, Any]) -> list[IntArray]:
     """The preview's discharge times, as sorted int32 arrays."""
-    return [spike_array(d) for d in preview.get("distime_all") or []]
+    return [spike_array(d) for d in preview.get("spike_times") or []]
 
 
 class _Run:
@@ -83,10 +85,14 @@ class _Run:
     def start(self) -> None:
         """Create the run's store and start supervising the worker."""
         self.store = SessionStore.create("run")
-        self._supervisor = threading.Thread(
-            target=self._supervise, name="muedit-decompose", daemon=True
-        )
-        self._supervisor.start()
+        try:
+            self._supervisor = threading.Thread(
+                target=self._supervise, name="muedit-decompose", daemon=True
+            )
+            self._supervisor.start()
+        except BaseException:
+            self.store.close()
+            raise
 
     def cancel(self) -> None:
         """Stop the worker process."""
@@ -106,16 +112,14 @@ class _Run:
         messages = self._process_messages()
         try:
             kept = self._relay(messages)
-        except Exception as exc:
+        except Exception:
             logger.exception("Decomposition run failed")
             self.cancel()  # the worker must not outlive its run's store
             self.events.put(
                 {
                     "stage": "error",
-                    "pct": 100,
                     "message": "Decomposition failed",
-                    "detail": str(exc),
-                    "traceback": traceback.format_exc(),
+                    "detail": INTERNAL_ERROR_DETAIL,
                 }
             )
         finally:
@@ -174,11 +178,12 @@ class _Run:
                 ended = True
             else:
                 if message.get("stage") == "error":
-                    logger.error(
-                        "Decomposition failed: %s\n%s",
-                        message.get("detail"),
-                        message.get("traceback", ""),
-                    )
+                    # Only a bug carries a traceback; it stays in the log.
+                    trace = message.pop("traceback", None)
+                    if trace:
+                        logger.error("Decomposition failed\n%s", trace)
+                    else:
+                        logger.info("Decomposition failed: %s", message.get("detail"))
                 self.events.put(message)
                 ended = ended or message.get("stage") == "error"
         if not ended:
@@ -189,7 +194,6 @@ class _Run:
                 self.events.put(
                     {
                         "stage": "error",
-                        "pct": 100,
                         "message": "Decomposition worker terminated unexpectedly",
                         "detail": f"The worker process exited with code {self._exitcode}",
                     }
@@ -208,13 +212,20 @@ class _Run:
         kept = bool(pulse_full.size)
         if kept:
             preview_payload["run_result_token"] = _store_run_result(
-                pulse_full, self.session, self.store, spikes
+                pulse_full,
+                self.session,
+                self.store,
+                spikes,
+                RunExtras(
+                    sil=list(message.get("sil") or []),
+                    rois=[(int(s), int(e)) for s, e in message.get("rois") or []] or None,
+                    target_segments=message.get("target_segments"),
+                ),
             )
         done = {
             "stage": "done",
             "summary": message.get("summary"),
             "preview": preview_payload,
-            "pct": 100,
             "message": "Complete",
         }
         return done, kept
@@ -248,40 +259,51 @@ def _spans(spans: list[Span] | None) -> list[tuple[int, int]] | None:
     return None if spans is None else [(s.start, s.end) for s in spans]
 
 
+def _check_bids_fields(payload: DecomposePayload, loader_meta: dict[str, Any], root: Path) -> None:
+    """Raise the ``BidsFieldError`` the run's BIDS export would raise, before anything is computed."""
+    check_run_export(root, payload.bids_entities or {}, loader_meta, payload.bids_metadata)
+
+
 def start_decomposition(payload: DecomposePayload, *, session: str = DEFAULT_SESSION) -> _Run:
     """Start a run on the upload behind ``payload.upload_token``; 409 while another one runs."""
+    for i, mask in enumerate(payload.discard_channels or []):
+        if mask and all(mask):
+            raise MueditError(
+                f"Grid {i + 1} has every channel discarded; keep at least one.", "discard_channels"
+            )
     bids_root = str(bids_root_for(payload.project)) if payload.bids_export else None
     with _SLOT.lock:
         if _SLOT.run is not None:
             raise HTTPException(
                 status_code=409,
-                detail="A decomposition is already running; wait for it to finish or cancel it",
+                detail="A decomposition is already running; wait for it to finish or cancel "
+                "it in the tab that started it",
             )
         held = _hold_upload(payload.upload_token)
         if held is None:
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "field": "upload_token",
-                    "reason": "Token expired or missing; reload the file via /preview-by-path",
-                },
+            raise missing_upload()
+        try:
+            if bids_root is not None:
+                _check_bids_fields(payload, held.signal.metadata, Path(bids_root))
+            run_path = held.source_path or str(Path(tempfile.gettempdir()) / "muedit_cached_input")
+            job = RunJob(
+                run_path=run_path,
+                signal=held.signal,
+                params=payload.params,
+                persist_output=payload.persist_output,
+                rois=_spans(payload.rois),
+                discard_channels=payload.discard_channels,
+                bids_root=bids_root,
+                bids_entities=payload.bids_entities,
+                bids_metadata=payload.bids_metadata,
+                include_full_preview=payload.full_preview,
+                artifact_regions=_spans(payload.artifact_regions),
+                target_index=payload.target_index,
             )
-        run_path = held.source_path or str(Path(tempfile.gettempdir()) / "muedit_cached_input")
-        job = RunJob(
-            run_path=run_path,
-            signal=held.signal,
-            params=payload.params,
-            persist_output=payload.persist_output,
-            rois=_spans(payload.rois),
-            discard_channels=payload.discard_channels,
-            bids_root=bids_root,
-            bids_entities=payload.bids_entities,
-            bids_metadata=payload.bids_metadata,
-            include_full_preview=payload.full_preview,
-            artifact_regions=_spans(payload.artifact_regions),
-            target_index=payload.target_index,
-        )
-        run = _Run(job, session, held)
+            run = _Run(job, session, held)
+        except BaseException:
+            held.release()
+            raise
         _SLOT.run = run
     try:
         run.start()
@@ -317,6 +339,7 @@ async def decomposition_event_stream(
     try:
         while True:
             try:
+                # Each open stream keeps one thread of the default executor waiting here.
                 event = await asyncio.to_thread(run.events.get, timeout=DISCONNECT_POLL_SEC)
             except queue.Empty:
                 if is_disconnected is not None and await is_disconnected():

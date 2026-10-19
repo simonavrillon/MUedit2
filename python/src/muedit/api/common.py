@@ -6,19 +6,20 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from fastapi import Header, HTTPException
+from fastapi import Header
 
 from muedit.api import config
 from muedit.api.cache import BUDGET
-from muedit.api.memory import DEFAULT_SESSION, session_id_or_default
-from muedit.io._bids_layout import dataset_root
+from muedit.api.memory import DEFAULT_SESSION, parse_session_id
+from muedit.errors import MueditError, NotFoundError
+from muedit.io.bids import dataset_root
 
 
 def request_session(x_muedit_session: str | None = Header(None)) -> str:
     """The calling tab's session id; a request that sends one makes it the active session."""
     if x_muedit_session is None:
         return DEFAULT_SESSION
-    session = session_id_or_default(x_muedit_session)
+    session = parse_session_id(x_muedit_session, "X-MUedit-Session")
     BUDGET.touch(session)
     return session
 
@@ -28,9 +29,7 @@ def bids_root_for(project: str | None) -> Path:
     try:
         return config.resolve_bids_root(project)
     except ValueError as exc:
-        raise HTTPException(
-            status_code=400, detail={"field": "project", "reason": str(exc)}
-        ) from exc
+        raise MueditError(str(exc), "project") from exc
 
 
 def dataset_root_of(filepath: str) -> Path | None:
@@ -59,14 +58,18 @@ def make_json_safe(value: Any) -> Any:
 
 
 def require_existing_path(path: str, field: str = "path") -> Path:
-    """Return ``path`` as a Path, raising HTTP 404 when nothing exists there."""
+    """Return ``path`` as a Path, raising ``NotFoundError`` when nothing exists there."""
     resolved = Path(path)
     if not resolved.exists():
-        raise HTTPException(
-            status_code=404,
-            detail={"field": field, "reason": f"File not found: {path}"},
-        )
+        raise NotFoundError(f"File not found: {path}", field)
     return resolved
+
+
+def missing_upload() -> MueditError:
+    """The error for an upload token the server no longer holds."""
+    return MueditError(
+        "Missing or expired upload; request /api/v1/preview-by-path first", "upload_token"
+    )
 
 
 def parse_entity_label(file_label: str) -> str:

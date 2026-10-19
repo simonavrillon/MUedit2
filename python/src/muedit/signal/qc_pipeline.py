@@ -50,7 +50,7 @@ def run_auto_qc(
         100.0 * prelim_bad / max(total_ch, 1),
     )
 
-    kept_rows = _kept_rows(grid_channel_counts, prelim_bad_masks)
+    kept_rows = _kept_channel_rows(grid_channel_counts, prelim_bad_masks)
     _, artifact_mask = detect_artifact_masks(
         data,
         fsamp,
@@ -63,7 +63,7 @@ def run_auto_qc(
         "QC stage 1 (artifacts): %d / %d samples (%.2f%%)",
         int(artifact_mask.sum()),
         data.shape[1],
-        100.0 * artifact_mask.sum() / data.shape[1],
+        100.0 * artifact_mask.sum() / max(data.shape[1], 1),
     )
 
     final_bad_masks = detect_bad_channels_per_grid(
@@ -90,7 +90,7 @@ def run_auto_qc(
     )
 
 
-def _kept_rows(
+def _kept_channel_rows(
     grid_channel_counts: list[int], bad_channel_masks: list[BoolArray]
 ) -> list[IntArray]:
     """Rows of each grid's kept channels in the full signal (its first channel if none is kept)."""

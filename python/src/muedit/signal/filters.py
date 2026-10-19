@@ -13,6 +13,7 @@ import numpy as np
 from scipy.fft import irfft, rfft
 from scipy.signal import butter, filtfilt
 
+from muedit.errors import MueditError
 from muedit.models import FloatArray
 
 NOTCH_WINDOW_HZ: float = 50.0
@@ -75,12 +76,12 @@ def _bandpass_coefficients(fsamp: float, emg_type: int) -> tuple[FloatArray, Flo
     """Butterworth (b, a) for the surface (1) or intramuscular (2) bandpass."""
     if emg_type == 1:
         if fsamp <= 1000:
-            raise ValueError(
+            raise MueditError(
                 f"Surface bandpass (20-500 Hz) requires fsamp > 1000 Hz; got {fsamp} Hz."
             )
         return butter(2, [20, 500], btype="bandpass", fs=fsamp)
     if fsamp <= 8800:
-        raise ValueError(
+        raise MueditError(
             f"Intramuscular bandpass (100-4400 Hz) requires fsamp > 8800 Hz; got {fsamp} Hz."
         )
     return butter(3, [100, 4400], btype="bandpass", fs=fsamp)
@@ -92,15 +93,22 @@ def bandpass_signals(signal: FloatArray, fsamp: float, emg_type: int = 1) -> Flo
     return filtfilt(b, a, signal, axis=-1)
 
 
+def _filter_rows_inplace(
+    signal: FloatArray, filter_one: Callable[[FloatArray], FloatArray]
+) -> None:
+    """Write ``filter_one(row)`` back into each row of ``signal``, on the filter threads."""
+
+    def filter_row(row: int) -> None:
+        signal[row] = filter_one(signal[row])
+
+    for_each_row(filter_row, range(signal.shape[0]), signal.shape[1])
+
+
 def bandpass_inplace(signal: FloatArray, fsamp: float, emg_type: int = 1) -> None:
     """``bandpass_signals`` written back into ``signal``, row by row on the filter threads."""
     # filtfilt filters each row on its own, so per-row results are bit-identical.
     b, a = _bandpass_coefficients(fsamp, emg_type)
-
-    def filter_row(row: int) -> None:
-        signal[row] = filtfilt(b, a, signal[row])
-
-    for_each_row(filter_row, range(signal.shape[0]), signal.shape[1])
+    _filter_rows_inplace(signal, lambda row: filtfilt(b, a, row))
 
 
 def _notch_params(fsamp: float, n_samples: int) -> tuple[int, int]:
@@ -146,11 +154,7 @@ def notch_inplace(signal: FloatArray, fsamp: float) -> None:
     if signal.size == 0:
         return
     frad, window = _notch_params(fsamp, signal.shape[1])
-
-    def filter_row(row: int) -> None:
-        signal[row] = _remove_line_interference(signal[row], frad, window)
-
-    for_each_row(filter_row, range(signal.shape[0]), signal.shape[1])
+    _filter_rows_inplace(signal, lambda row: _remove_line_interference(row, frad, window))
 
 
 def emg_filter_inplace(signal: FloatArray, fsamp: float, emg_type: int = 1) -> None:

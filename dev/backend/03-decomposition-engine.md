@@ -49,13 +49,12 @@ def run_decomposition(
 | `fsamp` | `float` | Sampling frequency |
 | `grid_names` | `list[str]` | One per grid |
 | `pulse_trains` | `FloatArray` | `(n_mu, n_samples)` |
-| `discharge_times` | `list[IntArray]` | Sorted sample indices per MU |
+| `spike_times` | `list[IntArray]` | Sorted sample indices per MU |
 | `mu_grid_index` | `list[int]` | Grid of each MU |
 | `sil` | `list[float]` | SIL of each MU |
 | `discard_channels` | `list[IntArray]` | 0/1 per channel, per grid (auto-QC bad channels included) |
 | `parameters` | `dict[str, Any]` | `asdict(DecompositionParameters)` |
 | `preview` | `dict[str, Any]` | `build_preview_payload()`: what the run page draws |
-| `adaptive_losses` | `dict[int, Any]` | Adaptive post-processing losses per window |
 | `save_path` | `str \| None` | The `.npz` written, when `save_npz` |
 
 ---
@@ -68,7 +67,7 @@ Algorithm hyper-parameters for a single decomposition run.
 |---|---|---|---|
 | `niter` | `int` | `150` | Max ICA iterations per window |
 | `nwindows` | `int` | `1` | Number of analysis sub-windows per grid |
-| `initialization` | `bool` | `False` | False = activity-based init, True = random init |
+| `random_init` | `bool` | `False` | Seed each filter randomly; False seeds it from the most active unconsumed sample |
 | `random_seed` | `int` | `0` | RNG seed |
 | `peel_off_enabled` | `bool` | `False` | Enable MU waveform subtraction (peel-off) |
 | `covfilter` | `bool` | `False` | Filter MUs by ISI coefficient-of-variation |
@@ -92,6 +91,11 @@ Algorithm hyper-parameters for a single decomposition run.
 | `full_trace` | `bool` | `False` | Apply filters over full trace (dewhitened) |
 | `auto_mask_artifacts` | `bool` | `False` | Run auto QC to detect artifacts/bad channels |
 
+`__post_init__` raises `ValueError` unless `niter` and `nwindows` are ≥ 1, `peel_off_win`,
+`adapt_batch_ms` and both learning rates are > 0, `adapt_cov_alpha` is in (0, 1],
+`adapt_spike_prev_weight` is ≥ 0, and, with `use_adaptive`, `adapt_batch_ms` ≤ `edges_sec * 1000`.
+The API (422) and the CLI (usage error) both reject through it.
+
 ### Post-processing mode constants
 
 ```python
@@ -110,7 +114,6 @@ POSTPROCESS_MODES = {
 | Field | Type |
 |---|---|
 | `full_path` | `str` |
-| `filename` | `str` |
 | `signal` | `SignalImport` |
 | `data` | `FloatArray` |
 | `fsamp` | `float` |
@@ -131,7 +134,6 @@ POSTPROCESS_MODES = {
 | `ngrid` | `int` |
 | `coordinates_plateau` | `list[int]` |
 | `artifact_mask` | `np.ndarray \| None` |
-| `bad_channel_masks` | `list[np.ndarray] \| None` |
 
 ### `DecomposeStepOutput`
 | Field | Type |
@@ -146,12 +148,11 @@ POSTPROCESS_MODES = {
 ### `PostprocessStepOutput`
 | Field | Type |
 |---|---|
-| `pulse_t` | `np.ndarray` |
-| `distime` | `list[np.ndarray]` |
+| `pulse_trains` | `np.ndarray` |
+| `spike_times` | `list[np.ndarray]` |
 | `mu_grid_index` | `list[int]` |
 | `sil_by_window` | `dict[int, list[float]]` |
 | `sil` | `list[float]` |
-| `adaptive_losses` | `dict[int, Any]` |
 
 ---
 
@@ -180,7 +181,7 @@ Steps in order:
 5. Apply per-grid bandpass filters (`bandpass_signals()`) with grid-specific EMG type
 6. Resolve ROI list (explicit `rois`, single `roi`, interactive `manual_roi`, `duration`, or full signal). If `nwindows > 1` and single ROI resolved, split into `nwindows` equal sub-windows.
 7. Build `coordinates_plateau` (legacy flat format: `[s0, e0, s1, e1, ...]`)
-8. If `auto_mask_artifacts`: run `run_auto_qc()` to detect artifact mask and bad channels — OR bad channels into `discard_channels` (`declared_discard_channels` keeps them as they were before). User-drawn `artifact_regions` (if provided) are rasterized via `build_manual_artifact_mask` and OR'd into the artifact mask.
+8. If `auto_mask_artifacts`: run `run_auto_qc()` to detect artifact mask and bad channels — OR bad channels into `discard_channels` (`declared_discard_channels` keeps them as they were before). It runs on the notched and bandpassed EMG of steps 4-5, unlike `/qc/auto`, which bandpasses only (API doc, `/qc/auto`), so the two can disagree on the same recording. A grid left with no kept channel stops the run with a `ValueError`. User-drawn `artifact_regions` (if provided) are rasterized via `build_manual_artifact_mask` and OR'd into the artifact mask.
 
 ## Stage 2b: BIDS export (`preprocess.py: bids_export_step`)
 
@@ -188,8 +189,14 @@ Steps in order:
 def bids_export_step(loaded, prep, bids_root, bids_entities, bids_metadata) -> PreprocessStepOutput
 ```
 
-Runs only with `bids_root`. Writes the raw (unfiltered) EMG, its sidecars and `events.tsv`, and the
-participant row; `channels.tsv` marks `prep.declared_discard_channels`. Returns `prep` with
+Runs only with `bids_root`, after preprocessing and before any decomposition: its errors stop the
+run before the costly steps, and `start_decomposition` refuses the form fields it would refuse
+(`check_run_export`) with a 400 before the run starts. Writes the raw (unfiltered) EMG, its
+sidecars and `events.tsv`, and the participant row. Its metadata fields come from
+`io.bids.bids_emg_fields`, as the edit save's do. `channels.tsv` marks
+`prep.declared_discard_channels` bad ("manually excluded") and the channels auto-QC added
+("auto-detected"): the mask filter updates read back from the dataset. The signal file is
+encoded beside its destination and renamed over it, so a failed export leaves none. Returns `prep` with
 `bids_entity_label` and `bids_emg_path` in a new `loader_meta` (the caller's signal metadata is not
 changed), which `export_step` reads to save the decomposition in the dataset's derivatives.
 
@@ -241,6 +248,7 @@ Returns per-window MU filters, whitening matrices, SIL scores, and grid assignme
 | `KMEANS_ITER` | `10` | K-means iterations for amplitude split |
 | `DEDUP_MAXLAG_RATIO` | `40` | Max lag = fsamp / this ratio |
 | `DEDUP_JITTER` | `0.00025` | Jitter tolerance for dedup (seconds) |
+| `DEDUP_LAG_GATE` | `0.2` | Overlap above which dedup aligns a pair at its best lag |
 
 ### Functions
 
@@ -280,15 +288,15 @@ def subtract_mu_waveforms(x, spikes, fsamp, win) -> ndarray
 Subtracts averaged MU waveform (estimated from spikes within `+/- win*fsamp` samples) from the multichannel signal. This is the peel-off step.
 
 ```python
-def batch_process_filters(mu_filters_by_window, whitened_windows, coordinates, ltime, fsamp,
+def batch_process_filters(mu_filters_by_window, whitened_windows, coordinates, total_samples, fsamp,
                            whiten_mat_by_window, build_full_extended, window_to_grid,
-                           win_means_by_window, artifact_mask) -> (pulse_t, distime)
+                           win_means_by_window, artifact_mask) -> (pulse_trains, spike_times)
 ```
 Applies MU filters across all windows to reconstruct pulse trains and spike times. In full-trace mode, dewhitens filters and projects through full extended signal with mean-correction. In windowed mode, projects through per-window whitened signal. Zeros pulse trains at artifact-masked samples, then detects spikes via `find_refractory_peaks` + `split_by_amplitude`.
 
 ```python
-def rem_duplicates(pulse_t, distime, distime_ref, maxlag, jitter, tol, fsamp)
-    -> (kept_pulses, kept_distimes, kept_indices)
+def unique_mu_indices(spike_times, spike_times_ref, maxlag, jitter, tol, fsamp,
+                      total_samples) -> list[int]  # indices of the MUs kept
 ```
 Removes duplicated MUs using lag-aware spike-train overlap. For each pair: expand jittered spike times, find best cross-correlation lag, compute overlap score, group duplicates if `score >= tol`. Within each group, keeps the MU with lowest ISI CoV.
 
@@ -305,7 +313,7 @@ Steps:
 1. **Filter application**:
    - If `use_adaptive`: extract per-grid raw data and call `adaptive_batch_process()` with all adapt params + artifact mask
    - Else: call `batch_process_filters()` (full-trace dewhitened or windowed mode)
-2. **Deduplication** via `remove_duplicates_by_grid()` (calls `rem_duplicates()` with `maxlag = fsamp/40`, `jitter = 0.00025s`)
+2. **Deduplication** via `remove_duplicates_by_grid()` (calls `unique_mu_indices()` with `maxlag = fsamp/40`, `jitter = 0.00025s`)
 3. **SIL remapping** from deduplicated global indices
 4. Return `PostprocessStepOutput`
 
@@ -313,8 +321,8 @@ Steps:
 
 | Function | Description |
 |---|---|
-| `dedup_survivors(distime, mu_grid_index, ngrid, params, fsamp, n_samples) -> (kept, grids)` | Indices of the MUs duplicate removal keeps, within grids then across; works on spike times only (also the edit stage's dedup) |
-| `remove_duplicates_by_grid(pulse_t, distime, mu_grid_index, ngrid, params, fsamp)` | `dedup_survivors`, then the kept pulse rows indexed once |
+| `dedup_survivors(spike_times, mu_grid_index, ngrid, params, fsamp, total_samples) -> (kept, grids)` | Indices of the MUs duplicate removal keeps, within grids then across, in ascending order (grid-major for the run, whose MUs come grid by grid); works on spike times only (also the edit stage's dedup). A grid index outside `[0, ngrid)` raises `ValueError` |
+| `remove_duplicates_by_grid(pulse_trains, spike_times, mu_grid_index, ngrid, params, fsamp)` | `dedup_survivors`, then the kept pulse rows indexed once |
 | `_reconstruct_window_signal(prep, params, win_global, whiten_mat) -> w_sig` | Recompute a window's whitened extended signal for filter application; `postprocess_step` wraps it in `get_w_sig(nwin)` |
 
 ---
@@ -329,15 +337,15 @@ def export_step(loaded, prep, post, params, include_full_preview, save_npz, raw_
 Steps:
 
 1. Build preview payload via `build_preview_payload()`
-2. If `save_npz`: resolve the save path (BIDS derivatives layout or sibling to input file) and save the schema v2 NPZ with sil, sil_by_window, rois, adaptive_losses and the artifact mask; with `raw_emg` (the pipeline passes it when not exporting BIDS), also the raw EMG, discard_channels and coordinates
-3. Return the `DecompositionResult`; `save_path` is set only when the file was written
+2. If `save_npz`: resolve the save path (`io.bids.run_decomp_path`: the MUedit derivatives of the BIDS dataset the recording belongs to, whether loaded from it or exported into it by this run, else beside the input file) and save the schema v2 NPZ with sil, sil_by_window, rois, the artifact mask and the target segments; with `raw_emg` (the pipeline passes it only for a file saved outside a dataset), also the raw EMG, discard_channels, coordinates and loader_meta. A save into a dataset also writes `derivatives/muedit/dataset_description.json`
+3. Return the `DecompositionResult` (with the `rois` and `target_segments` the run save writes); `save_path` is set only when the file was written
 
 ---
 
 ## Preview (`preview.py`)
 
 ```python
-def build_preview_payload(data, fsamp, pulse_t, distime, grid_names, roi_list,
+def build_preview_payload(data, fsamp, pulse_trains, spike_times, grid_names, roi_list,
                            discard_channels, coordinates, mu_grid_index, loader_meta,
                            muscles, include_full_preview) -> dict[str, Any]
 ```
@@ -347,7 +355,7 @@ per-channel traces) come from the upload's `/series/*` endpoints, not from here.
 | Key | Content |
 |---|---|
 | `pulse_trains_full` | The run's pulse trains (the stored array itself) when `include_full_preview`, else `None`. The server keeps them for `/series/pulse` and the run save; no preview encoding sends them |
-| `distime_all` | Per-MU discharge times, int32 arrays (CSR in the MUB1 frame, lists in the JSON fallback) |
+| `spike_times` | Per-MU discharge times, int32 arrays (CSR in the MUB1 frame, lists in the JSON fallback) |
 | `channel_means` | Per-channel mean of the filtered \|EMG\| (including discarded channels) |
 | `fsamp`, `total_samples`, `rois`, `grid_names`, `mu_grid_index`, `metadata`, `muscle`, `coordinates` | Metadata |
 
@@ -356,12 +364,12 @@ per-channel traces) come from the upload's `/series/*` endpoints, not from here.
 ## Decomposition Files (`decomp/decomposition_file.py`)
 
 Owns the app `.npz` schema (v2, described in `docs/saved-files.md`):
-`save_decomposition_npz(out_path, pulse_trains, distimes, fsamp, grid_names, mu_grid_index,
-muscles, parameters, total_samples, *, sil, sil_by_window, adaptive_losses, rois,
+`save_decomposition_npz(out_path, pulse_trains, spike_times, fsamp, grid_names, mu_grid_index,
+muscles, parameters, total_samples, *, sil, sil_by_window, rois,
 artifact_mask, emg_data, discard_channels, coordinates, loader_meta)` writes it through
 `io.npz.NpzWriter` (uncompressed, 64-byte-aligned members, no pickle, written to a temporary
 file and moved over the destination). Discharge times are CSR (`spike_times` int32 +
-`spike_offsets` int64, `pack_csr` / `unpack_csr`); names, parameters and losses are JSON
+`spike_offsets` int64, `pack_csr` / `unpack_csr`); names and parameters are JSON
 strings; the artifact mask is stored as `[start, end)` intervals. `pulse_trains=None`
 writes spike times only. `pulse_trains` can also be an `io.npz.RowSource` (shape + a
 `read(first, stop)` of rows), which the writer reads a block of rows at a time: the saves
@@ -386,33 +394,27 @@ its spike times. v7.3 EMG is read by slice. Handles the 1-based MATLAB discharge
 convention (shifts by -1). A v1 `.npz` embeds filtered EMG, so its context has
 `prefiltered=True`.
 
-```python
-def load_decomposition_file(filepath: str) -> LoadedDecomposition
-def load_decomposition_signal_context(filepath: str, store: ArrayStore | None = None) -> EditSignalContext | None
-```
-`load_decomposition` without the EMG, and its EMG context alone.
-
 ### Key helper functions
 
 | Function | Description |
 |---|---|
-| `normalize_distimes(raw) -> list[IntArray]` | One `spike_array` per MU (sorted, deduplicated, non-negative int32) |
-| `build_pulse_trains_from_distimes(distimes, total_samples) -> np.ndarray` | Binary float32 `(n_mu, total_samples)` pulse matrix from discharge indices |
-| `save_editlog(path, mu_uids, edit_history, artifact_times)` | Write JSON editlog sidecar |
+| `normalize_spike_times(raw) -> list[IntArray]` | One `spike_array` per MU (sorted, deduplicated, non-negative int32) |
+| `build_pulse_trains_from_spike_times(spike_times, total_samples) -> np.ndarray` | Binary float32 `(n_mu, total_samples)` pulse matrix from discharge indices |
+| `save_editlog(path, mu_uids, edit_history, artifact_times)` | Write JSON editlog sidecar; `artifact_times` only when an MU has markers (the edit save writes it to a temporary file and renames it with the `.npz`) |
 | `first_non_none(*values)` | Return first non-None argument |
 | `_npz_v1_decomp(archive)` / `_npz_v2_decomp(archive) -> DecompositionLoad` | Read the MUedit NPZ schemas |
 | `_mat5_decomp(mat)` / `_mat73_decomp(h5f) -> DecompositionLoad` | Read MATLAB MAT (scipy v5 or HDF5 v7.3, without the EMG samples) |
 | `_parse_mu_grid_index(raw) -> list[int]` | Normalize MU-to-grid assignment |
-| `_unpack_gridwise_decomposition(pulse_trains, distime_raw, mu_grid_index) -> (pulse, distime, mu_grid_index)` | Stack per-grid blocks |
-| `_distimes_from_pulse_matrix(matrix) -> list[IntArray]` | Derive discharge times from pulse matrix non-zero entries |
-| `_shift_distimes(values, shift, limit) -> list[IntArray]` | Shift all discharge times by constant, clip to `[0, limit)` |
+| `_unpack_gridwise_decomposition(pulse_trains, spike_times_raw, mu_grid_index) -> (pulse, spike_times, mu_grid_index)` | Stack per-grid blocks |
+| `_spike_times_from_pulse_matrix(matrix) -> list[IntArray]` | Derive discharge times from pulse matrix non-zero entries |
+| `_shift_spike_times(values, shift, limit) -> list[IntArray]` | Shift all discharge times by constant, clip to `[0, limit)` |
 
 ### `DecompositionLoad` (NamedTuple)
 
 | Field | Type |
 |---|---|
 | `pulse_trains` | `Any` |
-| `distime_raw` | `Any` |
+| `spike_times_raw` | `Any` |
 | `fsamp` | `float \| None` |
 | `total_samples` | `int \| None` |
 | `grid_names` | `list[str]` |
@@ -438,16 +440,16 @@ Instead of applying static ICA filters to the full signal, the adaptive engine r
 ```python
 def adaptive_batch_process(
     mu_filters_by_window, w_sig_by_window, win_data, whiten_mats,
-    grid_data, coordinates, ltime, fsamp, nwindows_per_grid,
+    grid_data, coordinates, total_samples, fsamp, nwindows_per_grid,
     win_means_by_window=None, batch_ms=100,
     adapt_wh=True, adapt_sv=True, adapt_sd=True,
     wh_learning_rate=7e-3, sv_learning_rate=3e-3,
     cov_alpha=0.1, spike_prev_weight=5,
     compute_loss=False, artifact_mask=None,
-) -> (pulse_t, distime, all_losses)
+) -> (pulse_trains, spike_times, all_losses)
 ```
 
-For each window: a samples-first float32 `StreamedExtender` over the grid's kept channels (window mean subtracted per batch), a bidirectional adaptive pass writing each batch's pulse trains (`signed_square` of ipts) into the store, artifact regions zeroed, discharge times collected per batch.
+For each window: a samples-first `StreamedExtender` in the run's `compute_dtype` over the grid's kept channels (window mean subtracted per batch), a bidirectional adaptive pass writing the `signed_square` of each batch's pulse trains into the store, artifact regions zeroed, discharge times collected per batch.
 
 ### Bidirectional pass
 
@@ -509,7 +511,7 @@ class AdaptiveDecomp:
 Constructor: extends EMG signal, aligns artifact mask, runs whitening calibration (EMA covariance + KL divergence stats), and optionally contrast calibration.
 
 ```python
-    def run(self) -> (ipts_output, spikes_output, losses)
+    def run(self, start=0, stop=None, reverse=False, sink=None) -> losses  # outputs via sink
 ```
 **Main processing loop.** For each batch:
 - If artifact-contaminated: forward-only pass, no state updates, zero spikes in artifact region
@@ -522,19 +524,19 @@ Constructor: extends EMG signal, aligns artifact mask, runs whitening calibratio
 |---|---|
 | `_whiten(emg_batch)` | Apply whitening, update EMA covariance, gradient descent if `adapt_wh` |
 | `_separate(whitened_signal)` | Project through separation vectors |
-| `_detect_spikes(ipts_squared, update_centroids=True)` | Amplitude-bounded peak finding, midpoint threshold, EMA centroid update |
+| `_detect_spikes(pulse_trains, update_centroids=True)` | Amplitude-bounded peak finding, midpoint threshold, EMA centroid update |
 | `_kl_divergence()` | KL divergence between estimated whitened covariance and identity |
 | `_wh_loss(kl_div)` | Normalized whitening loss (squared z-score vs calibration) |
-| `_contrast_value(ipts_batch, spikes_batch)` | Mean logcosh contrast at spike positions, per MU |
+| `_contrast_value(pulse_trains_batch, spikes_batch)` | Mean logcosh contrast at spike positions, per MU |
 | `_sv_loss(contrast)` | Normalized separation vector loss |
-| `_update_separation_vectors(whitened_signal, ipts, spikes)` | Gradient ascent on logcosh, Gram-Schmidt deflation, unit-norm renorm |
+| `_update_separation_vectors(whitened_signal, pulse_trains, spikes)` | Gradient ascent on logcosh, Gram-Schmidt deflation, unit-norm renorm |
 
 ### Module-level function
 
 ```python
 def run_adaptive_decomposition(emg, whitening, sep_vectors, base_centr, spikes_centr,
                                 emg_calib, config, artifact_mask=None)
-    -> (ipts, spikes, losses)
+    -> (pulse_trains, spikes, losses)
 ```
 Constructs `AdaptiveDecomp` and calls `.run()`.
 

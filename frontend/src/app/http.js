@@ -53,30 +53,24 @@ async function parseApiError(res) {
   let code = "";
   let field = "";
   try {
-    const data = await res.json();
-    const err = data?.error || data;
+    const err = (await res.json())?.error;
     if (typeof err?.message === "string" && err.message.trim()) {
       message = err.message.trim();
     }
     if (typeof err?.code === "string") code = err.code;
 
-    const detail = err?.detail ?? data?.detail;
-    if (typeof detail === "string" && detail.trim()) {
-      message = `${message}: ${detail.trim()}`;
-    } else if (Array.isArray(detail)) {
-      // FastAPI/Pydantic validation errors are commonly lists with `loc` + `msg`.
+    const detail = err?.detail;
+    if (Array.isArray(detail)) {
+      // A 422: Pydantic's validation errors, each with `loc` + `msg`.
       const first =
         detail.find((item) => item && typeof item === "object") || null;
-      const msg = first?.msg || first?.message || "";
+      const msg = first?.msg || "";
       const loc = Array.isArray(first?.loc) ? first.loc.join(".") : "";
       if (msg) {
         message = `${message}: ${loc ? `${loc} ` : ""}${msg}`.trim();
       }
-    } else if (detail && typeof detail === "object" && !Array.isArray(detail)) {
-      const reason = detail.reason || detail.message || "";
-      if (typeof detail.field === "string") field = detail.field;
-      const fieldText = field ? `${field} ` : "";
-      if (reason) message = `${message}: ${fieldText}${reason}`.trim();
+    } else if (typeof detail?.field === "string") {
+      field = detail.field;
     }
   } catch {
     // Keep status fallback.

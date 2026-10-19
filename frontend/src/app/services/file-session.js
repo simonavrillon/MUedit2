@@ -93,7 +93,7 @@ export function createFileSessionService(app) {
               handedness: handedness || "n/a",
             }
           : null,
-      powerlineFreq: Number(text(els.bidsPowerlineFreq)) || 50,
+      powerlineFreq: Number(text(els.bidsPowerlineFreq)) || null,
       manufacturer: text(els.bidsManufacturer),
       deviceModel: text(els.bidsDeviceModel),
       placementScheme: text(els.bidsPlacementScheme) || "Other",
@@ -145,9 +145,9 @@ export function createFileSessionService(app) {
   /** @type {FileSessionService["applyPreviewMetadata"]} */
   function applyPreviewMetadata(data) {
     if (els.fsamp) {
-      const fs = Number(data.fsamp);
+      const fsamp = Number(data.fsamp);
       els.fsamp.value =
-        Number.isFinite(fs) && fs > 0 ? String(Math.round(fs)) : "";
+        Number.isFinite(fsamp) && fsamp > 0 ? String(Math.round(fsamp)) : "";
     }
     applyParticipantFields(els, data?.participant_meta || {});
     // The project folder the file lies in under the output folder, when it does.
@@ -158,6 +158,24 @@ export function createFileSessionService(app) {
       els.bidsManufacturer.value = data.manufacturer;
     if (els.bidsDeviceModel && data?.manufacturers_model_name)
       els.bidsDeviceModel.value = data.manufacturers_model_name;
+    // A recording in a BIDS dataset brings the placement its sidecar records.
+    const meta = data?.metadata || {};
+    const scheme = data?.placement_scheme || meta.placement_scheme;
+    if (els.bidsPlacementScheme && scheme) {
+      els.bidsPlacementScheme.value = String(scheme);
+      els.bidsPlacementDescRow?.classList.toggle("hidden", scheme !== "Other");
+    }
+    /** @type {[HTMLInputElement | null | undefined, unknown][]} */
+    const placement = [
+      [
+        els.bidsPlacementDescription,
+        data?.placement_scheme_description || meta.placement_scheme_description,
+      ],
+      [els.bidsReferenceLocation, data?.reference_location],
+      [els.bidsGroundLocation, data?.ground_location],
+    ];
+    for (const [field, value] of placement)
+      if (field && value) field.value = String(value);
   }
 
   /** @type {FileSessionService["applySessionInfoFromDecomposition"]} */
@@ -186,7 +204,7 @@ export function createFileSessionService(app) {
     if (
       els.bidsPowerlineFreq &&
       !els.bidsPowerlineFreq.value &&
-      meta.powerline_freq
+      Number(meta.powerline_freq) > 0
     )
       els.bidsPowerlineFreq.value = String(meta.powerline_freq);
   }

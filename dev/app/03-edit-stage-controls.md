@@ -210,9 +210,9 @@ it is done and the status says how it went; a failure is reported and changes no
       -> api.editOp(op, {token, ...args})       POST /edit/ops/{op}
       -> applyEditChange(state, frame):
            keepEditMus(kept_indices)            [when MUs were removed or reordered]
-           distimes/artifactTimes of the `changed` MUs
+           spikeTimes/artifactTimes of the `changed` MUs
            flagged, muUids, muGridIndex, versions, dirty, canUndo
-           editHistory cut at history_start, `history` appended
+           editHistory cut at history_start (an index into the server's log), `history` appended
       -> refreshEditModeButtons()               [Undo follows canUndo]
 3. setEditBookmark({muIdx, position}) + setShowBookmark(false)
 4. Clear the selections + setEditMode(null)
@@ -240,7 +240,13 @@ it is done and the status says how it went; a failure is reported and changes no
 
 ## Edit History Log
 
-`state.edit.editHistory` mirrors the session's history, entry for entry. Each is tagged with:
+`state.edit.editHistory` mirrors the tail of the session's history, entry for entry, and
+`editHistoryStart` is the server index of its first entry. Open, state, recover and save send
+the last 100 entries (`HISTORY_TAIL`), reaching further back when the undo stack does, so an undo
+never cuts below what the client holds; each edit then appends to it. The whole log stays on the
+server and in the `.json` sidecar. The client only reads the latest entries: the last one naming
+an MU (where to resume) and each MU's last one (the timeline marks; after a reload, an MU last
+edited before the tail shows none). Each entry is tagged with:
 
 | Field | Description |
 |---|---|
@@ -300,7 +306,7 @@ User clicks Save (#editSaveBtn)
         2. applyEditSave(state, saved):
            keepEditMus(saved.kept_indices)       [the server dropped flagged and duplicate MUs]
            the per-MU fields (dirty is false again)
-           editHistory = saved.edit_history      [with the remove_flagged/remove_duplicates entries]
+           editHistory = saved.edit_history      [the tail, with the remove_flagged/remove_duplicates entries]
         3. refreshEditModeButtons()               [the undo stack starts over]
         4. renderEditExplorer()
         5. setStatus("Edited decomposition saved to {path}", "success")

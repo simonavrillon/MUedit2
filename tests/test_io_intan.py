@@ -1,217 +1,175 @@
-"""Intan RHD loading on synthetic recordings in all three save layouts."""
+"""Importing an Intan RHD recording, in each of its three save layouts."""
 
 from __future__ import annotations
 
-import json
-import struct
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
 import pytest
 
+from muedit.errors import SignalLoadError
 from muedit.io import load_signal
-from muedit.io._intan import load_intan
+from tests._io_files import (
+    INTAN_FSAMP,
+    INTAN_GRID,
+    INTAN_N_CH,
+    INTAN_N_PORTS,
+    INTAN_N_SAMPLES,
+    Expected,
+    Write,
+    check_signal,
+    intan_signals,
+    write_grid_sidecar,
+    write_intan_header,
+    write_intan_per_channel,
+    write_intan_per_signal_type,
+    write_intan_traditional,
+)
 
-_GRID = "GR10MM0804"
-_N_CH = 32
-_N_PORTS = 2
-_SAMPLES_PER_BLOCK = 128
-_N_BLOCKS = 3
-_N_SAMPLES = _SAMPLES_PER_BLOCK * _N_BLOCKS
-_FSAMP = 2000.0
+
+def _folder(tmp_path: Path, name: str) -> Path:
+    folder = tmp_path / name
+    folder.mkdir()
+    write_grid_sidecar(folder, [INTAN_GRID], ["ta", "gm"])
+    return folder
 
 
-def _qstring(text: str) -> bytes:
-    """Encode a Qt ``QString`` the way the RHD header stores one."""
-    raw = text.encode("utf-16-le")
-    return struct.pack("<I", len(raw)) + raw
+def _per_channel(tmp_path: Path) -> Path:
+    folder = _folder(tmp_path, "per_channel")
+    write_intan_per_channel(folder, *intan_signals())
+    return folder
 
 
-def _channel_record(native: str, order: int, signal_type: int) -> bytes:
-    """Encode one channel record of the header's signal-group table."""
-    return (
-        _qstring(native)
-        + _qstring(native)
-        + struct.pack("<hhhhhh", order, order, signal_type, 1, order, 0)
-        + struct.pack("<hhhh", 0, 0, 0, 0)
-        + struct.pack("<ff", 0.0, 0.0)
+def _per_signal_type(tmp_path: Path) -> Path:
+    folder = _folder(tmp_path, "per_signal_type")
+    write_intan_per_signal_type(folder, *intan_signals())
+    return folder
+
+
+def _traditional(tmp_path: Path) -> Path:
+    path = _folder(tmp_path, "traditional") / "recording.rhd"
+    write_intan_traditional(path, *intan_signals())
+    return path
+
+
+def _long_header(tmp_path: Path) -> Path:
+    """A header past the first 64 KiB read: it is parsed from a growing prefix."""
+    path = _folder(tmp_path, "long_header") / "recording.rhd"
+    write_intan_traditional(path, *intan_signals(), notes=("n" * 50_000, "", ""))
+    return path
+
+
+def _synthetic(every_aux_sample: bool) -> Expected:
+    amp, aux, digital = intan_signals()
+    n_emg = INTAN_N_PORTS * INTAN_N_CH
+    aux_scaled = (aux[0] * 37.4e-6).astype(np.float32)
+    return Expected(
+        shape=(n_emg, INTAN_N_SAMPLES),
+        fsamp=INTAN_FSAMP,
+        grid_names=[INTAN_GRID] * INTAN_N_PORTS,
+        muscle_names=["ta", "gm"],
+        aux_names=["A-AUX1", "B-AUX1", "DIGITAL-IN-01"],
+        metadata={
+            "manufacturer": "Intan Technologies",
+            "units": "mV",
+            "aux_units": "V",
+            "aux_kinds": ["analog", "analog", "digital"],
+            "powerline_freq": 50.0,
+            "hardware_filters": ["HP: 20.00 Hz, LP: 500.00 Hz, Notch: 50 Hz"],
+            "emg_hpf": [20.0] * n_emg,
+            "emg_lpf": [500.0] * n_emg,
+            "electrode_impedances": [52.5] + [None] * (n_emg - 1),
+            "acquisition_date": None,
+        },
+        # Counts scaled in float64 (0.195 uV per bit) and rounded once to float32.
+        data=(amp.astype(np.float64) * 0.195e-3).astype(np.float32),
+        aux_rows={
+            # Aux inputs are sampled every 4th amplifier sample; layouts that store only
+            # those samples hold each one for the next three.
+            0: aux_scaled if every_aux_sample else np.repeat(aux_scaled[::4], 4),
+            2: digital[0].astype(np.float32),
+        },
     )
 
 
-def _write_header(path: Path, notes: tuple[str, str, str] = ("", "", "")) -> None:
-    """Write a version 3.0 RHD header: two amplifier ports, aux, and digital in."""
-    buf = struct.pack("<Ihh", 0xC6912702, 3, 0)
-    buf += struct.pack("<f", _FSAMP)
-    buf += struct.pack("<h", 1)
-    buf += struct.pack("<ffffff", 20.0, 10.0, 500.0, 20.0, 10.0, 500.0)
-    buf += struct.pack("<h", 1)
-    buf += struct.pack("<ff", 1000.0, 1000.0)
-    buf += b"".join(_qstring(note) for note in notes)
-    buf += struct.pack("<h", 0)
-    buf += struct.pack("<h", 0)
-    buf += _qstring("n/a")
-    buf += struct.pack("<h", _N_PORTS + 1)
-
-    for port in ("A", "B"):
-        buf += _qstring(f"Port {port}") + _qstring(port)
-        buf += struct.pack("<hhh", 1, _N_CH + 1, _N_CH)
-        for i in range(_N_CH):
-            buf += _channel_record(f"{port}-{i:03d}", i, 0)
-        buf += _channel_record(f"{port}-AUX1", _N_CH, 1)
-
-    buf += _qstring("Digital In Ports") + _qstring("DIGITAL-IN")
-    buf += struct.pack("<hhh", 1, 1, 0)
-    buf += _channel_record("DIGITAL-IN-01", 0, 4)
-
-    path.write_bytes(buf)
-
-
-def _reference_signals() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Build amplifier / aux / digital sample blocks with per-channel signatures."""
-    rng = np.random.default_rng(7)
-    amp = rng.integers(-2000, 2000, size=(_N_PORTS * _N_CH, _N_SAMPLES)).astype(np.int16)
-    amp += (np.arange(_N_PORTS * _N_CH, dtype=np.int16) * 10)[:, None]
-    aux = rng.integers(0, 3000, size=(_N_PORTS, _N_SAMPLES)).astype(np.uint16)
-    digital = rng.integers(0, 2, size=(1, _N_SAMPLES)).astype(np.uint16)
-    return amp, aux, digital
-
-
-def _write_per_channel(
-    directory: Path, amp: np.ndarray, aux: np.ndarray, digital: np.ndarray
-) -> None:
-    """Write the "one file per channel" layout: one ``.dat`` per saved channel."""
-    _write_header(directory / "info.rhd")
-    np.arange(_N_SAMPLES, dtype=np.int32).tofile(directory / "time.dat")
-    for port_i, port in enumerate(("A", "B")):
-        for i in range(_N_CH):
-            amp[port_i * _N_CH + i].tofile(directory / f"amp-{port}-{i:03d}.dat")
-        aux[port_i].tofile(directory / f"aux-{port}-AUX1.dat")
-    digital[0].tofile(directory / "board-DIGITAL-IN-01.dat")
-
-
-def _write_per_signal_type(
-    directory: Path, amp: np.ndarray, aux: np.ndarray, digital: np.ndarray
-) -> None:
-    """Write the "one file per signal type" layout: channels interleaved per file."""
-    _write_header(directory / "info.rhd")
-    np.arange(_N_SAMPLES, dtype=np.int32).tofile(directory / "time.dat")
-    amp.T.astype(np.int16).tofile(directory / "amplifier.dat")
-    aux[:, ::4].T.astype(np.uint16).tofile(directory / "auxiliary.dat")
-    digital[0].astype(np.uint16).tofile(directory / "digitalin.dat")
-
-
-def _write_traditional(path: Path, amp: np.ndarray, aux: np.ndarray, digital: np.ndarray) -> None:
-    """Write a monolithic ``.rhd``: fixed-size data blocks following the header."""
-    _write_header(path)
-    with open(path, "ab") as handle:
-        for b in range(_N_BLOCKS):
-            lo, hi = b * _SAMPLES_PER_BLOCK, (b + 1) * _SAMPLES_PER_BLOCK
-            handle.write(np.arange(lo, hi, dtype=np.int32).tobytes())
-            handle.write((amp[:, lo:hi].astype(np.int32) + 32768).astype(np.uint16).tobytes())
-            handle.write(aux[:, lo:hi:4].astype(np.uint16).tobytes())
-            handle.write(digital[0, lo:hi].astype(np.uint16).tobytes())
-
-
-@pytest.fixture
-def synthetic_layouts(tmp_path: Path) -> dict[str, Path]:
-    """Write the same recording in all three Intan save layouts."""
-    amp, aux, digital = _reference_signals()
-    per_channel = tmp_path / "per_channel"
-    per_signal_type = tmp_path / "per_signal_type"
-    traditional = tmp_path / "traditional"
-    for d in (per_channel, per_signal_type, traditional):
-        d.mkdir()
-    _write_per_channel(per_channel, amp, aux, digital)
-    _write_per_signal_type(per_signal_type, amp, aux, digital)
-    _write_traditional(traditional / "recording.rhd", amp, aux, digital)
-    return {
-        "per_channel": per_channel,
-        "per_signal_type": per_signal_type,
-        "traditional": traditional / "recording.rhd",
-    }
-
-
-def test_all_three_layouts_recover_the_same_channels(synthetic_layouts: dict[str, Path]) -> None:
-    amp, _, _ = _reference_signals()
-    # Loaders scale in float64 and store float32, so the result is exactly the cast.
-    expected = (amp.astype(np.float64) * 0.195e-3).astype(np.float32)
-
-    loaded = {
-        name: load_intan(str(path), grid_names=_GRID) for name, path in synthetic_layouts.items()
-    }
-    for name, sig in loaded.items():
-        assert sig.metadata["intan_layout"] == name
-        assert sig.data.shape == (_N_PORTS * _N_CH, _N_SAMPLES), name
-        assert sig.fsamp == _FSAMP, name
-        assert sig.gridname == [_GRID] * _N_PORTS, name
-        assert sig.data.dtype == np.float32, name
-        np.testing.assert_array_equal(sig.data, expected, err_msg=name)
-
-
-def test_layouts_agree_on_auxiliary_and_digital(synthetic_layouts: dict[str, Path]) -> None:
-    _, aux, digital = _reference_signals()
-
-    for name, path in synthetic_layouts.items():
-        sig = load_intan(str(path), grid_names=_GRID)
-        assert sig.auxiliaryname == ["A-AUX1", "B-AUX1", "DIGITAL-IN-01"], name
-        assert sig.metadata["aux_kinds"] == ["analog", "analog", "digital"], name
-        np.testing.assert_array_equal(sig.auxiliary[2], digital[0], err_msg=name)
-        scaled = (aux[0] * 37.4e-6).astype(np.float32)
-        if name == "per_channel":
-            np.testing.assert_array_equal(sig.auxiliary[0], scaled, err_msg=name)
-        else:
-            np.testing.assert_array_equal(sig.auxiliary[0, ::4], scaled[::4], err_msg=name)
-
-
-def test_grid_names_resolve_from_sidecar(synthetic_layouts: dict[str, Path]) -> None:
-    """``load_signal`` cannot pass arguments, so a sidecar must name the grids."""
-    directory = synthetic_layouts["per_channel"]
-    (directory / "muedit_grids.json").write_text(
-        json.dumps({"gridname": [_GRID, _GRID], "muscle": ["ta", "gm"]})
+def _sample() -> Expected:
+    return Expected(
+        shape=(128, 2_584_832),
+        fsamp=10000.0,
+        grid_names=["INTAN64-1305"] * 2,
+        muscle_names=[],
+        metadata={"manufacturer": "Intan Technologies", "units": "mV"},
     )
-    sig = load_signal(str(directory))
-    assert sig.gridname == [_GRID, _GRID]
-    assert sig.muscle == ["ta", "gm"]
 
 
-def test_unknown_grid_raises_actionable_error(synthetic_layouts: dict[str, Path]) -> None:
-    with pytest.raises(ValueError, match="does not record one"):
-        load_intan(str(synthetic_layouts["per_channel"]))
+_FILES: dict[str, tuple[Write, Expected]] = {
+    "per-channel": (lambda _, tmp: _per_channel(tmp), _synthetic(every_aux_sample=True)),
+    "per-signal-type": (lambda _, tmp: _per_signal_type(tmp), _synthetic(every_aux_sample=False)),
+    "traditional": (lambda _, tmp: _traditional(tmp), _synthetic(every_aux_sample=False)),
+    "long-header": (lambda _, tmp: _long_header(tmp), _synthetic(every_aux_sample=False)),
+    "sample": (lambda request, _: request.getfixturevalue("intan_dir"), _sample()),
+}
 
 
-def test_intan_adapter_channel_map_is_a_gr08mm1305_permutation() -> None:
-    """INTAN64-1305 re-orders the GR08MM1305 electrodes onto Intan channels 1-64."""
-    from muedit.signal.grid import _GRID_CATALOG
-
-    spec = _GRID_CATALOG["INTAN64-1305"]
-    assert spec.nbelectrodes == 64
-    assert spec.ied == 8.0
-    assert sorted(int(v) for v in spec.channel_map.flat if v) == list(range(1, 65))
-    otb = _GRID_CATALOG["GR08MM1305"].channel_map
-    np.testing.assert_array_equal(spec.channel_map.astype(bool), otb.astype(bool))
+@pytest.mark.parametrize(
+    "case",
+    [pytest.param(c, marks=pytest.mark.data) if c == "sample" else c for c in _FILES],
+)
+def test_loads_intan(request: pytest.FixtureRequest, tmp_path: Path, case: str) -> None:
+    write, expected = _FILES[case]
+    check_signal(load_signal(str(write(request, tmp_path))), expected)
 
 
-def test_header_longer_than_the_first_read(tmp_path: Path) -> None:
-    """The header is parsed from a growing prefix, never from the whole recording."""
-    amp, aux, digital = _reference_signals()
-    path = tmp_path / "recording.rhd"
-    _write_traditional(path, amp, aux, digital)
-    long_note = "n" * 50_000  # 100 kB as UTF-16: past the first 64 KiB read
-    short = path.read_bytes()
-    _write_header(path, notes=(long_note, "", ""))
-    header_len = len(path.read_bytes())
+def _not_rhd(tmp_path: Path) -> Path:
+    path = tmp_path / "bogus.rhd"
+    path.write_bytes(b"\x00" * 4096)
+    return path
+
+
+def _header_only(tmp_path: Path) -> Path:
+    folder = _folder(tmp_path, "empty")
+    write_intan_header(folder / "info.rhd")
+    return folder
+
+
+def _without_time(tmp_path: Path) -> Path:
+    folder = _per_channel(tmp_path)
+    (folder / "time.dat").unlink()
+    return folder
+
+
+def _missing_channel(tmp_path: Path) -> Path:
+    folder = _per_channel(tmp_path)
+    (folder / "amp-B-031.dat").unlink()
+    return folder
+
+
+def _truncated(tmp_path: Path) -> Path:
+    path = _traditional(tmp_path)
     with open(path, "ab") as handle:
-        _write_header(tmp_path / "plain.rhd")
-        handle.write(short[len((tmp_path / "plain.rhd").read_bytes()) :])
-    assert header_len > 1 << 16
-
-    sig = load_intan(str(path), grid_names=_GRID)
-    assert sig.metadata["intan_notes"] == [long_note]
-    np.testing.assert_array_equal(sig.data, (amp.astype(np.float64) * 0.195e-3).astype(np.float32))
+        handle.write(b"\x00\x01")
+    return path
 
 
-def test_rejects_non_intan_file(tmp_path: Path) -> None:
-    bogus = tmp_path / "bogus.rhd"
-    bogus.write_bytes(b"\x00" * 4096)
-    with pytest.raises(OSError, match="magic number"):
-        load_intan(str(bogus))
+def _unnamed_grids(tmp_path: Path) -> Path:
+    folder = _per_channel(tmp_path)
+    (folder / "muedit_grids.json").unlink()
+    return folder
+
+
+_BAD_FILES: dict[str, tuple[Callable[[Path], Path], str]] = {
+    "not-an-rhd-file": (_not_rhd, "magic number"),
+    "no-data-files": (_header_only, "no amplifier data files"),
+    "no-time-file": (_without_time, r"Missing time\.dat"),
+    "a-channel-file-missing": (_missing_channel, r"amp-B-031\.dat is missing"),
+    "truncated": (_truncated, "not a whole number"),
+    "grids-not-named": (_unnamed_grids, "does not record one"),
+}
+
+
+@pytest.mark.parametrize("case", list(_BAD_FILES))
+def test_refuses_bad_intan(tmp_path: Path, case: str) -> None:
+    write, message = _BAD_FILES[case]
+    with pytest.raises(SignalLoadError, match=message):
+        load_signal(str(write(tmp_path)))

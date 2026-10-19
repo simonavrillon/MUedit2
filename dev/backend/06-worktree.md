@@ -182,9 +182,8 @@ Use this to trace what the user can reach.
 | `cache._release_upload()` | App-internal | Called by the preview service before the next load |
 | `cache._store_upload_signal()` | App-internal | Called by preview service, with the upload's views, once both are built |
 | `cache._hold_upload()` | App-internal | Called by decompose, preview (`/qc/auto`) and series services |
-| `cache._get_upload_signal()`, `cache._get_upload_source_path()`, `cache._get_signal_views()`, `cache._get_run_result()` | App-internal | Tests (the services use `_hold_upload` / `_get_run_result_entry`) |
 | `cache._store_run_result()` | App-internal | Called by decompose service |
-| `cache._get_run_result_entry()` | App-internal | Called by series service (`/series/pulse`) and `save_edits` |
+| `cache._held_run_result()` | App-internal | Called by series service (`/series/pulse`) and `save_edits` |
 | `cache._store_edit_session()` | App-internal | Called by `open_edit_session`, in place of the tab's previous session |
 | `cache._get_edit_session()` | App-internal | Called by editing and series services |
 | `cache._resize_edit_session()` | App-internal | Called after each edit, recovery and save |
@@ -193,7 +192,7 @@ Use this to trace what the user can reach.
 | `memory.MemoryBudget` | App-internal | Byte budget over every cache: eviction, idle-session sweep, `usage()` |
 | `memory.BudgetedLRU` | App-internal | One token-keyed cache: `pin`, `get`, `move`, `pop`, `discard`, `resize`, `release_session` |
 | `memory.default_budget_bytes()` | App-internal | 10% of RAM in [256 MB, 1 GB], or `MUEDIT_CACHE_BUDGET_MB` |
-| `memory.session_id_or_default()` | App-internal | Validates a session id |
+| `memory.parse_session_id()` | App-internal | A session id, or a 400 on its field when malformed |
 | `memory.process_memory_bytes()`, `peak_rss_bytes()`, `physical_memory_bytes()` | App-internal | `/debug/memory`, the memory tests |
 
 ---
@@ -216,9 +215,8 @@ Use this to trace what the user can reach.
 | `batch_process_filters()` | App-internal | Called by `postprocess_step` |
 | `remove_duplicates_by_grid()` | App-internal | Called by `postprocess_step` |
 | `dedup_survivors()` | App-internal | Called by `remove_duplicates_by_grid`, editing service `_dedup` |
-| `rem_duplicates()` | App-internal | Called by `remove_duplicates_by_grid` |
+| `unique_mu_indices()` | App-internal | Called by `remove_duplicates_by_grid` |
 | `compute_silhouette()` | App-internal | Called by `decompose_step` |
-| `extend_signal()` | App-internal | Called by `decompose_step`, `operations.py` |
 | `fixed_point_alg()` | App-internal | Called by `decompose_step` |
 | `get_spikes()` | App-internal | Called by `decompose_step` |
 | `minimize_isi_covariance()` | App-internal | Called by `decompose_step` |
@@ -228,10 +226,8 @@ Use this to trace what the user can reach.
 | `adaptive_batch_process()` | App-internal | Called by `postprocess_step` |
 | `build_preview_payload()` | App-internal | Called by `export_step` |
 | `abs_means()` | App-internal | Called by `build_preview_payload` (channel means, row by row) |
-| `load_decomposition_file()` | App-internal | `load_decomposition()` without the EMG; tests and scripts |
-| `load_decomposition_signal_context()` | App-internal | The EMG context alone; tests and scripts |
-| `normalize_distimes()` | App-internal | Called by editing service |
-| `build_pulse_trains_from_distimes()` | App-internal | Called by the decomposition loader for a file without pulse trains |
+| `normalize_spike_times()` | App-internal | Called by editing service |
+| `build_pulse_trains_from_spike_times()` | App-internal | Called by the decomposition loader for a file without pulse trains |
 | `save_editlog()` | App-internal | Called by editing service |
 | `save_decomposition_npz()` | App-internal | Called by `export_step`, editing service save — owns the `.npz` schema |
 | `load_decomposition()` | App-internal | Called by editing service; one read of the file for both the decomposition and its EMG |
@@ -261,10 +257,8 @@ Use this to trace what the user can reach.
 | `export_bids_mu_derivatives()` | App-internal | Called by editing service |
 | `BidsEntities`, `dataset_root()` (`io/_bids_layout.py`) | App-internal | Every BIDS file name and folder: reader, exporters, run and edit saves, `api.common.dataset_root_of` |
 | `read_channels_summary()`, `read_sidecar_meta()` | App-internal | Called by the preview service and `_file_extras` |
-| `load_bids_emg_grid()` | App-internal | Windowed grid read (sample window) |
 | `read_bids_emg_grid()` | App-internal | Called by the edit session's first refit of a grid |
 | `resolve_bids_emg_path()` | App-internal | Called by `_bids_reader`, `preprocess` |
-| `select_grid_channels()` | App-internal | Called by `load_bids_emg_grid` |
 | `NpzWriter`, `NpzArchive`, `RowSource` (`io/npz.py`) | App-internal | Called by `decomposition_file` and the saves (rows written as they are read) |
 | `SessionStore`, `RamStore`, `ArrayStore` (`storage.py`) | App-internal | Where loaders, runs and edit sessions put full-length arrays |
 | `copy_into()`, `store_signal()`, `sample_blocks()` | App-internal | Block-by-block copies into a store |
@@ -289,11 +283,13 @@ Use this to trace what the user can reach.
 | `_detect_artifact_mask()` | App-internal | Called by `detect_artifact_masks` |
 | `detect_artifact_masks()` | App-internal | Called by QC pipeline |
 | `mask_to_intervals()`, `intervals_to_mask()` | App-internal | `.npz` artifact intervals, preview artifact regions |
-| `extend_signal()` | App-internal | Called by `decompose_step`, `operations.py` |
+| `extend_signal()` | App-internal | Called by `decompose_step`, `postprocess_step`, `operations.py`, `StreamedExtender` |
+| `extension_factor()` | App-internal | Delays per channel for `nbextchan`; `decompose_step`, `postprocess_step`, `operations.py` |
+| `extend_signal_mask()` | App-internal | Artifact mask over `extend_signal`'s padded columns; `decompose_step` |
 | `signed_square()` | App-internal | Called by `decompose_step`, `operations.py` |
 | `find_refractory_peaks()` | App-internal | Called by `decompose_step`, `operations.py` |
 | `split_by_amplitude()` | App-internal | Called by `decompose_step`, `operations.py` |
-| `isi_cov()` | App-internal | Called by `rem_duplicates`, `minimize_isi_covariance` |
+| `isi_cov()` | App-internal | Called by `unique_mu_indices`, `minimize_isi_covariance` |
 | `bandpass_inplace()`, `notch_inplace()`, `emg_filter_inplace()` | App-internal | Filters a few rows at a time in place (`preprocess_step`, series service, edit session) |
 | `MinMaxPyramid`, `view()`, `envelope()` (`signal/pyramid.py`) | App-internal | Built by `build_signal_views`; read by `series_frame`, `pulse_frame` |
 | `StreamedExtender`, `RowSelection`, `extend_mask()` (`signal/streaming.py`) | App-internal | Extended signal read batch by batch (full-trace and adaptive postprocess) |
@@ -315,10 +311,7 @@ Use this to trace what the user can reach.
 |---|---|---|
 | `update_motor_unit_filter_window()` | User-exposed | `muedit.editing.__init__`, editing service |
 | `add_spikes_in_roi()` | User-exposed | `muedit.editing.__init__`, editing service |
-| `add_artifact_in_roi()` | User-exposed | `muedit.editing.__init__`, editing service |
 | `delete_spikes_in_roi()` | User-exposed | `muedit.editing.__init__`, editing service |
-| `delete_artifacts_in_roi()` | User-exposed | `muedit.editing.__init__`, editing service |
-| `delete_high_discharge_rate_spikes_in_roi()` | User-exposed | `muedit.editing.__init__` (no edit-session operation) |
 | `remove_discharge_rate_outliers()` | User-exposed | `muedit.editing.__init__`, editing service |
 | `SpikeTimes` | User-exposed | `muedit.editing.__init__` (type alias) |
 | `FilterUpdateResult` | User-exposed | `muedit.editing.__init__` (type alias) |
@@ -355,9 +348,9 @@ Use this to trace what the user can reach.
 | `spike_array()` | App-internal | Discharge times as sorted, unique, non-negative int32: the one normalizer for loads, edits and saves |
 | `EditSignalContext` | App-internal | Built by `decomp.decomposition_file`; held by the `EditSession` |
 | `LoadedDecomposition` | App-internal | Used by `decomp.decomposition_file` |
-| `_as_2d_float_array()` | App-internal | Called by `SignalImport.from_mapping` |
-| `_as_name_list()` | App-internal | Called by `SignalImport.build` for gridname/muscle coercion |
-| `_ensure_channel_matrix()` | App-internal | Called by `SignalImport.from_mapping` |
+| `_as_2d_float_array()` | App-internal | Called by `SignalImport.build` |
+| `_as_name_list()` | App-internal | Called by `SignalImport.build` for grid_names/muscle_names coercion |
+| `_ensure_channel_matrix()` | App-internal | Called by `SignalImport.build` |
 
 ---
 
@@ -378,5 +371,5 @@ Use this to trace what the user can reach.
 | `serve_api()` | User-exposed | `muedit-api` entry point |
 | `run_decomposition_cli()` | User-exposed | `muedit-decompose` entry point |
 | `main()` | User-exposed | `python -m muedit.cli` (dispatcher) |
-| `_parse_roi(value)` | App-internal | Called by `run_decomposition_cli` |
-| `_parse_rois(value)` | App-internal | Called by `run_decomposition_cli` |
+| `_parse_roi_arg(value)` | App-internal | Called by `run_decomposition_cli` |
+| `_parse_roi_args(value)` | App-internal | Called by `run_decomposition_cli` |

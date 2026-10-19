@@ -77,16 +77,12 @@ export function buildDecomposeParams(raw) {
   return {
     niter: raw.niter,
     nwindows: raw.nwindows,
-    nbextchan: 1000,
     duplicatesthresh: raw.duplicatesthresh,
     sil_thr: raw.silVal,
     cov_thr: raw.covVal,
     covfilter: raw.covOn ? 1 : 0,
-    contrast_func: "skew",
-    initialization: 0,
     peel_off_enabled: raw.peelOn ? 1 : 0,
     peel_off_win: raw.peelWindow / 1000,
-    auto_mask_artifacts: 0,
     ...postprocessFlags(raw.postprocessMode),
   };
 }

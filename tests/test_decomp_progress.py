@@ -19,7 +19,7 @@ _PARAMS = DecompositionParameters(niter=12)
 def _decompose_with_events() -> tuple[Any, list[dict[str, Any]]]:
     emg = motor_unit_emg(seed=5, n_samples=40_000, fsamp=FSAMP, activity=_ROI)
     signal = SignalImport(
-        data=emg.astype(np.float32), fsamp=FSAMP, gridname=["GR08MM1305"], muscle=["ta"]
+        data=emg.astype(np.float32), fsamp=FSAMP, grid_names=["GR08MM1305"], muscle_names=["ta"]
     )
     events: list[dict[str, Any]] = []
     loaded = load_step("synthetic.mat", None, signal, lambda _s, p: events.append(p))

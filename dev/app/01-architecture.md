@@ -155,7 +155,7 @@ plus the view, selection and bookmark setters.
 {
   file, filename,
   token,                      // the server's edit session
-  distimes: [],               // Int32Array per MU
+  spikeTimes: [],               // Int32Array per MU
   artifactTimes: [],          // Int32Array per MU
   versions: [],               // per MU; changes whenever the server edits it
   gridNames: [], muGridIndex: [],
@@ -171,7 +171,7 @@ plus the view, selection and bookmark setters.
   project,
   pulseView,                  // the fetched window: { mu, version, start, end, bins, row, spikes, … }
   muUids: [],
-  editHistory: [],
+  editHistory: [], editHistoryStart: 0,   // the log's tail and its index in the server's log
   bookmarkPosition, showBookmark,
   softwareVersions,
 }
@@ -193,7 +193,7 @@ plus the view, selection and bookmark setters.
 │  │        state.edit (per-stage)       │    │
 │  │                                     │    │
 │  │  Edit-only:                          │    │
-│  │    token, distimes, artifactTimes,   │    │
+│  │    token, spikeTimes, artifactTimes,   │    │
 │  │    versions, pulseView, mode, dirty, │    │
 │  │    canUndo, flagged, editHistory,    │    │
 │  │    bookmarkPosition, muUids, view    │    │
