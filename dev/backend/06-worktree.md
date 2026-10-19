@@ -225,6 +225,10 @@ Use this to trace what the user can reach.
 | `subtract_mu_waveforms()` | App-internal | Called by `decompose_step`, `operations.py` |
 | `whiten_extended_signal()` | App-internal | Called by `decompose_step`, `operations.py` |
 | `adaptive_batch_process()` | App-internal | Called by `postprocess_step` |
+| `AdaptiveDecomp`, `Calibration`, `calibration_centroids()` (`adaptation.py`) | App-internal | Built by `adaptive_batch`; the calibration a forward pass fits and the backward pass reuses |
+| `AdaptiveDecomp.run()` | App-internal | Called by `adaptive_batch` passes |
+| `AdaptiveDecomp._calibrate()`, `_set_centroids()` | App-internal | Called by `__init__` |
+| `AdaptiveDecomp._whiten()`, `_update_covariance()`, `_separate()`, `_project()`, `_detect_spikes()`, `_update_separation_vectors()` | App-internal | Called by `run` |
 | `build_preview_payload()` | App-internal | Called by `export_step` |
 | `abs_means()` | App-internal | Called by `build_preview_payload` (channel means, row by row) |
 | `normalize_spike_times()` | App-internal | Called by editing service |
@@ -320,23 +324,6 @@ Use this to trace what the user can reach.
 | `EditSession` (`session.py`) | App-internal | Built by `open_edit_session`; every edit operation, undo, saves |
 | `EditError`, `Change` | App-internal | Refused edit (400), what an edit changed |
 | `EditLog`, `find_recoverable()`, `purge_old_logs()` (`edit_log.py`) | App-internal | Per-session operation log; recovery on reopen; startup cleanup |
-
----
-
-## `adapt_decomp/` — Adaptive Online Decomposition
-
-| Symbol | Category | Reachable via |
-|---|---|---|
-| `AdaptiveDecomp` | User-exposed | `muedit.adapt_decomp.__init__` |
-| `Config` | User-exposed | `muedit.adapt_decomp.__init__` |
-| `run_adaptive_decomposition()` | User-exposed | `muedit.adapt_decomp.__init__`, `adaptive_batch.py` |
-| `AdaptiveDecomp.run()` | App-internal | Called by `run_adaptive_decomposition`, `adaptive_batch` passes |
-| `Calibration`, `calibration_centroids()` | App-internal | The calibration a forward pass fits and the backward pass reuses |
-| `AdaptiveDecomp._calibrate()`, `_set_centroids()` | App-internal | Called by `__init__` |
-| `AdaptiveDecomp._whiten()`, `_separate()`, `_project()` | App-internal | Called by `run` |
-| `AdaptiveDecomp._detect_spikes_with_context()`, `_detect_spikes()` | App-internal | Called by `run` |
-| `AdaptiveDecomp._kl_divergence()`, `_wh_loss()`, `_contrast_value()`, `_sv_loss()` | App-internal | Losses, called by `run` |
-| `AdaptiveDecomp._update_separation_vectors()` | App-internal | Called by `run` |
 
 ---
 

@@ -96,7 +96,6 @@ does not load SciPy.
 | `muedit.decomp` | `DecompositionParameters`, `DecompositionResult`, `run_decomposition` |
 | `muedit.io` | `LoaderFn`, `get_loader`, `load_signal`, `register_loader`, `supported_extensions` |
 | `muedit.editing` | `FilterUpdateResult`, `SpikeTimes`, `add_spikes_in_roi`, `delete_spikes_in_roi`, `remove_discharge_rate_outliers`, `update_motor_unit_filter_window` |
-| `muedit.adapt_decomp` | `AdaptiveDecomp`, `Config`, `run_adaptive_decomposition` |
 | `muedit.api` | (none — empty, just a package marker) |
 
 ---
@@ -222,6 +221,7 @@ Decomposition state loaded from `.npz`/`.mat` for editing. Returned by `load_dec
 | `preprocess.py` | Load, filter, ROI resolution, BIDS export, QC integration |
 | `postprocess.py` | Filter application, dedup, export, NPZ save |
 | `adaptive_batch.py` | Online adaptive post-processing (bidirectional) |
+| `adaptation.py` | `AdaptiveDecomp` — online whitening + separation vector + spike centroid adaptation, and the `Calibration` the backward pass reuses |
 | `preview.py` | Downsampled preview payload builder |
 | `decomposition_file.py` | Decomposition file load/save (NPZ schema v2, legacy v1 reader, MAT v5/v7.3) |
 | `types.py` | `DecompositionParameters` + step output dataclasses |
@@ -262,13 +262,6 @@ Decomposition state loaded from `.npz`/`.mat` for editing. Returned by `load_dec
 | `operations.py` | All MU editing operations: filter update, spike add/delete, artifact add/delete, discharge-rate pruning, outlier removal |
 | `session.py` | `EditSession`: the decomposition being edited, its undo stack and pulse-train copies |
 | `edit_log.py` | `EditLog`: each session's operations on disk, replayed to recover unsaved edits |
-
-### `adapt_decomp/` — Adaptive Online Decomposition
-
-| Component | Responsibility |
-|---|---|
-| `config.py` | `Config` dataclass with adaptation hyper-parameters |
-| `adaptation.py` | `AdaptiveDecomp` class — online whitening + separation vector + spike centroid adaptation |
 
 ---
 

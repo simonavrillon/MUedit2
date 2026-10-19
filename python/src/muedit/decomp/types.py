@@ -82,7 +82,6 @@ class DecompositionParameters:
                 raise MueditError(message)
         edge_ms = self.edges_sec * 1000
         if self.use_adaptive and self.adapt_batch_ms > edge_ms:
-            # A batch longer than the calibration edge leaves a gap in the loss tracking.
             raise MueditError(
                 f"adapt_batch_ms must be <= {edge_ms:.0f} (edges_sec * 1000) when use_adaptive"
             )

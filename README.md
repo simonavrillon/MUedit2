@@ -294,6 +294,6 @@ The architecture of the frontend and backend is documented under
 ## Acknowledgment
 
 This project includes code from `adapt_decomp` (see
-`python/src/muedit/adapt_decomp`) for adaptive decomposition workflows.
+`python/src/muedit/decomp/adaptation.py`) for adaptive decomposition workflows.
 Original author: Irene Mendez Guerra;
 original repository: <https://github.com/imendezguerra/adapt_decomp>.

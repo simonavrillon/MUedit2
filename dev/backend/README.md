@@ -76,6 +76,7 @@ python/src/muedit/
 │   ├── preprocess.py                         load_step, preprocess_step, ROI resolution, BIDS export
 │   ├── postprocess.py                        postprocess_step, export_step, NPZ save
 │   ├── adaptive_batch.py                     Online adaptive post-processing
+│   ├── adaptation.py                         AdaptiveDecomp and the Calibration it shares between passes
 │   ├── preview.py                            Preview payload builder
 │   ├── decomposition_file.py                 Decomposition file load/save (NPZ schema, MAT)
 │   └── types.py                              DecompositionParameters, step output dataclasses
@@ -108,8 +109,4 @@ python/src/muedit/
 │   ├── operations.py                         MU editing operations (filter update, spike/artifact add/delete, rate pruning)
 │   ├── session.py                            EditSession: the decomposition being edited, undo, pulse-train copies
 │   └── edit_log.py                           Per-session JSONL log of operations, replayed to recover unsaved edits
-│
-└── adapt_decomp/
-    ├── config.py                             Config dataclass for adaptive decomposition
-    └── adaptation.py                         AdaptiveDecomp class + run_adaptive_decomposition()
 ```

@@ -150,7 +150,7 @@ def postprocess_step(
     }
 
     if params.use_adaptive:
-        pulse_trains, spike_times, _ = adaptive_batch_process(
+        pulse_trains, spike_times = adaptive_batch_process(
             decomposed.mu_filters_by_window,
             decomposed.whiten_mat_by_window,
             grid_data,

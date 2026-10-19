@@ -128,6 +128,6 @@ def calibration_case(raw: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarra
     window = raw[:, 200:2600]
     ext = extend_signal(window - window.mean(axis=1, keepdims=True), EX)
     vecs, vals = pca_extended_signal(ext)
-    _, whitening = whiten_extended_signal(ext, vecs, vals)
-    filters = np.linalg.qr(np.random.default_rng(4).standard_normal((ext.shape[0], 4)))[0]
-    return whitening, filters, window.mean(axis=1)
+    _, whiten_mat = whiten_extended_signal(ext, vecs, vals)
+    mu_filters = np.linalg.qr(np.random.default_rng(4).standard_normal((ext.shape[0], 4)))[0]
+    return whiten_mat, mu_filters, window.mean(axis=1)

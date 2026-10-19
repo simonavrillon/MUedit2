@@ -453,21 +453,21 @@ Instead of applying static ICA filters to the full signal, the adaptive engine r
 def adaptive_batch_process(
     mu_filters_by_window, whiten_mat_by_window, grid_data, coordinates_plateau, total_samples, fsamp,
     nwindows, win_mean_by_window, params,
-    artifact_mask=None, store=None, compute_loss=False,
-) -> (pulse_trains, spike_times, all_losses)
+    artifact_mask=None, store=None,
+) -> (pulse_trains, spike_times)
 ```
 
-The `Config` of the adaptation comes from `params` (`adapt_batch_ms`, `adapt_wh`, `adapt_sv`,
-`adapt_sd`, `adapt_wh_learning_rate`, `adapt_sv_learning_rate`, `adapt_cov_alpha`,
-`adapt_spike_prev_weight`, `compute_dtype`).
+`adaptive_batch_process` maps them into each pass's `Config` (`adapt_batch_ms`, `adapt_wh`,
+`adapt_sv`, `adapt_sd`, `adapt_wh_learning_rate`, `adapt_sv_learning_rate`, `adapt_cov_alpha`,
+`adapt_spike_prev_weight`, and `work_dtype` from `compute_dtype`); the batch size is
+`int(adapt_batch_ms * fsamp / 1000)`.
 
 For each window: a samples-first `StreamedExtender` in the run's `compute_dtype` over the grid's kept channels (window mean subtracted per batch), a bidirectional adaptive pass writing the `signed_square` of each batch's pulse trains into the store, artifact regions zeroed, discharge times collected per batch.
 
 ### Bidirectional pass
 
 ```python
-def _run_adapt_decomp_bidirectional(source, whiten_mat, mu_filters, calib_start, calib_end,
-                                    config, sink) -> losses
+def _run_bidirectional(source, whiten_mat, mu_filters, calib_start, calib_end, config, sink)
 ```
 Forward from `calib_start` (warming up on the batch before it), then, if the window does not start
 the recording, backward over `[0, calib_start)`: batches in reverse order, each read with its own
@@ -475,39 +475,28 @@ look-back, so nothing is reversed or concatenated.
 
 ### Calibration
 
-The forward pass's `AdaptiveDecomp` calibrates on the window in two reads. The first, in chunks,
-sums the whitening covariance and projects the chunk through the filters; the base/spike centroids
-come from those squared projections (`adaptation.calibration_centroids`: refractory peaks, k-means
-amplitude split). The second, in batches, runs the covariance moving average and the loss
-baselines. The backward pass reuses the forward pass's `Calibration`, fitted centroids included,
-so it starts from the same state and does not read the window again.
+The forward pass's `AdaptiveDecomp` calibrates on the window in two passes over it. The first,
+in chunks of 4096 samples, sums the whitening covariance in float64 (never holding more than one
+chunk of the extended window) and projects each chunk through the filters; the base/spike
+centroids come from those squared projections (`adaptation.calibration_centroids`: refractory
+peaks, k-means amplitude split). The second, in whole batches, blends each batch's whitened
+covariance into the running one (an EMA with `cov_alpha`), so the pass starts from the window's
+covariance smoothed over its batches. The covariance is fitted either way; `adapt_wh` only
+controls whether `run` keeps updating it. The backward pass reuses the forward pass's
+`Calibration`, fitted centroids included, so it starts from the same state and does not read the
+window again.
 
 ---
 
-## `adapt_decomp/` — Adaptive Online Learning Engine
+## `adaptation.py` — Adaptive Online Learning Engine
 
-### `Config` (config.py)
+### Settings
 
-```python
-@dataclass
-class Config:
-    fsamp: int = 2048
-    ex_factor: int = 10
-    batch_ms: int = 100
-    adapt_wh: bool = True
-    adapt_sv: bool = True
-    adapt_sd: bool = True
-    wh_learning_rate: float = 7e-3
-    sv_learning_rate: float = 3e-3
-    cov_alpha: float = 0.1
-    compute_loss: bool = False
-    spike_height_mult: int = 3
-    spike_prev_weight: int = 5
-    spike_dist_ms: int = 5
-    batch_size: int  # computed: batch_ms * fsamp / 1000
-```
+The adaptation takes the `adapt_*` fields and the work dtype of `DecompositionParameters` and the
+recording's `fsamp`. Peaks are searched with the post-processing refractory period (`POSTPROC_MIN_ISI_SEC`) and between
+a third of the baseline centroid and three times the spike centroid (`_SPIKE_HEIGHT_MULT`).
 
-### `AdaptiveDecomp` class (adaptation.py)
+### `AdaptiveDecomp` class
 
 Stateful online learning engine that processes EMG in fixed-size batches, adapting three components:
 
@@ -517,40 +506,30 @@ Stateful online learning engine that processes EMG in fixed-size batches, adapti
 
 ```python
 class AdaptiveDecomp:
-    def __init__(self, emg, whitening, sep_vectors, base_centr, spikes_centr,
-                 emg_calib, config, artifact_mask=None) -> None
+    def __init__(self, source, whiten_mat, mu_filters, calibration, config) -> None
 ```
-Constructor: extends EMG signal, aligns artifact mask, runs whitening calibration (EMA covariance + KL divergence stats), and optionally contrast calibration.
+`source` is the window's `StreamedExtender` (it carries the artifact mask), `whiten_mat` is the
+`(n_extended, n_extended)` whitening matrix, `mu_filters` is `(n_extended, n_mu)` as the
+decomposition stores it, and `calibration` is either the `(start, stop)` range to fit on or the
+`Calibration` of the forward pass.
 
 ```python
-    def run(self, start=0, stop=None, reverse=False, sink=None) -> losses  # outputs via sink
+    def run(self, start=0, stop=None, reverse=False, sink=None) -> None  # outputs via sink
 ```
 **Main processing loop.** For each batch:
-- If artifact-contaminated: forward-only pass, no state updates, zero spikes in artifact region
-- If clean: whiten -> separate -> signed-square -> detect spikes -> compute losses -> update separation vectors
-- Handles remainder samples after the last full batch
+- If artifact-contaminated: no state updates, zero spikes in the artifact region
+- If clean: whiten -> separate -> detect spikes (with one flanking sample each side) -> update separation vectors
+- The trailing partial batch keeps the whitening but still adapts the centroids and, without an artifact, the separation vectors
 
 ### Key methods
 
 | Method | Description |
 |---|---|
-| `_whiten(emg_batch)` | Apply whitening, update EMA covariance, gradient descent if `adapt_wh` |
-| `_separate(whitened_signal)` | Project through separation vectors |
-| `_detect_spikes(pulse_trains, update_centroids=True)` | Amplitude-bounded peak finding, midpoint threshold, EMA centroid update |
-| `_kl_divergence()` | KL divergence between estimated whitened covariance and identity |
-| `_wh_loss(kl_div)` | Normalized whitening loss (squared z-score vs calibration) |
-| `_contrast_value(pulse_trains_batch, spikes_batch)` | Mean logcosh contrast at spike positions, per MU |
-| `_sv_loss(contrast)` | Normalized separation vector loss |
+| `_whiten(emg_batch)` | Apply whitening; with `adapt_wh`, update the EMA covariance and step toward identity |
+| `_update_covariance(whitened_signal)` | EMA of the whitened batch covariance, called by `_whiten` and `_calibrate` |
+| `_separate(whitened_signal)` | Project through the MU filters |
+| `_detect_spikes(pulse_trains_batch, edges, update_centroids=True)` | Amplitude-bounded peak finding with batch-edge context, midpoint threshold, EMA centroid update |
 | `_update_separation_vectors(whitened_signal, pulse_trains, spikes)` | Gradient ascent on logcosh, Gram-Schmidt deflation, unit-norm renorm |
-
-### Module-level function
-
-```python
-def run_adaptive_decomposition(emg, whitening, sep_vectors, base_centr, spikes_centr,
-                                emg_calib, config, artifact_mask=None)
-    -> (pulse_trains, spikes, losses)
-```
-Constructs `AdaptiveDecomp` and calls `.run()`.
 
 ### Relationship to main decomp
 

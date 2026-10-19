@@ -3,18 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import replace
-from typing import Any
 
 import numpy as np
 
-from muedit.adapt_decomp.adaptation import (
-    AdaptiveDecomp,
-    BatchSink,
-    Calibration,
-    drop_partial_batch_loss,
-)
-from muedit.adapt_decomp.config import Config
+from muedit.decomp.adaptation import AdaptiveDecomp, BatchSink, Calibration
 from muedit.decomp.types import DecompositionParameters
 from muedit.models import BoolArray, FloatArray, IntArray
 from muedit.signal.decomp_primitives import enforce_refractory, extend_mask, signed_square
@@ -22,18 +14,17 @@ from muedit.signal.streaming import SampleSource, StreamedExtender
 from muedit.storage import ArrayStore, RamStore
 
 
-def _run_adapt_decomp_bidirectional(
+def _run_bidirectional(
     source: StreamedExtender,
     whiten_mat: FloatArray,
     mu_filters: FloatArray,
     calib_start: int,
     calib_end: int,
-    config: Config,
+    params: DecompositionParameters,
+    fsamp: float,
     sink: BatchSink,
-) -> dict[str, Any]:
+) -> None:
     """Run adaptive decomposition forward from calib_start and, if needed, backward over the pre-calibration segment."""
-    cfg = replace(config, ex_factor=source.ex_factor)
-    bs = cfg.batch_size
 
     def _clipped(lo: int, hi: int) -> BatchSink:
         def _emit(start: int, pulse_trains_batch: np.ndarray, spikes: np.ndarray) -> None:
@@ -45,37 +36,21 @@ def _run_adapt_decomp_bidirectional(
 
     def _pass(calibration: tuple[int, int] | Calibration) -> AdaptiveDecomp:
         return AdaptiveDecomp(
-            emg=source,
-            whitening=whiten_mat,
-            sep_vectors=mu_filters.T,
-            base_centr=None,  # fitted in the forward pass's calibration read, shared with the backward
-            spikes_centr=None,
-            emg_calib=calibration,
-            config=cfg,
+            source=source,
+            whiten_mat=whiten_mat,
+            mu_filters=mu_filters,
+            calibration=calibration,
+            params=params,
+            fsamp=fsamp,
         )
 
     # The forward pass warms up on the batch before the calibration window;
     # that batch adapts the state but its output is dropped.
-    fwd_start = max(0, calib_start - bs)
     fwd = _pass((calib_start, calib_end))
-    losses_fwd = fwd.run(fwd_start, source.n_samples, sink=_clipped(calib_start, source.n_samples))
-    losses_fwd = drop_partial_batch_loss(losses_fwd, source.n_samples - fwd_start, bs)
-    n_pre_fwd = -(-(calib_start - fwd_start) // bs)
-    if losses_fwd:
-        losses_fwd = {k: v[n_pre_fwd:] for k, v in losses_fwd.items()}
-
-    if calib_start == 0:
-        return losses_fwd
-
-    bwd = _pass(fwd.calibration)
-    losses_bwd = bwd.run(0, calib_start, reverse=True, sink=_clipped(0, calib_start))
-    if not losses_fwd:
-        return {}
-    # Processed from the calibration window backwards: flip to chronological order.
-    return {
-        k: np.concatenate([losses_bwd[k][::-1], losses_fwd[k]], axis=0)
-        for k in ("wh_loss", "sv_loss", "total_loss")
-    }
+    fwd_start = max(0, calib_start - fwd.batch_size)
+    fwd.run(fwd_start, source.n_samples, sink=_clipped(calib_start, source.n_samples))
+    if calib_start > 0:
+        _pass(fwd.calibration).run(0, calib_start, reverse=True, sink=_clipped(0, calib_start))
 
 
 def adaptive_batch_process(
@@ -90,30 +65,15 @@ def adaptive_batch_process(
     params: DecompositionParameters,
     artifact_mask: BoolArray | None = None,
     store: ArrayStore | None = None,
-    compute_loss: bool = False,
-) -> tuple[FloatArray, list[IntArray], dict[int, dict[str, Any]]]:
+) -> tuple[FloatArray, list[IntArray]]:
     """Apply adaptive post-processing across all decomposition windows and grids.
 
     The adaptation runs in ``params.work_dtype``; the pulse trains are written into
     ``store`` (heap by default) batch by batch.
     """
-    config = Config(
-        fsamp=int(fsamp),
-        batch_ms=params.adapt_batch_ms,
-        adapt_wh=params.adapt_wh,
-        adapt_sv=params.adapt_sv,
-        adapt_sd=params.adapt_sd,
-        wh_learning_rate=params.adapt_wh_learning_rate,
-        sv_learning_rate=params.adapt_sv_learning_rate,
-        cov_alpha=params.adapt_cov_alpha,
-        spike_prev_weight=params.adapt_spike_prev_weight,
-        compute_loss=compute_loss,
-        dtype=params.work_dtype,
-    )
-
     total_mus = sum(f.shape[1] for f in mu_filters_by_window.values() if f.size > 0)
     if total_mus == 0:
-        return np.array([]), [], {}
+        return np.array([]), []
 
     store = store if store is not None else RamStore()
     pulse_trains = store.allocate(
@@ -122,7 +82,6 @@ def adaptive_batch_process(
     found_times: list[IntArray] = []
     spike_units: list[IntArray] = []
     mu_nb = 0
-    all_losses: dict[int, dict[str, Any]] = {}
 
     for win_global in sorted(mu_filters_by_window.keys()):
         filters = mu_filters_by_window[win_global]
@@ -157,17 +116,16 @@ def adaptive_batch_process(
             found_times.append(start + t)
             spike_units.append(rows.start + unit)
 
-        win_losses = _run_adapt_decomp_bidirectional(
+        _run_bidirectional(
             source=source,
             whiten_mat=whiten_mat_by_window[win_global],
             mu_filters=filters,
             calib_start=calib_start,
             calib_end=calib_end,
-            config=config,
+            params=params,
+            fsamp=fsamp,
             sink=_collect,
         )
-        if compute_loss and win_losses:
-            all_losses[win_global] = win_losses
         if artifact_mask is not None:
             pulse_trains[rows][:, extend_mask(artifact_mask[:total_samples], source.ex_factor)] = (
                 0.0
@@ -181,12 +139,8 @@ def adaptive_batch_process(
         times[order].astype(int), np.searchsorted(units[order], np.arange(1, total_mus))
     )
 
-    min_isi_sec = config.spike_dist_ms / 1000.0
     # Detection is per batch, so a pair straddling a batch boundary or the
     # backward/forward seam can still breach the refractory period.
-    spike_times = [
-        enforce_refractory(by_unit[j], pulse_trains[j], fsamp, min_isi_sec=min_isi_sec)
-        for j in range(total_mus)
-    ]
+    spike_times = [enforce_refractory(by_unit[j], pulse_trains[j], fsamp) for j in range(total_mus)]
 
-    return pulse_trains, spike_times, all_losses
+    return pulse_trains, spike_times
