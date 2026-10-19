@@ -246,15 +246,6 @@ def _reduce_memmap(arr: np.memmap) -> tuple[Callable[..., np.ndarray], tuple[Any
 ForkingPickler.register(np.memmap, _reduce_memmap)
 
 
-def _folder_bytes(path: Path) -> int:
-    total = 0
-    with contextlib.suppress(OSError):
-        for entry in path.iterdir():
-            with contextlib.suppress(OSError):
-                total += entry.stat().st_size
-    return total
-
-
 def _pid_alive(pid: int) -> bool:
     """Whether a process with this id is running."""
     alive = False
@@ -298,23 +289,3 @@ def purge_stale_sessions() -> None:
         if pid is None or not _pid_alive(pid):
             logger.info("Removing stale session store %s", folder)
             shutil.rmtree(folder, ignore_errors=True)
-
-
-def store_usage() -> dict[str, Any]:
-    """Disk used by this process's stores and the free space left, for the debug endpoint."""
-    root = sessions_dir()
-    folders = [f for f in (root.iterdir() if root.is_dir() else []) if _owner_pid(f) == os.getpid()]
-    stores = [{"name": f.name, "bytes": _folder_bytes(f)} for f in folders]
-    probe = root
-    while not probe.exists() and probe != probe.parent:
-        probe = probe.parent
-    free: int | None = None
-    with contextlib.suppress(OSError):
-        free = shutil.disk_usage(probe).free
-    return {
-        "path": str(root),
-        "bytes": sum(s["bytes"] for s in stores),
-        "free_bytes": free,
-        "reserve_bytes": disk_reserve_bytes(),
-        "stores": stores,
-    }

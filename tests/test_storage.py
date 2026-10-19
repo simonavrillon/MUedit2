@@ -70,7 +70,6 @@ class TestSessionStore:
         assert resident_nbytes(sealed[1:, 2:]) == 0
         assert not sealed.flags.writeable
         np.testing.assert_array_equal(sealed, np.arange(15).reshape(3, 5))
-        assert store._folder_bytes(st.path) >= 15 * 4
 
     def test_a_reused_name_never_truncates_a_live_map(self, cache_dir: Path) -> None:
         st = SessionStore.create("t")
@@ -217,15 +216,6 @@ class TestStaleSessions:
         assert not dead.exists()
         assert not orphan.exists()
         assert mine.path.exists()
-
-    def test_usage_counts_this_process_only(self, cache_dir: Path) -> None:
-        self._folder(cache_dir, "other", {"pid": 2**22 + 12345})
-        mine = SessionStore.create("mine")
-        mine.seal(mine.allocate("x", (16, 16), np.float32, zero=True))
-        usage = store.store_usage()
-        assert [s["name"] for s in usage["stores"]] == [mine.path.name]
-        assert usage["bytes"] == store._folder_bytes(mine.path) > 0
-        assert usage["free_bytes"] > 0
 
     def test_own_pid_is_alive(self) -> None:
         assert store._pid_alive(os.getpid())

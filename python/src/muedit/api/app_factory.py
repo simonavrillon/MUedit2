@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from muedit import installed_version
 from muedit.api.cache import BUDGET
 from muedit.api.errors import register_exception_handlers
 from muedit.api.services.decompose_service import stop_decompositions
@@ -41,13 +42,11 @@ class _RevalidatedFiles(StaticFiles):
         return response
 
 
-def create_app(
-    title: str = "MUedit API",
-    version: str = "2.1.0",
-    allowed_hosts: Sequence[str] | None = None,
-) -> FastAPI:
+def create_app(allowed_hosts: Sequence[str] | None = None) -> FastAPI:
     """Create the FastAPI app with the host check and canonical error handlers."""
-    app = FastAPI(title=title, version=version, lifespan=_sweep_caches)
+    app = FastAPI(
+        title="MUedit API", version=installed_version() or "unknown", lifespan=_sweep_caches
+    )
     if allowed_hosts is not None:
         # DNS rebinding makes a hostile page same-origin, so CORS cannot stop it; the Host header can.
         app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(allowed_hosts))

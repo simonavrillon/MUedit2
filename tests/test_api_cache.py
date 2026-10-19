@@ -11,18 +11,12 @@ import pytest
 
 from muedit.api import cache
 from muedit.api.memory import SESSION_IDLE_SEC
-from muedit.api.schemas import DecomposePayload
-from muedit.api.services import decompose_service
 from muedit.api.services.series_service import build_signal_views
 from muedit.editing.session import EditSession
 from muedit.models import IntArray, SignalImport
 from muedit.storage import RamStore, SessionStore
+from tests._api import run_result
 from tests._platform import deleted
-
-
-def _run_result(token: str | None) -> cache.RunResult | None:
-    with cache._held_run_result(token) as run:
-        return run
 
 
 class FakeClock:
@@ -59,12 +53,23 @@ def _signal(n_channels: int = 4, n_samples: int = 100, fill: float = 1.0) -> Sig
     )
 
 
+SOURCE_PATH = "/data/rec.otb+"
+
+
+def _upload(
+    signal: SignalImport, session: str = "tab-a", views: cache.SignalViews | None = None
+) -> str:
+    """Keep ``signal`` as the app does: with its own store, and views built in it unless given."""
+    st = SessionStore.create("upload")
+    return cache.store_upload(signal, SOURCE_PATH, st, views or _views(st), session)
+
+
 def _store(session: str = "tab-a", **kwargs: Any) -> str:
-    return cache._store_upload_signal(_signal(**kwargs), session=session)
+    return _upload(_signal(**kwargs), session)
 
 
 def _held(token: str | None) -> cache.HeldUpload | None:
-    held = cache._hold_upload(token)
+    held = cache.hold_upload(token)
     if held is not None:
         held.release()
     return held
@@ -79,10 +84,8 @@ def _upload_signal(token: str | None) -> SignalImport | None:
 
 
 class TestUploadSignal:
-    def test_store_copies_and_get_shares_read_only(self, clock: FakeClock) -> None:
-        signal = _signal()
-        token = cache._store_upload_signal(signal, source_path="/data/rec.otb+")
-        signal.data[:] = 0
+    def test_get_shares_read_only(self, clock: FakeClock) -> None:
+        token = _store()
         first = _upload_signal(token)
         assert first is not None
         np.testing.assert_array_equal(first.data, np.ones((4, 100)))
@@ -92,7 +95,7 @@ class TestUploadSignal:
         with pytest.raises(ValueError):
             first.aux_data[...] = 5
         held = _held(token)
-        assert held is not None and held.source_path == "/data/rec.otb+"
+        assert held is not None and held.source_path == SOURCE_PATH
 
     def test_metadata_and_names_are_independent(self, clock: FakeClock) -> None:
         token = _store()
@@ -120,7 +123,7 @@ class TestUploadSignal:
     def test_release_before_the_next_load(self, clock: FakeClock) -> None:
         token = _store("tab-a")
         other = _store("tab-b")
-        cache._release_upload("tab-a")
+        cache.release_upload("tab-a")
         assert _upload_signal(token) is None
         assert _upload_signal(other) is not None
 
@@ -167,7 +170,7 @@ def _views(store: RamStore | SessionStore, n_samples: int = 2000) -> cache.Signa
 class TestSignalViews:
     def test_round_trip(self, clock: FakeClock) -> None:
         views = _views(RamStore())
-        token = cache._store_upload_signal(_signal(), views=views)
+        token = _upload(_signal(), views=views)
         held = _held(token)
         assert held is not None and held.views is views
         assert views.grid_rows == [(0, 4), (4, 6)]
@@ -180,15 +183,11 @@ class TestSignalViews:
         with pytest.raises(ValueError):
             views.emg.levels[0][0, 0, 0] = 5
 
-    def test_without_views_returns_none(self, clock: FakeClock) -> None:
-        held = _held(_store())
-        assert held is not None and held.views is None
-
     def test_heap_views_count_against_the_budget(self, clock: FakeClock) -> None:
         signal = _signal()
         views = _views(RamStore())
         before = cache.BUDGET.used_bytes
-        cache._store_upload_signal(signal, views=views)
+        _upload(signal, views=views)
         assert views.nbytes > 0
         assert cache.BUDGET.used_bytes == before + signal.nbytes + views.nbytes
 
@@ -200,8 +199,8 @@ class TestRunResult:
     def test_read_only_view_with_its_spikes(self, clock: FakeClock) -> None:
         pulse_trains = np.arange(6, dtype=np.float32).reshape(2, 3)
         spikes: list[IntArray] = [np.array([0, 2], np.int32), np.array([1], np.int32)]
-        token = cache._store_run_result(pulse_trains, spike_times=spikes)
-        entry = _run_result(token)
+        token = cache.store_run_result(pulse_trains, spike_times=spikes)
+        entry = run_result(token)
         assert entry is not None and entry.spike_times is not None
         assert np.shares_memory(entry.pulse_trains, pulse_trains)
         with pytest.raises(ValueError):
@@ -210,22 +209,22 @@ class TestRunResult:
         assert cache._RUN_RESULTS.slots[token].nbytes == pulse_trains.nbytes + 12
 
     def test_keeps_only_the_latest_run_of_a_session(self, clock: FakeClock) -> None:
-        first = cache._store_run_result(np.zeros((1, 3), dtype=np.float32), "tab-a")
-        other = cache._store_run_result(np.zeros((1, 3), dtype=np.float32), "tab-b")
-        second = cache._store_run_result(np.ones((1, 3), dtype=np.float32), "tab-a")
-        assert _run_result(first) is None
-        assert _run_result(second) is not None
-        assert _run_result(other) is not None
+        first = cache.store_run_result(np.zeros((1, 3), dtype=np.float32), "tab-a")
+        other = cache.store_run_result(np.zeros((1, 3), dtype=np.float32), "tab-b")
+        second = cache.store_run_result(np.ones((1, 3), dtype=np.float32), "tab-a")
+        assert run_result(first) is None
+        assert run_result(second) is not None
+        assert run_result(other) is not None
 
     @pytest.mark.parametrize("token", [None, "", "unknown"])
     def test_missing_token(self, clock: FakeClock, token: str | None) -> None:
-        assert _run_result(token) is None
+        assert run_result(token) is None
 
     def test_does_not_expire_while_the_session_is_active(self, clock: FakeClock) -> None:
-        token = cache._store_run_result(np.zeros((1, 3), dtype=np.float32))
+        token = cache.store_run_result(np.zeros((1, 3), dtype=np.float32))
         clock.advance(10 * SESSION_IDLE_SEC)
         cache.BUDGET.sweep()
-        assert _run_result(token) is not None
+        assert run_result(token) is not None
 
 
 # ── edit sessions ────────────────────────────────────────────────────────────
@@ -246,28 +245,28 @@ def _edit(fill: int = 1) -> EditSession:
 class TestEditSessions:
     def test_keeps_one_session_per_tab_and_closes_the_one_it_drops(self, clock: FakeClock) -> None:
         first_edit = _edit()
-        first = cache._store_edit_session(first_edit, "tab-a")
-        other = cache._store_edit_session(_edit(3), "tab-b")
-        second = cache._store_edit_session(_edit(2), "tab-a")
+        first = cache.store_edit_session(first_edit, "tab-a")
+        other = cache.store_edit_session(_edit(3), "tab-b")
+        second = cache.store_edit_session(_edit(2), "tab-a")
         assert set(cache._EDIT_SESSIONS.slots) == {other, second}
-        assert cache._get_edit_session(first) is None
+        assert cache.get_edit_session(first) is None
         assert not first_edit.store.path.exists()
-        got = cache._get_edit_session(second)
+        got = cache.get_edit_session(second)
         assert got is not None and got.spike_times[0].tolist() == [2, 12]
 
     def test_a_reloaded_tab_takes_the_session_over(self, clock: FakeClock) -> None:
-        token = cache._store_edit_session(_edit(), "tab-old")
-        replaced = cache._store_edit_session(_edit(5), "tab-new")
-        moved = cache._get_edit_session(token, "tab-new")
+        token = cache.store_edit_session(_edit(), "tab-old")
+        replaced = cache.store_edit_session(_edit(5), "tab-new")
+        moved = cache.get_edit_session(token, "tab-new")
         assert moved is not None
         assert cache._EDIT_SESSIONS.slots[token].session == "tab-new"
         assert replaced not in cache._EDIT_SESSIONS.slots  # one session per tab
         cache.close_session("tab-old")
-        assert cache._get_edit_session(token) is not None
+        assert cache.get_edit_session(token) is not None
 
     def test_counts_its_heap_arrays(self, clock: FakeClock) -> None:
         edit = _edit()
-        token = cache._store_edit_session(edit, "tab-a")
+        token = cache.store_edit_session(edit, "tab-a")
         assert cache._EDIT_SESSIONS.slots[token].nbytes == edit.nbytes > 0
 
 
@@ -278,16 +277,16 @@ class TestSessions:
     def _fill(self, session: str) -> list[str]:
         return [
             _store(session),
-            cache._store_run_result(np.zeros((1, 3), dtype=np.float32), session),
-            cache._store_edit_session(_edit(), session),
+            cache.store_run_result(np.zeros((1, 3), dtype=np.float32), session),
+            cache.store_edit_session(_edit(), session),
         ]
 
     def _alive(self, tokens: list[str]) -> list[bool]:
         upload, run, edit = tokens
         return [
             _upload_signal(upload) is not None,
-            _run_result(run) is not None,
-            cache._get_edit_session(edit) is not None,
+            run_result(run) is not None,
+            cache.get_edit_session(edit) is not None,
         ]
 
     def test_close_drops_everything_the_session_holds(self, clock: FakeClock) -> None:
@@ -327,18 +326,6 @@ class TestSessions:
         assert self._alive(tokens) == [True, True, True]
         assert "tab-b" not in cache.BUDGET.sessions
 
-    def test_usage_reports_caches_and_sessions(self, clock: FakeClock) -> None:
-        self._fill("tab-a")
-        usage = cache.BUDGET.usage()
-        assert usage["active_session"] == "tab-a"
-        assert usage["used_bytes"] == cache.BUDGET.used_bytes > 0
-        assert usage["caches"]["uploads"]["entries"] == 1
-        [session] = usage["sessions"]
-        assert session["id"] == "tab-a"
-        assert session["active"] is True
-        assert session["entries"] == 3
-        assert session["bytes"] == usage["used_bytes"]
-
 
 # ── T1 session stores owned by cache entries ─────────────────────────────────
 
@@ -348,13 +335,13 @@ def _stored_upload(session: str = "tab-a") -> tuple[str, SessionStore]:
     data = st.allocate("emg", (4, 100), np.float32)
     data[:] = 1.0
     signal = SignalImport(data=st.seal(data), fsamp=2000.0, grid_names=["GR08MM1305"])
-    return cache._store_upload_signal(signal, session=session, store=st), st
+    return cache.store_upload(signal, SOURCE_PATH, st, _views(st), session), st
 
 
 def _stored_run(session: str = "tab-a") -> tuple[str, SessionStore]:
     st = SessionStore.create("run")
     pulse_trains = st.allocate("pulse_trains", (2, 50), np.float32, zero=True)
-    return cache._store_run_result(st.seal(pulse_trains), session, st), st
+    return cache.store_run_result(st.seal(pulse_trains), session, st), st
 
 
 class TestSessionStores:
@@ -371,7 +358,7 @@ class TestSessionStores:
         views = _views(st)
         data = st.allocate("emg", (4, 100), np.float32)
         signal = SignalImport(data=st.seal(data), fsamp=2000.0, grid_names=["GR08MM1305"])
-        cache._store_upload_signal(signal, store=st, views=views)
+        cache.store_upload(signal, SOURCE_PATH, st, views)
         assert views.nbytes == 0
         assert cache.BUDGET.used_bytes == 0
 
@@ -379,7 +366,7 @@ class TestSessionStores:
     def test_dropping_an_upload_deletes_its_store(self, clock: FakeClock, how: str) -> None:
         token, st = _stored_upload("tab-a")
         if how == "release":
-            cache._release_upload("tab-a")
+            cache.release_upload("tab-a")
         elif how == "close":
             cache.close_session("tab-a")
         elif how == "next_upload":
@@ -398,7 +385,7 @@ class TestSessionStores:
 
     def test_run_result_keeps_its_store_until_its_session_closes(self, clock: FakeClock) -> None:
         token, st = _stored_run("tab-a")
-        got = _run_result(token)
+        got = run_result(token)
         assert got is not None and not got.pulse_trains.flags.writeable
         assert cache.BUDGET.used_bytes == 0
         cache.close_session("tab-a")
@@ -406,7 +393,7 @@ class TestSessionStores:
 
     def test_a_held_run_keeps_its_store_until_the_read_ends(self, clock: FakeClock) -> None:
         token, st = _stored_run("tab-a")
-        with cache._held_run_result(token) as run:
+        with cache.held_run_result(token) as run:
             assert run is not None
             cache.close_session("tab-a")
             assert st.path.exists()
@@ -418,29 +405,13 @@ class TestSessionStores:
     ) -> None:
         monkeypatch.setattr(cache.BUDGET, "limit_bytes", 1000)
         token = _store("tab-a", n_samples=25)
-        held = cache._hold_upload(token)
+        held = cache.hold_upload(token)
         assert held is not None
         _store("tab-b", n_samples=25)
         assert cache._UPLOADS.get(token) is not None
         held.release()
         _store("tab-c", n_samples=25)
         assert cache._UPLOADS.get(token) is None
-
-    def test_a_run_that_fails_to_start_releases_its_upload(
-        self, clock: FakeClock, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        token, st = _stored_upload("tab-a")
-
-        def fail(**kwargs: Any) -> None:
-            raise ValueError("bad job")
-
-        monkeypatch.setattr(decompose_service, "RunJob", fail)
-        payload = DecomposePayload.model_validate({"upload_token": token})
-        with pytest.raises(ValueError):
-            decompose_service.start_decomposition(payload, session="tab-a")
-        assert decompose_service.active_run() is None
-        cache.close_session("tab-a")
-        assert deleted(st.path)
 
     def test_the_next_run_deletes_the_previous_store(self, clock: FakeClock) -> None:
         _, first = _stored_run("tab-a")

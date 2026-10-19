@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import fields
-from typing import Annotated, Any
+from typing import Any
 
-import numpy as np
 from pydantic import (
     BaseModel,
     Field,
@@ -17,11 +16,8 @@ from pydantic import (
     model_validator,
 )
 
-from muedit.decomp.types import ComputeDtype, DecompositionParameters
+from muedit.decomp.types import DecompositionParameters
 from muedit.io.bids import parse_age
-
-#: A discharge time: a 0-based sample index the .npz stores as int32.
-SampleIndex = Annotated[int, Field(ge=0, le=np.iinfo(np.int32).max)]
 
 
 class PathPayload(BaseModel):
@@ -37,10 +33,10 @@ class QcAutoPayload(BaseModel):
 
 
 class SegmentPayload(BaseModel):
-    """Request body for the target segmentation; without ``aux_index`` the target is found by name."""
+    """Request body for the target segmentation; without ``target_index`` it is found by name."""
 
     upload_token: str
-    aux_index: int | None = None
+    target_index: int | None = None
 
 
 class Span(BaseModel):
@@ -57,20 +53,16 @@ class Span(BaseModel):
 
 
 class DecomposePayload(BaseModel):
-    """A decomposition run of the upload behind ``upload_token``."""
+    """A decomposition run of the upload behind ``upload_token``, exported into ``project``."""
 
     upload_token: str
     params: DecompositionParameters = Field(default_factory=DecompositionParameters)
-    persist_output: bool = False  # also save the .npz next to the source file
-    full_preview: bool = False  # keep the full pulse trains for the run's explorer and save
     rois: list[Span] | None = None  # decomposition windows; None = the whole recording
     artifact_regions: list[Span] | None = None
     discard_channels: list[list[int]] | None = None  # per grid, per channel: 1 = discarded
     target_index: int | None = None  # the auxiliary channel the user segmented
-    bids_export: bool = False
     project: str | None = None
     bids_entities: dict[str, Any] | None = None
-    bids_metadata: dict[str, Any] | None = None
 
     @field_validator("params", mode="before")
     @classmethod
@@ -123,13 +115,9 @@ class BidsSaveFields(BaseModel):
 
 
 class EditSavePayload(BidsSaveFields):
-    """The run save: pulse trains stay on the server under ``run_result_token``.
+    """The run save: discharge times and pulse trains stay on the server under ``run_result_token``."""
 
-    The run also supplies the discharge times when none are sent.
-    """
-
-    spike_times: list[list[SampleIndex]] | None = None
-    run_result_token: str | None = None
+    run_result_token: str
     total_samples: PositiveInt
     fsamp: PositiveFloat
     grid_names: list[str] | None = None
@@ -199,10 +187,7 @@ class FilterUpdatePayload(MuOpPayload):
     use_peeloff: bool = False
     lock_spikes: bool = False
     project: str | None = None
-    # Left out, these are the run's own settings.
-    nbextchan: int | None = None
-    peel_off_win: float | None = Field(default=None, gt=0)
-    compute_dtype: ComputeDtype | None = None
+    peel_off_win: float | None = Field(default=None, gt=0)  # left out, the run's own
 
 
 #: The body of each ``/edit/ops/{op}``; ``remove-duplicates`` and ``undo`` need only the token.

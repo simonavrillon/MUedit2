@@ -49,7 +49,7 @@ cli.serve_api()
       → app.include_router(decompose_router)  # /api/v1: decompose_stream, decompose/cancel
       → app.include_router(editing_router)    # /api/v1: edit/session/*, edit/ops/{op}, edit/save
       → app.include_router(dialog_router)   # /api/v1/dialog: open-file
-      → app.include_router(memory_router)   # /api/v1: debug/memory, session/close
+      → app.include_router(session_router)  # /api/v1: session/close
   → app_factory.mount_frontend(app, paths.frontend_dir())
       → StaticFiles at / (after the routers, which it would otherwise shadow),
         Cache-Control: no-cache so a pulled update is never stale
@@ -95,7 +95,7 @@ does not load SciPy.
 |---|---|
 | `muedit.decomp` | `DecompositionParameters`, `DecompositionResult`, `run_decomposition` |
 | `muedit.io` | `LoaderFn`, `get_loader`, `load_signal`, `register_loader`, `supported_extensions` |
-| `muedit.editing` | `FilterUpdateResult`, `SpikeTimes`, `add_spikes_in_roi`, `delete_spikes_in_roi`, `remove_discharge_rate_outliers`, `update_motor_unit_filter_window` |
+| `muedit.editing` | (none — the app imports `operations`, `session` and `edit_log` directly) |
 | `muedit.api` | (none — empty, just a package marker) |
 
 ---
@@ -186,16 +186,14 @@ Decomposition state loaded from `.npz`/`.mat` for editing. Returned by `load_dec
 | `routes/decompose.py` | Streaming decomposition, cancel, binary preview fetch |
 | `routes/editing.py` | Edit sessions (open, state, operations, recovery, save) and the run save |
 | `routes/dialog.py` | Native file-open dialog (macOS AppleScript / tkinter) |
-| `routes/memory.py` | `/session/close` (a closing tab) and `/debug/memory` |
+| `routes/session.py` | `/session/close` (a closing tab) |
 | `services/preview_service.py` | Preview building, on-demand auto-QC |
 | `services/series_service.py` | One bandpass pass building the QC pyramids; serves `/series/*` frames, pulse trains included |
 | `services/decompose_service.py` | One run at a time (409), cancel, worker supervision, NDJSON streaming, binary preview |
 | `services/decompose_worker.py` | Run body, executed in a `spawn` worker process |
 | `services/editing_service.py` | Opens edit sessions, applies edits, recovers unsaved edits, both saves + BIDS export |
-| `services/edit_helpers.py` | Payload normalization helpers for edits |
 | `schemas.py` | Pydantic request models (7 models) |
-| `contracts.py` | `success_payload()` response envelope |
-| `binary.py` | `pack_frame()` / `unpack_frame()`: the MUB1 wire format |
+| `binary.py` | `pack_frame()` / `frame_response()`: the MUB1 wire format |
 | `cache.py` | The four session-scoped caches (uploads, previews, runs, edit sessions) |
 | `memory.py` | `MemoryBudget` (one byte budget, idle-session sweep) and `BudgetedLRU` (one cache) |
 | `common.py` | JSON parsing, param building, serialization, path checks |

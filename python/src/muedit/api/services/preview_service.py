@@ -10,9 +10,9 @@ import numpy as np
 
 from muedit.api import config
 from muedit.api.cache import (
-    _hold_upload,
-    _release_upload,
-    _store_upload_signal,
+    hold_upload,
+    release_upload,
+    store_upload,
 )
 from muedit.api.common import (
     dataset_root_of,
@@ -38,7 +38,7 @@ from muedit.signal.filters import for_each_row
 from muedit.signal.grid import format_hdemg_signal, grid_rows
 from muedit.signal.qc_pipeline import run_auto_qc
 from muedit.signal.segmentation import segment_target
-from muedit.storage import ArrayStore, RamStore, SessionStore
+from muedit.storage import ArrayStore, SessionStore
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +49,7 @@ def _build_preview_core(filepath: str, session: str = DEFAULT_SESSION) -> dict[s
     The upload is kept only once it is built: a second file opened in the same tab meanwhile
     drops the uploads kept, never one still being written.
     """
-    _release_upload(session)
+    release_upload(session)
     store = SessionStore.create("upload")
     try:
         signal = load_signal(filepath, store=store)
@@ -60,9 +60,7 @@ def _build_preview_core(filepath: str, session: str = DEFAULT_SESSION) -> dict[s
     except BaseException:
         store.close()
         raise
-    upload_token = _store_upload_signal(
-        signal, source_path=filepath, session=session, store=store, views=views
-    )
+    upload_token = store_upload(signal, filepath, store, views, session)
 
     return make_json_safe(
         {
@@ -102,13 +100,13 @@ def build_preview_from_path(filepath: str, session: str = DEFAULT_SESSION) -> di
 
 
 def _bandpassed_grids(
-    signal: SignalImport, grid_counts: list[int], emg_types: list[int], store: ArrayStore
+    signal: SignalImport, grid_channel_counts: list[int], emg_types: list[int], store: ArrayStore
 ) -> FloatArray:
     """The grid channels bandpassed into one float32 array of ``store``, a few rows at once."""
     # No notch, unlike the in-run auto-QC (preprocess_step): results can differ on powerline noise.
-    n_rows, n_samples = sum(grid_counts), signal.data.shape[1]
+    n_rows, n_samples = sum(grid_channel_counts), signal.data.shape[1]
     out = store.allocate("qc-auto", (n_rows, n_samples), np.float32)
-    for grid, rows in enumerate(grid_rows(grid_counts, n_rows)):
+    for grid, rows in enumerate(grid_rows(grid_channel_counts, n_rows)):
         emg_type = grid_emg_type(emg_types, grid)
 
         def filter_row(row: int, emg_type: int = emg_type) -> None:
@@ -120,11 +118,11 @@ def _bandpassed_grids(
 
 def run_auto_qc_on_token(payload: QcAutoPayload) -> dict[str, Any]:
     """Run the automatic QC pipeline over the upload's grid channels, bandpassed for the run."""
-    held = _hold_upload(payload.upload_token)
+    held = hold_upload(payload.upload_token)
     if held is None:
         raise missing_upload()
     try:
-        return _auto_qc(held.signal, held.store if held.store is not None else RamStore())
+        return _auto_qc(held.signal, held.store)
     finally:
         held.release()
 
@@ -157,13 +155,9 @@ def _auto_qc(signal: SignalImport, store: ArrayStore) -> dict[str, Any]:
     }
 
 
-def _aux_error(reason: str) -> MueditError:
-    return MueditError(reason, "aux_index")
-
-
 def segment_target_on_token(payload: SegmentPayload) -> dict[str, Any]:
     """Split the upload's target channel into ramps, plateaus, sinusoids and irregular blocks."""
-    held = _hold_upload(payload.upload_token)
+    held = hold_upload(payload.upload_token)
     if held is None:
         raise missing_upload()
     try:
@@ -171,24 +165,27 @@ def segment_target_on_token(payload: SegmentPayload) -> dict[str, Any]:
         names = signal.aux_names
         n_aux = signal.aux_data.shape[0]
         if n_aux == 0:
-            raise _aux_error("This recording has no auxiliary channels")
-        index = (
-            payload.aux_index
-            if payload.aux_index is not None
+            raise MueditError("This recording has no auxiliary channels", "target_index")
+        target_index = (
+            payload.target_index
+            if payload.target_index is not None
             else find_target_channel(names, signal.metadata.get("aux_kinds"))
         )
-        if index is None:
-            raise _aux_error(
-                "No auxiliary channel is named as a target; show it alone in the auxiliary plot"
+        if target_index is None:
+            raise MueditError(
+                "No auxiliary channel is named as a target; show it alone in the auxiliary plot",
+                "target_index",
             )
-        if not 0 <= index < n_aux:
-            raise _aux_error(f"Auxiliary channel {index} does not exist")
-        segments = segment_target(np.asarray(signal.aux_data[index]), signal.fsamp)
+        if not 0 <= target_index < n_aux:
+            raise MueditError(f"Auxiliary channel {target_index} does not exist", "target_index")
+        segments = segment_target(np.asarray(signal.aux_data[target_index]), signal.fsamp)
         if not segments:
-            raise _aux_error("The target holds no contraction to segment")
+            raise MueditError("The target holds no contraction to segment", "target_index")
         return {
-            "target_index": index,
-            "target_name": names[index] if index < len(names) else f"Aux {index + 1}",
+            "target_index": target_index,
+            "target_name": (
+                names[target_index] if target_index < len(names) else f"Aux {target_index + 1}"
+            ),
             "segments": [s.to_dict() for s in segments],
         }
     finally:

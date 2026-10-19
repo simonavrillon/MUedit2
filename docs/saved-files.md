@@ -47,7 +47,7 @@ Notes:
 - CLI decomposition uses `save_npz=True` by default.
 - The run starts only if its BIDS form fields can be written: a placement scheme `Other` without a
   description, or an age that is not a whole number, is refused (400) before anything is computed.
-- API decomposition persists this file when `persist_output=true` is set on the request or BIDS export is requested (then under `derivatives/muedit/.../decomp/`, see below).
+- API decomposition always persists this file, under `derivatives/muedit/.../decomp/` of the project's BIDS dataset (see below).
 
 ## 2) BIDS Export During Decomposition
 

@@ -9,8 +9,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import Response
 from pydantic import ValidationError
 
-from muedit.api.common import request_session
-from muedit.api.contracts import success_payload
+from muedit.api.common import request_session, success_payload
 from muedit.api.schemas import (
     EDIT_OPS,
     EditPrepareGridPayload,

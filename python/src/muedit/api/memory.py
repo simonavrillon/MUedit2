@@ -69,98 +69,6 @@ def default_budget_bytes() -> int:
     return int(min(max(BUDGET_RAM_FRACTION * ram, BUDGET_MIN_BYTES), BUDGET_MAX_BYTES))
 
 
-def process_memory_bytes() -> int | None:
-    """Memory this process holds now, or None where it cannot be read."""
-    held: int | None = None
-    try:
-        if sys.platform == "win32":
-            held = _windows_working_set_bytes()
-        elif sys.platform == "darwin":
-            held = _darwin_footprint_bytes()
-        else:
-            with open("/proc/self/statm") as statm:
-                held = int(statm.read().split()[1]) * os.sysconf("SC_PAGE_SIZE")
-    except (OSError, ValueError, IndexError, AttributeError):
-        return None
-    return held
-
-
-def _darwin_footprint_bytes() -> int | None:
-    """Physical footprint from the Mach ``task_info`` call, as Activity Monitor shows it."""
-    # Not resident_size: macOS keeps freed pages counted there until it needs them back.
-    import ctypes
-
-    counters = [
-        "virtual_size", "region_count_and_page_size", "resident_size", "resident_size_peak",
-        "device", "device_peak", "internal", "internal_peak", "external", "external_peak",
-        "reusable", "reusable_peak", "purgeable_volatile_pmap", "purgeable_volatile_resident",
-        "purgeable_volatile_virtual", "compressed", "compressed_peak", "compressed_lifetime",
-        "phys_footprint",
-    ]  # fmt: skip
-
-    class _TaskVmInfo(ctypes.Structure):
-        _fields_ = [(name, ctypes.c_uint64) for name in counters]
-
-    task_vm_info = 22
-    libc = ctypes.CDLL("/usr/lib/libSystem.B.dylib")
-    info = _TaskVmInfo()
-    count = ctypes.c_uint(ctypes.sizeof(info) // 4)
-    task = ctypes.c_uint.in_dll(libc, "mach_task_self_")
-    if libc.task_info(task, task_vm_info, ctypes.byref(info), ctypes.byref(count)) != 0:
-        return None
-    return int(info.phys_footprint)
-
-
-def _windows_working_set_bytes() -> int | None:
-    """Working-set size from ``GetProcessMemoryInfo``."""
-    import ctypes
-
-    class _Counters(ctypes.Structure):
-        _fields_ = [
-            ("cb", ctypes.c_ulong),
-            ("PageFaultCount", ctypes.c_ulong),
-            ("PeakWorkingSetSize", ctypes.c_size_t),
-            ("WorkingSetSize", ctypes.c_size_t),
-            ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
-            ("QuotaPagedPoolUsage", ctypes.c_size_t),
-            ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
-            ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
-            ("PagefileUsage", ctypes.c_size_t),
-            ("PeakPagefileUsage", ctypes.c_size_t),
-        ]
-
-    counters = _Counters()
-    counters.cb = ctypes.sizeof(counters)
-    working_set: int | None = None
-    # The only caller is Windows-only, but mypy checks this body on every OS and
-    # ctypes.windll exists only in the Windows stubs.
-    if sys.platform == "win32":
-        from ctypes import wintypes
-
-        # Typed on a private handle to the DLL: ctypes would otherwise take the process
-        # handle for a 32-bit int and truncate it.  ``windll``'s prototypes are shared.
-        kernel32 = ctypes.WinDLL("kernel32")
-        kernel32.GetCurrentProcess.restype = wintypes.HANDLE
-        query = kernel32.K32GetProcessMemoryInfo
-        query.argtypes = [wintypes.HANDLE, ctypes.POINTER(_Counters), wintypes.DWORD]
-        query.restype = wintypes.BOOL
-        if query(kernel32.GetCurrentProcess(), ctypes.byref(counters), counters.cb):
-            working_set = int(counters.WorkingSetSize)
-    return working_set
-
-
-def peak_rss_bytes() -> int | None:
-    """Highest resident memory of this process so far, or None where it cannot be read."""
-    peak: int | None = None
-    if sys.platform != "win32":
-        import resource
-
-        # ru_maxrss is in bytes on macOS and in kilobytes elsewhere.
-        unit = 1 if sys.platform == "darwin" else 1024
-        peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * unit
-    return peak
-
-
 def parse_session_id(value: str, field: str) -> str:
     """The client's session id from ``field``; a malformed one is refused."""
     value = value.strip()
@@ -331,31 +239,6 @@ class MemoryBudget:
                     cache.drop(token)
             self.sessions.clear()
             self.active_session = None
-
-    def usage(self) -> dict[str, Any]:
-        """Budget, per-cache and per-session totals, for the debug endpoint."""
-        with self.locked():
-            now = self.clock()
-            slots = [slot for cache in self.caches.values() for slot in cache.slots.values()]
-            return {
-                "limit_bytes": self.limit_bytes,
-                "used_bytes": sum(slot.nbytes for slot in slots),
-                "active_session": self.active_session,
-                "caches": {
-                    name: {"entries": len(cache.slots), "bytes": cache.nbytes}
-                    for name, cache in self.caches.items()
-                },
-                "sessions": [
-                    {
-                        "id": session,
-                        "active": session == self.active_session,
-                        "idle_sec": round(now - seen, 1),
-                        "entries": sum(1 for slot in slots if slot.session == session),
-                        "bytes": sum(slot.nbytes for slot in slots if slot.session == session),
-                    }
-                    for session, seen in self.sessions.items()
-                ],
-            }
 
 
 class BudgetedLRU(Generic[V]):

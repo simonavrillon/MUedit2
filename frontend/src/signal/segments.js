@@ -149,7 +149,7 @@ export async function requestSegmentation(app) {
     const data = await withUpload(app, (token) =>
       api.segmentTarget({
         upload_token: token,
-        ...(channel === null ? {} : { aux_index: channel }),
+        ...(channel === null ? {} : { target_index: channel }),
       }),
     );
     const segments = toSegments(data?.segments);

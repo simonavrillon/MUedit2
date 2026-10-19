@@ -123,7 +123,7 @@ export function createApiClient({ apiFetch, apiJson, API_BASE, sessionId }) {
     },
 
     /**
-     * @param {{ upload_token: string, aux_index?: number }} payload
+     * @param {{ upload_token: string, target_index?: number }} payload
      */
     segmentTarget(payload) {
       return postJson(`${API_BASE}${routes.qcSegment}`, payload);

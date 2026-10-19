@@ -31,16 +31,11 @@ Signal Primitives (signal/decomp_primitives.py, signal/filters.py)
 Decomposition Algorithm (decomp/algorithm.py)
 ```
 
-### Type Aliases
-
-```python
-SpikeTimes: TypeAlias = IntArray  # sorted, unique, non-negative int32 (models.spike_array)
-FilterUpdateResult: TypeAlias = tuple[np.ndarray | None, SpikeTimes]
-```
+### Discharge times
 
 Every operation takes discharge times as anything array-like, normalizes them with
-`spike_array`, and returns a new `SpikeTimes` array; the operations are vectorized (no
-per-spike Python loops).
+`spike_array` (sorted, unique, non-negative int32), and returns a new array; the operations are
+vectorized (no per-spike Python loops).
 
 ---
 
@@ -52,9 +47,9 @@ entry of the given type.
 
 | `op` | Arguments | Changes | History entry | Core function |
 |---|---|---|---|---|
-| `update-filter` | `mu, view_start, view_end, use_peeloff, lock_spikes, project, nbextchan, peel_off_win, compute_dtype` | pulse train in view + spikes | `update_filter` | `update_motor_unit_filter_window()` |
-| `add-spikes` | `mu, x_start, x_end, y_min` | spikes | `add_spikes` | `add_spikes_in_roi()` |
-| `add-artifact` | `mu, x_start, x_end, y_min` | artifacts | `add_artifact` | `add_spikes_in_roi()` |
+| `update-filter` | `mu, view_start, view_end, use_peeloff, lock_spikes, project, peel_off_win` | pulse train in view + spikes | `update_filter` | `update_motor_unit_filter_window()` |
+| `add-spikes` | `mu, x_start, x_end, y_min` | spikes | `add_spikes` | `peaks_in_roi()` |
+| `add-artifact` | `mu, x_start, x_end, y_min` | artifacts | `add_artifact` | `peaks_in_roi()` |
 | `delete-spikes` | `mu, x_start, x_end, y_min, y_max` | spikes + artifacts | `delete_spikes`, `delete_artifact` | `delete_spikes_in_roi()` (spikes, then artifacts) |
 | `remove-outliers` | `mu` | spikes | `remove_outliers` | `remove_discharge_rate_outliers()` |
 | `flag` | `mu, flag` | flag | `flag_mu` | — |
@@ -74,7 +69,7 @@ samples it added or removed (`spikes_added`, `spikes_removed`, `artifacts_added`
 ```python
 class EditSession:
     def __init__(self, *, store, fsamp, total_samples, spikes, pulse, mu_grid_index, mu_uids,
-                 artifacts=None, history=None, signal=None, bids_grid=None, duplicates=None)
+                 artifact_times=None, history=None, signal=None, bids_grid=None, duplicates=None)
     def apply(self, op: str, args: dict) -> Change
     def replay(self, records: list[dict]) -> int
 ```
@@ -122,48 +117,45 @@ The most complex operation. Recomputes a motor unit's pulse train and spike trai
 
 ```python
 def update_motor_unit_filter_window(
-    emg: np.ndarray,              # (n_channels, n_samples) EMG
-    emg_mask: np.ndarray,         # (n_channels,) bad-channel mask (nonzero = discard)
-    spike_times: SpikeTimes,      # existing spike times for this MU
+    emg: np.ndarray,              # (n_channels, n_samples) filtered EMG of the grid
+    discard_mask: np.ndarray,     # (n_channels,) 1 = discarded channel
+    spike_times: ArrayLike,       # existing spike times for this MU
     fsamp: float,
     start: int,                   # window start sample
     end: int,                     # window end sample
     nbextchan: int = DEFAULT_NBEXTCHAN,    # target extended channels (1000)
-    peeloff_spike_times: Sequence[SpikeTimes] | None = None,  # other MUs' spikes for peel-off
+    peel_off_spike_times: Sequence[ArrayLike] | None = None,  # other MUs' spikes to peel off
     peel_off_win: float = DEFAULT_PEEL_OFF_WIN_SEC,       # 0.025 s
-    emg_offset: int = 0,          # offset of emg array within full signal
-    use_peeloff: bool = False,    # enable peel-off of other MUs
-    artifact_times: SpikeTimes | None = None,  # artifact spike times to subtract
+    artifact_times: ArrayLike | None = None,  # artifact spike times to subtract
     lock_spikes: bool = False,    # snap existing spikes to nearest peak
     artifact_mask: np.ndarray | None = None,  # (n_samples,) artifact region mask
-    bandpass: bool = True,        # False for EMG that is already filtered
     compute_dtype: ComputeDtype = DEFAULT_COMPUTE_DTYPE,  # float32 by default
-) -> FilterUpdateResult  # (pulse_train | None, updated_spike_times)
+) -> tuple[np.ndarray | None, IntArray]  # (pulse_train | None, updated_spike_times)
 ```
 
-### Internal pipeline (`_recompute_spikes_in_window`)
+### Pipeline
 
 ```
-1. Slice EMG to [start, end)
-2. Bandpass filter (bandpass_signals), unless bandpass=False (the edit session passes filtered EMG)
-3. Delay-embed (extend_signal) to nbextchan extended channels
-4. PCA on the columns spikes are taken from: [edge, L - edge), past the zero-padded
-   extension ends and the bandpass transients, minus artifact columns (pca_extended_signal)
-5. Whiten (whiten_extended_signal)
-6. Optional peel-off: subtract other MUs' waveforms (subtract_mu_waveforms)
+1. Slice the kept channels of the EMG to [start, end)
+2. Delay-embed (extend_signal) to nbextchan extended channels
+3. PCA on the columns spikes are taken from: [trim, L - trim), trim = window_trim with
+   EDGE_SEC (0.1 s), past the zero-padded extension ends and the bandpass transients,
+   minus artifact columns (pca_extended_signal)
+4. Whiten (whiten_extended_signal)
+5. Optional peel-off: subtract other MUs' waveforms (subtract_mu_waveforms)
    + subtract artifacts
-7. Build MU filter from existing spikes in window
-8. Project to get pulse train
-9. Signed-square nonlinearity (signed_square)
-10. Zero artifact regions
-11. Refractory peak detection (find_refractory_peaks)
-12. K-means amplitude split (split_by_amplitude) -> high/low clusters
-13. Drop spikes inside artifact regions
-14. Optional lock_spikes: snap existing spikes to nearest peak (+/- 10 samples),
+6. Build MU filter from existing spikes in window
+7. Project to get pulse train
+8. Signed-square nonlinearity (signed_square)
+9. Zero artifact regions
+10. Refractory peak detection (find_refractory_peaks)
+11. K-means amplitude split (split_by_amplitude) -> high/low clusters
+12. Drop spikes inside artifact regions
+13. Optional lock_spikes: snap existing spikes to nearest peak (+/- 10 samples),
     then merge with new detections
-15. Amplitude ceiling: pulse_train[spike] <= 3 * centroid_high
-16. Merge with spikes outside the window
-17. Return (pulse_train | None, updated_spike_times)
+14. Amplitude ceiling: pulse_train[spike] <= 3 * centroid_high
+15. Merge with spikes outside the window
+16. Return (pulse_train | None, updated_spike_times)
 ```
 
 ### In the session (`EditSession.update_filter`)
@@ -171,12 +163,13 @@ def update_motor_unit_filter_window(
 | Argument | Controls | Default |
 |---|---|---|
 | `view_start` / `view_end` | Window boundaries (required; 400 when empty or past the EMG) | — |
-| `nbextchan` | Extended channel count | the run's, else `1000` |
 | `peel_off_win` | Peel-off window half-width (s) | the run's, else `0.025` |
-| `compute_dtype` | Type of the extended and whitened window | the run's, else `float32` |
 | `use_peeloff` | Peel off the other unflagged MUs of the same grid | `False` |
 | `lock_spikes` | Snap existing spikes to nearest peaks | `False` |
 | `project` | Where to read the BIDS EMG (see `_dataset_root` below) | `None` |
+
+The extended channel count (`nbextchan`, else `1000`) and the type of the extended and whitened
+window (`compute_dtype`, else `float32`) are always the run's.
 
 "The run's" is the file's saved `parameters` (`edit.meta["parameters"]`), so a refit extends and
 whitens the window as the decomposition did. The frontend sends none of the three.
@@ -190,8 +183,7 @@ cannot be applied to a view. The filtered grid is built once, in the session sto
 (`EditSession._grid_emg`). The page asks for it ahead of the first refit
 (`/edit/session/prepare-grid` → `EditSession.prepare_grid`) when a file opens, for the grid on
 screen, and when the user picks a grid; it runs outside the session lock, so edits go on, and a
-refit sent meanwhile waits for the same filtering under the grid's own lock. The refit then runs
-with `bandpass=False`. The raw
+refit sent meanwhile waits for the same filtering under the grid's own lock. The raw
 EMG comes from:
 - **BIDS**: the whole grid read channel by channel into the store (`io.bids.read_bids_emg_grid`)
 - **the decomposition file**: its embedded EMG (a v2 `.npz` member mapped in place, or `.mat`);
@@ -199,27 +191,27 @@ EMG comes from:
   is used as is
 
 With neither, the refit is refused (400). The new train is written into the MU's own copy over
-`[view_start + edge, view_end − edge)`, `edge` = 0.1 s, where the bandpass transients have died
-down.
+`[view_start + edge, view_end − edge)`, `edge` = `edge_samples(fsamp)` (0.1 s), where the
+bandpass transients have died down.
 
 ---
 
-## 2. Add Spikes in ROI (`add_spikes_in_roi`)
+## 2. Add Spikes in ROI (`peaks_in_roi`)
 
 ```python
-def add_spikes_in_roi(
-    pulse: np.ndarray,        # pulse train for this MU
-    spike_times: SpikeTimes,  # existing spike times
+def peaks_in_roi(
+    pulse_train: np.ndarray,  # pulse train for this MU
     fsamp: float,
-    x_start: int,            # ROI start sample
-    x_end: int,              # ROI end sample
-    y_min: float,            # minimum pulse amplitude threshold
-) -> SpikeTimes
+    x_start: int,             # ROI start sample
+    x_end: int,               # ROI end sample
+    y_min: float,             # minimum pulse amplitude threshold
+) -> IntArray
 ```
-Zeros everything outside the ROI `[x_start, x_end]`, finds refractory peaks above `y_min` amplitude threshold, unions with existing spikes. Returns sorted unique spike list.
+Zeros everything outside the ROI `[x_start, x_end]` and returns the refractory peaks above the
+`y_min` amplitude threshold.
 
 The session passes the ROI's window of the train plus one sample on each side (so peak picking
-matches the whole train) and adds the peaks it finds. `y_min` omitted means no peak qualifies.
+matches the whole train) and merges the peaks it finds into the MU's spikes. `y_min` omitted means no peak qualifies.
 `add-artifact` runs the same function on the MU's artifact times.
 
 ---
@@ -228,13 +220,13 @@ matches the whole train) and adds the peaks it finds. `y_min` omitted means no p
 
 ```python
 def delete_spikes_in_roi(
-    pulse: np.ndarray,
-    spike_times: SpikeTimes,
+    pulse_train: np.ndarray,
+    spike_times: ArrayLike,
     x_start: int,
     x_end: int,
     y_min: float,
     y_max: float,
-) -> SpikeTimes
+) -> IntArray
 ```
 Deletes spikes inside the ROI `[x_start, x_end]` whose pulse amplitude falls within `[min(y_min, y_max), max(y_min, y_max) + 1]`. Spikes outside the ROI or outside the amplitude band are kept.
 
@@ -247,15 +239,14 @@ Deletes spikes inside the ROI `[x_start, x_end]` whose pulse amplitude falls wit
 
 ```python
 def remove_discharge_rate_outliers(
-    pulse: FloatArray,
-    spike_times: SpikeTimes,
+    pulse_train: FloatArray,
+    spike_times: ArrayLike,
     fsamp: float,
-    z_factor: float = 3.0,
-) -> SpikeTimes
+) -> IntArray
 ```
-Global discharge-rate outlier removal (no ROI). Computes per-pair discharge rates, sets threshold = `mean + z_factor * std`, and for each pair exceeding the threshold deletes the lower-amplitude spike. Requires >= 3 spikes. Returns the pruned spikes; the change carries `removed_count`.
+Global discharge-rate outlier removal (no ROI). Computes per-pair discharge rates, sets threshold = `mean + 3 * std` (`_RATE_Z_FACTOR`), and for each pair exceeding the threshold deletes the lower-amplitude spike. Requires >= 3 spikes. Returns the pruned spikes; the change carries `removed_count`.
 
-`z_factor` stays at `3.0`; the API does not expose it.
+The factor is a module constant; the API does not expose it.
 
 ---
 
@@ -306,7 +297,7 @@ def open_edit_session(filepath: str, session: str = DEFAULT_SESSION) -> Response
    `.json` edit log saved next to the file sets `mu_uids`, the history and the artifact times.
 4. The pulse trains go to the session as float32 outside the heap (mapped from the file, or copied
    into the store); a file without them gets trains drawn from the discharge times
-5. The session is cached for the tab (`_store_edit_session`), in place of the tab's previous one,
+5. The session is cached for the tab (`store_edit_session`), in place of the tab's previous one,
    which closes only now: a file that fails to open leaves it open. It is offered the unsaved edits an
    earlier session left for this file (`find_recoverable`), and given its own `EditLog`
 6. The response is the MUB1 state frame (see [02-api-surface.md](02-api-surface.md#editing-router-routeseditingpy))
@@ -355,32 +346,27 @@ Returns `{saved, path, kept_indices, mu_uids, edit_history, bids_emg_paths?, bid
 **`save_edit_session`** saves the session's state: its spikes, flags, uids, history, artifacts,
 train rows (`EditSession.pulse_rows`) and signal context. On Windows the file being replaced may be
 memory-mapped by the session, so `detach` first copies what is mapped from it into the store.
-A form that names no muscle saves the file's (`meta["muscle"]`). Afterwards the saved MUs become
+A form that names no muscle saves the file's (`meta["muscle_names"]`). Afterwards the saved MUs become
 the session's baseline (`EditSession.saved`), the session's `file_label` and `source_path` name
 the saved file, and the undo stack and log start over. The new log is keyed to the saved file, so
 reopening that file is what offers unsaved edits back after a crash.
 
 **`save_edits`** is the run save, from the run stage. It takes the run held under
-`run_result_token`: its discharge times (unless the request sends `spike_times`) and its pulse
-trains, and the SIL, windows and target segments the run kept with them (`RunExtras`). It generates
-the uids and writes an empty history. The artifact mask comes from the run's `artifact_regions`
-(`build_manual_artifact_mask`). A token the server no longer holds, with no discharge times sent,
-is a 400. The request model refuses a non-positive `fsamp`, negative or int32-overflowing discharge
-times, negative grid indices, a `powerline_freq` outside `(0, 1000]` Hz and an age that is not a
+`run_result_token`: its discharge times and pulse trains, and the SIL, windows and target segments
+the run kept with them (`RunExtras`). It generates the uids and writes an empty history. The
+artifact mask comes from the run's `artifact_regions` (`build_manual_artifact_mask`). A token the
+server no longer holds is a 400. The request model refuses a non-positive `fsamp`, negative grid
+indices, a `powerline_freq` outside `(0, 1000]` Hz and an age that is not a
 whole number of years (422).
 
 ---
 
-## Service Helpers (`services/edit_helpers.py`)
+## Service Helpers (in `services/editing_service.py`)
 
 | Function | Description |
 |---|---|
 | `_expected_grid_count(decomp: LoadedDecomposition)` | Grid count implied by names, muscles and MU-to-grid indices |
-| `_pad_grid_names(names, expected_count, fallback)` | Pads/truncates grid names to expected count |
-| `_normalize_muscle_names(raw)` | Normalizes muscle-name payload to clean list of non-empty strings |
-| `_normalize_flagged(raw, nmu)` | Coerces flagged list to `nmu` length, padding with `False` |
-| `_generate_mu_uids(mu_grid_index)` | Generates per-grid MU UIDs like `"g0_mu0"`, `"g0_mu1"`, `"g1_mu0"` |
-| `_normalize_mu_grid_index(raw, nmu)` | Coerces mu_grid_index to `nmu` length, padding with 0 |
+| `_pad_grid_names(names, expected_count, fallback)` | Pads grid names to the expected count |
 | `_coerce_dup_tol(raw, default=0.3)` | Coerces `duplicatesthresh` to float |
 | `_coerce_bool_param(raw)` | Coerces `duplicatesbgrids` (MATLAB 0/1, nested arrays, strings) to bool |
 

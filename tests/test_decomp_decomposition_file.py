@@ -125,7 +125,7 @@ def _edit_save(tmp_path: Path) -> tuple[Path, dict[str, Any]]:
         flagged=[False, True, False],
         mu_grid_index=decomp.mu_grid_index,
         mu_uids=["g0_mu0", "g1_mu0", "g1_mu1"],
-        edit_history=history,
+        history=history,
         artifact_times=[np.array([12]), np.array([], dtype=int), np.array([], dtype=int)],
         fsamp=FSAMP,
         total_samples=T,
@@ -199,7 +199,7 @@ def test_saves_and_reloads(
         for got, entry in zip(log["history"], want["history"], strict=True):
             assert entry.items() <= got.items()
         extras = _file_extras(str(path), path.name, decomp)
-        assert (extras.mu_uids, extras.edit_history) == (log["mu_uids"], log["history"])
+        assert (extras.mu_uids, extras.history) == (log["mu_uids"], log["history"])
     else:
         # The raw EMG, with the loader's BIDS fields, so an edit save can export it later.
         assert not ctx.prefiltered

@@ -69,11 +69,7 @@ def serve_api() -> None:
     # /preview-by-path reads any local path, so only this machine's frontend may call it.
     host = os.environ.get("MUEDIT_HOST", "127.0.0.1")
     port = int(os.environ.get("MUEDIT_PORT") or os.environ.get("MUEDIT_BACKEND_PORT", "8000"))
-    app = create_app(
-        title="MUedit API",
-        version="2.1.0",
-        allowed_hosts=LOOPBACK_HOSTS if host in LOOPBACK_HOSTS else None,
-    )
+    app = create_app(allowed_hosts=LOOPBACK_HOSTS if host in LOOPBACK_HOSTS else None)
     include_routers(app)
     frontend = frontend_dir()
     if frontend is not None:

@@ -266,7 +266,7 @@ describe("requestSegmentation", () => {
       };
     };
     assert.equal(await requestSegmentation(app), true);
-    assert.deepEqual(sent.calls, [[{ upload_token: "tok", aux_index: 1 }]]);
+    assert.deepEqual(sent.calls, [[{ upload_token: "tok", target_index: 1 }]]);
     assert.equal(app.state.segments.length, 3);
     assert.equal(els.auxSelector.value, "1");
     assert.equal(els.qcSegmentBtn.disabled, false);
@@ -288,7 +288,7 @@ describe("requestSegmentation", () => {
     els.auxSelector.value = "-1";
     await requestSegmentation(app);
     assert.deepEqual(sent.calls, [
-      [{ upload_token: "tok", aux_index: 0 }],
+      [{ upload_token: "tok", target_index: 0 }],
       [{ upload_token: "tok" }],
     ]);
   });

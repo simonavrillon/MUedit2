@@ -15,6 +15,11 @@ from muedit.errors import MueditError, NotFoundError
 from muedit.io.bids import dataset_root
 
 
+def success_payload(data: Any) -> dict[str, Any]:
+    """Wrap JSON success responses in the canonical v1 envelope."""
+    return {"data": data, "meta": {"api_version": "v1"}}
+
+
 def request_session(x_muedit_session: str | None = Header(None)) -> str:
     """The calling tab's session id; a request that sends one makes it the active session."""
     if x_muedit_session is None:

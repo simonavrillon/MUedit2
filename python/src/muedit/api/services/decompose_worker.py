@@ -36,13 +36,10 @@ class RunJob:
     run_path: str
     signal: SignalImport
     params: DecompositionParameters
-    persist_output: bool = False
+    bids_root: str
     rois: list[tuple[int, int]] | None = None
     discard_channels: list[list[int]] | None = None
-    bids_root: str | None = None
     bids_entities: dict[str, Any] | None = None
-    bids_metadata: dict[str, Any] | None = None
-    include_full_preview: bool = False
     artifact_regions: list[tuple[int, int]] | None = None
     target_index: int | None = None  # the auxiliary channel the user segmented
 
@@ -59,20 +56,18 @@ def execute(job: RunJob, store: ArrayStore, send: Send) -> None:
         result = run_decomposition(
             job.run_path,
             params=job.params,
-            save_npz=job.persist_output or job.bids_root is not None,
             progress_cb=progress,
             rois=job.rois,
             discard_overrides=job.discard_channels,
             bids_root=job.bids_root,
             bids_entities=job.bids_entities,
-            bids_metadata=job.bids_metadata,
-            include_full_preview=job.include_full_preview,
+            include_full_preview=True,
             preloaded_signal=job.signal,
             artifact_regions=job.artifact_regions,
             store=store,
             target_index=job.target_index,
         )
-        summary = make_json_safe(_summary(result, job.persist_output))
+        summary = make_json_safe(_summary(result))
     except MueditError as exc:
         send({"stage": "error", "message": "Decomposition failed", "detail": str(exc)})
         return
@@ -99,12 +94,11 @@ def execute(job: RunJob, store: ArrayStore, send: Send) -> None:
     )
 
 
-def _summary(result: DecompositionResult, persisted: bool) -> dict[str, Any]:
-    """What the run page's result panel shows, and where ``persist_output`` saved the run."""
+def _summary(result: DecompositionResult) -> dict[str, Any]:
+    """What the run page's result panel shows."""
     return {
         "grid_names": result.grid_names,
         "mu_count": len(result.spike_times),
-        "save_path": result.save_path if persisted else None,
         "parameters": result.parameters,
     }
 

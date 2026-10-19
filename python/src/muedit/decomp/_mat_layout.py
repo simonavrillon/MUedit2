@@ -9,6 +9,7 @@ from typing import Any
 import numpy as np
 
 from muedit.models import IntArray, spike_array
+from muedit.signal.grid import grid_spec, is_known_grid
 
 logger = logging.getLogger(__name__)
 
@@ -208,8 +209,27 @@ def infer_total_samples_from_pulse(pulse_trains: Any) -> int | None:
     return None
 
 
-def parse_discard_channels(raw: Any) -> list[np.ndarray]:
-    """Parse discard-channel cell arrays into per-grid binary channel masks."""
+def _discard_mask(cell: np.ndarray, n_ch: int) -> np.ndarray:
+    """A grid's 0/1 discard mask from a stored one, or from 1- or 0-based discarded indices."""
+    if cell.size == n_ch and np.all(np.isin(cell, [0, 1])):
+        return cell
+    mask = np.zeros(n_ch, dtype=int)
+    if cell.size > 0:
+        max_val, min_val = int(np.max(cell)), int(np.min(cell))
+        if min_val >= 1 and max_val <= n_ch:
+            mask[cell - 1] = 1
+        elif min_val >= 0 and max_val < n_ch:
+            mask[cell] = 1
+        elif cell.size == n_ch:
+            mask = np.asarray(cell != 0, dtype=int)
+    return mask
+
+
+def parse_discard_channels(raw: Any, grid_names: list[str]) -> list[np.ndarray]:
+    """Per-grid 0/1 channel masks (1 = discarded) from discard-channel cell arrays.
+
+    A cell of a grid the catalogue does not know is kept as stored.
+    """
 
     def _parse_mask_item(item: Any) -> np.ndarray:
         """Flatten one cell into a 1-D int array, preserving order and length."""
@@ -248,13 +268,18 @@ def parse_discard_channels(raw: Any) -> list[np.ndarray]:
             return np.array([], dtype=int)
 
     items = _top_level_cell_items(raw)
+    cells = [_parse_mask_item(item) for item in items]
     if not items and isinstance(raw, np.ndarray) and raw.dtype != object:
         if raw.ndim <= 1:
-            return [_parse_mask_item(raw)]
-        if raw.ndim == 2:
-            return [_parse_mask_item(raw[i]) for i in range(raw.shape[0])]
-
-    return [_parse_mask_item(item) for item in items]
+            cells = [_parse_mask_item(raw)]
+        elif raw.ndim == 2:
+            cells = [_parse_mask_item(raw[i]) for i in range(raw.shape[0])]
+    return [
+        _discard_mask(cell, grid_spec(grid_names[i]).n_channels)
+        if i < len(grid_names) and is_known_grid(grid_names[i])
+        else cell
+        for i, cell in enumerate(cells)
+    ]
 
 
 def parse_signal_coordinates(raw: Any) -> list[np.ndarray]:

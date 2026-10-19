@@ -7,22 +7,19 @@ import json
 import logging
 import multiprocessing
 import queue
-import tempfile
 import threading
 from collections.abc import AsyncGenerator, Awaitable, Callable, Generator, Iterator
 from multiprocessing.connection import wait
 from multiprocessing.process import BaseProcess
-from pathlib import Path
 from typing import Any
 
 import numpy as np
-from fastapi import HTTPException
 
 from muedit.api.cache import (
     HeldUpload,
     RunExtras,
-    _hold_upload,
-    _store_run_result,
+    hold_upload,
+    store_run_result,
 )
 from muedit.api.common import bids_root_for, make_json_safe, missing_upload
 from muedit.api.memory import DEFAULT_SESSION
@@ -33,16 +30,13 @@ from muedit.api.services.decompose_worker import (
     RunJob,
     child_main,
 )
-from muedit.errors import MueditError
+from muedit.errors import ConflictError, MueditError
 from muedit.io.bids import check_run_export
-from muedit.models import IntArray, spike_array
+from muedit.models import spike_array
 from muedit.storage import SessionStore
 
 logger = logging.getLogger(__name__)
 
-#: The preview fields a ``done`` event carries: the page already shows the recording the rest
-#: describe, and the pulse trains and discharge times stay on the server under the run token.
-DONE_PREVIEW_KEYS = ("mu_grid_index",)
 #: How often a stream waiting for the next event checks that its client is still connected.
 DISCONNECT_POLL_SEC = 1.0
 SHUTDOWN_WAIT_SEC = 10.0
@@ -50,21 +44,6 @@ CANCELLED_EVENT: dict[str, Any] = {
     "stage": "cancelled",
     "message": "Decomposition cancelled",
 }
-
-
-def _as_matrix(value: Any) -> np.ndarray:
-    """Coerce a preview pulse payload into a 2-D matrix without copying an ndarray."""
-    matrix = np.asarray(value if value is not None else [])
-    if matrix.ndim == 1:
-        matrix = matrix.reshape(1, -1) if matrix.size else np.zeros((0, 0))
-    if matrix.ndim != 2:
-        matrix = np.zeros((0, 0))
-    return matrix
-
-
-def _preview_spikes(preview: dict[str, Any]) -> list[IntArray]:
-    """The preview's discharge times, as sorted int32 arrays."""
-    return [spike_array(d) for d in preview.get("spike_times") or []]
 
 
 class _Run:
@@ -201,21 +180,21 @@ class _Run:
         return kept
 
     def _done_event(self, message: dict[str, Any]) -> tuple[dict[str, Any], bool]:
-        """The ``done`` event for a finished run, and whether its pulse trains were kept."""
-        preview_raw: dict[str, Any] = message.get("preview") or {}
-        spikes = _preview_spikes(preview_raw)
-        preview_payload = make_json_safe(
-            {k: preview_raw[k] for k in DONE_PREVIEW_KEYS if k in preview_raw}
-        )
-        # The run save reads the pulse trains and discharge times from the run's store.
-        pulse_full = _as_matrix(preview_raw.get("pulse_trains_full")).astype(np.float32, copy=False)
-        kept = bool(pulse_full.size)
+        """The ``done`` event for a finished run, and whether its pulse trains were kept.
+
+        The page already shows the recording, so the event carries only the MU-to-grid index:
+        the pulse trains and discharge times stay on the server under the run token.
+        """
+        preview: dict[str, Any] = message.get("preview") or {}
+        preview_payload = make_json_safe({"mu_grid_index": preview.get("mu_grid_index", [])})
+        pulse_trains = preview.get("pulse_trains_full")
+        kept = pulse_trains is not None
         if kept:
-            preview_payload["run_result_token"] = _store_run_result(
-                pulse_full,
+            preview_payload["run_result_token"] = store_run_result(
+                np.asarray(pulse_trains, np.float32),
                 self.session,
                 self.store,
-                spikes,
+                [spike_array(d) for d in preview.get("spike_times") or []],
                 RunExtras(
                     sil=list(message.get("sil") or []),
                     rois=[(int(s), int(e)) for s, e in message.get("rois") or []] or None,
@@ -259,11 +238,6 @@ def _spans(spans: list[Span] | None) -> list[tuple[int, int]] | None:
     return None if spans is None else [(s.start, s.end) for s in spans]
 
 
-def _check_bids_fields(payload: DecomposePayload, loader_meta: dict[str, Any], root: Path) -> None:
-    """Raise the ``BidsFieldError`` the run's BIDS export would raise, before anything is computed."""
-    check_run_export(root, payload.bids_entities or {}, loader_meta, payload.bids_metadata)
-
-
 def start_decomposition(payload: DecomposePayload, *, session: str = DEFAULT_SESSION) -> _Run:
     """Start a run on the upload behind ``payload.upload_token``; 409 while another one runs."""
     for i, mask in enumerate(payload.discard_channels or []):
@@ -271,32 +245,27 @@ def start_decomposition(payload: DecomposePayload, *, session: str = DEFAULT_SES
             raise MueditError(
                 f"Grid {i + 1} has every channel discarded; keep at least one.", "discard_channels"
             )
-    bids_root = str(bids_root_for(payload.project)) if payload.bids_export else None
+    bids_root = bids_root_for(payload.project)
     with _SLOT.lock:
         if _SLOT.run is not None:
-            raise HTTPException(
-                status_code=409,
-                detail="A decomposition is already running; wait for it to finish or cancel "
-                "it in the tab that started it",
+            raise ConflictError(
+                "A decomposition is already running; wait for it to finish or cancel "
+                "it in the tab that started it"
             )
-        held = _hold_upload(payload.upload_token)
+        held = hold_upload(payload.upload_token)
         if held is None:
             raise missing_upload()
         try:
-            if bids_root is not None:
-                _check_bids_fields(payload, held.signal.metadata, Path(bids_root))
-            run_path = held.source_path or str(Path(tempfile.gettempdir()) / "muedit_cached_input")
+            # The error the run's BIDS export would raise, before anything is computed.
+            check_run_export(bids_root, payload.bids_entities or {}, held.signal.metadata)
             job = RunJob(
-                run_path=run_path,
+                run_path=held.source_path,
                 signal=held.signal,
                 params=payload.params,
-                persist_output=payload.persist_output,
+                bids_root=str(bids_root),
                 rois=_spans(payload.rois),
                 discard_channels=payload.discard_channels,
-                bids_root=bids_root,
                 bids_entities=payload.bids_entities,
-                bids_metadata=payload.bids_metadata,
-                include_full_preview=payload.full_preview,
                 artifact_regions=_spans(payload.artifact_regions),
                 target_index=payload.target_index,
             )
@@ -314,10 +283,10 @@ def start_decomposition(payload: DecomposePayload, *, session: str = DEFAULT_SES
     return run
 
 
-def cancel_decomposition(session: str | None = None) -> bool:
-    """Stop the run in progress if ``session`` started it (any run when None)."""
+def cancel_decomposition(session: str) -> bool:
+    """Stop the run in progress if ``session`` started it."""
     run = active_run()
-    if run is None or (session is not None and run.session != session):
+    if run is None or run.session != session:
         return False
     run.cancel()
     return True

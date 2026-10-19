@@ -54,13 +54,13 @@ class SignalViews:
 @dataclass
 class _UploadEntry:
     signal: SignalImport
-    source_path: str | None
-    views: SignalViews | None = None
-    store: SessionStore | None = None  # T1 folder holding the memory-mapped arrays
+    source_path: str
+    views: SignalViews
+    store: SessionStore  # T1 folder holding the memory-mapped arrays
 
     @property
     def nbytes(self) -> int:
-        return self.signal.nbytes + (self.views.nbytes if self.views is not None else 0)
+        return self.signal.nbytes + self.views.nbytes
 
 
 @dataclass
@@ -122,26 +122,25 @@ def close_session(session: str) -> None:
     BUDGET.close_session(session)
 
 
-def _release_upload(session: str = DEFAULT_SESSION) -> None:
+def release_upload(session: str = DEFAULT_SESSION) -> None:
     """Drop the upload ``session`` holds, before it loads the next file."""
     _UPLOADS.release_session(session)
 
 
-def _store_upload_signal(
+def store_upload(
     signal: SignalImport,
-    source_path: str | None = None,
+    source_path: str,
+    store: SessionStore,
+    views: SignalViews,
     session: str = DEFAULT_SESSION,
-    store: SessionStore | None = None,
-    views: SignalViews | None = None,
 ) -> str:
     """Keep ``signal`` (and the file it came from), with the QC stage's ``views``; return a token.
 
-    With ``store``, the entry takes over the store ``signal`` and ``views`` were built in and
-    deletes it when dropped; otherwise it keeps a copy of ``signal``. The upload is kept
-    whole: a store is only ever deleted once nothing is still being written into it.
+    The entry takes over the store ``signal`` and ``views`` were built in and deletes it when
+    dropped. The upload is kept whole: a store is only ever deleted once nothing is still
+    being written into it.
     """
-    kept = signal if store is not None else signal.clone()
-    entry = _UploadEntry(signal=kept, source_path=source_path, views=views, store=store)
+    entry = _UploadEntry(signal=signal, source_path=source_path, views=views, store=store)
     return _UPLOADS.pin(entry, session)
 
 
@@ -150,19 +149,18 @@ class HeldUpload:
     """An upload taken for one request or run: its store stays until ``release``."""
 
     signal: SignalImport  # a read-only view
-    source_path: str | None
-    store: SessionStore | None
-    views: SignalViews | None
+    source_path: str
+    store: SessionStore
+    views: SignalViews
     token: str
 
     def release(self) -> None:
         """End the hold; a drop of the upload meanwhile deletes its store now."""
         _UPLOADS.unhold(self.token)
-        if self.store is not None:
-            self.store.release()
+        self.store.release()
 
 
-def _hold_upload(token: str | None) -> HeldUpload | None:
+def hold_upload(token: str | None) -> HeldUpload | None:
     """The upload for ``token``, kept from eviction and its store held until ``release``.
 
     Dropping the upload meanwhile (a new file, a closed tab) closes the store only after.
@@ -171,13 +169,12 @@ def _hold_upload(token: str | None) -> HeldUpload | None:
         entry = _UPLOADS.hold(token)
         if entry is None or token is None:
             return None
-        if entry.store is not None:
-            entry.store.hold()
+        entry.store.hold()
         signal = entry.signal.readonly_view()
         return HeldUpload(signal, entry.source_path, entry.store, entry.views, token)
 
 
-def _store_run_result(
+def store_run_result(
     pulse_trains: FloatArray,
     session: str = DEFAULT_SESSION,
     store: SessionStore | None = None,
@@ -193,7 +190,7 @@ def _store_run_result(
 
 
 @contextlib.contextmanager
-def _held_run_result(token: str | None) -> Iterator[RunResult | None]:
+def held_run_result(token: str | None) -> Iterator[RunResult | None]:
     """The stored run for ``token``, pulse trains read-only, its store kept until the block ends."""
     with BUDGET.locked():
         stored = _RUN_RESULTS.hold(token)
@@ -212,7 +209,7 @@ def _held_run_result(token: str | None) -> Iterator[RunResult | None]:
             stored.store.release()
 
 
-def _store_edit_session(edit: EditSession, session: str = DEFAULT_SESSION) -> str:
+def store_edit_session(edit: EditSession, session: str = DEFAULT_SESSION) -> str:
     """Keep an edit session for ``session``, in place of its last, and return its token.
 
     Dropping a session closes it.
@@ -220,18 +217,18 @@ def _store_edit_session(edit: EditSession, session: str = DEFAULT_SESSION) -> st
     return _EDIT_SESSIONS.pin(_EditSessionEntry(edit), session)
 
 
-def _get_edit_session(token: str | None, session: str | None = None) -> EditSession | None:
+def get_edit_session(token: str | None, session: str | None = None) -> EditSession | None:
     """The edit session for ``token``; with ``session``, it moves to that tab (a reloaded page)."""
     entry = _EDIT_SESSIONS.get(token) if session is None else _EDIT_SESSIONS.move(token, session)
     return entry.session if entry is not None else None
 
 
-def _resize_edit_session(token: str) -> None:
+def resize_edit_session(token: str) -> None:
     """Recount an edit session's bytes after an edit."""
     _EDIT_SESSIONS.resize(token)
 
 
-def _live_edit_logs() -> set[Path]:
+def live_edit_logs() -> set[Path]:
     """The edit logs open sessions are writing."""
     with BUDGET.locked():
         entries = [slot.value.session for slot in _EDIT_SESSIONS.slots.values()]

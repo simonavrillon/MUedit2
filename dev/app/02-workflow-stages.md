@@ -287,8 +287,8 @@ User clicks "Decompose signal" / "Start decomposition"
      5. buildRunPayload(token): a JSON body
         - upload_token (required), params
         - discard_channels, rois, artifact_regions, target_index (null when unset)
-        - project, bids_entities, bids_export = true
-        - full_preview = true
+        - project, bids_entities (every run exports into the project's BIDS
+          dataset and keeps its full pulse trains on the server)
      6. api.decomposeStream(payload, 15min timeout)
         - sent through withUpload: on an upload_token ApiError, POST
           /preview-by-path with state.file.path to mint a fresh token, then

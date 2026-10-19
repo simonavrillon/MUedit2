@@ -213,11 +213,11 @@ def build_pulse_trains_from_spike_times(
 def save_editlog(
     editlog_path: Path,
     mu_uids: list[str],
-    edit_history: list[dict[str, Any]],
+    history: list[dict[str, Any]],
     artifact_times: Sequence[IntArray] | None = None,
 ) -> None:
     """Write a JSON editlog sidecar alongside a decomposition artifact."""
-    payload: dict[str, Any] = {"mu_uids": mu_uids, "history": edit_history}
+    payload: dict[str, Any] = {"mu_uids": mu_uids, "history": history}
     if artifact_times is not None and any(np.asarray(a).size for a in artifact_times):
         payload["artifact_times"] = [np.asarray(a).tolist() for a in artifact_times]
     with editlog_path.open("w", encoding="utf-8") as fh:
@@ -606,7 +606,7 @@ def _npz_signal_context(
     else:
         grid_names_raw = data.get("grid_names")
         grid_names = parse_text_list(grid_names_raw) if grid_names_raw is not None else []
-        discard_channels = parse_discard_channels(data.get("discard_channels"))
+        discard_channels = parse_discard_channels(data.get("discard_channels"), grid_names)
         coordinates = parse_signal_coordinates(data.get("coordinates"))
         mask_raw = data.get("artifact_mask")
         if mask_raw is not None:
@@ -676,7 +676,7 @@ def _mat_signal_context(
         top.get("EMGmask"),
         top.get("emgmask"),
     )
-    discard_channels = parse_discard_channels(discard_raw)
+    discard_channels = parse_discard_channels(discard_raw, grid_names)
 
     coordinates_raw = get_case_insensitive(signal, "coordinates")
     coordinates = parse_signal_coordinates(coordinates_raw)

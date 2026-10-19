@@ -149,8 +149,6 @@ export async function runDecomposition(app) {
           : null,
       project: getBidsProject() || null,
       bids_entities: Object.keys(bidsEntities).length ? bidsEntities : null,
-      bids_export: true,
-      full_preview: true,
     };
   };
 

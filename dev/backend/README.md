@@ -52,20 +52,18 @@ python/src/muedit/
 │   │   ├── decompose.py                      /decompose_stream, /decompose/cancel
 │   │   ├── editing.py                        /edit/session/*, /edit/ops/{op}, /edit/save
 │   │   ├── dialog.py                         /dialog/open-file
-│   │   └── memory.py                         /session/close, /debug/memory
+│   │   └── session.py                        /session/close
 │   ├── services/
 │   │   ├── preview_service.py                Preview building + on-demand auto-QC
 │   │   ├── series_service.py                 QC pyramids, viewport envelopes, pulse-train frames
 │   │   ├── decompose_service.py              One run at a time, cancel, NDJSON streaming
 │   │   ├── decompose_worker.py               Run body, executed in a spawned worker process
-│   │   ├── editing_service.py                Edit sessions: open, apply, recover, save + BIDS save
-│   │   └── edit_helpers.py                   Normalization helpers for edit payloads
+│   │   └── editing_service.py                Edit sessions: open, apply, recover, save + BIDS save
 │   ├── schemas.py                            Pydantic request models
-│   ├── contracts.py                          Response envelope
-│   ├── binary.py                             MUB1 frame packer and unpacker
+│   ├── binary.py                             MUB1 frame packer and its response
 │   ├── cache.py                              The session-scoped caches (upload, preview, run, edit session)
 │   ├── memory.py                             MemoryBudget + BudgetedLRU: one byte budget over every cache
-│   ├── common.py                             Shared parsing + serialization utilities
+│   ├── common.py                             Response envelope, shared parsing + serialization utilities
 │   ├── config.py                             DATA_ROOT, resolve_bids_root(), project_of()
 │   └── errors.py                             Exception handlers + error envelope
 │

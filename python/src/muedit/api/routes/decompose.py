@@ -7,8 +7,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 
-from muedit.api.common import request_session
-from muedit.api.contracts import success_payload
+from muedit.api.common import request_session, success_payload
 from muedit.api.schemas import DecomposePayload
 from muedit.api.services.decompose_service import (
     cancel_decomposition,

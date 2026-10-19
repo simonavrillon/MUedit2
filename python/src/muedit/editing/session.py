@@ -24,12 +24,12 @@ from muedit.decomp.types import (
     DEFAULT_COMPUTE_DTYPE,
     DEFAULT_NBEXTCHAN,
     DEFAULT_PEEL_OFF_WIN_SEC,
-    ComputeDtype,
 )
-from muedit.editing.edit_log import EditLog, RecoverableLog
+from muedit.editing.edit_log import EditLog, RecoverableLog, count_edit
 from muedit.editing.operations import (
-    add_spikes_in_roi,
     delete_spikes_in_roi,
+    edge_samples,
+    peaks_in_roi,
     remove_discharge_rate_outliers,
     update_motor_unit_filter_window,
 )
@@ -59,6 +59,19 @@ BidsGridReader = Callable[
 ]
 #: ``(discharge times, grid of each MU)`` → indices of the MUs duplicate removal keeps.
 DuplicateFinder = Callable[[list[IntArray], list[int]], list[int]]
+#: ``EditSession`` lists with one item per MU, in the order ``duplicate`` appends to them.
+_PER_MU_FIELDS = (
+    "spike_times",
+    "artifact_times",
+    "flagged",
+    "mu_grid_index",
+    "mu_uids",
+    "rows",
+    "owned",
+    "original_spikes",
+    "original_rows",
+    "versions",
+)
 
 
 class EditError(MueditError):
@@ -105,7 +118,7 @@ def _diff(before: IntArray, after: IntArray) -> tuple[list[int], list[int]]:
 @dataclass
 class _MuState:
     spike_times: IntArray
-    artifacts: IntArray
+    artifact_times: IntArray
     flagged: bool
     row: PulseRef
 
@@ -143,7 +156,7 @@ class EditSession:
         pulse_trains: FloatArray | None,
         mu_grid_index: list[int],
         mu_uids: list[str],
-        artifacts: Sequence[Any] | None = None,
+        artifact_times: Sequence[Any] | None = None,
         history: list[dict[str, Any]] | None = None,
         signal: EditSignalContext | None = None,
         bids_grid: BidsGridReader | None = None,
@@ -178,8 +191,8 @@ class EditSession:
         self.rows: list[PulseRef] = [("base", i) if has_pulse else None for i in range(n_mu)]
         self.owned = [False] * n_mu
         self.spike_times = [spike_array(s) for s in spike_times]
-        raw_artifacts = list(artifacts or [])
-        self.artifacts = [
+        raw_artifacts = list(artifact_times or [])
+        self.artifact_times = [
             spike_array(raw_artifacts[i] if i < len(raw_artifacts) else []) for i in range(n_mu)
         ]
         self.flagged = [False] * n_mu
@@ -215,7 +228,7 @@ class EditSession:
     @property
     def nbytes(self) -> int:
         """Heap bytes: discharge times, undo patches and the signal context."""
-        arrays: list[np.ndarray] = [*self.spike_times, *self.artifacts, *self.original_spikes]
+        arrays: list[np.ndarray] = [*self.spike_times, *self.artifact_times, *self.original_spikes]
         arrays += [step.patch[1] for step in self.undo_stack if step.patch is not None]
         arrays += [step.before.spike_times for step in self.undo_stack if step.before is not None]
         total = sum(resident_nbytes(a) for a in arrays)
@@ -269,7 +282,9 @@ class EditSession:
         return np.asarray(self.values(mu, lo, hi), dtype=np.float64)
 
     def _snapshot(self, mu: int) -> _MuState:
-        return _MuState(self.spike_times[mu], self.artifacts[mu], self.flagged[mu], self.rows[mu])
+        return _MuState(
+            self.spike_times[mu], self.artifact_times[mu], self.flagged[mu], self.rows[mu]
+        )
 
     def _touch(self, mu: int) -> None:
         self.versions[mu] = next(self._counter)
@@ -360,7 +375,7 @@ class EditSession:
             except BaseException:
                 self._roll_back(top)
                 raise
-            self.unsaved = max(0, self.unsaved - 1) if op == "undo" else self.unsaved + 1
+            self.unsaved = count_edit(self.unsaved, op)
             self._record(op, args)
             return change
 
@@ -431,12 +446,12 @@ class EditSession:
             # One zero sample on each side keeps peak picking as it is on the whole train.
             w_lo, w_hi = max(0, lo - 1), min(self.total_samples, hi + 2)
             window = self._pulse_window(mu, w_lo, w_hi)
-            found = add_spikes_in_roi(window, [], self.fsamp, lo - w_lo, hi - w_lo, height)
+            found = peaks_in_roi(window, self.fsamp, lo - w_lo, hi - w_lo, height)
             peaks = found.astype(np.int64) + w_lo
         if artifacts:
-            before = self.artifacts[mu]
-            self.artifacts[mu] = spike_array(np.concatenate([before, peaks]))
-            added, _ = _diff(before, self.artifacts[mu])
+            before = self.artifact_times[mu]
+            self.artifact_times[mu] = spike_array(np.concatenate([before, peaks]))
+            added, _ = _diff(before, self.artifact_times[mu])
             self._entry(kind, mu, artifacts_added=added or None)
         else:
             before = self.spike_times[mu]
@@ -474,9 +489,9 @@ class EditSession:
         _, removed = _diff(before, self.spike_times[mu])
         if removed:
             self._entry("delete_spikes", mu, spikes_removed=removed)
-        artifacts_before = self.artifacts[mu]
-        self.artifacts[mu] = delete(artifacts_before)
-        _, gone = _diff(artifacts_before, self.artifacts[mu])
+        artifacts_before = self.artifact_times[mu]
+        self.artifact_times[mu] = delete(artifacts_before)
+        _, gone = _diff(artifacts_before, self.artifact_times[mu])
         if gone:
             self._entry("delete_artifact", mu, artifacts_removed=gone)
         self.flagged[mu] = False
@@ -507,24 +522,23 @@ class EditSession:
         use_peeloff: bool = False,
         lock_spikes: bool = False,
         project: str | None = None,
-        nbextchan: int | None = None,
         peel_off_win: float | None = None,
-        compute_dtype: ComputeDtype | None = None,
     ) -> Change:
         """Refit the MU filter on the EMG in view and redetect its discharges there.
 
-        Settings left None are the run's (``meta["parameters"]``), else the run defaults.
+        Settings are the run's (``meta["parameters"]``), else the run defaults; ``peel_off_win``
+        left None is the run's too.
         """
         self.check_mu(mu)
         run = self.meta.get("parameters") or {}
-        nbextchan = int(nbextchan or run.get("nbextchan") or DEFAULT_NBEXTCHAN)
+        nbextchan = int(run.get("nbextchan") or DEFAULT_NBEXTCHAN)
         peel_off_win = float(peel_off_win or run.get("peel_off_win") or DEFAULT_PEEL_OFF_WIN_SEC)
-        compute_dtype = compute_dtype or run.get("compute_dtype") or DEFAULT_COMPUTE_DTYPE
+        compute_dtype = run.get("compute_dtype") or DEFAULT_COMPUTE_DTYPE
         view_start, view_end = int(view_start), int(view_end)
         if view_end <= view_start:
             raise EditError("view_start/view_end are required")
         grid = self.mu_grid_index[mu]
-        emg, fsamp, emg_mask = self._grid_emg(project, grid)
+        emg, fsamp, discard_mask = self._grid_emg(project, grid)
         if view_start < 0 or view_end > emg.shape[1]:
             raise EditError("view window exceeds available EMG samples")
         start = len(self.history)
@@ -536,23 +550,21 @@ class EditSession:
         ]
         pulse_train, updated = update_motor_unit_filter_window(
             emg,
-            emg_mask,
+            discard_mask,
             self.spike_times[mu],
             fsamp,
             view_start,
             view_end,
             nbextchan=nbextchan,
-            peeloff_spike_times=others,
+            peel_off_spike_times=others if use_peeloff else None,
             peel_off_win=peel_off_win,
-            use_peeloff=bool(use_peeloff),
-            artifact_times=self.artifacts[mu],
+            artifact_times=self.artifact_times[mu],
             lock_spikes=bool(lock_spikes),
             artifact_mask=self.signal.artifact_mask if self.signal is not None else None,
-            bandpass=False,  # filtered as the decomposition was, by _grid_emg
             compute_dtype=compute_dtype,
         )
         if pulse_train is not None:
-            edge = int(round(0.1 * fsamp))
+            edge = edge_samples(fsamp)
             seg_start = view_start + edge
             seg_end = min(view_start + len(pulse_train) - edge, self.total_samples)
             if seg_end > seg_start and len(pulse_train) > 2 * edge:
@@ -612,20 +624,15 @@ class EditSession:
         if self.bids_grid is not None:
             found = self.bids_grid(project, grid, self.store)
             if found is not None:
-                emg, fsamp, mask = found
+                emg, fsamp, discard_mask = found
                 self._filter_rows(
                     emg, emg, fsamp, self._emg_type(self.meta.get("grid_names"), grid)
                 )
-                return self.store.seal(emg), fsamp, mask
+                return self.store.seal(emg), fsamp, discard_mask
         ctx = self.signal
         missing = "No BIDS EMG available. Reload decomposition MAT and retry filter update."
         if ctx is None or ctx.data.size == 0:
             raise EditError(missing)
-        data = ctx.data.reshape(1, -1) if ctx.data.ndim == 1 else ctx.data
-        if data.ndim != 2:
-            raise EditError("Invalid cached EMG context")
-        if data.shape[0] > data.shape[1]:
-            data = data.T
         if ctx.fsamp <= 0:
             raise EditError("Missing fsamp in MAT signal context")
         coordinates, _, _, emg_types = format_hdemg_signal(
@@ -635,18 +642,18 @@ class EditSession:
             raise out_of_range("grid", grid, len(coordinates))
         span = grid_rows([c.shape[0] for c in coordinates])[grid]
         n_ch = span.stop - span.start
-        cell = (
-            ctx.discard_channels[grid]
-            if grid < len(ctx.discard_channels)
-            else np.array([], dtype=int)
+        masks = ctx.discard_channels
+        discard_mask = (
+            np.asarray(masks[grid], dtype=int)
+            if grid < len(masks) and len(masks[grid]) == n_ch
+            else np.zeros(n_ch, dtype=int)
         )
-        rows = data[span, :]
-        mask = _discard_mask(cell, n_ch)
+        rows = ctx.data[span, :]
         if ctx.prefiltered:  # a v1 file's EMG went through these filters before it was saved
-            return rows, ctx.fsamp, mask
+            return rows, ctx.fsamp, discard_mask
         out = self.store.allocate(f"filtered-grid{grid}", rows.shape, np.float32)
         self._filter_rows(rows, out, ctx.fsamp, emg_types[grid])
-        return self.store.seal(out), ctx.fsamp, mask
+        return self.store.seal(out), ctx.fsamp, discard_mask
 
     @staticmethod
     def _emg_type(grid_names: Any, grid: int) -> int:
@@ -685,10 +692,10 @@ class EditSession:
         self._begin("reset_mu", mu)
         baseline = self.original_spikes[mu]
         added, removed = _diff(self.spike_times[mu], baseline)
-        artifacts_removed = self.artifacts[mu].tolist()
+        artifacts_removed = self.artifact_times[mu].tolist()
         was_flagged = self.flagged[mu]
         self.spike_times[mu] = baseline.copy()
-        self.artifacts[mu] = spike_array([])
+        self.artifact_times[mu] = spike_array([])
         self.flagged[mu] = False
         if self.rows[mu] != self.original_rows[mu]:
             self.rows[mu] = self.original_rows[mu]
@@ -720,25 +727,22 @@ class EditSession:
         uid = self._new_uid(grid)
         # Both now share one train: the next write to either copies it first.
         self.owned[mu] = False
-        self.spike_times.append(self.spike_times[mu].copy())
-        self.artifacts.append(spike_array([]))
-        self.flagged.append(False)
-        self.mu_grid_index.append(grid)
-        self.mu_uids.append(uid)
-        self.rows.append(self.rows[mu])
-        self.owned.append(False)
-        self.original_spikes.append(self.spike_times[mu].copy())
-        self.original_rows.append(self.rows[mu])
-        self.versions.append(next(self._counter))
-        self._push(_Undo("duplicate_mu", start, appended=True))  # once undo has an MU to pop
-        self.history.append(
-            {
-                "type": "duplicate_mu",
-                "mu_uid": uid,
-                "source_mu_uid": self.mu_uids[mu],
-                "timestamp": timestamp(),
-            }
+        new_mu = (
+            self.spike_times[mu].copy(),
+            spike_array([]),
+            False,
+            grid,
+            uid,
+            self.rows[mu],
+            False,
+            self.spike_times[mu].copy(),
+            self.rows[mu],
+            next(self._counter),
         )
+        for name, value in zip(_PER_MU_FIELDS, new_mu, strict=True):
+            getattr(self, name).append(value)
+        self._push(_Undo("duplicate_mu", start, appended=True))  # once undo has an MU to pop
+        self._entry("duplicate_mu", mu_uid=uid, source_mu_uid=self.mu_uids[mu])
         return Change([self.n_mu - 1], start)
 
     def remove_duplicates(self) -> Change:
@@ -760,18 +764,7 @@ class EditSession:
     def keep(self, kept: list[int]) -> None:
         """Keep only the MUs at ``kept``, in that order; undo history is dropped."""
         self._clear_undo()
-        for name in (
-            "spike_times",
-            "artifacts",
-            "flagged",
-            "mu_grid_index",
-            "mu_uids",
-            "rows",
-            "owned",
-            "original_spikes",
-            "original_rows",
-            "versions",
-        ):
+        for name in _PER_MU_FIELDS:
             values = getattr(self, name)
             setattr(self, name, [values[i] for i in kept])
         self._drop_unused_rows()
@@ -803,24 +796,13 @@ class EditSession:
         self.undo_stack.pop()
         del self.history[step.history_len :]
         if step.appended:
-            for name in (
-                "spike_times",
-                "artifacts",
-                "flagged",
-                "mu_grid_index",
-                "mu_uids",
-                "rows",
-                "owned",
-                "original_spikes",
-                "original_rows",
-                "versions",
-            ):
+            for name in _PER_MU_FIELDS:
                 getattr(self, name).pop()
             return Change([], step.history_len, kept=list(range(self.n_mu)))
         mu = step.mu
         assert step.before is not None
         self.spike_times[mu] = step.before.spike_times
-        self.artifacts[mu] = step.before.artifacts
+        self.artifact_times[mu] = step.before.artifact_times
         self.flagged[mu] = step.before.flagged
         if step.patch is not None:
             self._forget(step)
@@ -882,20 +864,3 @@ def _mapped_from(arr: np.ndarray, path: str) -> bool:
     """Whether ``arr`` is a memory map of the file at ``path``."""
     filename = getattr(arr, "filename", None)
     return filename is not None and Path(filename).resolve() == Path(path).resolve()
-
-
-def _discard_mask(cell: Any, n_ch: int) -> IntArray:
-    """A grid's 0/1 discard mask from a stored one, or from 1- or 0-based discarded indices."""
-    cell_arr = np.asarray(cell, dtype=int).flatten()
-    if cell_arr.size == n_ch and np.all(np.isin(cell_arr, [0, 1])):
-        return cell_arr.copy()
-    mask = np.zeros(n_ch, dtype=int)
-    if cell_arr.size > 0:
-        max_val, min_val = int(np.max(cell_arr)), int(np.min(cell_arr))
-        if min_val >= 1 and max_val <= n_ch:
-            mask[cell_arr[cell_arr >= 1] - 1] = 1
-        elif min_val >= 0 and max_val < n_ch:
-            mask[cell_arr[cell_arr >= 0]] = 1
-        elif cell_arr.size == n_ch:
-            mask = np.asarray(cell_arr != 0, dtype=int)
-    return mask

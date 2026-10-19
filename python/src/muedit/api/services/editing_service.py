@@ -16,14 +16,13 @@ import numpy as np
 from fastapi.responses import Response
 
 from muedit.api import config
-from muedit.api.binary import FRAME_FORMAT, FRAME_MEDIA_TYPE, pack_frame
+from muedit.api.binary import frame_response
 from muedit.api.cache import (
-    RunExtras,
-    _get_edit_session,
-    _held_run_result,
-    _live_edit_logs,
-    _resize_edit_session,
-    _store_edit_session,
+    get_edit_session,
+    held_run_result,
+    live_edit_logs,
+    resize_edit_session,
+    store_edit_session,
 )
 from muedit.api.common import (
     bids_root_for,
@@ -41,17 +40,8 @@ from muedit.api.schemas import (
     EditSavePayload,
     EditSessionSavePayload,
 )
-from muedit.api.services.edit_helpers import (
-    _coerce_bool_param,
-    _coerce_dup_tol,
-    _expected_grid_count,
-    _normalize_flagged,
-    _normalize_mu_grid_index,
-    _pad_grid_names,
-)
 from muedit.decomp.decomposition_file import (
     load_decomposition,
-    normalize_spike_times,
     pack_csr,
     save_decomposition_npz,
     save_editlog,
@@ -95,17 +85,47 @@ from muedit.models import (
     resident_nbytes,
     spike_array,
 )
+from muedit.signal.grid import fallback_grid_name
 from muedit.storage import SessionStore, copy_into
 
 logger = logging.getLogger(__name__)
 
 
-def _frame_response(meta: dict[str, Any], arrays: dict[str, tuple[Any, str]]) -> Response:
-    return Response(
-        content=pack_frame(meta, arrays),
-        media_type=FRAME_MEDIA_TYPE,
-        headers={"x-muedit-format": FRAME_FORMAT},
-    )
+def _expected_grid_count(decomp: LoadedDecomposition) -> int:
+    """Number of grids implied by the names, muscles and MU-to-grid indices."""
+    from_index = max(decomp.mu_grid_index) + 1 if decomp.mu_grid_index else 0
+    return max(1, len(decomp.grid_names), len(decomp.muscle_names), from_index)
+
+
+def _pad_grid_names(names: list[str], expected_count: int, fallback: list[str]) -> list[str]:
+    out = [str(x).strip() for x in (names or []) if str(x).strip()]
+    if not out:
+        out = [str(x).strip() for x in (fallback or []) if str(x).strip()]
+    target_count = max(int(expected_count or 0), len(out))
+    while len(out) < target_count:
+        out.append(fallback_grid_name(len(out)))
+    return out
+
+
+def _coerce_dup_tol(raw: Any, default: float = 0.3) -> float:
+    """Coerce a ``duplicatesthresh`` parameter to float, unwrapping nested lists."""
+    while isinstance(raw, (list, tuple, np.ndarray)) and np.ndim(raw) > 0:
+        raw = raw[0] if len(raw) > 0 else default
+    try:
+        return float(raw)
+    except (TypeError, ValueError) as exc:
+        raise MueditError(
+            f"duplicatesthresh must be a number; got {raw!r}", "parameters.duplicatesthresh"
+        ) from exc
+
+
+def _coerce_bool_param(raw: Any) -> bool:
+    """Coerce a boolean parameter such as ``duplicatesbgrids`` (MATLAB stores 0/1), unwrapping nested lists."""
+    while isinstance(raw, (list, tuple, np.ndarray)) and np.ndim(raw) > 0:
+        raw = raw[0] if len(raw) > 0 else False
+    if isinstance(raw, str):
+        return raw.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(raw)
 
 
 def _dedup(
@@ -142,7 +162,7 @@ class _FileExtras:
     bids_root: Path | None = None
     sidecar_meta: dict[str, Any] = field(default_factory=dict)
     mu_uids: list[Any] | None = None
-    edit_history: list[Any] | None = None
+    history: list[Any] | None = None
     artifact_times: list[Any] | None = None
 
 
@@ -178,7 +198,7 @@ def _file_extras(filepath: str, file_label: str, decomp: LoadedDecomposition) ->
             if isinstance(editlog.get("mu_uids"), list):
                 extras.mu_uids = editlog["mu_uids"]
             if isinstance(editlog.get("history"), list):
-                extras.edit_history = editlog["history"]
+                extras.history = editlog["history"]
             if isinstance(editlog.get("artifact_times"), list):
                 extras.artifact_times = editlog["artifact_times"]
         except (OSError, ValueError, KeyError) as exc:
@@ -240,8 +260,8 @@ def _new_session(
         pulse_trains=_session_pulse_trains(decomp, store),
         mu_grid_index=decomp.mu_grid_index,
         mu_uids=uids if uids and len(uids) == n_mu else initial_mu_uids(decomp.mu_grid_index),
-        artifacts=extras.artifact_times,
-        history=extras.edit_history,
+        artifact_times=extras.artifact_times,
+        history=extras.history,
         signal=signal,
         bids_grid=bids_grid,
         duplicates=duplicates,
@@ -281,9 +301,9 @@ def open_edit_session(filepath: str, session: str = DEFAULT_SESSION) -> Response
     except BaseException:
         store.close()
         raise
-    token = _store_edit_session(edit, session)
+    token = store_edit_session(edit, session)
     # Before edit.lock: the budget lock is never taken under it (a dropped session closes under it).
-    live_logs = _live_edit_logs()
+    live_logs = live_edit_logs()
     with edit.lock:
         _check_open(edit)
         # Created first: a log another tab opens meanwhile is in its live set or has edits.
@@ -299,7 +319,7 @@ def _expired() -> MueditError:
 
 
 def _require_session(token: str, session: str) -> EditSession:
-    edit = _get_edit_session(token, session)
+    edit = get_edit_session(token, session)
     if edit is None:
         raise _expired()
     return edit
@@ -356,7 +376,7 @@ def _state_response(edit: EditSession, token: str, **extra: Any) -> Response:
         "recoverable_edits": recovery.edits if recovery is not None else 0,
         **extra,
     }
-    return _frame_response(meta, _spike_arrays(edit.spike_times, edit.artifacts))
+    return frame_response(meta, _spike_arrays(edit.spike_times, edit.artifact_times))
 
 
 def _change_response(edit: EditSession, change: Change) -> Response:
@@ -370,9 +390,9 @@ def _change_response(edit: EditSession, change: Change) -> Response:
     }
     arrays = _spike_arrays(
         [edit.spike_times[i] for i in change.changed],
-        [edit.artifacts[i] for i in change.changed],
+        [edit.artifact_times[i] for i in change.changed],
     )
-    return _frame_response(meta, arrays)
+    return frame_response(meta, arrays)
 
 
 def edit_session_state(token: str, session: str = DEFAULT_SESSION) -> Response:
@@ -390,7 +410,7 @@ def apply_edit(op: str, payload: EditOpPayload, session: str = DEFAULT_SESSION) 
     with edit.lock:
         change = edit.apply(op, args)
         response = _change_response(edit, change)
-    _resize_edit_session(payload.token)
+    resize_edit_session(payload.token)
     return response
 
 
@@ -409,7 +429,7 @@ def recover_edits(payload: EditRecoverPayload, session: str = DEFAULT_SESSION) -
                 # Replayed edits are in this session's own log now; a failed replay is not retried.
                 recovery.discard()
         response = _state_response(edit, payload.token, recovered_edits=applied)
-    _resize_edit_session(payload.token)
+    resize_edit_session(payload.token)
     return response
 
 
@@ -430,7 +450,7 @@ class _SaveRequest:
     flagged: list[bool]
     mu_grid_index: list[int]
     mu_uids: list[str]
-    edit_history: list[dict[str, Any]]
+    history: list[dict[str, Any]]
     artifact_times: list[IntArray]
     fsamp: float
     total_samples: int
@@ -532,9 +552,8 @@ def _kept_mus(
     entries: list[dict[str, Any]] = []
     # Unset (None) form fields leave both steps on.
     if req.form.remove_flagged is not False and kept:
-        flagged = _normalize_flagged(req.flagged, len(kept))
-        dropped = [i for i in kept if flagged[i]]
-        kept = [i for i in kept if not flagged[i]]
+        dropped = [i for i in kept if req.flagged[i]]
+        kept = [i for i in kept if not req.flagged[i]]
         if dropped:
             entries.append(_save_removal_entry("remove_flagged", [req.mu_uids[i] for i in dropped]))
     if req.form.remove_duplicates is not False and len(kept) > 1 and req.fsamp > 0:
@@ -662,7 +681,7 @@ def _save(req: _SaveRequest) -> tuple[dict[str, Any], list[int], list[dict[str, 
 
     kept, entries = _kept_mus(req, parameters)
     mu_uids = [req.mu_uids[i] for i in kept]
-    edit_history = [*req.edit_history, *entries]
+    history = [*req.history, *entries]
     artifacts = [
         req.artifact_times[i] if i < len(req.artifact_times) else spike_array([]) for i in kept
     ]
@@ -676,7 +695,7 @@ def _save(req: _SaveRequest) -> tuple[dict[str, Any], list[int], list[dict[str, 
         req,
         out_path,
         kept,
-        {"mu_uids": mu_uids, "edit_history": edit_history, "artifact_times": artifacts},
+        {"mu_uids": mu_uids, "history": history, "artifact_times": artifacts},
         grid_names=grid_names,
         muscle_names=muscle_names,
         parameters=parameters,
@@ -701,7 +720,7 @@ def _save(req: _SaveRequest) -> tuple[dict[str, Any], list[int], list[dict[str, 
         "path": str(out_path),
         "kept_indices": kept,
         "mu_uids": mu_uids,
-        "edit_history": edit_history,
+        "edit_history": history,
     }
     if bids_paths:
         result["bids_emg_paths"] = bids_paths
@@ -732,8 +751,8 @@ def save_edit_session(
             flagged=edit.flagged,
             mu_grid_index=edit.mu_grid_index,
             mu_uids=edit.mu_uids,
-            edit_history=edit.history,
-            artifact_times=edit.artifacts,
+            history=edit.history,
+            artifact_times=edit.artifact_times,
             fsamp=edit.fsamp,
             total_samples=edit.total_samples,
             grid_names=list(meta.get("grid_names") or []),
@@ -742,7 +761,7 @@ def save_edit_session(
                 update={"file_label": payload.file_label or meta.get("file_label")}
             ),
             pulse_trains=edit.pulse_rows,
-            muscle_names=list(meta.get("muscle_names") or meta.get("muscle") or []),
+            muscle_names=list(meta.get("muscle_names") or []),
             sil=[edit.sil_by_uid.get(uid) for uid in edit.mu_uids],
             rois=list(meta.get("rois") or []) or None,
             artifact_mask=mask if mask is not None and mask.size == edit.total_samples else None,
@@ -762,28 +781,23 @@ def save_edit_session(
         # Keyed to the saved file: reopening it is what offers these edits back after a crash.
         edit.log = EditLog.create(result["path"], payload.token)
         result.update(_per_mu(edit))
-    _resize_edit_session(payload.token)
+    resize_edit_session(payload.token)
     return make_json_safe(result)
 
 
 def save_edits(payload: EditSavePayload) -> dict[str, Any]:
     """Save a run: discharge times from the request, else from the stored run, and its pulse trains."""
-    with _held_run_result(payload.run_result_token) as run:
-        if payload.spike_times:
-            spike_times = normalize_spike_times(payload.spike_times)
-        elif run is not None:
-            spike_times = list(run.spike_times)
-        else:
-            # Without it the save would write a file with no motor units and report success.
+    with held_run_result(payload.run_result_token) as run:
+        if run is None:
             raise MueditError(
                 "The run's results are no longer on the server; run the decomposition again",
                 "run_result_token",
             )
-        matrix = run.pulse_trains if run is not None else None
-        if matrix is not None and (
-            matrix.size == 0 or matrix.shape != (len(spike_times), payload.total_samples)
-        ):
-            matrix = None  # the loader draws them from the discharge times
+        spike_times = list(run.spike_times)
+        pulse_rows = run.pulse_trains
+        # Otherwise the loader draws them from the discharge times.
+        fits = pulse_rows.size and pulse_rows.shape == (len(spike_times), payload.total_samples)
+        matrix = pulse_rows if fits else None
 
         def pulse_trains(kept: list[int]) -> FloatArray | RowSource | None:
             if matrix is None or len(kept) == matrix.shape[0]:
@@ -791,9 +805,11 @@ def save_edits(payload: EditSavePayload) -> dict[str, Any]:
             # Read as the file is written, not indexed into a heap copy of the kept rows.
             return RowSource((len(kept), matrix.shape[1]), lambda a, b: matrix[kept[a:b]])
 
-        mu_grid_index = _normalize_mu_grid_index(payload.mu_grid_index, len(spike_times))
+        n_mu = len(spike_times)
+        mu_grid_index = list(payload.mu_grid_index or [])[:n_mu]
+        mu_grid_index += [0] * (n_mu - len(mu_grid_index))
         regions = [(r.start, r.end) for r in payload.artifact_regions or []]
-        extras = run.extras if run is not None else RunExtras()
+        extras = run.extras
         sil = extras.sil if len(extras.sil) == len(spike_times) else None
 
         req = _SaveRequest(
@@ -801,7 +817,7 @@ def save_edits(payload: EditSavePayload) -> dict[str, Any]:
             flagged=[False] * len(spike_times),
             mu_grid_index=mu_grid_index,
             mu_uids=initial_mu_uids(mu_grid_index),
-            edit_history=[],
+            history=[],
             artifact_times=[],
             fsamp=payload.fsamp,
             total_samples=payload.total_samples,

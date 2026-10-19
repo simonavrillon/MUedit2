@@ -9,12 +9,12 @@ from typing import Any, Literal
 import numpy as np
 from fastapi.responses import Response
 
-from muedit.api.binary import FRAME_FORMAT, FRAME_MEDIA_TYPE, pack_frame
+from muedit.api.binary import frame_response
 from muedit.api.cache import (
     SignalViews,
-    _get_edit_session,
-    _held_run_result,
-    _hold_upload,
+    get_edit_session,
+    held_run_result,
+    hold_upload,
 )
 from muedit.api.common import missing_upload
 from muedit.editing.session import out_of_range
@@ -59,7 +59,7 @@ def bandpassed_row(signal: SignalImport, row: int, emg_type: int) -> FloatArray:
 
 
 def build_signal_views(
-    signal: SignalImport, store: ArrayStore, grid_counts: list[int], emg_types: list[int]
+    signal: SignalImport, store: ArrayStore, grid_channel_counts: list[int], emg_types: list[int]
 ) -> tuple[SignalViews, list[FloatArray]]:
     """Bandpass the grid channels once and keep what the QC stage draws, in ``store``.
 
@@ -67,10 +67,10 @@ def build_signal_views(
     heap: the EMG pyramid is filled a row at a time, while the next rows are filtered.
     """
     n_rows, n_samples = signal.data.shape
-    rows_of = grid_rows(grid_counts, n_rows)
+    rows_of = grid_rows(grid_channel_counts, n_rows)
     n_grid_rows = rows_of[-1].stop if rows_of else 0
     emg = MinMaxPyramid.allocate(store, "emg-pyramid", n_grid_rows, n_samples)
-    overview = store.allocate("overview", (len(grid_counts), n_samples), np.float32)
+    overview = store.allocate("overview", (len(grid_channel_counts), n_samples), np.float32)
     channel_means: list[FloatArray] = []
     abs_sums = np.empty(n_samples)
     row = np.empty(n_samples)
@@ -92,7 +92,9 @@ def build_signal_views(
     del row, abs_sums
 
     overview = store.seal(overview)
-    overview_levels = MinMaxPyramid.allocate(store, "overview-pyramid", len(grid_counts), n_samples)
+    overview_levels = MinMaxPyramid.allocate(
+        store, "overview-pyramid", len(grid_channel_counts), n_samples
+    )
     overview_levels.write(0, np.asarray(overview))
     aux = MinMaxPyramid.allocate(store, "aux-pyramid", signal.aux_data.shape[0], n_samples)
     for lo in range(0, signal.aux_data.shape[0], FILTER_BLOCK_ROWS):
@@ -134,10 +136,8 @@ def series_frame(
     The frame holds ``samples`` ``(rows, end - start)`` when the window has no more samples
     than bins, else ``min`` and ``max`` ``(rows, bins)``.
     """
-    held = _hold_upload(upload_token)
-    if held is None or held.views is None:
-        if held is not None:
-            held.release()
+    held = hold_upload(upload_token)
+    if held is None:
         raise missing_upload()
     try:
         return _series(kind, held.signal, held.views, start, end, bins, grid)
@@ -154,9 +154,8 @@ def _series(
     bins: int,
     grid: int,
 ) -> Response:
-    n_samples = int(signal.data.shape[1])
-    s = max(0, min(int(start), n_samples))
-    e = n_samples if end <= 0 else max(s, min(int(end), n_samples))
+    total_samples = int(signal.data.shape[1])
+    s, e = _clamp_window(total_samples, start, end)
 
     names: list[str]
     if kind == "emg":
@@ -177,51 +176,44 @@ def _series(
         aux_data = signal.aux_data
         series = view(views.aux, lambda r, a, b: aux_data[r, a:b], slice(None), s, e, bins)
         names = list(signal.aux_names)
-    return _frame(series, kind, bins, n_samples, views.fsamp, names, grid)
-
-
-def _frame(
-    series: SeriesView,
-    kind: SeriesKind,
-    bins: int,
-    n_samples: int,
-    fsamp: float,
-    names: list[str],
-    grid: int,
-) -> Response:
-    meta: dict[str, Any] = {
-        "series": kind,
-        "start": series.start,
-        "end": series.end,
-        "bins": bins,
-        "factor": series.factor,
-        "total_samples": n_samples,
-        "fsamp": fsamp,
-        "names": names,
-    }
+    meta: dict[str, Any] = {"series": kind, "fsamp": views.fsamp, "names": names}
     if kind == "emg":
         meta["grid"] = grid
-    arrays: dict[str, tuple[Any, str]]
+    return _series_frame(series, meta, {}, bins, total_samples)
+
+
+def _series_frame(
+    series: SeriesView,
+    meta: dict[str, Any],
+    arrays: dict[str, tuple[Any, str]],
+    bins: int,
+    total_samples: int,
+) -> Response:
+    """The frame of ``series`` with ``meta`` and ``arrays``: its ``samples``, or ``min`` and ``max``."""
+    meta.update(
+        start=series.start,
+        end=series.end,
+        bins=bins,
+        factor=series.factor,
+        total_samples=total_samples,
+    )
     if series.samples is not None:
         meta["kind"] = "samples"
-        arrays = {"samples": (series.samples, "f4")}
+        arrays["samples"] = (series.samples, "f4")
     else:
         meta["kind"] = "envelope"
-        arrays = {"min": (series.mins, "f4"), "max": (series.maxs, "f4")}
-    return Response(
-        content=pack_frame(meta, arrays),
-        media_type=FRAME_MEDIA_TYPE,
-        headers={"x-muedit-format": FRAME_FORMAT},
-    )
+        arrays["min"] = (series.mins, "f4")
+        arrays["max"] = (series.maxs, "f4")
+    return frame_response(meta, arrays)
 
 
 def _missing_token() -> MueditError:
     return MueditError("No open edit session or run result for this token", "token")
 
 
-def _clamp_window(n_samples: int, start: int, end: int) -> tuple[int, int]:
-    s = max(0, min(int(start), n_samples))
-    return s, n_samples if end <= 0 else max(s, min(int(end), n_samples))
+def _clamp_window(total_samples: int, start: int, end: int) -> tuple[int, int]:
+    s = max(0, min(int(start), total_samples))
+    return s, total_samples if end <= 0 else max(s, min(int(end), total_samples))
 
 
 def _in_view(times: IntArray, start: int, end: int) -> IntArray:
@@ -239,20 +231,19 @@ def pulse_frame(token: str, mu: int, start: int, end: int, bins: int) -> Respons
     """
     meta: dict[str, Any]
     arrays: dict[str, tuple[Any, str]]
-    edit = _get_edit_session(token)
+    edit = get_edit_session(token)
     # The run's store is held until the frame is packed: its pulse trains are mapped from it.
-    with _held_run_result(None if edit is not None else token) as run:
+    with held_run_result(None if edit is not None else token) as run:
         if edit is not None:
             with edit.lock:
                 if edit.closed:
                     raise _missing_token()
-                if not 0 <= mu < edit.n_mu:
-                    raise out_of_range("mu", mu, edit.n_mu)
-                n_samples = edit.total_samples
-                s, e = _clamp_window(n_samples, start, end)
+                edit.check_mu(mu)
+                total_samples = edit.total_samples
+                s, e = _clamp_window(total_samples, start, end)
                 series = envelope(lambda a, b: edit.values(mu, a, b), s, e, bins)
                 spikes = _in_view(edit.spike_times[mu], s, e)
-                artifacts = _in_view(edit.artifacts[mu], s, e)
+                artifacts = _in_view(edit.artifact_times[mu], s, e)
                 meta = {"version": edit.versions[mu], "flagged": edit.flagged[mu]}
                 arrays = {
                     "spikes": (spikes, "i4"),
@@ -266,8 +257,8 @@ def pulse_frame(token: str, mu: int, start: int, end: int, bins: int) -> Respons
             pulse_trains = run.pulse_trains
             if not 0 <= mu < pulse_trains.shape[0]:
                 raise out_of_range("mu", mu, pulse_trains.shape[0])
-            n_samples = int(pulse_trains.shape[1])
-            s, e = _clamp_window(n_samples, start, end)
+            total_samples = int(pulse_trains.shape[1])
+            s, e = _clamp_window(total_samples, start, end)
             series = envelope(lambda a, b: pulse_trains[mu, a:b], s, e, bins)
             spikes = (
                 _in_view(run.spike_times[mu], s, e)
@@ -279,26 +270,5 @@ def pulse_frame(token: str, mu: int, start: int, end: int, bins: int) -> Respons
                 "spikes": (spikes, "i4"),
                 "spike_values": (pulse_trains[mu, spikes], "f4"),
             }
-        meta.update(
-            {
-                "series": "pulse",
-                "mu": mu,
-                "start": series.start,
-                "end": series.end,
-                "bins": bins,
-                "factor": series.factor,
-                "total_samples": n_samples,
-            }
-        )
-        if series.samples is not None:
-            meta["kind"] = "samples"
-            arrays["samples"] = (series.samples, "f4")
-        else:
-            meta["kind"] = "envelope"
-            arrays["min"] = (series.mins, "f4")
-            arrays["max"] = (series.maxs, "f4")
-        return Response(
-            content=pack_frame(meta, arrays),
-            media_type=FRAME_MEDIA_TYPE,
-            headers={"x-muedit-format": FRAME_FORMAT},
-        )
+        meta.update(series="pulse", mu=mu)
+        return _series_frame(series, meta, arrays, bins, total_samples)

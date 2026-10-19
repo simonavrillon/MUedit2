@@ -8,7 +8,8 @@ import struct
 import numpy as np
 import pytest
 
-from muedit.api.binary import FRAME_MAGIC, pack_frame, unpack_frame
+from muedit.api.binary import FRAME_MAGIC, pack_frame
+from tests._frames import unpack_frame
 
 
 def _header(frame: memoryview | bytes) -> dict:

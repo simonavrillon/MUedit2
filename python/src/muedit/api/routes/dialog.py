@@ -10,18 +10,20 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
-from muedit.api.contracts import success_payload
+from muedit.api.common import success_payload
+from muedit.io.factory import supported_extensions
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/dialog")
 
-_EXTENSIONS = ["mat", "otb+", "otb4", "npz", "bdf", "edf", "rhd", "oebin"]
+#: The recordings a loader reads, and the decomposition files the edit stage opens.
+_EXTENSIONS = [*supported_extensions(), ".npz"]
 
 
 def _open_dialog_macos() -> str | None:
     """Use AppleScript — works from any thread/process on macOS."""
-    ext_list = "{" + ", ".join(f'".{e}"' for e in _EXTENSIONS) + "}"
+    ext_list = "{" + ", ".join(f'"{e}"' for e in _EXTENSIONS) + "}"
     script = (
         'tell application "System Events"\n'
         "  activate\n"
@@ -42,7 +44,7 @@ def _open_dialog_macos() -> str | None:
 
 
 # Python snippet for tkinter — run in a subprocess so it owns the main thread,
-# which is required on Linux/Windows.
+# which is required on Linux/Windows. Its argument is the file patterns to offer.
 _TKINTER_SCRIPT = """\
 import sys
 try:
@@ -53,16 +55,7 @@ try:
     root.attributes('-topmost', True)
     path = filedialog.askopenfilename(
         title='Select EMG signal or decomposition file',
-        filetypes=[
-            ('EMG signal files', '*.mat *.otb+ *.otb4 *.npz *.bdf *.edf *.rhd *.oebin'),
-            ('MATLAB files', '*.mat'),
-            ('OTB files', '*.otb+ *.otb4'),
-            ('BIDS EMG files', '*.bdf *.edf'),
-            ('Intan RHD files', '*.rhd'),
-            ('Open Ephys recordings', '*.oebin'),
-            ('Decomposition files', '*.npz'),
-            ('All files', '*'),
-        ],
+        filetypes=[('EMG signal or decomposition files', sys.argv[1]), ('All files', '*')],
     )
     root.destroy()
     print(path or '', end='')
@@ -79,7 +72,7 @@ def _open_dialog_tkinter() -> str | None:
         # Suppress the console window that would briefly flash on Windows
         kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
     result = subprocess.run(
-        [sys.executable, "-c", _TKINTER_SCRIPT],
+        [sys.executable, "-c", _TKINTER_SCRIPT, " ".join(f"*{e}" for e in _EXTENSIONS)],
         capture_output=True,
         text=True,
         timeout=120,

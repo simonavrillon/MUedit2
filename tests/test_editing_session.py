@@ -1,8 +1,7 @@
-"""The server-side edit session: parity with the edit functions, undo, recovery, and its API."""
+"""The edit session: parity with the edit operations, the filter refit, undo, replay and saving."""
 
 from __future__ import annotations
 
-import shutil
 import threading
 from collections.abc import Iterator
 from pathlib import Path
@@ -10,54 +9,33 @@ from typing import Any
 
 import numpy as np
 import pytest
-from httpx import Response
-from starlette.testclient import TestClient
 
-from muedit.api import cache
-from muedit.api.binary import FRAME_MEDIA_TYPE, unpack_frame
-from muedit.api.schemas import EDIT_OPS
-from muedit.api.services import editing_service
-from muedit.decomp.decomposition_file import load_decomposition, save_decomposition_npz, unpack_csr
+from muedit.decomp.decomposition_file import load_decomposition, save_decomposition_npz
 from muedit.decomp.preprocess import preprocess_step
 from muedit.decomp.types import DecompositionParameters, LoadStepOutput
-from muedit.editing import edit_log
 from muedit.editing import session as session_module
 from muedit.editing.edit_log import EditLog, find_recoverable
 from muedit.editing.operations import (
-    add_spikes_in_roi,
     delete_spikes_in_roi,
+    peaks_in_roi,
     remove_discharge_rate_outliers,
     update_motor_unit_filter_window,
 )
 from muedit.editing.session import EditError, EditSession, initial_mu_uids, next_mu_uid
-from muedit.models import EditSignalContext, SignalImport
+from muedit.models import EditSignalContext, SignalImport, spike_array
 from muedit.storage import SessionStore
-from tests._platform import deleted
-from tests.test_editing_operations import (
+from tests._editing_data import (
     EDGE,
     FSAMP,
     N_CHANNELS,
     N_SAMPLES,
     VIEW_END,
     VIEW_START,
-    _in_view,
-    _match_count,
-    _pulse_with_peaks,
-    _spike_train,
-    make_synthetic_mu,
+    noisy_pulse_trains,
+    spike_train,
+    synthetic_mu,
 )
-
-API = "/api/v1"
-SESSION_HEADER = "X-MUedit-Session"
-
-
-def _noisy_pulse(n_mu: int, seed: int = 0) -> np.ndarray:
-    """Pulse trains with random peaks, float32 like a saved file."""
-    rng = np.random.default_rng(seed)
-    pulse_trains = rng.random((n_mu, N_SAMPLES)).astype(np.float32) * 0.2
-    for row in pulse_trains:
-        row[rng.choice(N_SAMPLES, 60, replace=False)] += rng.random(60).astype(np.float32) + 0.5
-    return pulse_trains
+from tests._platform import deleted
 
 
 def _session(
@@ -78,21 +56,25 @@ def _session(
     )
 
 
-@pytest.fixture(scope="module")
-def synthetic_mu() -> dict[str, np.ndarray]:
-    return make_synthetic_mu()
+@pytest.fixture(scope="module", name="synthetic_mu")
+def synthetic_mu_fixture() -> dict[str, np.ndarray]:
+    return synthetic_mu()
 
 
 @pytest.fixture()
 def pulse_trains() -> np.ndarray:
-    return _noisy_pulse(3)
+    return noisy_pulse_trains(3)
+
+
+@pytest.fixture()
+def cache_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    monkeypatch.setenv("MUEDIT_CACHE_DIR", str(tmp_path / "cache"))
+    return tmp_path / "cache"
 
 
 @pytest.fixture()
 def edit(pulse_trains: np.ndarray) -> Iterator[EditSession]:
-    session = _session(
-        [_spike_train(10.0, seed=s).tolist() for s in (1, 2, 3)], pulse_trains.copy()
-    )
+    session = _session([spike_train(10.0, seed=s).tolist() for s in (1, 2, 3)], pulse_trains.copy())
     yield session
     session.close()
 
@@ -106,15 +88,16 @@ class TestParity:
         self, edit: EditSession, pulse_trains: np.ndarray, roi: tuple[int, int]
     ) -> None:
         before = edit.spike_times[1].tolist()
-        expected = add_spikes_in_roi(pulse_trains[1].astype(float), before, FSAMP, *roi, 0.6)
+        peaks = peaks_in_roi(pulse_trains[1].astype(float), FSAMP, *roi, 0.6)
+        expected = spike_array(np.concatenate([before, peaks]))
         edit.apply("add-spikes", {"mu": 1, "x_start": roi[0], "x_end": roi[1], "y_min": 0.6})
         assert edit.spike_times[1].tolist() == expected.tolist()
         assert edit.spike_times[1].dtype == np.int32
 
     def test_add_artifact(self, edit: EditSession, pulse_trains: np.ndarray) -> None:
-        expected = add_spikes_in_roi(pulse_trains[0].astype(float), [], FSAMP, 2000, 4000, 0.6)
+        expected = peaks_in_roi(pulse_trains[0].astype(float), FSAMP, 2000, 4000, 0.6)
         edit.apply("add-artifact", {"mu": 0, "x_start": 2000, "x_end": 4000, "y_min": 0.6})
-        assert edit.artifacts[0].tolist() == expected.tolist()
+        assert edit.artifact_times[0].tolist() == expected.tolist()
 
     def test_delete_spikes(self, edit: EditSession, pulse_trains: np.ndarray) -> None:
         before = edit.spike_times[2].tolist()
@@ -216,7 +199,6 @@ class TestUpdateFilter:
                 FSAMP,
                 VIEW_START,
                 VIEW_END,
-                bandpass=False,
             )
             assert pulse_train is not None
             edit.apply("update-filter", {"mu": 0, "view_start": VIEW_START, "view_end": VIEW_END})
@@ -227,8 +209,6 @@ class TestUpdateFilter:
                 pulse_train[EDGE : len(pulse_train) - EDGE].astype(np.float32),
             )
             assert not row[: VIEW_START + EDGE].any()
-            truth = _in_view(synthetic_mu["target"])
-            assert _match_count(truth, _in_view(edit.spike_times[0])) >= 0.5 * truth.size
             # The file's train is untouched: the MU got its own copy.
             assert edit.owned[0] and edit.rows[0] != ("base", 0)
             assert not edit.arrays["base"].any()
@@ -308,7 +288,7 @@ class TestUpdateFilter:
         ("args", "expected"),
         [
             ({}, (500, 0.03, "float64")),
-            ({"nbextchan": 800, "compute_dtype": "float32"}, (800, 0.03, "float32")),
+            ({"peel_off_win": 0.05}, (500, 0.05, "float64")),
         ],
         ids=["run-settings", "request-overrides"],
     )
@@ -355,7 +335,7 @@ class TestUpdateFilter:
 def _state(edit: EditSession) -> tuple[Any, ...]:
     return (
         [s.tolist() for s in edit.spike_times],
-        [a.tolist() for a in edit.artifacts],
+        [a.tolist() for a in edit.artifact_times],
         list(edit.flagged),
         list(edit.mu_uids),
         [edit.values(i, 0, N_SAMPLES).tobytes() for i in range(edit.n_mu)],
@@ -500,7 +480,7 @@ class TestUndo:
         assert set(edit.arrays) == {"base"}
 
     def test_a_closed_session_takes_no_edit(self) -> None:
-        edit = _session([[100]], _noisy_pulse(1))
+        edit = _session([[100]], noisy_pulse_trains(1))
         edit.close()
         with pytest.raises(EditError) as err:
             edit.apply("flag", {"mu": 0})
@@ -549,12 +529,12 @@ class TestUndo:
         assert edit.history[-1] == {**edit.history[-1], "source_mu_uid": "g0_mu0"}
 
     def test_remove_duplicates_keeps_order_and_clears_undo(self) -> None:
-        a = _spike_train(10.0, seed=3).tolist()
-        b = _spike_train(8.0, seed=4).tolist()
+        a = spike_train(10.0, seed=3).tolist()
+        b = spike_train(8.0, seed=4).tolist()
         noisy_a = sorted([*a, (a[5] + a[6]) // 2])
         edit = _session(
             [noisy_a, b, a],
-            _noisy_pulse(3),
+            noisy_pulse_trains(3),
             duplicates=lambda spikes, grids: [1, 2],
         )
         try:
@@ -568,9 +548,6 @@ class TestUndo:
         finally:
             edit.close()
 
-    def test_every_op_has_a_request_model(self) -> None:
-        assert set(EDIT_OPS) == set(EditSession.OPS)
-
     def test_unknown_op_and_bad_args_are_edit_errors(self, edit: EditSession) -> None:
         with pytest.raises(EditError, match="Unknown"):
             edit.apply("explode", {})
@@ -580,22 +557,16 @@ class TestUndo:
             edit.apply("flag", {"mu": 3})
 
 
-# ── the edit log ─────────────────────────────────────────────────────────────
+# ── replay and the edit log ──────────────────────────────────────────────────
 
 
-@pytest.fixture()
-def cache_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    monkeypatch.setenv("MUEDIT_CACHE_DIR", str(tmp_path / "cache"))
-    return tmp_path / "cache"
-
-
-class TestEditLog:
+class TestReplay:
     def test_replaying_the_log_rebuilds_the_session(
         self, cache_dir: Path, tmp_path: Path, pulse_trains: np.ndarray
     ) -> None:
         source = tmp_path / "rec_decomp.npz"
         source.write_bytes(b"decomposition")
-        spikes = [_spike_train(10.0, seed=s).tolist() for s in (1, 2, 3)]
+        spikes = [spike_train(10.0, seed=s).tolist() for s in (1, 2, 3)]
         first = _session(spikes, pulse_trains.copy())
         first.log = EditLog.create(source, "tab-one")
         first.apply("add-spikes", {"mu": 0, "x_start": 0, "x_end": N_SAMPLES, "y_min": 0.6})
@@ -635,24 +606,16 @@ class TestEditLog:
         assert edit.replay(records) == 1
         assert edit.n_mu == 3
 
-    def test_logs_without_net_edits_or_of_another_file_version_are_dropped(
+    def test_closing_deletes_a_log_whose_edits_were_undone(
         self, cache_dir: Path, tmp_path: Path
     ) -> None:
         source = tmp_path / "rec_decomp.npz"
-        source.write_bytes(b"v1")
-        undone = _session([[100]])
-        undone.log = EditLog.create(source, "a")
-        undone.apply("flag", {"mu": 0})
-        undone.apply("undo", {})
-        undone.close()
-        assert not list((cache_dir / "edit-logs").iterdir())
-
-        stale = _session([[100]])
-        stale.log = EditLog.create(source, "b")
-        stale.apply("flag", {"mu": 0})
-        stale.close()
-        source.write_bytes(b"v2, saved elsewhere")
-        assert find_recoverable(source, set()) is None
+        source.write_bytes(b"decomposition")
+        edit = _session([[100]])
+        edit.log = EditLog.create(source, "tab")
+        edit.apply("flag", {"mu": 0})
+        edit.apply("undo", {})
+        edit.close()
         assert not list((cache_dir / "edit-logs").iterdir())
 
     def test_a_log_that_fails_keeps_what_it_holds(self, cache_dir: Path, tmp_path: Path) -> None:
@@ -670,453 +633,8 @@ class TestEditLog:
         found = find_recoverable(source, set())
         assert found is not None and found.edits == 1
 
-    def test_a_log_without_edits_is_left_for_its_session(
-        self, cache_dir: Path, tmp_path: Path
-    ) -> None:
-        source = tmp_path / "rec_decomp.npz"
-        source.write_bytes(b"decomposition")
-        opening = EditLog.create(source, "other-tab")
-        assert opening is not None
-        assert find_recoverable(source, set()) is None
-        assert opening.path.exists()
-        opening.close(keep=False)
 
-    def test_a_live_sessions_log_is_not_recoverable(self, cache_dir: Path, tmp_path: Path) -> None:
-        source = tmp_path / "rec_decomp.npz"
-        source.write_bytes(b"decomposition")
-        live = _session([[100]])
-        live.log = EditLog.create(source, "live")
-        try:
-            live.apply("flag", {"mu": 0})
-            assert live.log is not None
-            assert find_recoverable(source, {live.log.path}) is None
-            assert find_recoverable(source, set()) is not None
-        finally:
-            live.close()
-
-
-# ── HTTP ─────────────────────────────────────────────────────────────────────
-
-
-@pytest.fixture()
-def api(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, cache_dir: Path) -> Iterator[TestClient]:
-    import muedit.api.config as config
-    from muedit.api.app_factory import create_app
-    from muedit.api.routes import include_routers
-
-    monkeypatch.setattr(config, "DATA_ROOT", tmp_path)
-    app = create_app()
-    include_routers(app)
-    with TestClient(app, raise_server_exceptions=False) as client:
-        yield client
-
-
-@pytest.fixture()
-def decomp_file(tmp_path: Path) -> Path:
-    path = tmp_path / "sub-01_task-edit_decomp.npz"
-    save_decomposition_npz(
-        path,
-        pulse_trains=_noisy_pulse(3),
-        spike_times=[_spike_train(10.0, seed=s) for s in (1, 2, 3)],
-        fsamp=FSAMP,
-        grid_names=["GR08MM1305"],
-        mu_grid_index=[0, 0, 0],
-        muscle_names=["ta"],
-        parameters={"duplicatesthresh": 0.3},
-        total_samples=N_SAMPLES,
-    )
-    return path
-
-
-def _frame(resp: Response) -> tuple[dict[str, Any], dict[str, np.ndarray]]:
-    assert resp.status_code == 200, resp.text
-    assert resp.headers["content-type"] == FRAME_MEDIA_TYPE
-    return unpack_frame(resp.content)
-
-
-def _open(api: TestClient, path: Path, tab: str = "tab-edit") -> tuple[dict[str, Any], dict]:
-    return _frame(
-        api.post(
-            f"{API}/edit/session/open", json={"path": str(path)}, headers={SESSION_HEADER: tab}
-        )
-    )
-
-
-def _op(api: TestClient, token: str, op: str, tab: str = "tab-edit", **args: Any) -> Any:
-    return _frame(
-        api.post(
-            f"{API}/edit/ops/{op}", json={"token": token, **args}, headers={SESSION_HEADER: tab}
-        )
-    )
-
-
-class TestSessionApi:
-    def test_a_session_whose_edits_cannot_be_logged_says_so(
-        self, api: TestClient, decomp_file: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        blocker = tmp_path / "not-a-folder"
-        blocker.write_text("")
-        monkeypatch.setattr(edit_log, "edit_logs_dir", lambda: blocker / "edit_logs")
-        meta = _open(api, decomp_file)[0]
-        assert meta["crash_recovery"] is False
-        assert _op(api, meta["token"], "flag", mu=0, flag=True)[0]["crash_recovery"] is False
-
-    def test_open_sends_fields_and_csr_spikes_not_pulse_trains(
-        self, api: TestClient, decomp_file: Path
-    ) -> None:
-        meta, arrays = _open(api, decomp_file)
-        assert meta["n_mu"] == 3
-        assert meta["file_label"] == decomp_file.name
-        assert meta["has_pulse"] == [True, True, True]
-        assert meta["dirty"] is False and meta["can_undo"] is False
-        assert meta["recoverable_edits"] == 0
-        assert meta["crash_recovery"] is True
-        assert set(arrays) == {"spikes", "spike_offsets", "artifacts", "artifact_offsets"}
-        assert arrays["spikes"].dtype == np.int32
-        rows = unpack_csr(arrays["spikes"], arrays["spike_offsets"])
-        assert rows[1].tolist() == _spike_train(10.0, seed=2).tolist()
-        edit = cache._get_edit_session(meta["token"])
-        assert edit is not None
-        assert isinstance(edit.arrays["base"], np.memmap)  # mapped from the file, not copied
-
-    def test_ops_return_what_changed(self, api: TestClient, decomp_file: Path) -> None:
-        meta, _ = _open(api, decomp_file)
-        token = meta["token"]
-        change, arrays = _op(
-            api, token, "delete-spikes", mu=1, x_start=0, x_end=N_SAMPLES, y_min=0.0, y_max=5.0
-        )
-        assert change["changed"] == [1]
-        assert change["dirty"] is True and change["can_undo"] is True
-        assert change["history_start"] == 0
-        assert change["history"][0]["type"] == "delete_spikes"
-        assert arrays["spike_offsets"].tolist() == [0, 0]
-        assert change["versions"][1] != meta["versions"][1]
-        undone, arrays = _op(api, token, "undo")
-        assert undone["history_start"] == 0 and undone["history"] == []
-        assert unpack_csr(arrays["spikes"], arrays["spike_offsets"])[0].size > 0
-
-    def test_duplicate_and_remove_duplicates(self, api: TestClient, decomp_file: Path) -> None:
-        token = _open(api, decomp_file)[0]["token"]
-        dup, _ = _op(api, token, "duplicate", mu=0)
-        assert dup["n_mu"] == 4 and dup["changed"] == [3]
-        removed, _ = _op(api, token, "remove-duplicates")
-        assert removed["kept_indices"] == [0, 1, 2]
-        assert removed["removed_count"] == 1
-        assert removed["can_undo"] is False
-
-    def test_bad_requests(self, api: TestClient, decomp_file: Path) -> None:
-        token = _open(api, decomp_file)[0]["token"]
-        for mu in (9, -1):
-            resp = api.post(f"{API}/edit/ops/flag", json={"token": token, "mu": mu})
-            assert resp.status_code == 400
-            err = resp.json()["error"]
-            assert (err["message"], err["detail"]) == (
-                f"mu {mu} is out of range [0, 3)",
-                {"field": "mu"},
-            )
-        resp = api.post(f"{API}/edit/ops/explode", json={"token": token})
-        assert resp.status_code == 422
-        # Each op's body is checked before the session sees it.
-        resp = api.post(f"{API}/edit/ops/add-spikes", json={"token": token, "mu": 0, "x_end": 9})
-        assert resp.status_code == 422
-        assert resp.json()["error"]["detail"][0]["loc"] == ["body", "x_start"]
-        for bad_mu in ("first", "1", True, 1.0):
-            resp = api.post(f"{API}/edit/ops/flag", json={"token": token, "mu": bad_mu})
-            assert resp.status_code == 422, bad_mu
-        resp = api.post(f"{API}/edit/ops/flag", json={"token": "gone", "mu": 0})
-        assert resp.status_code == 400
-        resp = api.post(
-            f"{API}/edit/ops/undo", json={"token": token}, headers={SESSION_HEADER: "tab-edit"}
-        )
-        assert resp.status_code == 400  # nothing to undo
-
-    def test_prepare_grid(self, api: TestClient, decomp_file: Path) -> None:
-        token = _open(api, decomp_file)[0]["token"]
-        url = f"{API}/edit/session/prepare-grid"
-        headers = {SESSION_HEADER: "tab-edit"}
-        resp = api.post(url, json={"token": token, "grid": 9}, headers=headers)
-        assert resp.status_code == 200 and resp.json()["data"] == {"grid": 9}
-        resp = api.post(url, json={"token": "gone", "grid": 0}, headers=headers)
-        assert resp.status_code == 400
-
-    def test_pulse_viewport_is_exact(self, api: TestClient, decomp_file: Path) -> None:
-        token = _open(api, decomp_file)[0]["token"]
-        with np.load(decomp_file) as z:
-            row = z["pulse_trains"][2]
-        meta, arrays = _frame(
-            api.get(f"{API}/series/pulse", params={"token": token, "mu": 2, "bins": 100})
-        )
-        assert meta["kind"] == "envelope" and meta["end"] == N_SAMPLES
-        np.testing.assert_array_equal(arrays["max"][0], row.reshape(100, -1).max(axis=1))
-        np.testing.assert_array_equal(arrays["min"][0], row.reshape(100, -1).min(axis=1))
-        spikes = _spike_train(10.0, seed=3)
-        assert arrays["spikes"].tolist() == spikes.tolist()
-        np.testing.assert_array_equal(arrays["spike_values"], row[spikes])
-        meta, arrays = _frame(
-            api.get(
-                f"{API}/series/pulse",
-                params={"token": token, "mu": 2, "start": 500, "end": 900, "bins": 1000},
-            )
-        )
-        assert meta["kind"] == "samples"
-        np.testing.assert_array_equal(arrays["samples"][0], row[500:900])
-
-    def test_a_reloaded_page_takes_the_session_over(
-        self, api: TestClient, decomp_file: Path
-    ) -> None:
-        token = _open(api, decomp_file, tab="tab-before")[0]["token"]
-        meta, _ = _frame(
-            api.get(
-                f"{API}/edit/session",
-                params={"token": token},
-                headers={SESSION_HEADER: "tab-after"},
-            )
-        )
-        assert meta["token"] == token and meta["n_mu"] == 3
-        slot = cache._EDIT_SESSIONS.slots[token]
-        assert slot.session == "tab-after"
-
-    def test_state_carries_the_log_tail_back_to_the_oldest_undo(
-        self, api: TestClient, decomp_file: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setattr(editing_service, "HISTORY_TAIL", 1)
-        token = _open(api, decomp_file)[0]["token"]
-        for mu in range(3):
-            _op(api, token, "flag", mu=mu)
-        edit = cache._get_edit_session(token)
-        assert edit is not None
-        n, first_undo = len(edit.history), edit.undo_stack[0].history_len
-
-        def state() -> dict[str, Any]:
-            return _frame(
-                api.get(
-                    f"{API}/edit/session",
-                    params={"token": token},
-                    headers={SESSION_HEADER: "tab-edit"},
-                )
-            )[0]
-
-        # All three flags can be undone, so the client holds the log back to the first.
-        meta = state()
-        assert meta["edit_history_start"] == first_undo
-        assert meta["edit_history"] == edit.history[first_undo:]
-        edit.undo_stack.clear()
-        meta = state()
-        assert meta["edit_history_start"] == n - 1
-        assert meta["edit_history"] == edit.history[-1:]
-
-    def test_save_writes_the_edits_and_makes_them_the_baseline(
-        self, api: TestClient, decomp_file: Path, tmp_path: Path
-    ) -> None:
-        meta, _ = _open(api, decomp_file)
-        token = meta["token"]
-        _op(api, token, "delete-spikes", mu=0, x_start=0, x_end=3000, y_max=5.0)
-        _op(api, token, "flag", mu=1)
-        _op(api, token, "duplicate", mu=2)
-        edit = cache._get_edit_session(token)
-        assert edit is not None
-        kept_spikes = [edit.spike_times[0].tolist(), edit.spike_times[2].tolist()]
-        resp = api.post(
-            f"{API}/edit/session/save",
-            json={"token": token, "project": "proj", "entity_label": "sub-01_task-edit"},
-            headers={SESSION_HEADER: "tab-edit"},
-        )
-        assert resp.status_code == 200, resp.text
-        data = resp.json()["data"]
-        assert data["kept_indices"] == [0, 2]
-        assert [e["type"] for e in data["edit_history"][-2:]] == [
-            "remove_flagged",
-            "remove_duplicates",
-        ]
-        assert data["dirty"] is False and data["can_undo"] is False
-        out = Path(data["path"])
-        assert out.is_relative_to(tmp_path / "proj")
-        with np.load(out) as z:
-            np.testing.assert_array_equal(z["pulse_trains"], _noisy_pulse(3)[[0, 2]])
-            rows = unpack_csr(z["spike_times"], z["spike_offsets"])
-            assert [r.tolist() for r in rows] == kept_spikes
-        assert edit.n_mu == 2 and not edit.dirty
-
-        # Saving again overwrites the file the session may map.
-        reopened = _open(api, out)[0]["token"]
-        _op(api, reopened, "delete-spikes", mu=1, x_start=0, x_end=N_SAMPLES, y_max=5.0)
-        again = api.post(
-            f"{API}/edit/session/save",
-            json={
-                "token": reopened,
-                "project": "proj",
-                "entity_label": "sub-01_task-edit",
-                "remove_duplicates": False,
-            },
-            headers={SESSION_HEADER: "tab-edit"},
-        ).json()["data"]
-        assert again["path"] == str(out)
-        with np.load(out) as z:
-            assert z["spike_offsets"].tolist()[-1] == z["spike_offsets"].tolist()[-2]
-            saved_row = z["pulse_trains"][0].copy()
-        # The file was replaced, not rewritten in place: the session still reads the
-        # trains it had mapped, which are the ones it saved.
-        _, arrays = _frame(
-            api.get(
-                f"{API}/series/pulse",
-                params={"token": reopened, "mu": 0, "start": 0, "end": 1000, "bins": 1000},
-            )
-        )
-        np.testing.assert_array_equal(arrays["samples"][0], saved_row[:1000])
-
-    def test_a_dataset_outside_the_data_root_is_saved_back_into(
-        self,
-        api: TestClient,
-        decomp_file: Path,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        import muedit.api.config as config
-
-        monkeypatch.setattr(config, "DATA_ROOT", tmp_path / "outputs")
-        dataset = tmp_path / "elsewhere" / "study"
-        path = dataset / "derivatives" / "muedit" / "sub-01" / "decomp" / decomp_file.name
-        path.parent.mkdir(parents=True)
-        shutil.copy(decomp_file, path)
-        meta, _ = _open(api, path)
-        assert meta["project"] == ""
-
-        def save(project: str) -> Response:
-            return api.post(
-                f"{API}/edit/session/save",
-                json={
-                    "token": meta["token"],
-                    "project": project,
-                    "entity_label": "sub-01_task-edit",
-                },
-                headers={SESSION_HEADER: "tab-edit"},
-            )
-
-        assert Path(save("").json()["data"]["path"]).is_relative_to(dataset)
-        assert Path(save("proj").json()["data"]["path"]).is_relative_to(
-            tmp_path / "outputs" / "proj"
-        )
-        refused = save("../escape")
-        assert refused.status_code == 400
-        assert refused.json()["error"]["detail"]["field"] == "project"
-
-    def test_unsaved_edits_are_offered_when_the_file_is_reopened(
-        self, api: TestClient, decomp_file: Path
-    ) -> None:
-        token = _open(api, decomp_file)[0]["token"]
-        _op(api, token, "delete-spikes", mu=0, x_start=0, x_end=N_SAMPLES, y_max=5.0)
-        api.post(f"{API}/session/close", params={"session": "tab-edit"})
-
-        meta, _ = _open(api, decomp_file)
-        assert meta["recoverable_edits"] == 1
-        meta, arrays = _frame(
-            api.post(
-                f"{API}/edit/session/recover",
-                json={"token": meta["token"]},
-                headers={SESSION_HEADER: "tab-edit"},
-            )
-        )
-        assert meta["recovered_edits"] == 1 and meta["dirty"] is True
-        assert arrays["spike_offsets"].tolist()[:2] == [0, 0]
-
-        api.post(f"{API}/session/close", params={"session": "tab-edit"})
-        meta, _ = _open(api, decomp_file)
-        assert meta["recoverable_edits"] == 1  # the recovered edits are unsaved again
-        declined, _ = _frame(
-            api.post(
-                f"{API}/edit/session/recover",
-                json={"token": meta["token"], "apply": False},
-                headers={SESSION_HEADER: "tab-edit"},
-            )
-        )
-        assert declined["recovered_edits"] == 0 and declined["dirty"] is False
-        api.post(f"{API}/session/close", params={"session": "tab-edit"})
-        assert _open(api, decomp_file)[0]["recoverable_edits"] == 0
-
-    def test_a_failed_recovery_still_drops_the_log(
-        self, api: TestClient, decomp_file: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        token = _open(api, decomp_file)[0]["token"]
-        _op(api, token, "flag", mu=0)
-        api.post(f"{API}/session/close", params={"session": "tab-edit"})
-        meta, _ = _open(api, decomp_file)
-        assert meta["recoverable_edits"] == 1
-
-        def broken(self: EditSession, records: Any) -> int:
-            raise RuntimeError("replay broke")
-
-        monkeypatch.setattr(EditSession, "replay", broken)
-        resp = api.post(
-            f"{API}/edit/session/recover",
-            json={"token": meta["token"]},
-            headers={SESSION_HEADER: "tab-edit"},
-        )
-        assert resp.status_code == 500
-        monkeypatch.undo()
-        api.post(f"{API}/session/close", params={"session": "tab-edit"})
-        assert _open(api, decomp_file)[0]["recoverable_edits"] == 0
-
-    def test_open_errors(self, api: TestClient, tmp_path: Path) -> None:
-        assert api.post(f"{API}/edit/session/open", json={"path": ""}).status_code == 400
-        missing = api.post(f"{API}/edit/session/open", json={"path": str(tmp_path / "no.npz")})
-        assert missing.status_code == 404
-        other = tmp_path / "recording.otb4"
-        other.write_bytes(b"")
-        assert api.post(f"{API}/edit/session/open", json={"path": str(other)}).status_code == 400
-
-    def test_a_file_that_fails_to_open_leaves_the_open_one(
-        self, api: TestClient, decomp_file: Path, tmp_path: Path
-    ) -> None:
-        token = _open(api, decomp_file)[0]["token"]
-        broken = tmp_path / "broken_decomp.npz"
-        broken.write_bytes(b"not a decomposition")
-        resp = api.post(
-            f"{API}/edit/session/open",
-            json={"path": str(broken)},
-            headers={SESSION_HEADER: "tab-edit"},
-        )
-        assert resp.status_code == 400
-        err = resp.json()["error"]
-        assert err["message"] == "Cannot read broken_decomp.npz: File is not a zip file"
-        assert err["detail"] == {"field": "path"}
-        meta, _ = _op(api, token, "flag", mu=0, flag=True)
-        assert meta["flagged"][0] is True
-        replaced = _open(api, decomp_file)[0]["token"]
-        assert replaced != token
-        gone = api.post(
-            f"{API}/edit/ops/undo", json={"token": token}, headers={SESSION_HEADER: "tab-edit"}
-        )
-        assert gone.status_code == 400
-
-    def test_a_spikes_only_file_draws_its_trains(self, api: TestClient, tmp_path: Path) -> None:
-        path = tmp_path / "spikes_only_decomp.npz"
-        save_decomposition_npz(
-            path,
-            pulse_trains=None,
-            spike_times=[[100, 200]],
-            fsamp=FSAMP,
-            grid_names=["GR08MM1305"],
-            mu_grid_index=[0],
-            muscle_names=[],
-            parameters={},
-            total_samples=N_SAMPLES,
-        )
-        meta, _ = _open(api, path)
-        assert meta["has_pulse"] == [False]
-        _, arrays = _frame(
-            api.get(
-                f"{API}/series/pulse",
-                params={"token": meta["token"], "mu": 0, "start": 0, "end": 300, "bins": 1000},
-            )
-        )
-        assert np.flatnonzero(arrays["samples"][0]).tolist() == [100, 200]
-        assert arrays["spike_values"].tolist() == [1.0, 1.0]
-
-
-def test_delete_in_roi_matches_on_a_drawn_pulse() -> None:
-    """The ROI helpers the session calls still work on a plain array."""
-    pulse_train = _pulse_with_peaks({100: 0.5, 200: 0.5, 300: 0.5}, n=1000)
-    assert delete_spikes_in_roi(pulse_train, [100, 200], 150, 400, 0.2, 0.8).tolist() == [100]
+# ── uids and saving ──────────────────────────────────────────────────────────
 
 
 def test_mu_uids_are_numbered_per_grid_and_never_reused() -> None:

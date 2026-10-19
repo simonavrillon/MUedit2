@@ -21,11 +21,13 @@ from typing import Any
 import numpy as np
 import pyedflib
 import pytest
+import scipy.io
 
 from muedit import storage
 from muedit.api.schemas import BidsSaveFields
 from muedit.api.services.editing_service import _save, _SaveRequest
 from muedit.decomp.decomposition_file import LOADER_BIDS_META_KEYS
+from muedit.decomp.pipeline import run_decomposition
 from muedit.decomp.preprocess import bids_export_step, preprocess_step
 from muedit.decomp.types import DecompositionParameters, LoadStepOutput, PreprocessStepOutput
 from muedit.errors import MueditError
@@ -34,6 +36,7 @@ from muedit.io.bids import export_bids_mu_derivatives, read_channel_groups
 from muedit.models import EditSignalContext, SignalImport
 from muedit.signal.grid import format_hdemg_signal
 from tests._io_files import tsv_rows
+from tests._synthetic_emg import motor_unit_emg
 
 # Pinned so a validator release cannot change the outcome unnoticed (latest on JSR, 2026-10-13).
 VALIDATOR = "jsr:@bids/validator@3.0.2"
@@ -356,7 +359,7 @@ def _edit_save(root: Path, recording: SignalImport, form: BidsSaveFields) -> dic
         flagged=[False, False],
         mu_grid_index=[0, 1],
         mu_uids=["g0_mu0", "g1_mu0"],
-        edit_history=[],
+        history=[],
         artifact_times=[],
         fsamp=recording.fsamp,
         total_samples=recording.data.shape[1],
@@ -461,3 +464,34 @@ def test_re_export_into_an_existing_dataset(tmp_path: Path) -> None:
         "ttl",
     ]
     assert rows[1]["event_description"] == "Ramp up"
+
+
+def test_a_bids_run_saves_a_complete_derivative_without_the_emg(tmp_path: Path) -> None:
+    path = tmp_path / "motor_units.mat"
+    n_samples = 12_000
+    emg = motor_unit_emg(seed=3, n_samples=n_samples, fsamp=FSAMP)
+    scipy.io.savemat(
+        path,
+        {"signal": {"data": emg, "fsamp": FSAMP, "gridname": "GR08MM1305", "muscle": "ta"}},
+    )
+    params = DecompositionParameters(niter=5, nbextchan=200)
+    root = tmp_path / "ds"
+    entities = {"subject": "01", "task": "mu", "placement_scheme_description": PLACEMENT}
+    run = run_decomposition(str(path), params=params, bids_root=str(root), bids_entities=entities)
+    assert run.save_path is not None
+    deriv = root / "derivatives" / "muedit"
+    assert Path(run.save_path).is_relative_to(deriv)
+    assert json.loads((deriv / "dataset_description.json").read_text())["DatasetType"] == (
+        "derivative"
+    )
+    with np.load(run.save_path) as z:
+        assert "emg_data" not in z.files
+    assert run.rois
+
+    # The exported recording, decomposed again without an export, saves into the same
+    # derivatives and does not copy the raw EMG there.
+    edf = root / "sub-01" / "emg" / "sub-01_task-mu_emg.edf"
+    again = run_decomposition(str(edf), params=params)
+    assert again.save_path == run.save_path
+    with np.load(again.save_path) as z:
+        assert "emg_data" not in z.files

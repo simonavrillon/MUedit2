@@ -21,6 +21,12 @@ class NotFoundError(MueditError):
     status = 404
 
 
+class ConflictError(MueditError):
+    """A request the server cannot take while another one is in progress."""
+
+    status = 409
+
+
 class SignalLoadError(MueditError):
     """Not a recording this loader reads: the wrong kind, malformed or truncated, or missing parts."""
 

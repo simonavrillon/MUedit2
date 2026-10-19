@@ -58,11 +58,16 @@ def _read(path: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     return header, records
 
 
+def count_edit(count: int, op: str) -> int:
+    """``count`` edits after ``op``: an undo takes one back."""
+    return max(0, count - 1) if op == "undo" else count + 1
+
+
 def net_edits(records: list[dict[str, Any]]) -> int:
     """Operations left after the undos in ``records``."""
     count = 0
     for rec in records:
-        count = max(0, count - 1) if rec.get("op") == "undo" else count + 1
+        count = count_edit(count, str(rec.get("op")))
     return count
 
 
@@ -115,7 +120,7 @@ class EditLog:
             self._fh.flush()
         except ValueError as exc:  # the file is closed
             raise OSError(f"Edit log {self.path} is closed") from exc
-        self.net = max(0, self.net - 1) if op == "undo" else self.net + 1
+        self.net = count_edit(self.net, op)
 
     def close(self, *, keep: bool) -> None:
         """Close the file; delete it unless ``keep`` (unsaved edits worth recovering)."""

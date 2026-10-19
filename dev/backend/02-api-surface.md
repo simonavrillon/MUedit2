@@ -4,7 +4,7 @@ All routers use prefix `/api/v1` (dialog uses `/api/v1/dialog`). All JSON respon
 
 The same server serves `frontend/` at `/` (after the routers), so the page and the API share one
 origin and no CORS headers are sent. A `project` that is not a single folder name is refused with a 400 on the
-`project` field (`/decompose_stream` with `bids_export`, `/edit/save`, `/edit/session/save`).
+`project` field (`/decompose_stream`, `/edit/save`, `/edit/session/save`).
 
 Each browser tab sends its session id in `X-MUedit-Session` (`common.request_session`). A request
 that carries one makes that session the active one. The caches, the run and the edit session a tab
@@ -42,13 +42,13 @@ temporary store file.
 regions for the same recording, most visibly on one with strong powerline interference. The app
 never sets `auto_mask_artifacts`, so its runs use the QC page's result as sent.
 
-`/qc/segment` splits the target channel (`aux_index`, or the first aux channel
+`/qc/segment` splits the target channel (`target_index`, or the first aux channel
 `find_target_channel` names as a target) into `segments`, each
 `{start, end, kind, direction, level_start, level_end, level_min, level_max, frequency_hz,
 amplitude, offset, n_cycles, cycles}` with `kind` one of `ramp` | `plateau` | `sinusoid` |
 `irregular` (see [04-io-signal-qc.md](04-io-signal-qc.md#target-segmentation-signalsegmentationpy)).
 Rest is left out, so consecutive segments share their boundary sample unless rest lies between
-them. It is a 400 on `aux_index` when the recording has no aux channel, none is named as a target
+them. It is a 400 on `target_index` when the recording has no aux channel, none is named as a target
 and none was given, the index does not exist, or the target holds no contraction (flat).
 
 ### Series Router (`routes/series.py`)
@@ -93,13 +93,14 @@ or `cancelled`. An `error` event is `{stage, message, detail}`: `detail` is the 
 `muedit.log` only. A run is cancelled by `/decompose/cancel`, by the client disconnecting, by
 `/session/close` for its session, and at server shutdown; cancelling terminates the worker process.
 
-The `done` event's preview carries only `mu_grid_index` (`DONE_PREVIEW_KEYS`): the page already
-shows the recording the rest of the run's preview describes, and neither `pulse_trains_full` nor
-`spike_times` crosses to the client. When the run has a full-length pulse matrix (`full_preview`),
-the preview also carries `run_result_token`: the server keeps the matrix and the discharge times (the session's latest run,
-until the session closes) for `/series/pulse` and the run save, which sends the token instead of the
-data. A save naming a token the server no longer holds, and no discharge times, is refused with 400
-(`field: run_result_token`).
+Every run exports into the BIDS dataset of its `project` and keeps its full pulse trains; its
+`bids_entities` are checked before the run starts (a 400 on `bids_entities`). The `done` event's
+preview carries only `mu_grid_index`: the page already shows the recording the rest of the run's
+preview describes, and neither `pulse_trains_full` nor `spike_times` crosses to the client. When
+the run found motor units, the preview also carries `run_result_token`: the server keeps the pulse
+trains and the discharge times (the session's latest run, until the session closes) for
+`/series/pulse` and the run save, which sends the token instead of the data. A save naming a token
+the server no longer holds is refused with 400 (`field: run_result_token`).
 
 ### Editing Router (`routes/editing.py`)
 
@@ -144,8 +145,7 @@ survive a crash; the page warns).
 **Saves.** `/edit/session/save` writes the session's edits (flagged MUs and duplicates removed
 unless `remove_flagged` / `remove_duplicates` are false). The saved file becomes the session's
 baseline, and its edit log starts over. `/edit/save` is the run save: it writes the run held under
-`run_result_token` (its discharge times, unless `spike_times` are sent, its pulse trains, SIL,
-windows and target segments). Both return `{saved, path, kept_indices, mu_uids, edit_history,
+`run_result_token` (its discharge times, pulse trains, SIL, windows and target segments). Both return `{saved, path, kept_indices, mu_uids, edit_history,
 bids_emg_paths?, bids_emg_error?, bids_deriv_paths?, bids_warnings?}`: `bids_emg_error` says why the
 BIDS EMG was not written, `bids_warnings` which other BIDS side outputs were not.
 
@@ -155,14 +155,13 @@ BIDS EMG was not written, `bids_warnings` which other BIDS side outputs were not
 |---|---|---|---|---|
 | GET | `/open-file` | — | JSON: `{path: str|None, name: str|None}` | `_open_dialog_macos()` (AppleScript) or `_open_dialog_tkinter()` (subprocess) |
 
-Accepted extensions: `mat, otb+, otb4, npz, bdf, edf, rhd, oebin`. Returns 408 on timeout, 500 on failure.
+Accepted extensions: those of the loader registry (`supported_extensions()`), and `.npz`. Returns 408 on timeout, 500 on failure.
 
-### Session Router (`routes/memory.py`)
+### Session Router (`routes/session.py`)
 
 | Method | Path | Accepts | Returns | Service |
 |---|---|---|---|---|
 | POST | `/session/close` | query: `session` | 204; cancels the session's run and drops everything it holds | `cancel_decomposition()` + `cache.close_session()` |
-| GET | `/debug/memory` | — | JSON: process memory, `BUDGET.usage()` per cache and per session, the session stores on disk | — |
 
 The frontend sends `/session/close` as a `keepalive` fetch (which, unlike a beacon, carries the session header) when its page is hidden for good.
 
@@ -186,7 +185,7 @@ All models are Pydantic `BaseModel`.
 | Field | Type | Default |
 |---|---|---|
 | `upload_token` | `str` | (required) |
-| `aux_index` | `int \| None` | `None` (the channel named as a target) |
+| `target_index` | `int \| None` | `None` (the channel named as a target) |
 
 ### `BidsSaveFields`
 
@@ -214,8 +213,7 @@ The session form's fields, shared by both saves.
 ### `EditSavePayload` (`BidsSaveFields` +)
 | Field | Type | Default |
 |---|---|---|
-| `spike_times` | `list[list[int]] \| None`, each in `[0, 2**31)` | `None` (the run's, from `run_result_token`) |
-| `run_result_token` | `str \| None` | `None` |
+| `run_result_token` | `str` | (required) |
 | `total_samples` | `int`, `> 0` | (required) |
 | `fsamp` | `float`, `> 0` | (required) |
 | `grid_names` | `list[str] \| None` | `None` |
@@ -240,15 +238,12 @@ The session form's fields, shared by both saves.
 |---|---|---|
 | `upload_token` | `str` | (required) |
 | `params` | `DecompositionParameters` (overrides; unknown keys ignored, `0`/`1` accepted for booleans) | the defaults |
-| `persist_output` | `bool` | `False` (also save the `.npz` next to the source) |
-| `full_preview` | `bool` | `False` (keep the full pulse trains for the explorer and the save) |
 | `rois` | `list[Span] \| None` | `None` (the whole recording) |
 | `artifact_regions` | `list[Span] \| None` | `None` |
 | `discard_channels` | `list[list[int]] \| None` | `None` (per grid, per channel: 1 = discarded) |
 | `target_index` | `int \| None` | `None` (the segmented auxiliary channel) |
-| `bids_export` | `bool` | `False` |
-| `project` | `str \| None` | `None` |
-| `bids_entities`, `bids_metadata` | `dict[str, Any] \| None` | `None` |
+| `project` | `str \| None` | `None` (the default project) |
+| `bids_entities` | `dict[str, Any] \| None` | `None` |
 
 `Span` is `{start: int ≥ 0, end: int > start}` (else a 422); an end past the recording is
 clamped to it. `params` is range-checked by `DecompositionParameters` itself
@@ -263,17 +258,17 @@ not passed, so the session method's defaults apply.
 |---|---|---|
 | `add-spikes`, `add-artifact` | `RoiAddPayload` | `mu`, `x_start`, `x_end`, `y_min: float \| None` |
 | `delete-spikes` | `RoiDeletePayload` | as `RoiAddPayload`, plus `y_max: float \| None` |
-| `update-filter` | `FilterUpdatePayload` | `mu`, `view_start`, `view_end`, `use_peeloff=False`, `lock_spikes=False`, `project`, `nbextchan`, `peel_off_win`, `compute_dtype` (left out: the run's own) |
+| `update-filter` | `FilterUpdatePayload` | `mu`, `view_start`, `view_end`, `use_peeloff=False`, `lock_spikes=False`, `project`, `peel_off_win` (left out: the run's own; the other filter settings are always the run's) |
 | `flag` | `FlagPayload` | `mu`, `flag=True` |
 | `remove-outliers`, `reset`, `duplicate` | `MuOpPayload` | `mu` |
 | `remove-duplicates`, `undo` | `EditOpPayload` | — |
 
 ---
 
-## Response Envelope (`contracts.py`)
+## Response Envelope (`common.py`)
 
 ```python
-def success_payload(data: Any, *, api_version: str = "v1") -> dict[str, Any]
+def success_payload(data: Any) -> dict[str, Any]
 ```
 Returns `{"data": <data>, "meta": {"api_version": "v1"}}`.
 
@@ -289,7 +284,7 @@ Returns `{"data": <data>, "meta": {"api_version": "v1"}}`.
 |---|---|---|---|
 | `http_exception_handler` | `HTTPException` | `http_{status}` | exc.status_code |
 | `validation_exception_handler` | `RequestValidationError` | `validation_error` | 422 |
-| `muedit_exception_handler` | `MueditError` | `http_{status}` | exc.status (400; 404 for `NotFoundError`) |
+| `muedit_exception_handler` | `MueditError` | `http_{status}` | exc.status (400; 404 for `NotFoundError`, 409 for `ConflictError`) |
 | `unhandled_exception_handler` | any uncaught `Exception` | `internal_error` | 500 |
 
 Registered via `register_exception_handlers(app)`.
@@ -297,11 +292,11 @@ Registered via `register_exception_handlers(app)`.
 `MueditError` (`muedit/errors.py`, a `ValueError`) is an error the user can fix: its message is
 the envelope's `message`, and `detail` is `{field}` when it names the request field at fault
 (`upload_token`, `token`, `path`, …). Every 400 and 404 is one; services raise it and let the
-handler answer. Its subclasses: `NotFoundError` (404, a missing file), `SignalLoadError` (a
+handler answer. Its subclasses: `NotFoundError` (404, a missing file), `ConflictError` (409, a
+run while another is going), `SignalLoadError` (a
 recording any loader refuses, `field: path`, a MAT decomposition opened as a signal among them),
 `DecompositionFileError` (`field: path`), `BidsFieldError` (`field: bids_entities`) and
-`EditError`. `HTTPException` is left to the routing-level 408 (dialog timeout), 409 (a run is
-already going) and the dialog's 500. Anything else is a bug: a 500 with the generic message and
+`EditError`. `HTTPException` is left to the routing-level 408 (dialog timeout) and the dialog's 500. Anything else is a bug: a 500 with the generic message and
 no detail.
 
 Logging (`muedit.log`): a user error is one INFO line with its message, no traceback (the
@@ -314,7 +309,7 @@ side output) is one WARNING naming what was lost and why, with the traceback onl
 
 ## Binary Wire Formats (`binary.py`)
 
-### MUB1 frame — `pack_frame(meta, arrays)` / `unpack_frame(body)`
+### MUB1 frame — `pack_frame(meta, arrays)` / `frame_response(meta, arrays)`
 
 The one format for array transfers. Little-endian.
 
@@ -327,8 +322,8 @@ dtype ∈ f4, i4, i8, u1, i2
 
 `pack_frame(meta, {name: (array, dtype)})` sizes one `bytearray` up front and casts each array
 straight into it (`np.copyto`, `same_kind`), returning a `memoryview` that `Response` sends
-without another copy. `unpack_frame` (used by the tests) validates the header and bounds and returns
-`np.frombuffer` views. The alignment lets the client read every array as a zero-copy typed-array view.
+without another copy; `frame_response` wraps it in that `Response`. The tests read frames back with
+`tests/_frames.py:unpack_frame`, which validates the header and bounds. The alignment lets the client read every array as a zero-copy typed-array view.
 Media type `application/x-muedit-frame`; response header `x-muedit-format: mub1`.
 
 ### Format Catalog
@@ -367,15 +362,15 @@ replaces its previous one. `on_drop` releases what an entry holds outside the he
 | Function | Description |
 |---|---|
 | `close_session(session)` | Drop everything the session holds |
-| `_release_upload(session)` | Drop the session's upload before it loads the next file. A file opened while another loads in the same tab is pinned only once built, so a drop never deletes a store still being written: the upload pinned last stays, the other answers 400 (`field: upload_token`) |
-| `_store_upload_signal(signal, source_path, session, store, views) -> token` | Keep a signal and the QC stage's views, once both are built; with `store`, take over the store they were written in, else keep a copy |
-| `_hold_upload(token) -> HeldUpload \| None` | Signal, source path, store and views of an upload, kept from eviction and the store held until `release()`; used by runs, `/qc/auto` and `/series/*` |
-| `_store_run_result(pulse_trains, session, store, spikes) -> token` | Keep a finished run, taking over its run store |
-| `_held_run_result(token)` | Context manager: the run (or None), its pulse trains read-only, its store held until the block ends; used by `/series/pulse` and `save_edits` |
-| `_store_edit_session(edit, session) -> token` | Keep an edit session in place of the session's last, which closes |
-| `_get_edit_session(token, session=None)` | The edit session; with `session`, it moves to that tab |
-| `_resize_edit_session(token)` | Recount its bytes after an edit |
-| `_live_edit_logs()` | The edit logs open sessions are writing (not offered for recovery) |
+| `release_upload(session)` | Drop the session's upload before it loads the next file. A file opened while another loads in the same tab is pinned only once built, so a drop never deletes a store still being written: the upload pinned last stays, the other answers 400 (`field: upload_token`) |
+| `store_upload(signal, source_path, session, store, views) -> token` | Keep a signal and the QC stage's views, once both are built; with `store`, take over the store they were written in, else keep a copy |
+| `hold_upload(token) -> HeldUpload \| None` | Signal, source path, store and views of an upload, kept from eviction and the store held until `release()`; used by runs, `/qc/auto` and `/series/*` |
+| `store_run_result(pulse_trains, session, store, spikes) -> token` | Keep a finished run, taking over its run store |
+| `held_run_result(token)` | Context manager: the run (or None), its pulse trains read-only, its store held until the block ends; used by `/series/pulse` and `save_edits` |
+| `store_edit_session(edit, session) -> token` | Keep an edit session in place of the session's last, which closes |
+| `get_edit_session(token, session=None)` | The edit session; with `session`, it moves to that tab |
+| `resize_edit_session(token)` | Recount its bytes after an edit |
+| `live_edit_logs()` | The edit logs open sessions are writing (not offered for recovery) |
 
 Uploads are stored once (a copy, or the store the loader wrote). Holds return `readonly_view()`:
 the arrays are shared with the cache but not writable, and lists and metadata dicts are fresh

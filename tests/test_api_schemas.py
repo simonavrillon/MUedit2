@@ -1,16 +1,14 @@
-"""``DecomposePayload`` validates the run parameters at the API boundary."""
+"""The request models (``schemas``): what the API refuses before any work starts."""
 
 from __future__ import annotations
 
 import re
-from pathlib import Path
 from typing import Any, get_args
 
 import pytest
 from pydantic import ValidationError
 
 from muedit.api.schemas import DecomposePayload
-from muedit.cli import run_decomposition_cli
 from muedit.decomp.types import ContrastFunc, DecompositionParameters
 
 
@@ -64,25 +62,6 @@ def test_out_of_range_params_rejected(params: dict[str, Any], field: str) -> Non
     with pytest.raises(ValidationError, match=field) as exc_info:
         _payload(**params)
     assert exc_info.value.errors()[0]["loc"] == ("params",)
-
-
-def test_cli_reports_a_file_it_cannot_load_without_a_traceback(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    notes = tmp_path / "notes.txt"
-    notes.write_text("not a recording")
-    with pytest.raises(SystemExit) as exited:
-        run_decomposition_cli([str(notes)])
-    assert exited.value.code == 1
-    err = capsys.readouterr().err
-    assert err.startswith("muedit: Unsupported file format: .txt")
-    assert "Traceback" not in err
-
-
-def test_cli_rejects_through_the_same_checks(capsys: pytest.CaptureFixture[str]) -> None:
-    with pytest.raises(SystemExit):
-        run_decomposition_cli(["--niter", "0"])
-    assert "niter must be >= 1" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize(

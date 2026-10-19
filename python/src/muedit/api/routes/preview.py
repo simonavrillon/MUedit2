@@ -6,8 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends
 
-from muedit.api.common import request_session
-from muedit.api.contracts import success_payload
+from muedit.api.common import request_session, success_payload
 from muedit.api.schemas import PathPayload, QcAutoPayload, SegmentPayload
 from muedit.api.services.preview_service import (
     build_preview_from_path,

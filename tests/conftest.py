@@ -1,16 +1,18 @@
-"""Shared fixtures for the I/O test suite."""
+"""Shared fixtures for the test suite."""
 
 from __future__ import annotations
 
 import os
 import shutil
 import tempfile
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pytest
 import scipy.io
+from starlette.testclient import TestClient
 
 from muedit.models import SignalImport
 
@@ -215,3 +217,39 @@ def pytest_terminal_summary(terminalreporter: Any) -> None:
         terminalreporter.write_line(f"CSVs written to {_report.report_dir()}:")
         for path in paths:
             terminalreporter.write_line(f"  {path.name}")
+
+
+@pytest.fixture(scope="module")
+def client(tmp_path_factory: pytest.TempPathFactory) -> Iterator[TestClient]:
+    """One app client for all of a module's tests, which share its uploads (``api``: one per test)."""
+    from tests._api import api_client
+
+    with api_client(tmp_path_factory.mktemp("data")) as client:
+        yield client
+
+
+@pytest.fixture(scope="module")
+def signal_mat(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A recording of noise on one 64-channel grid, without auxiliary channels."""
+    from tests._api import N_CHANNELS, N_SAMPLES, write_recording
+
+    emg = np.random.default_rng(0).normal(0, 1, (N_CHANNELS, N_SAMPLES))
+    return write_recording(tmp_path_factory.mktemp("recording") / "synthetic_signal.mat", emg)
+
+
+@pytest.fixture(scope="module")
+def upload_token(client: TestClient, signal_mat: Path) -> str:
+    """``signal_mat`` loaded in its own tab: a tab keeps one upload."""
+    from tests._api import upload
+
+    return upload(client, signal_mat, "fixture-upload")
+
+
+@pytest.fixture
+def api(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
+    """A fresh app client: its projects under ``tmp_path / "data"``, its stores and logs in ``tmp_path / "cache"``."""
+    from tests._api import api_client
+
+    monkeypatch.setenv("MUEDIT_CACHE_DIR", str(tmp_path / "cache"))
+    with api_client(tmp_path / "data") as client:
+        yield client

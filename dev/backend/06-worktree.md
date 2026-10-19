@@ -61,13 +61,12 @@ Use this to trace what the user can reach.
 | `_open_dialog_macos()` | App-internal | Called by route handler (macOS) |
 | `_open_dialog_tkinter()` | App-internal | Called by route handler (non-macOS) |
 
-### `routes/memory.py`
+### `routes/session.py`
 
 | Symbol | Category | Reachable via |
 |---|---|---|
-| `memory_router` | User-exposed | `include_routers()` |
+| `session_router` | User-exposed | `include_routers()` |
 | `POST /session/close` | User-exposed | HTTP (a `keepalive` fetch from a closing tab) |
-| `GET /debug/memory` | User-exposed | HTTP (diagnostics) |
 
 ### `services/preview_service.py`
 
@@ -84,7 +83,7 @@ Use this to trace what the user can reach.
 
 | Symbol | Category | Reachable via |
 |---|---|---|
-| `build_signal_views(signal, store, grid_counts, emg_types)` | App-internal | Called by `_build_preview_core`; pyramids, overview and channel means in one pass |
+| `build_signal_views(signal, store, grid_channel_counts, emg_types)` | App-internal | Called by `_build_preview_core`; pyramids, overview and channel means in one pass |
 | `series_frame(kind, upload_token, start, end, bins, grid)` | App-internal | `GET /series/emg`, `/series/overview`, `/series/aux` |
 | `pulse_frame(token, mu, start, end, bins)` | App-internal | `GET /series/pulse`; an edit session's or a run's train |
 | `bandpassed_rows(signal, lo, hi, emg_type)` | App-internal | Preview pass and auto-QC |
@@ -125,19 +124,8 @@ Use this to trace what the user can reach.
 | `_dedup(...)` | App-internal | Called by `_save` and the session's `remove-duplicates` |
 | `_export_bids_emg(...)` | App-internal | Called by `_save` |
 | `_dataset_root(edit, project)` | App-internal | Where a session save writes and a refit reads BIDS EMG |
-
-### `services/edit_helpers.py`
-
-| Symbol | Category | Reachable via |
-|---|---|---|
-| `_expected_grid_count(decomp)` | App-internal | Called by `_file_extras` |
-| `_pad_grid_names(names, expected, fallback)` | App-internal | Called by `_file_extras`, `_save` |
-| `_normalize_muscle_names(raw)` | App-internal | Called by `_save` |
-| `_normalize_flagged(raw, nmu)` | App-internal | Called by `_save` |
-| `_generate_mu_uids(mu_grid_index)` | App-internal | Called by `_new_session`, `save_edits` |
-| `_normalize_mu_grid_index(raw, nmu)` | App-internal | Called by `save_edits` |
-| `_coerce_dup_tol(raw, default)` | App-internal | Called by `_dedup` |
-| `_coerce_bool_param(raw)` | App-internal | Called by `_dedup` (`duplicatesbgrids`) |
+| `_expected_grid_count(decomp)`, `_pad_grid_names(names, expected, fallback)` | App-internal | Grid names of an opened file and of a save |
+| `_coerce_dup_tol(raw, default)`, `_coerce_bool_param(raw)` | App-internal | Called by `_dedup` (a file's `duplicatesthresh`, `duplicatesbgrids`) |
 
 ### `schemas.py`
 
@@ -160,9 +148,8 @@ Use this to trace what the user can reach.
 | `app_factory.create_app()` | App-internal | Called by `cli.serve_api` |
 | `app_factory.mount_frontend()` | App-internal | Called by `cli.serve_api` |
 | `routes.include_routers()` | App-internal | Called by `cli.serve_api` |
-| `contracts.success_payload()` | App-internal | Called by all route handlers |
-| `binary.pack_frame()` | App-internal | Called by the series, decompose and editing services |
-| `binary.unpack_frame()` | App-internal | Tests only (every frame goes from server to client) |
+| `common.success_payload()` | App-internal | Called by all route handlers |
+| `binary.pack_frame()`, `binary.frame_response()` | App-internal | Called by the series and editing services |
 | `errors.register_exception_handlers()` | App-internal | Called by `create_app` |
 | `errors.error_payload()` | App-internal | Called by exception handlers |
 | `errors.http_exception_handler` | App-internal | Registered on app |
@@ -179,21 +166,21 @@ Use this to trace what the user can reach.
 | `common.require_existing_path()` | App-internal | Called by preview/editing route handlers |
 | `cache.BUDGET` | App-internal | The one `MemoryBudget`; swept by the app lifespan |
 | `cache.close_session()` | App-internal | Called by `POST /session/close` |
-| `cache._release_upload()` | App-internal | Called by the preview service before the next load |
-| `cache._store_upload_signal()` | App-internal | Called by preview service, with the upload's views, once both are built |
-| `cache._hold_upload()` | App-internal | Called by decompose, preview (`/qc/auto`) and series services |
-| `cache._store_run_result()` | App-internal | Called by decompose service |
-| `cache._held_run_result()` | App-internal | Called by series service (`/series/pulse`) and `save_edits` |
-| `cache._store_edit_session()` | App-internal | Called by `open_edit_session`, in place of the tab's previous session |
-| `cache._get_edit_session()` | App-internal | Called by editing and series services |
-| `cache._resize_edit_session()` | App-internal | Called after each edit, recovery and save |
-| `cache._live_edit_logs()` | App-internal | Called by `open_edit_session` (logs not offered for recovery) |
+| `cache.release_upload()` | App-internal | Called by the preview service before the next load |
+| `cache.store_upload()` | App-internal | Called by preview service, with the upload's views, once both are built |
+| `cache.hold_upload()` | App-internal | Called by decompose, preview (`/qc/auto`) and series services |
+| `cache.store_run_result()` | App-internal | Called by decompose service |
+| `cache.held_run_result()` | App-internal | Called by series service (`/series/pulse`) and `save_edits` |
+| `cache.store_edit_session()` | App-internal | Called by `open_edit_session`, in place of the tab's previous session |
+| `cache.get_edit_session()` | App-internal | Called by editing and series services |
+| `cache.resize_edit_session()` | App-internal | Called after each edit, recovery and save |
+| `cache.live_edit_logs()` | App-internal | Called by `open_edit_session` (logs not offered for recovery) |
 | `cache.SignalViews`, `cache.RunResult`, `cache.HeldUpload` | App-internal | Cache entry types |
-| `memory.MemoryBudget` | App-internal | Byte budget over every cache: eviction, idle-session sweep, `usage()` |
+| `memory.MemoryBudget` | App-internal | Byte budget over every cache: eviction, idle-session sweep |
 | `memory.BudgetedLRU` | App-internal | One token-keyed cache: `pin`, `get`, `move`, `pop`, `discard`, `resize`, `release_session` |
 | `memory.default_budget_bytes()` | App-internal | 10% of RAM in [256 MB, 1 GB], or `MUEDIT_CACHE_BUDGET_MB` |
 | `memory.parse_session_id()` | App-internal | A session id, or a 400 on its field when malformed |
-| `memory.process_memory_bytes()`, `peak_rss_bytes()`, `physical_memory_bytes()` | App-internal | `/debug/memory`, the memory tests |
+| `memory.physical_memory_bytes()` | App-internal | Called by `default_budget_bytes` |
 
 ---
 
@@ -269,7 +256,6 @@ Use this to trace what the user can reach.
 | `SessionStore`, `RamStore`, `ArrayStore` (`storage.py`) | App-internal | Where loaders, runs and edit sessions put full-length arrays |
 | `copy_into()`, `store_signal()`, `sample_blocks()` | App-internal | Block-by-block copies into a store |
 | `purge_stale_sessions()` | App-internal | Called by the app lifespan at startup |
-| `store_usage()` | App-internal | Called by `/debug/memory` |
 | All `_`-prefixed functions | App-internal | Internal helpers |
 
 ---
@@ -314,13 +300,8 @@ Use this to trace what the user can reach.
 
 | Symbol | Category | Reachable via |
 |---|---|---|
-| `update_motor_unit_filter_window()` | User-exposed | `muedit.editing.__init__`, editing service |
-| `add_spikes_in_roi()` | User-exposed | `muedit.editing.__init__`, editing service |
-| `delete_spikes_in_roi()` | User-exposed | `muedit.editing.__init__`, editing service |
-| `remove_discharge_rate_outliers()` | User-exposed | `muedit.editing.__init__`, editing service |
-| `SpikeTimes` | User-exposed | `muedit.editing.__init__` (type alias) |
-| `FilterUpdateResult` | User-exposed | `muedit.editing.__init__` (type alias) |
-| `_recompute_spikes_in_window()` | App-internal | Called by `update_motor_unit_filter_window` |
+| `update_motor_unit_filter_window()`, `peaks_in_roi()`, `delete_spikes_in_roi()`, `remove_discharge_rate_outliers()` (`operations.py`) | App-internal | Called by `EditSession` |
+| `edge_samples()`, `EDGE_SEC` | App-internal | Refit window edge, shared by `operations.py` and `EditSession.update_filter` |
 | `EditSession` (`session.py`) | App-internal | Built by `open_edit_session`; every edit operation, undo, saves |
 | `EditError`, `Change` | App-internal | Refused edit (400), what an edit changed |
 | `EditLog`, `find_recoverable()`, `purge_old_logs()` (`edit_log.py`) | App-internal | Per-session operation log; recovery on reopen; startup cleanup |

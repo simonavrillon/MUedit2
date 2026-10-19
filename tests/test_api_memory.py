@@ -52,13 +52,9 @@ class TestDefaultBudget:
         assert memory.default_budget_bytes() == 64 * MIB
 
 
-def test_platform_memory_readers() -> None:
+def test_physical_memory_is_reported() -> None:
     ram = memory.physical_memory_bytes()
-    held = memory.process_memory_bytes()
     assert ram is not None and ram > 0
-    assert held is not None and 0 < held < ram
-    peak = memory.peak_rss_bytes()
-    assert peak is None or peak >= held // 2
 
 
 @pytest.mark.parametrize(("raw", "session"), [(" 3f2a-bc ", "3f2a-bc"), ("a" * 64, "a" * 64)])

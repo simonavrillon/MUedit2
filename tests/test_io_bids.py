@@ -4,13 +4,24 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
 
 from muedit.errors import SignalLoadError
-from muedit.io import load_signal
-from muedit.io.bids import dataset_root, export_bids_emg, read_bids_emg_grid
+from muedit.io import bids, load_signal
+from muedit.io.bids import (
+    BidsFieldError,
+    bids_emg_fields,
+    check_run_export,
+    dataset_root,
+    export_bids_emg,
+    form_over_loader_meta,
+    read_bids_emg_grid,
+    run_decomp_path,
+    write_participant,
+)
 from muedit.signal import grid
 from muedit.signal.grid import format_hdemg_signal
 from muedit.storage import RamStore
@@ -22,6 +33,7 @@ from tests._io_files import (
     Write,
     check_signal,
     munitquest_trace,
+    tsv_rows,
     write_munitquest,
 )
 
@@ -263,3 +275,104 @@ def test_refuses_bad_bids(tmp_path: Path, case: str) -> None:
     write, message = _BAD_FILES[case]
     with pytest.raises(SignalLoadError, match=message):
         load_signal(str(write(tmp_path)))
+
+
+# ── Writing BIDS ─────────────────────────────────────────────────────────────
+
+HD_GRID = ["HD08MM1305"]
+N_HD_EMG = len(format_hdemg_signal(HD_GRID)[2][0])
+PLACEMENT = "Grid over the muscle belly, located by palpation."
+
+
+def test_the_form_fields_override_the_loader_fields_once() -> None:
+    meta = form_over_loader_meta(
+        {"units": "mV", "device_name": "Quattrocento", "recording_type": "epoched"},
+        {"units": "uV", "manufacturers_model_name": "", "manufacturer": "OT"},
+    )
+    fields = bids_emg_fields(meta, ["TA", "VL"])
+    assert fields["units"] == "uV"
+    assert fields["manufacturers_model_name"] == "Quattrocento"  # a blank form field
+    assert fields["manufacturer"] == "OT"
+    assert fields["recording_type"] == "epoched"
+    assert fields["target_muscle"] == ["TA", "VL"]
+    assert fields["emg_json_extra"] == {"Muscles": ["TA", "VL"]}
+    assert bids_emg_fields({}, "TA")["target_muscle"] == "TA"
+
+
+def test_a_run_with_a_bad_bids_field_is_400_before_it_starts(tmp_path: Path) -> None:
+    with pytest.raises(BidsFieldError) as refused:
+        check_run_export(tmp_path, {"subject": "01"}, {})
+    assert refused.value.field == "bids_entities"  # the API answers it with a 400
+    bad_age = {"placement_scheme_description": PLACEMENT, "participant_meta": {"age": "abc"}}
+    with pytest.raises(BidsFieldError, match="age"):
+        check_run_export(tmp_path, bad_age, {})
+    check_run_export(tmp_path, {}, {"placement_scheme_description": PLACEMENT})
+
+
+def test_a_failed_edf_write_leaves_no_signal_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fail(*_: Any) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(bids, "_write_records", fail)
+    coordinates, ied, discard, _ = format_hdemg_signal(HD_GRID)
+    data = np.zeros((N_HD_EMG, N_SAMPLES), dtype=np.float32)
+    with pytest.raises(OSError, match="disk full"):
+        export_bids_emg(
+            data, FSAMP, HD_GRID, coordinates, discard, tmp_path, ied=ied,
+            placement_scheme_description=PLACEMENT,
+        )  # fmt: skip
+    assert not [p for p in tmp_path.rglob("*") if p.suffix in (".edf", ".bdf")]
+
+
+def test_a_runs_npz_location(tmp_path: Path) -> None:
+    source = tmp_path / "rec.mat"
+    assert run_decomp_path(source, {}) == (tmp_path / "rec_decomp.npz", False)
+    edf = tmp_path / "ds" / "sub-01" / "emg" / "sub-01_task-x_emg.edf"
+    meta = {"bids_emg_path": str(edf), "bids_entity_label": "sub-01_task-x"}
+    path, in_dataset = run_decomp_path(edf, meta)
+    assert in_dataset
+    assert (
+        path
+        == (
+            tmp_path
+            / "ds"
+            / "derivatives"
+            / "muedit"
+            / "sub-01"
+            / "decomp"
+            / "sub-01_task-x_decomp.npz"
+        ).resolve()
+    )
+    assert not path.parent.exists()  # created only when the file is written
+    odd = {"bids_emg_path": str(tmp_path / "sub-x" / "a.edf"), "bids_entity_label": "nolabel"}
+    assert run_decomp_path(source, odd) == (tmp_path / "rec_decomp.npz", False)
+
+
+def test_auto_detected_bad_channels_are_marked_in_channels_tsv(tmp_path: Path) -> None:
+    coordinates, ied, discard, _ = format_hdemg_signal(HD_GRID)
+    declared = [np.zeros_like(discard[0])]
+    declared[0][0] = 1
+    auto = [declared[0].copy()]
+    auto[0][[0, 5]] = 1
+    out = export_bids_emg(
+        np.random.default_rng(0).normal(size=(N_HD_EMG, N_SAMPLES)).astype(np.float32),
+        FSAMP, HD_GRID, coordinates, declared, tmp_path, ied=ied,
+        placement_scheme_description=PLACEMENT, auto_discard_channels=auto,
+    )  # fmt: skip
+    rows = [r for r in tsv_rows(out["channels_tsv"]) if r["type"] == "EMG"]
+    assert (rows[0]["status"], rows[0]["status_description"]) == ("bad", "manually excluded")
+    assert (rows[5]["status"], rows[5]["status_description"]) == ("bad", "auto-detected")
+    assert sum(r["status"] == "bad" for r in rows) == 2
+
+
+def test_a_participant_update_keeps_the_fields_it_does_not_give(tmp_path: Path) -> None:
+    write_participant(tmp_path, "01", {"age": 30, "sex": "F", "handedness": "right"})
+    write_participant(tmp_path, "01", {"age": "n/a", "sex": "n/a", "handedness": "left"})
+    write_participant(tmp_path, "02", None)
+    rows = tsv_rows(tmp_path / "participants.tsv")
+    assert rows[0] == {"participant_id": "sub-01", "age": "30", "sex": "F", "handedness": "left"}
+    assert rows[1] == {"participant_id": "sub-02", "age": "n/a", "sex": "n/a", "handedness": "n/a"}
+    with pytest.raises(BidsFieldError, match="age"):
+        write_participant(tmp_path, "01", {"age": "abc"})

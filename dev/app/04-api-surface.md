@@ -27,7 +27,7 @@ All HTTP endpoints used by the frontend, their payloads, and binary formats.
 
 > **Origin.** The page and the API share one origin (the server serves `frontend/` at `/`), so `API_BASE` is `${location.origin}/api/v1` and there is no CORS. `closeSession()` posts `/session/close` with `fetch(..., { keepalive: true })` rather than a beacon, because a beacon cannot carry the session header.
 
-> Files are only ever opened by path through the native dialog. `tests/test_api_http.py` fails if `routes.js` names a route the backend does not serve.
+> Files are only ever opened by path through the native dialog. `tests/test_api_app.py` fails if `routes.js` names a route the backend does not serve.
 
 > **Session header.** `http.js` creates one `SESSION_ID` per page load and `apiFetch` sends it as `X-MUedit-Session`. The server scopes the tab's upload, run and edit session to it, and `/session/close` frees them.
 
@@ -122,8 +122,6 @@ Request body (buildRunPayload):
   target_index: number | null           (the segmented target, when segments exist)
   project: string | null                (BIDS project name)
   bids_entities: object | null          (collectBidsEntities)
-  bids_export: true
-  full_preview: true
 
 Response: NDJSON stream (one JSON object per line):
   { message: string, stage?: string,
@@ -135,7 +133,7 @@ Response: NDJSON stream (one JSON object per line):
                                                       //   f too few spikes)
   { stage: "done",                                    // the run's result, in one event
     preview: { run_result_token?, mu_grid_index },   // the token when units were kept
-    summary: { mu_count, grid_names, parameters, save_path } }
+    summary: { mu_count, grid_names, parameters } }
   { stage: "error", message: string, detail?: string }
   { stage: "cancelled", message: string }   (after /decompose/cancel, a disconnect or tab close)
 

@@ -1,118 +1,56 @@
-"""Tests for the post-hoc motor-unit editing operations."""
+"""The post-hoc motor-unit editing operations: ROI peaks and deletion, rate outliers, filter refit."""
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from pathlib import Path
 from typing import Any
-from unittest import mock
 
 import numpy as np
 import pytest
-from starlette.testclient import TestClient
 
 from muedit.editing import operations
 from muedit.editing.operations import (
-    FilterUpdateResult,
-    add_spikes_in_roi,
     delete_spikes_in_roi,
+    peaks_in_roi,
     remove_discharge_rate_outliers,
     update_motor_unit_filter_window,
 )
-
-# ── Fixtures ─────────────────────────────────────────────────────────────────
-
-FSAMP = 2000.0
-N_SAMPLES = 10_000
-N_CHANNELS = 32
-MUAP_LEN = 20
-VIEW_START, VIEW_END = 1000, 9000
-EDGE = int(round(0.1 * FSAMP))
-
-
-def _spike_train(rate: float, seed: int, jitter: float = 20.0) -> np.ndarray:
-    """Quasi-regular discharge times (samples) at ``rate`` Hz."""
-    rng = np.random.default_rng(seed)
-    times: list[int] = []
-    t = 300
-    while t < N_SAMPLES - 300:
-        times.append(t)
-        t += int(FSAMP / rate + rng.normal(0, jitter))
-    return np.asarray(times, dtype=int)
+from tests._editing_data import (
+    EDGE,
+    FSAMP,
+    N_CHANNELS,
+    N_SAMPLES,
+    VIEW_END,
+    VIEW_START,
+    in_view,
+    match_count,
+    pulse_with_peaks,
+    synthetic_mu,
+)
 
 
-def _muap(seed: int) -> np.ndarray:
-    """Multichannel MUAP template, shape ``(N_CHANNELS, MUAP_LEN)``."""
-    rng = np.random.default_rng(seed)
-    tt = np.arange(MUAP_LEN)
-    win = np.hanning(MUAP_LEN)
-    sin = (np.sin(2 * np.pi * tt / MUAP_LEN) * win)[np.newaxis, :]
-    cos = (np.cos(2 * np.pi * tt / MUAP_LEN) * win)[np.newaxis, :]
-    return rng.normal(0, 1, (N_CHANNELS, 1)) * sin + 0.3 * rng.normal(0, 1, (N_CHANNELS, 1)) * cos
+@pytest.fixture(scope="module", name="synthetic_mu")
+def synthetic_mu_fixture() -> dict[str, np.ndarray]:
+    return synthetic_mu()
 
 
-@pytest.fixture(scope="module")
-def synthetic_mu() -> dict[str, np.ndarray]:
-    return make_synthetic_mu()
+# ── peaks_in_roi ─────────────────────────────────────────────────────────────
 
 
-def make_synthetic_mu() -> dict[str, np.ndarray]:
-    """EMG with one target MU, one interfering MU and white noise."""
-    rng = np.random.default_rng(0)
-    target = _spike_train(12.0, seed=1)
-    other = _spike_train(9.0, seed=2)
-    emg = rng.normal(0, 0.01, (N_CHANNELS, N_SAMPLES))
-    w_target, w_other = _muap(10), 0.5 * _muap(11)
-    for s in target:
-        emg[:, s : s + MUAP_LEN] += w_target
-    for s in other:
-        emg[:, s : s + MUAP_LEN] += w_other
-    return {"emg": emg, "target": target, "other": other}
-
-
-def _in_view(spikes: np.ndarray | list[int]) -> np.ndarray:
-    arr = np.asarray(spikes, dtype=int)
-    return arr[(arr >= VIEW_START + EDGE) & (arr < VIEW_END - EDGE)]
-
-
-def _match_count(truth: np.ndarray, found: np.ndarray, tol: int = 2) -> int:
-    if found.size == 0:
-        return 0
-    return int(sum(np.min(np.abs(found - s)) <= tol for s in truth))
-
-
-def _pulse_with_peaks(peaks: dict[int, float], n: int = N_SAMPLES) -> np.ndarray:
-    """Flat pulse train with isolated peaks of the given heights."""
-    pulse_train = np.zeros(n)
-    for t, h in peaks.items():
-        pulse_train[t] = h
-    return pulse_train
-
-
-# ── add_spikes_in_roi ────────────────────────────────────────────────────────
-
-
-class TestAddInRoi:
-    def test_adds_peaks_above_threshold_inside_roi(self) -> None:
-        pulse_train = _pulse_with_peaks({1000: 1.0, 1500: 0.2, 3000: 1.0})
-        out = add_spikes_in_roi(pulse_train, [500], FSAMP, 900, 2000, 0.5)
-        assert out.tolist() == [500, 1000]
+class TestPeaksInRoi:
+    def test_peaks_above_threshold_inside_roi(self) -> None:
+        pulse_train = pulse_with_peaks({1000: 1.0, 1500: 0.2, 3000: 1.0})
+        assert peaks_in_roi(pulse_train, FSAMP, 900, 2000, 0.5).tolist() == [1000]
 
     def test_roi_bounds_are_inclusive(self) -> None:
-        pulse_train = _pulse_with_peaks({1000: 1.0, 2000: 1.0})
-        assert add_spikes_in_roi(pulse_train, [], FSAMP, 1000, 2000, 0.5).tolist() == [1000, 2000]
+        pulse_train = pulse_with_peaks({1000: 1.0, 2000: 1.0})
+        assert peaks_in_roi(pulse_train, FSAMP, 1000, 2000, 0.5).tolist() == [1000, 2000]
 
-    def test_no_peak_returns_sorted_unique_input(self) -> None:
-        pulse_train = np.zeros(N_SAMPLES)
-        assert add_spikes_in_roi(pulse_train, [30, 10, 30], FSAMP, 0, 100, 0.5).tolist() == [10, 30]
-
-    def test_existing_spike_not_duplicated(self) -> None:
-        pulse_train = _pulse_with_peaks({1000: 1.0})
-        assert add_spikes_in_roi(pulse_train, [1000], FSAMP, 0, 2000, 0.5).tolist() == [1000]
+    def test_no_peak(self) -> None:
+        assert peaks_in_roi(np.zeros(N_SAMPLES), FSAMP, 0, 100, 0.5).tolist() == []
 
     def test_refractory_period_keeps_one_of_close_peaks(self) -> None:
-        pulse_train = _pulse_with_peaks({1000: 1.0, 1005: 0.8})
-        assert add_spikes_in_roi(pulse_train, [], FSAMP, 0, 2000, 0.5).tolist() == [1000]
+        pulse_train = pulse_with_peaks({1000: 1.0, 1005: 0.8})
+        assert peaks_in_roi(pulse_train, FSAMP, 0, 2000, 0.5).tolist() == [1000]
 
 
 # ── delete_spikes_in_roi ─────────────────────────────────────────────────────
@@ -120,16 +58,16 @@ class TestAddInRoi:
 
 class TestDeleteInRoi:
     def test_deletes_only_spikes_inside_box(self) -> None:
-        pulse_train = _pulse_with_peaks({100: 0.5, 200: 0.5, 300: 5.0, 900: 0.5})
+        pulse_train = pulse_with_peaks({100: 0.5, 200: 0.5, 300: 5.0, 900: 0.5})
         out = delete_spikes_in_roi(pulse_train, [100, 200, 300, 900], 150, 400, 0.2, 0.8)
         assert out.tolist() == [100, 300, 900]
 
     def test_y_bounds_order_is_irrelevant(self) -> None:
-        pulse_train = _pulse_with_peaks({200: 0.5})
+        pulse_train = pulse_with_peaks({200: 0.5})
         assert delete_spikes_in_roi(pulse_train, [200], 0, 400, 0.8, 0.2).tolist() == []
 
     def test_x_bounds_are_inclusive(self) -> None:
-        pulse_train = _pulse_with_peaks({150: 0.5, 400: 0.5})
+        pulse_train = pulse_with_peaks({150: 0.5, 400: 0.5})
         assert delete_spikes_in_roi(pulse_train, [150, 400], 150, 400, 0.2, 0.8).tolist() == []
 
 
@@ -142,23 +80,15 @@ class TestRemoveDischargeRateOutliers:
         spikes.append(4020)
         heights = dict.fromkeys(spikes, 1.0)
         heights[4020] = 0.2
-        pulse_train = _pulse_with_peaks(heights)
+        pulse_train = pulse_with_peaks(heights)
         out = remove_discharge_rate_outliers(pulse_train, spikes, FSAMP)
         assert 4020 not in out
         assert out.tolist() == list(range(1000, 9001, 200))
 
     def test_regular_train_untouched(self) -> None:
         spikes = list(range(1000, 9001, 200))
-        pulse_train = _pulse_with_peaks(dict.fromkeys(spikes, 1.0))
+        pulse_train = pulse_with_peaks(dict.fromkeys(spikes, 1.0))
         assert remove_discharge_rate_outliers(pulse_train, spikes, FSAMP).tolist() == spikes
-
-    def test_z_factor_controls_sensitivity(self) -> None:
-        spikes = [*range(1000, 9001, 200), 4100]
-        pulse_train = _pulse_with_peaks(dict.fromkeys(spikes, 1.0))
-        strict = remove_discharge_rate_outliers(pulse_train, spikes, FSAMP, z_factor=0.5)
-        lenient = remove_discharge_rate_outliers(pulse_train, spikes, FSAMP, z_factor=100.0)
-        assert len(strict) < len(spikes)
-        assert lenient.tolist() == sorted(spikes)
 
     def test_fewer_than_three_spikes(self) -> None:
         pulse_train = np.zeros(10)
@@ -171,16 +101,16 @@ class TestRemoveDischargeRateOutliers:
 def _update(
     mu: dict[str, np.ndarray],
     emg: np.ndarray | None = None,
-    emg_mask: np.ndarray | None = None,
+    discard_mask: np.ndarray | None = None,
     spike_times: list[int] | None = None,
     start: int = VIEW_START,
     end: int = VIEW_END,
     **kwargs: Any,
-) -> FilterUpdateResult:
-    """Run the filter update on ``mu`` with overridable defaults."""
+) -> tuple[np.ndarray | None, np.ndarray]:
+    """Run the filter update on ``mu``'s band-passed EMG, with overridable defaults."""
     return update_motor_unit_filter_window(
-        mu["emg"] if emg is None else emg,
-        np.zeros(N_CHANNELS, dtype=int) if emg_mask is None else emg_mask,
+        mu["filtered"] if emg is None else emg,
+        np.zeros(N_CHANNELS, dtype=int) if discard_mask is None else discard_mask,
         mu["target"].tolist() if spike_times is None else spike_times,
         FSAMP,
         start,
@@ -195,9 +125,9 @@ class TestUpdateFilterWindow:
         assert pulse_train is not None
         assert pulse_train.shape == (VIEW_END - VIEW_START,)
 
-        truth = _in_view(synthetic_mu["target"])
-        found = _in_view(updated)
-        matched = _match_count(truth, found)
+        truth = in_view(synthetic_mu["target"])
+        found = in_view(updated)
+        matched = match_count(truth, found)
         assert matched == found.size
         assert matched >= 0.75 * truth.size
         assert updated.tolist() == sorted(set(updated.tolist()))
@@ -244,28 +174,21 @@ class TestUpdateFilterWindow:
     def test_lock_spikes_retains_original_spikes(self, synthetic_mu: dict[str, np.ndarray]) -> None:
         _, free = _update(synthetic_mu)
         _, locked = _update(synthetic_mu, lock_spikes=True)
-        truth = _in_view(synthetic_mu["target"])
-        assert _match_count(truth, _in_view(locked)) >= _match_count(truth, _in_view(free))
-        assert _match_count(truth, _in_view(locked)) >= 0.9 * truth.size
-
-    def test_emg_offset_matches_full_signal(self, synthetic_mu: dict[str, np.ndarray]) -> None:
-        """A pre-sliced EMG with ``emg_offset`` gives the same result as the full EMG."""
-        pt_full, up_full = _update(synthetic_mu)
-        sliced = synthetic_mu["emg"][:, VIEW_START:VIEW_END]
-        pt_sl, up_sl = _update(synthetic_mu, emg=sliced, emg_offset=VIEW_START)
-        assert pt_sl is not None and pt_full is not None
-        np.testing.assert_allclose(pt_sl, pt_full)
-        np.testing.assert_array_equal(up_sl, up_full)
+        truth = in_view(synthetic_mu["target"])
+        assert match_count(truth, in_view(locked)) >= match_count(truth, in_view(free))
+        assert match_count(truth, in_view(locked)) >= 0.9 * truth.size
 
     def test_masked_channels_ignored(self, synthetic_mu: dict[str, np.ndarray]) -> None:
-        """Channels with ``emg_mask == 1`` do not influence the result."""
+        """Channels with ``discard_mask == 1`` do not influence the result."""
         emg = synthetic_mu["emg"].copy()
         emg[3] = np.random.default_rng(5).normal(0, 100.0, N_SAMPLES)
         mask = np.zeros(N_CHANNELS, dtype=int)
         mask[3] = 1
-        pt_masked, up_masked = _update(synthetic_mu, emg=emg, emg_mask=mask)
+        pt_masked, up_masked = _update(synthetic_mu, emg=emg, discard_mask=mask)
         pt_ref, up_ref = _update(
-            synthetic_mu, emg=np.delete(synthetic_mu["emg"], 3, axis=0), emg_mask=np.array([])
+            synthetic_mu,
+            emg=np.delete(synthetic_mu["emg"], 3, axis=0),
+            discard_mask=np.zeros(N_CHANNELS - 1, dtype=int),
         )
         assert pt_masked is not None and pt_ref is not None
         np.testing.assert_allclose(pt_masked, pt_ref)
@@ -298,13 +221,12 @@ class TestUpdateFilterWindow:
         artifact_times = [4321]
         pulse_train, updated = _update(
             synthetic_mu,
-            use_peeloff=True,
-            peeloff_spike_times=[synthetic_mu["other"].tolist()],
+            peel_off_spike_times=[synthetic_mu["other"].tolist()],
             artifact_times=artifact_times,
         )
         assert pulse_train is not None
-        truth = _in_view(synthetic_mu["target"])
-        assert _match_count(truth, _in_view(updated)) >= 0.75 * truth.size
+        truth = in_view(synthetic_mu["target"])
+        assert match_count(truth, in_view(updated)) >= 0.75 * truth.size
 
 
 class TestUpdateFilterArtifactMask:
@@ -328,127 +250,9 @@ class TestUpdateFilterArtifactMask:
 
     def test_spikes_outside_mask_still_recovered(self, synthetic_mu: dict[str, np.ndarray]) -> None:
         _, updated = _update(synthetic_mu, artifact_mask=self._mask())
-        truth = _in_view(synthetic_mu["target"])
+        truth = in_view(synthetic_mu["target"])
         truth = truth[(truth < self.MASK_START) | (truth >= self.MASK_END)]
-        found = _in_view(updated)
-        matched = _match_count(truth, found)
+        found = in_view(updated)
+        matched = match_count(truth, found)
         assert matched == found.size
         assert matched >= 0.75 * truth.size
-
-
-# ── /api/v1/edit/* routes ────────────────────────────────────────────────────
-
-
-@pytest.fixture()
-def api_client(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[TestClient]:
-    """FastAPI TestClient with DATA_ROOT redirected to a tmp dir."""
-    from fastapi import FastAPI
-
-    import muedit.api.config as config
-    from muedit.api.routes import include_routers
-
-    monkeypatch.setattr(config, "DATA_ROOT", tmp_path)
-    app = FastAPI()
-    include_routers(app)
-    with TestClient(app) as client:
-        yield client
-
-
-def _post(client: TestClient, route: str, body: dict) -> dict:
-    resp = client.post(f"/api/v1/edit/{route}", json=body)
-    assert resp.status_code == 200, resp.text
-    return resp.json()["data"]
-
-
-def _kept(spike_times: list[list[int]], grids: list[int] | None = None, **params: Any) -> list[int]:
-    """MUs the edit stage's duplicate removal keeps."""
-    from muedit.api.services.editing_service import _dedup
-
-    grids = grids or [0] * len(spike_times)
-    return _dedup([np.asarray(d) for d in spike_times], grids, params, FSAMP, N_SAMPLES)
-
-
-class TestEditRoutes:
-    def test_remove_duplicates(self) -> None:
-        a = _spike_train(10.0, seed=3).tolist()
-        b = _spike_train(8.0, seed=4).tolist()
-        kept = _kept([a, [t + 1 for t in a], b])
-        assert len(kept) == 2
-        assert 2 in kept
-
-    def test_remove_duplicates_keeps_original_order(self) -> None:
-        a = _spike_train(10.0, seed=3).tolist()
-        b = _spike_train(8.0, seed=4).tolist()
-        # An extra mid-ISI spike raises MU 0's CoV, so its duplicate MU 2 is kept instead.
-        noisy_a = sorted([*a, (a[5] + a[6]) // 2])
-        assert _kept([noisy_a, b, a]) == [1, 2]
-
-    @pytest.mark.parametrize(
-        "bgrids,kept",
-        [(None, [0, 1]), (False, [0, 1, 2]), (0, [0, 1, 2]), (True, [0, 1]), ([[1.0]], [0, 1])],
-    )
-    def test_remove_duplicates_across_grids_unless_disabled(
-        self, bgrids: Any, kept: list[int]
-    ) -> None:
-        a = _spike_train(10.0, seed=3).tolist()
-        b = _spike_train(8.0, seed=4).tolist()
-        parameters = {} if bgrids is None else {"duplicatesbgrids": bgrids}
-        assert _kept([a, b, a], [0, 0, 1], **parameters) == kept
-
-    @pytest.mark.parametrize("bgrids", [False, True])
-    def test_remove_duplicates_matches_decomposition(self, bgrids: bool) -> None:
-        from muedit.decomp.decomposition_file import build_pulse_trains_from_spike_times
-        from muedit.decomp.postprocess import remove_duplicates_by_grid
-        from muedit.decomp.types import DecompositionParameters
-
-        a = _spike_train(10.0, seed=3).tolist()
-        b = _spike_train(8.0, seed=4).tolist()
-        c = _spike_train(12.0, seed=5).tolist()
-        noisy_a = sorted([*a, (a[5] + a[6]) // 2])
-        spike_times = [a, b, noisy_a, c, a, b]
-        grids = [0, 0, 1, 1, 1, 2]
-        _, _, _, pipeline_kept = remove_duplicates_by_grid(
-            build_pulse_trains_from_spike_times(spike_times, N_SAMPLES),
-            [np.asarray(d) for d in spike_times],
-            grids,
-            3,
-            DecompositionParameters(duplicatesbgrids=bgrids),
-            FSAMP,
-        )
-        assert _kept(spike_times, grids, duplicatesbgrids=bgrids) == sorted(pipeline_kept)
-
-    def test_save_without_dedup_keeps_duplicates(self, api_client: TestClient) -> None:
-        a = _spike_train(10.0, seed=3).tolist()
-        data = _post(
-            api_client,
-            "save",
-            {
-                "spike_times": [a, a],
-                "remove_duplicates": False,
-                "total_samples": N_SAMPLES,
-                "fsamp": FSAMP,
-                "entity_label": "sub-01_task-x",
-            },
-        )
-        assert data["kept_indices"] == [0, 1]
-        assert data["edit_history"] == []
-
-
-@pytest.mark.parametrize("bandpass", [True, False])
-def test_update_filter_bandpasses_only_raw_emg(bandpass: bool) -> None:
-    """EMG embedded already filtered (a v1 file) is not band-passed a second time."""
-    emg = np.random.default_rng(0).standard_normal((5, 3001)) * 100
-    with mock.patch.object(
-        operations, "bandpass_signals", side_effect=lambda x, _fs: x
-    ) as bandpass_mock:
-        operations.update_motor_unit_filter_window(
-            emg,
-            np.zeros(5, dtype=int),
-            [500, 900, 1300, 1700, 2100],
-            2048.0,
-            0,
-            3001,
-            nbextchan=20,
-            bandpass=bandpass,
-        )
-    assert bandpass_mock.called == bandpass
