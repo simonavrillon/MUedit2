@@ -95,7 +95,6 @@ does not load SciPy.
 |---|---|
 | `muedit.decomp` | `DecompositionParameters`, `DecompositionResult`, `run_decomposition` |
 | `muedit.io` | `LoaderFn`, `get_loader`, `load_signal`, `register_loader`, `supported_extensions` |
-| `muedit.signal` | `bandpass_signals`, `demean`, `format_hdemg_signal`, `notch_signals`, `run_auto_qc`, `QCPipelineResult` |
 | `muedit.editing` | `FilterUpdateResult`, `SpikeTimes`, `add_spikes_in_roi`, `delete_spikes_in_roi`, `remove_discharge_rate_outliers`, `update_motor_unit_filter_window` |
 | `muedit.adapt_decomp` | `AdaptiveDecomp`, `Config`, `run_adaptive_decomposition` |
 | `muedit.api` | (none — empty, just a package marker) |
@@ -239,22 +238,22 @@ Decomposition state loaded from `.npz`/`.mat` for editing. Returned by `load_dec
 | `_openephys.py` | Open Ephys binary-format loader (`structure.oebin` + `continuous.dat`) |
 | `_mat.py` | MATLAB .mat v5 (scipy) + v7.3 (h5py/HDF5) loader |
 | `_otb.py` | OT Bioelettronica OTB+ and OTB4 archive loaders |
+| `aux_channels.py` | `aux_kinds()`, `find_target_channel()`: what each auxiliary channel carries (trigger, target, performed, analog) |
 | `npz.py` | `NpzWriter` (aligned, uncompressed, written row block by row block), `NpzArchive` (one open, members memory-mapped), the restricted unpickler for legacy files |
 
 ### `signal/` — Signal Processing
 
 | Component | Responsibility |
 |---|---|
-| `filters.py` | `demean()`, `bandpass_signals()`, `notch_signals()`, and their in-place, row-block versions |
-| `downsample.py` | `moving_average_ms()` |
+| `filters.py` | `demean()`, `bandpass_signals()`, `bandpass_inplace()`, `notch_inplace()`, `emg_filter_inplace()` (row by row on the filter threads) |
 | `pyramid.py` | `MinMaxPyramid` (min/max levels at bins of 16, 64, 256, … samples) and `view()`, the envelope of any window |
 | `streaming.py` | `StreamedExtender`: the extended signal read batch by batch instead of whole |
-| `decomp_primitives.py` | `extend_signal()`, `extension_factor()`, `extend_signal_mask()`, `signed_square()`, `find_refractory_peaks()`, `split_by_amplitude()`, `isi_cov()` |
-| `grid.py` | `GridSpec` catalog, `format_hdemg_signal()`, `get_grid_electrode_metadata()` |
+| `decomp_primitives.py` | `extend_signal()`, `extension_factor()`, `extend_mask()`, `extend_signal_mask()`, `signed_square()`, `find_refractory_peaks()`, `split_by_amplitude()`, `isi_cov()` |
+| `grid.py` | `GridSpec` catalog, `grid_spec()`, `format_hdemg_signal()`, `get_grid_electrode_metadata()` |
 | `channel_qc.py` | Bad-channel detection (6 criteria: flat, saturated, noisy, low-SNR, intermittent, contact-loss) |
 | `artifact_mask.py` | Artifact region detection (two-stage robust amplitude detector with local baseline) |
 | `qc_pipeline.py` | `run_auto_qc()` — orchestrates channel QC + artifact detection |
-| `segmentation.py` | `segment_target()` — splits a force target into ramps, plateaus, sinusoids and irregular blocks; `find_target_channel()` |
+| `segmentation.py` | `segment_target()` — splits a force target into ramps, plateaus, sinusoids and irregular blocks |
 
 ### `editing/` — Motor-Unit Editing
 

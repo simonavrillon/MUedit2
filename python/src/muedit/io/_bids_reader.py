@@ -15,9 +15,9 @@ import numpy as np
 
 from muedit.errors import SignalLoadError
 from muedit.io._bids_layout import BidsEntities, dataset_root, entity_pairs
+from muedit.io.aux_channels import aux_kinds
 from muedit.models import SignalImport
 from muedit.signal.grid import is_known_grid
-from muedit.signal.segmentation import aux_kinds
 from muedit.storage import ArrayStore, RamStore
 
 _GRID_LABEL = re.compile(r"^grid\s*(\d+)$", re.IGNORECASE)

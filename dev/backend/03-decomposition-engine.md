@@ -177,8 +177,8 @@ Steps in order:
 1. Copy data to `float64`
 2. Resolve grid names, coordinates, IED, discard channels via `format_hdemg_signal()`
 3. Validate channel count
-4. Apply per-grid notch filters (`notch_signals()`)
-5. Apply per-grid bandpass filters (`bandpass_signals()`) with grid-specific EMG type
+4. Apply per-grid notch filters (`notch_inplace()`)
+5. Apply per-grid bandpass filters (`bandpass_inplace()`) with grid-specific EMG type
 6. Resolve ROI list (explicit `rois`, single `roi`, interactive `manual_roi`, `duration`, or full signal). If `nwindows > 1` and single ROI resolved, split into `nwindows` equal sub-windows.
 7. Build `coordinates_plateau` (legacy flat format: `[s0, e0, s1, e1, ...]`)
 8. If `auto_mask_artifacts`: run `run_auto_qc()` to detect artifact mask and bad channels — OR bad channels into `discard_channels` (`declared_discard_channels` keeps them as they were before). It runs on the notched and bandpassed EMG of steps 4-5, unlike `/qc/auto`, which bandpasses only (API doc, `/qc/auto`), so the two can disagree on the same recording. A grid left with no kept channel stops the run with a `ValueError`. User-drawn `artifact_regions` (if provided) are rasterized via `build_manual_artifact_mask` and OR'd into the artifact mask.

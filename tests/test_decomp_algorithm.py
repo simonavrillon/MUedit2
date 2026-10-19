@@ -1,4 +1,4 @@
-"""Tests for the peel-off and filter-application primitives of ``muedit.decomp.algorithm``."""
+"""Tests for the whitening, peel-off and filter-application primitives of ``muedit.decomp.algorithm``."""
 
 from __future__ import annotations
 
@@ -10,11 +10,13 @@ import pytest
 from muedit.decomp.algorithm import (
     batch_process_filters,
     column_energy,
+    pca_extended_signal,
     subtract_mu_waveforms,
     vec_mat,
+    whiten_extended_signal,
 )
-from muedit.models import FloatArray
-from muedit.signal.decomp_primitives import signed_square
+from muedit.models import FloatArray, SignalImport
+from muedit.signal.decomp_primitives import extend_signal, signed_square
 
 FSAMP = 2048.0
 WIN = 0.025
@@ -106,3 +108,25 @@ def test_windowed_filters_give_the_per_filter_projections(dtype: type) -> None:
                 pulse[row], signed_square(expected), rtol=1e-5, atol=1e-5 * peak
             )
             row += 1
+
+
+def test_whitening_on_real_emg_decorrelates(novecento_emg: SignalImport) -> None:
+    """Convolutive sphering on real EMG: whitened covariance is a projector."""
+    window = novecento_emg.data[:64, : int(10.0 * novecento_emg.fsamp)].copy()
+    extended = extend_signal(window, 3)
+    eigvecs, eigvals = pca_extended_signal(extended)
+    whitened, _ = whiten_extended_signal(extended, eigvecs, eigvals)
+
+    n_comp = eigvecs.shape[1]
+    cov_whitened = np.cov(whitened, bias=True)
+    np.testing.assert_allclose(cov_whitened, cov_whitened.T, atol=1e-10)
+    np.testing.assert_allclose(
+        cov_whitened @ cov_whitened,
+        cov_whitened,
+        atol=1e-4,
+        err_msg="whitened covariance must be idempotent (a projector)",
+    )
+    # n_comp eigenvalues ~1 (sphered), rest ~0; real EMG has a broad eigenvalue spectrum.
+    eigvals_w = np.linalg.eigvalsh(cov_whitened)[::-1]
+    np.testing.assert_allclose(eigvals_w[:n_comp], 1.0, atol=1e-3)
+    np.testing.assert_allclose(eigvals_w[n_comp:], 0.0, atol=1e-4)

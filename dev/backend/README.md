@@ -90,18 +90,19 @@ python/src/muedit/
 │   ├── _openephys.py                         Open Ephys binary-format loader
 │   ├── _mat.py                               MATLAB .mat v5 + v7.3 (HDF5) loader
 │   ├── _otb.py                               OT Bioelettronica OTB+ and OTB4 loaders
+│   ├── aux_channels.py                       aux_kinds, find_target_channel: what each auxiliary channel carries
 │   └── npz.py                                Aligned .npz writer, memory-mapping reader, legacy unpickler
 │
 ├── signal/
 │   ├── filters.py                            demean, bandpass, notch (whole or in place, by row block)
-│   ├── downsample.py                         moving average (the QC overview)
 │   ├── decomp_primitives.py                  extend_signal, signed_square, peak picking, k-means split
-│   ├── grid.py                               GridSpec catalog, format_hdemg_signal
+│   ├── grid.py                               GridSpec catalog, grid_spec, format_hdemg_signal
 │   ├── pyramid.py                            Min/max pyramids and viewport envelopes
 │   ├── streaming.py                          StreamedExtender: the extended signal read batch by batch
 │   ├── channel_qc.py                         Bad-channel detection (6 criteria)
 │   ├── artifact_mask.py                      Artifact region detection
-│   └── qc_pipeline.py                        Auto QC orchestration (run_auto_qc)
+│   ├── qc_pipeline.py                        Auto QC orchestration (run_auto_qc)
+│   └── segmentation.py                       Force-target segmentation (segment_target)
 │
 ├── editing/
 │   ├── operations.py                         MU editing operations (filter update, spike/artifact add/delete, rate pruning)

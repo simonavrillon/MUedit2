@@ -15,9 +15,9 @@ import numpy as np
 
 from muedit.errors import SignalLoadError
 from muedit.io._common import _AMPLIFIER_GAIN, _GRID_SIDECAR, _read_grid_sidecar, _resolve_muscles
+from muedit.io.aux_channels import aux_kinds
 from muedit.models import SignalImport, _as_name_list
-from muedit.signal.grid import format_hdemg_signal
-from muedit.signal.segmentation import aux_kinds
+from muedit.signal.grid import grid_spec
 from muedit.storage import ArrayStore, RamStore, sample_blocks
 
 logger = logging.getLogger(__name__)
@@ -275,11 +275,11 @@ def _resolve_openephys_grids(
             )
         resolved = [_DEFAULT_GRIDS[n] for n in groups]
 
-    _, _, discard_channels, _ = format_hdemg_signal(resolved)
-    if len(resolved) == 1 and len(discard_channels[0]) and n_emg % len(discard_channels[0]) == 0:
-        resolved = resolved * (n_emg // len(discard_channels[0]))
-        discard_channels = discard_channels * len(resolved)
-    covered = sum(len(d) for d in discard_channels)
+    counts = [grid_spec(name).n_channels for name in resolved]
+    if len(resolved) == 1 and n_emg % counts[0] == 0:
+        resolved = resolved * (n_emg // counts[0])
+        counts = counts * len(resolved)
+    covered = sum(counts)
     if covered != n_emg:
         raise SignalLoadError(
             f"Grid(s) {', '.join(resolved)} cover {covered} electrodes, but the Open Ephys "

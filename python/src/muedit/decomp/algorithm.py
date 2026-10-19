@@ -15,20 +15,20 @@ from muedit.models import BoolArray, FloatArray, IntArray
 from muedit.signal.decomp_primitives import (
     DECOMP_MIN_ISI_SEC,
     POSTPROC_MIN_ISI_SEC,
+    extend_mask,
     find_refractory_peaks,
     isi_cov,
     signed_square,
     split_by_amplitude,
     zeroed_matmul,
 )
-from muedit.signal.streaming import SampleSource, StreamedExtender, extend_mask
+from muedit.signal.streaming import SampleSource, StreamedExtender
 from muedit.storage import ArrayStore, RamStore
 
 logger = logging.getLogger(__name__)
 
 _FIXED_POINT_TOL = 1e-4
 FIXED_POINT_MAXITER = 500
-_MIN_ISI_SEC = DECOMP_MIN_ISI_SEC
 DEDUP_MAXLAG_RATIO: int = 40
 DEDUP_JITTER: float = 0.00025
 #: Dedup aligns a pair at its best lag only when their overlap there exceeds this fraction.
@@ -234,7 +234,7 @@ def _pulse_train(w: FloatArray, x: FloatArray) -> FloatArray:
 
 def _detect_peaks(icasig: FloatArray, fsamp: float) -> IntArray:
     """Detect candidate spikes with refractory-distance peak picking."""
-    return find_refractory_peaks(icasig, fsamp, min_isi_sec=_MIN_ISI_SEC)
+    return find_refractory_peaks(icasig, fsamp, min_isi_sec=DECOMP_MIN_ISI_SEC)
 
 
 def get_spikes(

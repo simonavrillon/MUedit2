@@ -51,7 +51,7 @@ def run_auto_qc(
     )
 
     kept_rows = _kept_channel_rows(grid_channel_counts, prelim_bad_masks)
-    _, artifact_mask = detect_artifact_masks(
+    artifact_mask = detect_artifact_masks(
         data,
         fsamp,
         [rows.size for rows in kept_rows],
@@ -96,10 +96,10 @@ def _kept_channel_rows(
     """Rows of each grid's kept channels in the full signal (its first channel if none is kept)."""
     rows: list[IntArray] = []
     ch_idx = 0
-    for n_ch, bad in zip(grid_channel_counts, bad_channel_masks, strict=True):
+    for n_channels, bad in zip(grid_channel_counts, bad_channel_masks, strict=True):
         kept = np.flatnonzero(~bad)
         if kept.size == 0:
             kept = np.array([0])
         rows.append(ch_idx + kept)
-        ch_idx += n_ch
+        ch_idx += n_channels
     return rows

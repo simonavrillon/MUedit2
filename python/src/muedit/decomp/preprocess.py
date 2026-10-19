@@ -180,13 +180,13 @@ def _apply_grid_bandpass_filters(
     fsamp: float,
     grid_names: list[str],
     coordinates: list[FloatArray],
-    emg_type: list[int],
+    emg_types: list[int],
 ) -> None:
     """Apply bandpass filtering in-place to each grid's channels using the grid's EMG type."""
     ch_idx = 0
     for i in range(len(grid_names)):
         n_channels_grid = coordinates[i].shape[0]
-        current_type = emg_type[i] if i < len(emg_type) else 1
+        current_type = emg_types[i] if i < len(emg_types) else 1
         logger.info(
             "Applying bandpass filter to Grid %d (Type %d)...",
             i + 1,
@@ -289,7 +289,7 @@ def preprocess_step(
             "Signal has no grid name. Set signal.grid_names to a name present in "
             "_GRID_CATALOG (signal/grid.py) before decomposing."
         )
-    coordinates, ied, discard_channels, emg_type = format_hdemg_signal(
+    coordinates, ied, discard_channels, emg_types = format_hdemg_signal(
         grid_names,
         discard_overrides=discard_overrides,
     )
@@ -302,7 +302,7 @@ def preprocess_step(
         )
     declared_discard = list(discard_channels)
     _apply_grid_notch_filters(data, loaded.fsamp, grid_names, coordinates)
-    _apply_grid_bandpass_filters(data, loaded.fsamp, grid_names, coordinates, emg_type)
+    _apply_grid_bandpass_filters(data, loaded.fsamp, grid_names, coordinates, emg_types)
 
     roi_list = _resolve_roi_list(
         data, loaded.fsamp, duration, manual_roi, roi, rois, params.nwindows

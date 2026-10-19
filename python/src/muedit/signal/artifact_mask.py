@@ -250,19 +250,17 @@ def detect_artifact_masks(
     config: ArtifactMaskConfig | None = None,
     grid_rows: list[IntArray] | None = None,
     store: ArrayStore | None = None,
-) -> tuple[list[BoolArray], BoolArray]:
-    """Per-grid artifact masks and their union; grid ``i`` is ``data[grid_rows[i]]`` or its next rows."""
+) -> BoolArray:
+    """Union of the grids' artifact masks; grid ``i`` is ``data[grid_rows[i]]`` or its next rows."""
     n_samples = data.shape[1]
-    per_grid_masks: list[BoolArray] = []
     global_mask = np.zeros(n_samples, dtype=bool)
 
     ch_idx = 0
-    for grid_idx, n_ch in enumerate(grid_channel_counts):
-        rows = slice(ch_idx, ch_idx + n_ch) if grid_rows is None else grid_rows[grid_idx]
+    for grid_idx, n_channels in enumerate(grid_channel_counts):
+        rows = slice(ch_idx, ch_idx + n_channels) if grid_rows is None else grid_rows[grid_idx]
         mask = _detect_artifact_mask(data, fsamp, config, rows, store)
-        per_grid_masks.append(mask)
         global_mask |= mask
-        ch_idx += n_ch
+        ch_idx += n_channels
 
         if mask.any():
             logger.info(
@@ -272,7 +270,7 @@ def detect_artifact_masks(
                 n_samples,
                 100.0 * mask.sum() / n_samples,
             )
-    return per_grid_masks, global_mask
+    return global_mask
 
 
 def mask_to_intervals(mask: BoolArray | None) -> IntArray:

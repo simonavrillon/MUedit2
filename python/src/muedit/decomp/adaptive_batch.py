@@ -16,11 +16,8 @@ from muedit.adapt_decomp.adaptation import (
 )
 from muedit.adapt_decomp.config import Config
 from muedit.models import BoolArray, FloatArray, IntArray
-from muedit.signal.decomp_primitives import (
-    enforce_refractory,
-    signed_square,
-)
-from muedit.signal.streaming import SampleSource, StreamedExtender, extend_mask
+from muedit.signal.decomp_primitives import enforce_refractory, extend_mask, signed_square
+from muedit.signal.streaming import SampleSource, StreamedExtender
 from muedit.storage import ArrayStore, RamStore
 
 _DEFAULT_CONFIG = Config()

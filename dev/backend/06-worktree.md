@@ -259,6 +259,7 @@ Use this to trace what the user can reach.
 | `read_channels_summary()`, `read_sidecar_meta()` | App-internal | Called by the preview service and `_file_extras` |
 | `read_bids_emg_grid()` | App-internal | Called by the edit session's first refit of a grid |
 | `resolve_bids_emg_path()` | App-internal | Called by `_bids_reader`, `preprocess` |
+| `aux_kinds()`, `find_target_channel()` (`io/aux_channels.py`) | App-internal | Loaders and BIDS export (`aux_kinds`); preview `target_index`, `segment_target_on_token` |
 | `NpzWriter`, `NpzArchive`, `RowSource` (`io/npz.py`) | App-internal | Called by `decomposition_file` and the saves (rows written as they are read) |
 | `SessionStore`, `RamStore`, `ArrayStore` (`storage.py`) | App-internal | Where loaders, runs and edit sessions put full-length arrays |
 | `copy_into()`, `store_signal()`, `sample_blocks()` | App-internal | Block-by-block copies into a store |
@@ -272,12 +273,11 @@ Use this to trace what the user can reach.
 
 | Symbol | Category | Reachable via |
 |---|---|---|
-| `run_auto_qc()` | User-exposed | `muedit.signal.__init__`, pipeline |
-| `QCPipelineResult` | User-exposed | `muedit.signal.__init__` |
-| `bandpass_signals()` | User-exposed | `muedit.signal.__init__`, pipeline |
-| `demean()` | User-exposed | `muedit.signal.__init__` |
-| `notch_signals()` | User-exposed | `muedit.signal.__init__`, pipeline |
-| `format_hdemg_signal()` | User-exposed | `muedit.signal.__init__`, pipeline, loaders |
+| `run_auto_qc()`, `QCPipelineResult` | App-internal | Called by `preprocess_step`, auto-QC route |
+| `bandpass_signals()` | App-internal | Called by `operations.py` |
+| `demean()` | App-internal | Called by `decompose_step`, `postprocess_step` |
+| `format_hdemg_signal()` | App-internal | Called by `preprocess_step`, preview service, edit session |
+| `grid_spec()` | App-internal | One grid's catalogue entry; Open Ephys loader, edit session |
 | `detect_bad_channels_per_grid()` | App-internal | Called by QC pipeline |
 | `_channel_qc_diagnostics()` | App-internal | Called by `detect_bad_channels_per_grid` |
 | `_detect_artifact_mask()` | App-internal | Called by `detect_artifact_masks` |
@@ -285,19 +285,17 @@ Use this to trace what the user can reach.
 | `mask_to_intervals()`, `intervals_to_mask()` | App-internal | `.npz` artifact intervals, preview artifact regions |
 | `extend_signal()` | App-internal | Called by `decompose_step`, `postprocess_step`, `operations.py`, `StreamedExtender` |
 | `extension_factor()` | App-internal | Delays per channel for `nbextchan`; `decompose_step`, `postprocess_step`, `operations.py` |
-| `extend_signal_mask()` | App-internal | Artifact mask over `extend_signal`'s padded columns; `decompose_step` |
+| `extend_signal_mask()`, `extend_mask()` | App-internal | Artifact mask over the extended signal; `decompose_step`, `StreamedExtender`, `operations.py` |
 | `signed_square()` | App-internal | Called by `decompose_step`, `operations.py` |
 | `find_refractory_peaks()` | App-internal | Called by `decompose_step`, `operations.py` |
 | `split_by_amplitude()` | App-internal | Called by `decompose_step`, `operations.py` |
 | `isi_cov()` | App-internal | Called by `unique_mu_indices`, `minimize_isi_covariance` |
 | `bandpass_inplace()`, `notch_inplace()`, `emg_filter_inplace()` | App-internal | Filters a few rows at a time in place (`preprocess_step`, series service, edit session) |
 | `MinMaxPyramid`, `view()`, `envelope()` (`signal/pyramid.py`) | App-internal | Built by `build_signal_views`; read by `series_frame`, `pulse_frame` |
-| `StreamedExtender`, `RowSelection`, `extend_mask()` (`signal/streaming.py`) | App-internal | Extended signal read batch by batch (full-trace and adaptive postprocess) |
-| `moving_average_ms()` | App-internal | Called by series service |
+| `StreamedExtender`, `RowSelection` (`signal/streaming.py`) | App-internal | Extended signal read batch by batch (full-trace and adaptive postprocess) |
 | `get_grid_electrode_metadata()` | App-internal | Called by `export_bids_emg` |
 | `ArtifactMaskConfig` | App-internal | Used by artifact mask functions |
 | `segment_target()`, `SegmentationConfig`, `TargetSegment` | App-internal | Called by `segment_target_on_token` |
-| `find_target_channel()` | App-internal | Called by `_build_preview_core` (`target_index`), `segment_target_on_token` |
 | `ChannelQCConfig` | App-internal | Used by channel QC functions |
 | `ChannelQCMetrics` | App-internal | Returned by `_channel_qc_diagnostics` |
 | `GridSpec` | App-internal | Used by `format_hdemg_signal` |

@@ -155,32 +155,21 @@ File names and folders come from `BidsEntities` (see BIDS Layout above).
 ### Filters (`filters.py`)
 
 ```python
-def demean(signal: np.ndarray) -> np.ndarray
+def {fn}(data: np.ndarray) -> np.ndarray
 ```
 Removes per-channel DC offset (subtracts mean along `axis=1`).
 
 ```python
-def bandpass_signals(signal: np.ndarray, fsamp: float, emg_type: int = 1) -> np.ndarray
+def {fn}(data: np.ndarray, fsamp: float, emg_type: int = 1) -> np.ndarray
 ```
 Zero-phase Butterworth bandpass via `filtfilt`:
 - `emg_type=1` -> 20-500 Hz (order 2, requires fs > 1000) — surface HD-EMG
 - `emg_type=2` -> 100-4400 Hz (order 3, requires fs > 8800) — intramuscular
 
 ```python
-def notch_signals(signal: np.ndarray, fsamp: float) -> np.ndarray
+def {fn}(data: np.ndarray, fsamp: float) -> None
 ```
-FFT-based notch suppressing mains harmonics without knowing the line frequency. Per-channel: compute the one-sided FFT (`scipy.fft.rfft`, which releases the GIL so the filter threads run in parallel), scan frequency bins in `NOTCH_WINDOW_HZ` (50 Hz) segments, flag bins exceeding median+5sigma, remove the interference band, reconstruct with `irfft`.
-
-### Downsample (`downsample.py`)
-
-| Constant | Value |
-|---|---|
-| `PREVIEW_MOVING_AVG_MS` | `25.0` |
-
-```python
-def moving_average_ms(series, fsamp, window_ms) -> np.ndarray
-```
-Moving average with window size in ms (convolution, `"same"` mode).
+FFT-based notch suppressing mains harmonics without knowing the line frequency. Per-channel: compute the one-sided FFT (`scipy.fft.rfft`, which releases the GIL so the filter threads run in parallel), scan frequency bins in `NOTCH_WINDOW_HZ` (50 Hz) segments, flag bins exceeding median+5sigma, remove the interference band, reconstruct with `irfft`, and write the result back into the row.
 
 ### Decomposition Primitives (`decomp_primitives.py`)
 
@@ -191,14 +180,14 @@ Moving average with window size in ms (convolution, `"same"` mode).
 | `POSTPROC_MIN_ISI_SEC` | `0.005` | Min ISI for postprocessing peak picking (5 ms) |
 
 ```python
-def extend_signal(signal, exfactor, samples_first=False) -> np.ndarray
+def {fn}(data, ex_factor, samples_first=False) -> np.ndarray
 ```
 Delay-embedding channel extension for convolutive source separation. Hankel-style block embedding (or column tiling if `samples_first=True`).
 
 `extension_factor(nbextchan, n_channels)` is the one place the number of delays is chosen
-(`round(nbextchan / n_channels)`, at least 1). `extend_signal_mask(mask, exfactor)` marks the
-`n + exfactor - 1` channels-first columns that read a masked sample; `streaming.extend_mask` is
-the same rule over the first `n` columns, for samples-first streams.
+(`round(nbextchan / n_channels)`, at least 1). `extend_signal_mask(mask, ex_factor)` marks the
+`n + ex_factor - 1` channels-first columns that read a masked sample: `extend_mask(mask, ex_factor)`,
+the same rule over the first `n` columns (for samples-first streams), applied to the zero-padded mask.
 
 ```python
 def signed_square(x) -> np.ndarray
@@ -206,7 +195,7 @@ def signed_square(x) -> np.ndarray
 Returns `x * |x|` — signed-squared nonlinearity for building pulse trains.
 
 ```python
-def find_refractory_peaks(signal, fsamp, min_isi_sec=DECOMP_MIN_ISI_SEC, **kwargs) -> np.ndarray
+def find_refractory_peaks(data, fsamp, min_isi_sec=DECOMP_MIN_ISI_SEC, **kwargs) -> np.ndarray
 ```
 Peak picking with refractory-distance constraint via `scipy.signal.find_peaks`.
 
@@ -233,7 +222,7 @@ Coefficient of variation of inter-spike intervals.
 | Field | Type | Description |
 |---|---|---|
 | `channel_map` | `np.ndarray` | 2-D layout; 0 = no electrode |
-| `nbelectrodes` | `int` | Total active electrodes |
+| `n_channels` | `int` | Total active electrodes |
 | `ied` | `float` | Inter-electrode distance (mm) |
 | `emg_type` | `int` | 1 = surface HD-EMG, 2 = intramuscular |
 | `manufacturer` | `str` | BIDS ElectrodeManufacturer |
@@ -258,7 +247,7 @@ Coefficient of variation of inter-spike intervals.
 def format_hdemg_signal(grid_names, discard_overrides=None)
     -> (coordinates, ied, discard_channels_vec, emg_type)
 ```
-Infers grid geometry. Returns one entry per grid. `coordinates[i]` is `(nbelectrodes, 2)` row/col positions. Raises `ValueError` on unknown grid or mismatched `discard_overrides`.
+Infers grid geometry. Returns one entry per grid. `coordinates[i]` is `(n_channels, 2)` row/col positions. Raises `ValueError` on unknown grid or mismatched `discard_overrides`.
 
 ```python
 def get_grid_electrode_metadata(grid_name: str) -> dict
@@ -309,7 +298,7 @@ Identifies defective channels across 6 criteria: flat, saturated, noisy, low-SNR
 | `sat_extreme_frac` | `float` | `0.005` | Saturated if > this fraction at min/max extreme |
 | `sat_tol_frac` | `float` | `0.001` | Tolerance for extreme test (fraction of p-p range) |
 | `neighbor_dist` | `float` | `1.5` | Max grid distance for "neighbour" |
-| `noisy_corr_threshold` | `float` | `0.30` | Noisy if mean neighbour corr below this |
+| `noisy_corr_thr` | `float` | `0.30` | Noisy if mean neighbour corr below this |
 | `noisy_abs_floor` | `float` | `1e-7` | Skip noisy check if grid RMS below this |
 | `snr_win_ms` | `int` | `500` | SNR window (ms) |
 | `snr_thr` | `float` | `7.0` | Low-SNR if SNR (dB) below this |
@@ -430,7 +419,7 @@ def segment_target(target, fsamp, config=None) -> list[TargetSegment]
 non-finite target gives `[]`.
 
 ```python
-def find_target_channel(names) -> int | None
+def find_target_channel(names, kinds=None) -> int | None  # muedit.io.aux_channels
 ```
 The first name matching `target`, `reference`, `requested` or `original` (OTB4 names the target
 `<track> - Original Path`), unless it also says `performed` or `actual` (the participant's own trace).

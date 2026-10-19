@@ -17,7 +17,6 @@ from muedit.decomp.decomposition_file import (
 from muedit.decomp.preprocess import build_manual_artifact_mask, preprocess_step
 from muedit.decomp.types import DecompositionParameters, LoadStepOutput, PreprocessStepOutput
 from muedit.models import SignalImport
-from muedit.signal.artifact_mask import mask_to_intervals
 from muedit.signal.filters import bandpass_signals
 from muedit.signal.qc_pipeline import QCPipelineResult
 
@@ -162,21 +161,6 @@ class TestPreprocessArtifactMask:
         params = DecompositionParameters(auto_mask_artifacts=True)
         with pytest.raises(ValueError, match=r"Grid 1 .* every channel discarded"):
             _preprocess(_raw_emg(), [GRID], params=params)
-
-
-# ── mask_to_intervals ────────────────────────────────────────────────────────
-
-
-def test_mask_to_intervals_round_trips() -> None:
-    mask = np.zeros(100, bool)
-    mask[[0, 3, 4, 5, 40, 90, 91, 99]] = True
-    regions = mask_to_intervals(mask).tolist()
-    assert regions == [[0, 1], [3, 6], [40, 41], [90, 92], [99, 100]]
-    rebuilt = build_manual_artifact_mask([(s, e) for s, e in regions], 100)
-    assert rebuilt is not None
-    np.testing.assert_array_equal(rebuilt, mask)
-    assert mask_to_intervals(np.zeros(4, bool)).tolist() == []
-    assert mask_to_intervals(None).tolist() == []
 
 
 # ── POST /api/v1/qc/auto ─────────────────────────────────────────────────────

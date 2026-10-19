@@ -15,6 +15,8 @@ BASE_FACTOR = 16
 LEVEL_RATIO = 4
 #: A level is kept while it still has this many bins; coarser views reduce it further.
 MIN_LEVEL_BINS = 64
+#: Samples of a row reduced at once by ``envelope``.
+ENVELOPE_BLOCK = 1 << 22
 
 #: ``read(rows, start, end)``: the full-resolution samples of ``rows`` over ``[start, end)``.
 Reader = Callable[[slice, int, int], FloatArray]
@@ -92,10 +94,6 @@ class SeriesView:
     samples: FloatArray | None = None  # (rows, end - start)
     mins: FloatArray | None = None  # (rows, bins)
     maxs: FloatArray | None = None
-
-
-#: Samples of a row reduced at once by ``envelope``.
-ENVELOPE_BLOCK = 1 << 22
 
 
 def envelope(read: Callable[[int, int], FloatArray], start: int, end: int, bins: int) -> SeriesView:

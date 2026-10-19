@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 from muedit import installed_version
 from muedit.errors import MueditError
+from muedit.io import aux_channels
 from muedit.io._bids_events import export_bids_events
 from muedit.io._bids_layout import BidsEntities, dataset_root
 from muedit.io._bids_reader import (
@@ -32,7 +33,6 @@ from muedit.io._bids_reader import (
     resolve_bids_channels_tsv,
     resolve_bids_emg_path,
 )
-from muedit.signal import segmentation
 from muedit.signal.grid import fallback_grid_name, get_grid_electrode_metadata
 from muedit.storage import BLOCK_BYTES, sample_blocks
 
@@ -492,7 +492,7 @@ def export_bids_emg(
         list(aux_kinds)
         if aux_kinds is not None and len(aux_kinds) == n_aux
         else list(
-            segmentation.aux_kinds(
+            aux_channels.aux_kinds(
                 [n or label for n, label in zip(given_names, aux_labels, strict=True)]
             )
         )

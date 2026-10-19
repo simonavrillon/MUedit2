@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import itertools
-import re
-from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
@@ -13,18 +11,11 @@ from scipy.ndimage import uniform_filter1d
 from scipy.signal import find_peaks
 
 from muedit.models import FloatArray, IntArray
+from muedit.signal.artifact_mask import mask_to_intervals
 
 SegmentKind = Literal["ramp", "plateau", "sinusoid", "irregular"]
-# What an auxiliary channel carries: a trigger line, the force target shown to the
-# participant, the participant's own trace, or any other analog signal.
-AuxKind = Literal["analog", "digital", "target", "performed"]
 
 _REST, _PLATEAU, _UP, _DOWN, _DYNAMIC = range(5)
-
-# OTB4 feedback tracks name the target "<track> - Original Path" and the
-# participant's own trace "<track> - Performed Path".
-_TARGET_NAME = re.compile(r"target|reference|requested|original", re.IGNORECASE)
-_PERFORMED_NAME = re.compile(r"performed|actual", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -67,28 +58,6 @@ class TargetSegment:
         return asdict(self)
 
 
-def aux_kinds(names: list[str], digital: list[bool] | None = None) -> list[AuxKind]:
-    """Kind of each auxiliary channel: digital when ``digital`` says so, else target or performed by name."""
-    kinds: list[AuxKind] = []
-    for idx, name in enumerate(names):
-        if digital is not None and idx < len(digital) and digital[idx]:
-            kinds.append("digital")
-        elif _PERFORMED_NAME.search(name):
-            kinds.append("performed")
-        elif _TARGET_NAME.search(name):
-            kinds.append("target")
-        else:
-            kinds.append("analog")
-    return kinds
-
-
-def find_target_channel(names: list[str], kinds: Sequence[str] | None = None) -> int | None:
-    """Index of the first auxiliary channel that is a target, or ``None``."""
-    if kinds is None or len(kinds) != len(names):
-        kinds = list(aux_kinds(names))
-    return next((idx for idx, kind in enumerate(kinds) if kind == "target"), None)
-
-
 def _block_mean(x: FloatArray, step: int) -> FloatArray:
     """``x`` averaged over consecutive blocks of ``step`` samples, the last one partial."""
     n_full = x.size // step
@@ -129,11 +98,7 @@ def _turning_points(y: FloatArray, prominence: float) -> tuple[IntArray, IntArra
 
 def _longest_run(mask: np.ndarray) -> int:
     """Length of the longest run of ``True`` in ``mask``."""
-    if not mask.any():
-        return 0
-    padded = np.concatenate([[False], mask, [False]])
-    edges = np.flatnonzero(np.diff(padded.astype(np.int8)))
-    return int((edges[1::2] - edges[::2]).max())
+    return int(np.diff(mask_to_intervals(mask)).max(initial=0))
 
 
 def _dynamic_blocks(
@@ -289,11 +254,12 @@ def segment_target(
         else:
             # Chains are split by flat stretches no fold can absorb: one block per run.
             block = next(b for b in blocks if s <= b[0] < e)
-            segments.append(_dynamic_segment(smooth, block, rate, cfg, common, step))
+            segments.append(_dynamic_segment(xd, smooth, block, rate, cfg, common, step))
     return segments
 
 
 def _dynamic_segment(
+    xd: FloatArray,
     smooth: FloatArray,
     block: tuple[int, int, IntArray, IntArray],
     rate: float,
@@ -315,9 +281,11 @@ def _dynamic_segment(
             rate / float(np.median(periods)),
             rate * (turns.size - 1) / (2.0 * float(turns[-1] - turns[0])),
         ]
-        freq, (offset, amplitude, r2) = max(
+        freq, (_, _, r2) = max(
             ((f, _sine_fit(piece, rate, f)) for f in freqs), key=lambda fit: fit[1][2]
         )
+        # The smoothing shrinks a fast sine: its amplitude comes from the unsmoothed trace.
+        offset, amplitude, _ = _sine_fit(xd[start:end], rate, freq)
         regular = (
             _cv(periods) < cfg.period_cv and _cv(np.abs(np.diff(piece[turns]))) < cfg.amplitude_cv
         )

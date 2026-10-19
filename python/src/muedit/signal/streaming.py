@@ -8,7 +8,7 @@ from typing import Any, Protocol
 import numpy as np
 
 from muedit.models import BoolArray, FloatArray, IntArray
-from muedit.signal.decomp_primitives import extend_signal
+from muedit.signal.decomp_primitives import extend_mask, extend_signal
 
 
 class SampleSource(Protocol):
@@ -86,14 +86,3 @@ class StreamedExtender:
         part = self.artifact_mask[lo:stop]
         raw[: part.size] = part
         return extend_mask(raw, self.ex_factor)[start - lo :]
-
-
-def extend_mask(mask: BoolArray, ex_factor: int) -> BoolArray:
-    """Mask of the extended samples: sample ``t`` is masked if any of ``t - ex_factor + 1 .. t`` is.
-
-    Same length as ``mask``; ``decomp_primitives.extend_signal_mask`` adds the padded tail.
-    """
-    out = np.array(mask, dtype=bool)
-    for m in range(1, ex_factor):
-        out[m:] |= mask[:-m]
-    return out

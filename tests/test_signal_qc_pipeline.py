@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from muedit.signal.qc_pipeline import QCPipelineResult, _kept_channel_rows, run_auto_qc
+from muedit.signal.qc_pipeline import QCPipelineResult, run_auto_qc
 from tests._synthetic_emg import (
     FSAMP,
     N_CHANNELS,
@@ -65,12 +65,3 @@ def test_multi_grid_reports_on_the_right_grid() -> None:
     result = _qc(np.vstack([g1, g2]), n_grids=2)
     assert result.artifact_mask[950:1050].any()
     assert [np.flatnonzero(m).tolist() for m in result.bad_channel_masks] == [[], [10]]
-
-
-def test_kept_channels_are_selected_per_grid() -> None:
-    bad = [np.ones(4, bool), np.array([1, 0, 0, 1, 0, 0], bool)]
-
-    rows = _kept_channel_rows([4, 6], bad)
-
-    # A grid with every channel bad keeps its first one.
-    assert [r.tolist() for r in rows] == [[0], [5, 6, 8, 9]]

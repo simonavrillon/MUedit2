@@ -15,7 +15,7 @@ class GridSpec:
     """Complete specification for one electrode grid model; a new grid needs only its entry below."""
 
     channel_map: IntArray  # 2-D layout; 0 = no electrode at that position
-    nbelectrodes: int  # total active electrode count
+    n_channels: int  # total active electrode count
     ied: float  # inter-electrode distance in mm
     emg_type: int  # 1 = surface HD-EMG, 2 = intramuscular
     manufacturer: str  # BIDS ElectrodeManufacturer
@@ -76,7 +76,7 @@ _GRID_CATALOG: dict[str, GridSpec] = {
     # ── OTBioelettronica 13×5 grids (64 ch) ─────────────────────────────────
     "GR04MM1305": GridSpec(
         channel_map=_GR_1305,
-        nbelectrodes=64,
+        n_channels=64,
         ied=4.0,
         emg_type=1,
         manufacturer="OTBioelettronica",
@@ -85,7 +85,7 @@ _GRID_CATALOG: dict[str, GridSpec] = {
     ),
     "HD04MM1305": GridSpec(
         channel_map=_HD_1305,
-        nbelectrodes=64,
+        n_channels=64,
         ied=4.0,
         emg_type=1,
         manufacturer="OTBioelettronica",
@@ -94,7 +94,7 @@ _GRID_CATALOG: dict[str, GridSpec] = {
     ),
     "GR08MM1305": GridSpec(
         channel_map=_GR_1305,
-        nbelectrodes=64,
+        n_channels=64,
         ied=8.0,
         emg_type=1,
         manufacturer="OTBioelettronica",
@@ -103,7 +103,7 @@ _GRID_CATALOG: dict[str, GridSpec] = {
     ),
     "HD08MM1305": GridSpec(
         channel_map=_HD_1305,
-        nbelectrodes=64,
+        n_channels=64,
         ied=8.0,
         emg_type=1,
         manufacturer="OTBioelettronica",
@@ -113,7 +113,7 @@ _GRID_CATALOG: dict[str, GridSpec] = {
     # ── Neuromotion 8×8 grids (64 ch) ──────────────────────────────────
     "GR10MM0808": GridSpec(
         channel_map=_GR_0808,
-        nbelectrodes=64,
+        n_channels=64,
         ied=10.0,
         emg_type=1,
         manufacturer="Neuromotion",
@@ -133,7 +133,7 @@ _GRID_CATALOG: dict[str, GridSpec] = {
                 [57, 49, 41, 33, 25, 17, 9, 1],
             ]
         ),
-        nbelectrodes=64,
+        n_channels=64,
         ied=10.0,
         emg_type=1,
         manufacturer="OTBioelettronica",
@@ -143,7 +143,7 @@ _GRID_CATALOG: dict[str, GridSpec] = {
     # ── OTBioelettronica 8×8 grid, 8 mm IED (64 ch) ──────────────────────────
     "GR08MM0808": GridSpec(
         channel_map=_GR_0808,
-        nbelectrodes=64,
+        n_channels=64,
         ied=8.0,
         emg_type=1,
         manufacturer="OTBioelettronica",
@@ -164,7 +164,7 @@ _GRID_CATALOG: dict[str, GridSpec] = {
                 [25, 17, 9, 1],
             ]
         ),
-        nbelectrodes=32,
+        n_channels=32,
         ied=10.0,
         emg_type=1,
         manufacturer="OTBioelettronica",
@@ -184,7 +184,7 @@ _GRID_CATALOG: dict[str, GridSpec] = {
                 [8, 16, 24, 32],
             ]
         ),
-        nbelectrodes=32,
+        n_channels=32,
         ied=10.0,
         emg_type=1,
         manufacturer="OTBioelettronica",
@@ -206,7 +206,7 @@ _GRID_CATALOG: dict[str, GridSpec] = {
                 [32, 8, 16, 24],
             ]
         ),
-        nbelectrodes=32,
+        n_channels=32,
         ied=1.0,
         emg_type=2,
         manufacturer="camber - Emory University",
@@ -228,7 +228,7 @@ _GRID_CATALOG: dict[str, GridSpec] = {
                 [17, 9, 32, 8],
             ]
         ),
-        nbelectrodes=32,
+        n_channels=32,
         ied=1.0,
         emg_type=2,
         manufacturer="camber - Emory University",
@@ -254,7 +254,7 @@ _GRID_CATALOG: dict[str, GridSpec] = {
                 [61, 63, 24, 22, 15],
             ]
         ),
-        nbelectrodes=64,
+        n_channels=64,
         ied=8.0,
         emg_type=1,
         manufacturer="OTBioelettronica",
@@ -271,6 +271,17 @@ def _find_spec(grid_name: str) -> GridSpec | None:
         if key in grid_name:
             return spec
     return None
+
+
+def grid_spec(grid_name: str) -> GridSpec:
+    """The catalogue entry of *grid_name*; raises for a grid the catalogue does not know."""
+    spec = _find_spec(grid_name)
+    if spec is None:
+        raise MueditError(
+            f"Unknown grid model '{grid_name}'. "
+            "Add an entry to _GRID_CATALOG in signal/grid.py or correct the grid name."
+        )
+    return spec
 
 
 def fallback_grid_name(index: int) -> str:
@@ -291,40 +302,33 @@ def format_hdemg_signal(
     coordinates: list[FloatArray] = []
     ied: list[float] = []
     discard_channels: list[IntArray] = []
-    emg_type: list[int] = []
+    emg_types: list[int] = []
 
     for i, grid_name in enumerate(grid_names):
-        spec = _find_spec(grid_name)
-
-        if spec is None:
-            raise MueditError(
-                f"Unknown grid model '{grid_name}'. "
-                "Add an entry to _GRID_CATALOG in signal/grid.py or correct the grid name."
-            )
-
-        nbelectrodes = spec.nbelectrodes
-        rows, cols = np.nonzero((spec.channel_map > 0) & (spec.channel_map <= nbelectrodes))
-        coords = np.zeros((nbelectrodes, 2))
+        spec = grid_spec(grid_name)
+        n_channels = spec.n_channels
+        rows, cols = np.nonzero((spec.channel_map > 0) & (spec.channel_map <= n_channels))
+        coords = np.zeros((n_channels, 2))
         coords[spec.channel_map[rows, cols] - 1] = np.column_stack([rows, cols])
 
         coordinates.append(coords)
         ied.append(spec.ied)
-        emg_type.append(spec.emg_type)
+        emg_types.append(spec.emg_type)
 
-        discard_mask = np.zeros(nbelectrodes, dtype=int)
+        discard_mask = np.zeros(n_channels, dtype=int)
         if discard_overrides and i < len(discard_overrides):
             mask_arr = np.array(discard_overrides[i], dtype=int)
-            if mask_arr.size != nbelectrodes:
+            if mask_arr.size != n_channels:
                 raise MueditError(
                     f"discard_overrides[{i}] has {mask_arr.size} elements but "
-                    f"grid '{grid_name}' has {nbelectrodes} channels. "
+                    f"grid '{grid_name}' has {n_channels} channels. "
                     f"Provide a full-length binary mask (1 = discard, 0 = keep)."
                 )
             discard_mask = mask_arr
 
         discard_channels.append(discard_mask)
 
-    return coordinates, ied, discard_channels, emg_type
+    return coordinates, ied, discard_channels, emg_types
 
 
 def get_grid_electrode_metadata(grid_name: str) -> dict[str, str]:

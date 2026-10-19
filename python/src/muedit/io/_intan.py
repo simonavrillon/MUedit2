@@ -14,8 +14,8 @@ import numpy as np
 
 from muedit.errors import SignalLoadError
 from muedit.io._common import _AMPLIFIER_GAIN, _GRID_SIDECAR, _read_grid_sidecar, _resolve_muscles
+from muedit.io.aux_channels import aux_kinds
 from muedit.models import SignalImport, _as_name_list
-from muedit.signal.segmentation import aux_kinds
 from muedit.storage import ArrayStore, RamStore, sample_blocks
 
 logger = logging.getLogger(__name__)

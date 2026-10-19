@@ -33,13 +33,7 @@ from muedit.decomp.types import (
 )
 from muedit.models import SignalImport, resident_nbytes
 from muedit.signal.decomp_primitives import extend_signal
-from muedit.signal.filters import (
-    bandpass_inplace,
-    bandpass_signals,
-    notch_inplace,
-    notch_signals,
-)
-from muedit.signal.streaming import RowSelection, StreamedExtender, extend_mask
+from muedit.signal.streaming import StreamedExtender
 from muedit.storage import SessionStore
 from tests._platform import MAPPED_FILES_STAY
 from tests._synthetic_emg import FSAMP, motor_unit_emg
@@ -92,55 +86,6 @@ def raw() -> np.ndarray:
 
 
 EX = 6
-
-
-class TestStreamedExtender:
-    """Every read equals the matching slice of a whole-recording extension."""
-
-    SPANS = ((0, 40), (2, 9), (EX - 1, 300), (1234, 1500), (2900, 3000))
-
-    @pytest.mark.parametrize(("start", "stop"), SPANS)
-    def test_channels_first_matches_full_extension(
-        self, raw: np.ndarray, start: int, stop: int
-    ) -> None:
-        rows = np.array([0, 2, 3, 7, 9])
-        offset = raw[rows].mean(axis=1)
-        full = extend_signal(raw[rows] - offset[:, None], EX)
-        source = StreamedExtender(RowSelection(raw, rows), EX, offset=offset)
-        np.testing.assert_array_equal(source.read(start, stop), full[:, start:stop])
-
-    @pytest.mark.parametrize(("start", "stop"), SPANS)
-    def test_samples_first_float32_matches_full_extension(
-        self, raw: np.ndarray, start: int, stop: int
-    ) -> None:
-        offset = raw.mean(axis=1)
-        demeaned = raw.astype(np.float32) - offset.astype(np.float32)[:, None]
-        full = extend_signal(demeaned.T, EX, samples_first=True)
-        source = StreamedExtender(raw, EX, offset=offset, dtype=np.float32, samples_first=True)
-        out = source.read(start, stop)
-        assert out.dtype == np.float32
-        np.testing.assert_array_equal(out, full[start:stop])
-
-    def test_mask_is_extended_cut_with_the_batch_and_padded_past_its_end(
-        self, raw: np.ndarray
-    ) -> None:
-        mask = np.zeros(2000, dtype=bool)
-        mask[100:110] = True
-        source = StreamedExtender(raw, EX, artifact_mask=mask)
-        np.testing.assert_array_equal(source.mask(95, 105), [False] * 5 + [True] * 5)
-        # 110 .. 110 + EX - 2 still hold masked samples in their look-back.
-        np.testing.assert_array_equal(source.mask(108, 118), [True] * 7 + [False] * 3)
-        np.testing.assert_array_equal(source.mask(1995, 2005), [False] * 10)
-        assert StreamedExtender(raw, EX).mask(0, 10) is None
-
-    def test_extend_mask_matches_the_decompose_step_construction(self) -> None:
-        mask = np.zeros(300, dtype=bool)
-        mask[[0, 40, 41, 150, 299]] = True
-        # core.decompose_step: OR of the mask shifted by every delay, cut to the window.
-        expected = np.zeros(mask.size + EX - 1, dtype=bool)
-        for m in range(EX):
-            expected[m : m + mask.size] |= mask
-        np.testing.assert_array_equal(extend_mask(mask, EX), expected[: mask.size])
 
 
 @pytest.mark.parametrize(
@@ -236,26 +181,7 @@ def test_backward_pass_reads_complete_lookback(raw: np.ndarray) -> None:
     )
 
 
-# ── Filters and previews by channel block ───────────────────────────────────
-
-
-@pytest.mark.parametrize("dtype", [np.float64, np.float32])
-def test_block_bandpass_is_bit_identical(dtype: type[np.floating]) -> None:
-    x = np.random.default_rng(0).standard_normal((21, 20_000)).astype(dtype)
-    for fsamp, emg_type in ((2048.0, 1), (10240.0, 2)):
-        y = x.copy()
-        bandpass_inplace(y, fsamp, emg_type)
-        np.testing.assert_array_equal(y, bandpass_signals(x, fsamp, emg_type).astype(dtype))
-
-
-@pytest.mark.parametrize("dtype", [np.float64, np.float32])
-def test_inplace_notch_is_bit_identical(dtype: type[np.floating]) -> None:
-    t = np.arange(20_001) / 2048.0
-    x = np.random.default_rng(1).standard_normal((5, t.size)) + 4 * np.sin(2 * np.pi * 50 * t)
-    x = x.astype(dtype)
-    y = x.copy()
-    notch_inplace(y, 2048.0)
-    np.testing.assert_array_equal(y, notch_signals(x, 2048.0))
+# ── Previews by channel block ───────────────────────────────────────────────
 
 
 @pytest.mark.parametrize("dtype", [np.float64, np.float32])

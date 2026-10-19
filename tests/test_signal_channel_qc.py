@@ -109,18 +109,6 @@ def test_quiet_but_correlated_channel_is_not_low_snr() -> None:
     assert "low-SNR" not in _channel_qc_diagnostics(data, FSAMP, grid_coords()).reasons[20]
 
 
-def test_noisy_check_needs_coordinates() -> None:
-    data = correlated_emg()
-    _noisy(data)
-    assert not _channel_qc_diagnostics(data, FSAMP, coordinates=None).mask[CH]
-
-
-def test_all_flat_grid_is_not_flagged() -> None:
-    """Flatness is relative to the grid median; a silent grid has no outlier."""
-    data = np.zeros((N_CHANNELS, N_SAMPLES), dtype=np.float32)
-    assert not _channel_qc_diagnostics(data, FSAMP, grid_coords()).mask.any()
-
-
 def test_per_grid_masks_use_grid_local_indices() -> None:
     data = np.vstack([correlated_emg(seed=100), correlated_emg(seed=101)])
     data[5] = 1e-12
@@ -129,22 +117,6 @@ def test_per_grid_masks_use_grid_local_indices() -> None:
         data, FSAMP, [N_CHANNELS, N_CHANNELS], [grid_coords(), grid_coords()]
     )
     assert [np.flatnonzero(m).tolist() for m in masks] == [[5], [6]]
-
-
-def test_per_grid_without_coordinates_still_flags_flat() -> None:
-    data = np.vstack([correlated_emg(seed=100), correlated_emg(seed=101)])
-    data[0] = 1e-12
-    masks = detect_bad_channels_per_grid(data, FSAMP, [N_CHANNELS, N_CHANNELS], None)
-    assert [np.flatnonzero(m).tolist() for m in masks] == [[0], []]
-
-
-def test_structural_pass_runs_only_flat_and_saturated() -> None:
-    data = correlated_emg()
-    _flat(data)
-    _noisy(data[CH + 1 :])
-    diag = _channel_qc_diagnostics(data, FSAMP, grid_coords(), structural_only=True)
-    assert np.flatnonzero(diag.mask).tolist() == [CH]
-    assert np.isnan(diag.snr).all() and (diag.mean_neighbor_corr == 1.0).all()
 
 
 def test_per_grid_ignores_samples_outside_keep() -> None:

@@ -23,6 +23,7 @@ from muedit.decomp.types import (
 from muedit.models import BoolArray, FloatArray, IntArray, spike_array
 from muedit.signal.decomp_primitives import (
     POSTPROC_MIN_ISI_SEC,
+    extend_mask,
     extend_signal,
     extension_factor,
     find_refractory_peaks,
@@ -30,7 +31,6 @@ from muedit.signal.decomp_primitives import (
     split_by_amplitude,
 )
 from muedit.signal.filters import bandpass_signals
-from muedit.signal.streaming import extend_mask
 
 SpikeTimes: TypeAlias = IntArray
 """Discharge times: sorted, unique, non-negative int32 sample indices (see ``spike_array``)."""

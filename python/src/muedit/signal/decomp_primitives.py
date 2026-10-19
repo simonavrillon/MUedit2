@@ -14,17 +14,17 @@ DECOMP_MIN_ISI_SEC: float = 0.02
 POSTPROC_MIN_ISI_SEC: float = 0.005
 
 
-def extend_signal_mask(mask: BoolArray, exfactor: int) -> BoolArray:
-    """Mask of ``extend_signal``'s ``n + exfactor - 1`` channels-first columns, padded tail included.
-
-    Column ``t`` is masked if any of samples ``t - exfactor + 1 .. t`` is; ``streaming.extend_mask``
-    is the same rule over the first ``n`` columns, for samples-first streams.
-    """
-    n = mask.size
-    out = np.zeros(n + exfactor - 1, dtype=bool)
-    for m in range(exfactor):
-        out[m : m + n] |= mask
+def extend_mask(mask: BoolArray, ex_factor: int) -> BoolArray:
+    """Mask of the extended samples: sample ``t`` is masked if any of ``t - ex_factor + 1 .. t`` is."""
+    out = np.array(mask, dtype=bool)
+    for m in range(1, ex_factor):
+        out[m:] |= mask[:-m]
     return out
+
+
+def extend_signal_mask(mask: BoolArray, ex_factor: int) -> BoolArray:
+    """:func:`extend_mask` over ``extend_signal``'s ``n + ex_factor - 1`` columns, padded tail included."""
+    return extend_mask(np.pad(mask, (0, ex_factor - 1)), ex_factor)
 
 
 def extension_factor(nbextchan: int, n_channels: int) -> int:
@@ -33,31 +33,31 @@ def extension_factor(nbextchan: int, n_channels: int) -> int:
 
 
 def extend_signal(
-    signal: FloatArray,
-    exfactor: int,
+    data: FloatArray,
+    ex_factor: int,
     samples_first: bool = False,
     dtype: DTypeLike | None = None,
 ) -> FloatArray:
     """Delay-embedding channel extension; channels-first output is ``dtype``, else at least float64."""
     if samples_first:
-        if exfactor <= 1:
-            return signal.copy()
-        n_samples, n_channels = signal.shape
-        output = np.zeros((n_samples, n_channels * exfactor), dtype=signal.dtype)
-        for i in range(exfactor):
-            output[i:, n_channels * i : n_channels * (i + 1)] = signal[: n_samples - i]
+        if ex_factor <= 1:
+            return data.copy()
+        n_samples, n_channels = data.shape
+        output = np.zeros((n_samples, n_channels * ex_factor), dtype=data.dtype)
+        for i in range(ex_factor):
+            output[i:, n_channels * i : n_channels * (i + 1)] = data[: n_samples - i]
         return output
 
-    out_dtype = np.result_type(signal.dtype, np.float64) if dtype is None else np.dtype(dtype)
-    if exfactor <= 1:
-        return signal.astype(out_dtype, copy=True)
+    out_dtype = np.result_type(data.dtype, np.float64) if dtype is None else np.dtype(dtype)
+    if ex_factor <= 1:
+        return data.astype(out_dtype, copy=True)
 
-    rows, cols = signal.shape
-    extended_rows = rows * exfactor
-    extended_cols = cols + exfactor - 1
+    rows, cols = data.shape
+    extended_rows = rows * ex_factor
+    extended_cols = cols + ex_factor - 1
     esample = np.zeros((extended_rows, extended_cols), dtype=out_dtype)
-    for m in range(exfactor):
-        esample[m * rows : (m + 1) * rows, m : cols + m] = signal
+    for m in range(ex_factor):
+        esample[m * rows : (m + 1) * rows, m : cols + m] = data
     return esample
 
 
@@ -76,14 +76,14 @@ def signed_square(x: FloatArray) -> FloatArray:
 
 
 def find_refractory_peaks(
-    signal: FloatArray,
+    data: FloatArray,
     fsamp: float,
     min_isi_sec: float = DECOMP_MIN_ISI_SEC,
     **kwargs: object,
 ) -> IntArray:
     """Peak picking with a refractory-distance constraint."""
     distance = int(np.round(fsamp * min_isi_sec))
-    peaks, _ = find_peaks(signal, distance=distance, **kwargs)
+    peaks, _ = find_peaks(data, distance=distance, **kwargs)
     return peaks
 
 
@@ -112,14 +112,12 @@ def enforce_refractory(
 def split_by_amplitude(
     values: FloatArray,
     peaks: IntArray,
-    kmeans_iter: int = KMEANS_ITER,
     missing: str = "raise",
-    seed: int = 0,
 ) -> tuple[IntArray, FloatArray, IntArray]:
     """Split peak amplitudes into low/high clusters and return the high ones."""
     try:
         centroids, labels = kmeans2(
-            values[peaks], 2, iter=kmeans_iter, minit="++", missing=missing, seed=seed
+            values[peaks], 2, iter=KMEANS_ITER, minit="++", missing=missing, seed=0
         )
     except ClusterError:
         peak_vals = values[peaks]

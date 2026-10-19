@@ -31,12 +31,12 @@ _MIN_THREADED_SAMPLES = 1 << 20
 T = TypeVar("T")
 
 
-def demean(signal: FloatArray) -> FloatArray:
+def demean(data: FloatArray) -> FloatArray:
     """Remove per-channel DC offset from a 2D signal array; the mean is taken in float64."""
-    mean = np.mean(signal, axis=1, keepdims=True, dtype=np.float64)
-    if signal.dtype == np.float32:
-        return (signal - mean).astype(np.float32)
-    return signal - mean
+    mean = np.mean(data, axis=1, keepdims=True, dtype=np.float64)
+    if data.dtype == np.float32:
+        return (data - mean).astype(np.float32)
+    return data - mean
 
 
 def filter_workers(n_rows: int, n_samples: int) -> int:
@@ -87,28 +87,26 @@ def _bandpass_coefficients(fsamp: float, emg_type: int) -> tuple[FloatArray, Flo
     return butter(3, [100, 4400], btype="bandpass", fs=fsamp)
 
 
-def bandpass_signals(signal: FloatArray, fsamp: float, emg_type: int = 1) -> FloatArray:
+def bandpass_signals(data: FloatArray, fsamp: float, emg_type: int = 1) -> FloatArray:
     """Zero-phase Butterworth bandpass: emg_type=1 → 20–500 Hz (surface), 2 → 100–4400 Hz (intramuscular)."""
     b, a = _bandpass_coefficients(fsamp, emg_type)
-    return filtfilt(b, a, signal, axis=-1)
+    return filtfilt(b, a, data, axis=-1)
 
 
-def _filter_rows_inplace(
-    signal: FloatArray, filter_one: Callable[[FloatArray], FloatArray]
-) -> None:
-    """Write ``filter_one(row)`` back into each row of ``signal``, on the filter threads."""
+def _filter_rows_inplace(data: FloatArray, filter_one: Callable[[FloatArray], FloatArray]) -> None:
+    """Write ``filter_one(row)`` back into each row of ``data``, on the filter threads."""
 
     def filter_row(row: int) -> None:
-        signal[row] = filter_one(signal[row])
+        data[row] = filter_one(data[row])
 
-    for_each_row(filter_row, range(signal.shape[0]), signal.shape[1])
+    for_each_row(filter_row, range(data.shape[0]), data.shape[1])
 
 
-def bandpass_inplace(signal: FloatArray, fsamp: float, emg_type: int = 1) -> None:
-    """``bandpass_signals`` written back into ``signal``, row by row on the filter threads."""
+def bandpass_inplace(data: FloatArray, fsamp: float, emg_type: int = 1) -> None:
+    """``bandpass_signals`` written back into ``data``, row by row on the filter threads."""
     # filtfilt filters each row on its own, so per-row results are bit-identical.
     b, a = _bandpass_coefficients(fsamp, emg_type)
-    _filter_rows_inplace(signal, lambda row: filtfilt(b, a, row))
+    _filter_rows_inplace(data, lambda row: filtfilt(b, a, row))
 
 
 def _notch_params(fsamp: float, n_samples: int) -> tuple[int, int]:
@@ -142,22 +140,15 @@ def _remove_line_interference(x: FloatArray, frad: int, window: int) -> FloatArr
     return x - irfft(correction, n)
 
 
-def notch_signals(signal: FloatArray, fsamp: float) -> FloatArray:
-    """FFT-based notch that suppresses mains harmonics without knowing the line frequency."""
-    filtered = np.array(signal)
-    notch_inplace(filtered, fsamp)
-    return filtered
-
-
-def notch_inplace(signal: FloatArray, fsamp: float) -> None:
-    """``notch_signals`` written back into ``signal``, channel by channel on the filter threads."""
-    if signal.size == 0:
+def notch_inplace(data: FloatArray, fsamp: float) -> None:
+    """FFT notch of mains harmonics, without knowing the line frequency, written back channel by channel."""
+    if data.size == 0:
         return
-    frad, window = _notch_params(fsamp, signal.shape[1])
-    _filter_rows_inplace(signal, lambda row: _remove_line_interference(row, frad, window))
+    frad, window = _notch_params(fsamp, data.shape[1])
+    _filter_rows_inplace(data, lambda row: _remove_line_interference(row, frad, window))
 
 
-def emg_filter_inplace(signal: FloatArray, fsamp: float, emg_type: int = 1) -> None:
+def emg_filter_inplace(data: FloatArray, fsamp: float, emg_type: int = 1) -> None:
     """The decomposition's filtering of one grid's rows (notch, then bandpass), written back."""
-    notch_inplace(signal, fsamp)
-    bandpass_inplace(signal, fsamp, emg_type)
+    notch_inplace(data, fsamp)
+    bandpass_inplace(data, fsamp, emg_type)

@@ -20,7 +20,6 @@ from muedit.api.common import missing_upload
 from muedit.editing.session import out_of_range
 from muedit.errors import MueditError
 from muedit.models import FloatArray, IntArray, SignalImport
-from muedit.signal.downsample import PREVIEW_MOVING_AVG_MS, moving_average_ms
 from muedit.signal.filters import FILTER_BLOCK_ROWS, bandpass_inplace, map_rows
 from muedit.signal.pyramid import MinMaxPyramid, Reader, SeriesView, envelope, view
 from muedit.storage import ArrayStore
@@ -29,6 +28,21 @@ SeriesKind = Literal["emg", "overview", "aux"]
 MAX_BINS = 8192
 #: Samples bandpassed on each side of an EMG window read at full resolution.
 FILTER_PAD_SEC = 1.0
+PREVIEW_MOVING_AVG_MS: float = 25.0
+
+
+def moving_average_ms(series: FloatArray, fsamp: float, win_ms: float) -> FloatArray:
+    """Compute moving average with window size specified in milliseconds."""
+    x = np.asarray(series, dtype=np.float32).reshape(-1)
+    if x.size == 0 or fsamp <= 0 or win_ms <= 0:
+        return x
+    window_samples = max(1, int(round((win_ms / 1000.0) * fsamp)))
+    if window_samples == 1:
+        return x
+    kernel = np.ones(window_samples, dtype=np.float32)
+    sums = np.convolve(x, kernel, mode="same")
+    counts = np.convolve(np.ones_like(x), kernel, mode="same")
+    return (sums / counts).astype(np.float32)
 
 
 def grid_rows(grid_counts: list[int], n_rows: int) -> list[tuple[int, int]]:

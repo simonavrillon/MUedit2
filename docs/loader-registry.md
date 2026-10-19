@@ -151,7 +151,7 @@ Every field must be filled in:
 | Field | Type | Meaning |
 | --- | --- | --- |
 | `channel_map` | `np.ndarray` (2-D) | Physical layout; each cell holds the **1-based** channel number at that row/column. `0` marks a position with **no electrode**. |
-| `nbelectrodes` | `int` | Total active electrode count (must match the count of non-zero entries in `channel_map`). |
+| `n_channels` | `int` | Total active electrode count (must match the count of non-zero entries in `channel_map`). |
 | `ied` | `float` | Inter-electrode distance in **mm**. |
 | `emg_type` | `int` | `1` = surface HD-EMG, `2` = intramuscular. |
 | `manufacturer` | `str` | BIDS `ElectrodeManufacturer`. |
@@ -170,7 +170,7 @@ so `"GR04MM1305"` resolves `"GR04MM1305_run1"`. Two consequences:
 
 ### `channel_map` conventions
 
-- Values are **1-based** channel indices; only `0 < val <= nbelectrodes` are
+- Values are **1-based** channel indices; only `0 < val <= n_channels` are
   placed. `0` means "no electrode here" (e.g. a corner left empty on a 13×5
   grid that carries 64 electrodes across 65 positions).
 - The array shape defines the electrode grid (rows × columns); coordinates are
@@ -186,7 +186,7 @@ so `"GR04MM1305"` resolves `"GR04MM1305_run1"`. Two consequences:
         # ... remaining rows ...
         [12, 13, 38, 39, 64],
     ]),
-    nbelectrodes=64, ied=4.0, emg_type=1,
+    n_channels=64, ied=4.0, emg_type=1,
     manufacturer="OTBioelettronica",
     electrode_type="surface array",
     electrode_material="gold coated",

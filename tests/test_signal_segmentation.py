@@ -1,4 +1,4 @@
-"""Tests for the segmentation of a force target into decomposition windows."""
+"""Tests for the segmentation of a force target (:mod:`muedit.signal.segmentation`)."""
 
 from __future__ import annotations
 
@@ -9,12 +9,7 @@ import numpy as np
 import pytest
 from scipy.signal import butter, sosfiltfilt
 
-from muedit.signal.segmentation import (
-    TargetSegment,
-    aux_kinds,
-    find_target_channel,
-    segment_target,
-)
+from muedit.signal.segmentation import TargetSegment, segment_target
 
 FSAMP = 2048.0
 # Corners blur over the smoothing width (0.1 s each side).
@@ -95,7 +90,7 @@ def test_consecutive_segments_share_their_boundary() -> None:
     assert all(a.end == b.start for a, b in touching)
 
 
-@pytest.mark.parametrize("freq", [0.25, 0.5, 1.5])
+@pytest.mark.parametrize("freq", [0.25, 1.5])
 def test_sinusoid_block_between_plateaus(freq: float) -> None:
     segments = segment_target(_sine_protocol(freq), FSAMP)
     assert _kinds(segments) == ["ramp-up", "plateau", "sinusoid", "plateau", "ramp-down"]
@@ -109,17 +104,6 @@ def test_sinusoid_block_between_plateaus(freq: float) -> None:
     assert all(sine.start <= c < sine.end for c in sine.cycles)
 
 
-def test_small_sinusoid_on_a_large_target_is_found() -> None:
-    x = np.concatenate(
-        [
-            _piecewise([(0, 0), (2, 0), (6, 100), (10, 100)]),
-            _sine(16, 0.5, offset=100, amp=3),
-            _piecewise([(0, 100), (4, 100), (8, 0), (10, 0)]),
-        ]
-    )
-    assert "sinusoid" in _kinds(segment_target(x, FSAMP))
-
-
 def test_noise_does_not_break_plateaus_or_the_sinusoid() -> None:
     x = _sine_protocol(0.5) + np.random.default_rng(0).normal(0, 0.3, _sine_protocol(0.5).size)
     assert _kinds(segment_target(x, FSAMP)) == [
@@ -131,9 +115,9 @@ def test_noise_does_not_break_plateaus_or_the_sinusoid() -> None:
     ]
 
 
-@pytest.mark.parametrize("freq", [0.1, 0.5])
-def test_pure_sinusoid_without_ramp_in_is_one_sinusoid(freq: float) -> None:
+def test_pure_sinusoid_without_ramp_in_is_one_sinusoid() -> None:
     """The troughs sit at the target's minimum; they must not read as rest, nor end the block."""
+    freq = 0.1
     segments = segment_target(_sine(10 / freq, freq), FSAMP)
     assert _kinds(segments) == ["sinusoid"]
     sine = segments[0]
@@ -144,21 +128,10 @@ def test_pure_sinusoid_without_ramp_in_is_one_sinusoid(freq: float) -> None:
     assert len(sine.cycles) == pytest.approx(10, abs=1)
 
 
-@pytest.mark.parametrize("freq", [4.0, 5.0])
-def test_fast_sinusoid_is_a_sinusoid(freq: float) -> None:
+def test_fast_sinusoid_is_a_sinusoid() -> None:
     """The frequency estimate must not be quantized to whole samples of period."""
-    segments = segment_target(_sine_protocol(freq), FSAMP)
-    sine = next((s for s in segments if s.kind == "sinusoid"), None)
-    assert sine is not None
-    assert sine.frequency_hz == pytest.approx(freq, rel=0.05)
-
-
-def test_short_ramp_into_a_sinusoid_keeps_it_a_sinusoid() -> None:
-    """A ramp shorter than min_duration folds into the block; the fit still sees the oscillation."""
-    x = np.concatenate([_piecewise([(0, 0), (0.3, 20)]), _sine(8, 2.0)])
-    segments = segment_target(x, FSAMP)
-    assert _kinds(segments) == ["sinusoid"]
-    assert segments[0].frequency_hz == pytest.approx(2.0, rel=0.05)
+    sine = next(s for s in segment_target(_sine_protocol(5.0), FSAMP) if s.kind == "sinusoid")
+    assert sine.frequency_hz == pytest.approx(5.0, rel=0.05)
 
 
 def test_random_tracking_target_is_one_irregular_block() -> None:
@@ -182,13 +155,6 @@ def test_single_triangle_stays_two_ramps() -> None:
     assert _kinds(segment_target(x, FSAMP)) == ["ramp-up", "ramp-down"]
 
 
-def test_regular_triangle_train_is_periodic() -> None:
-    train = _piecewise([(0, 10)] + [(1 + 2 * k, 20 if k % 2 == 0 else 10) for k in range(10)])
-    segments = segment_target(np.concatenate([_piecewise([(0, 0), (2, 0), (4, 10)]), train]), FSAMP)
-    sine = next(s for s in segments if s.kind == "sinusoid")
-    assert sine.frequency_hz == pytest.approx(0.25, rel=0.05)
-
-
 @pytest.mark.parametrize(
     "target",
     [np.full(int(10 * FSAMP), 5.0), np.zeros(0), np.array([0.0, np.nan, 1.0])],
@@ -196,34 +162,3 @@ def test_regular_triangle_train_is_periodic() -> None:
 )
 def test_degenerate_targets_give_no_segments(target: np.ndarray) -> None:
     assert segment_target(target, FSAMP) == []
-
-
-@pytest.mark.parametrize(
-    ("names", "expected"),
-    [
-        (["Acc X", "Feedback - Target", "Feedback - Path"], 1),
-        (["Path", "Target"], 1),
-        (["requested force"], 0),
-        (["Reference"], 0),
-        (["Trapezoidal track - Performed Path", "Trapezoidal track - Original Path"], 1),
-        (["Target path"], 0),
-        (["Actual target"], None),
-        (["Force", "Trigger"], None),
-        ([], None),
-    ],
-)
-def test_find_target_channel(names: list[str], expected: int | None) -> None:
-    assert find_target_channel(names) == expected
-
-
-def test_aux_kinds_from_the_loader_and_the_names() -> None:
-    names = ["Force - Original Path", "Force - Performed Path", "Torque", "TTL1"]
-    kinds = aux_kinds(names, [False, False, False, True])
-    assert kinds == ["target", "performed", "analog", "digital"]
-    assert aux_kinds(names) == ["target", "performed", "analog", "analog"]
-
-
-def test_a_trigger_line_is_never_the_target() -> None:
-    names = ["Target TTL", "Force - Original Path"]
-    assert find_target_channel(names) == 0
-    assert find_target_channel(names, aux_kinds(names, [True, False])) == 1

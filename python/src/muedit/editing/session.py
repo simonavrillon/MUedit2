@@ -37,7 +37,7 @@ from muedit.errors import MueditError
 from muedit.io.npz import RowSource
 from muedit.models import EditSignalContext, FloatArray, IntArray, resident_nbytes, spike_array
 from muedit.signal.filters import emg_filter_inplace, for_each_row
-from muedit.signal.grid import fallback_grid_name, format_hdemg_signal
+from muedit.signal.grid import fallback_grid_name, format_hdemg_signal, grid_spec
 from muedit.storage import SessionStore, StoreClosedError, copy_into
 
 logger = logging.getLogger(__name__)
@@ -649,8 +649,8 @@ class EditSession:
     @staticmethod
     def _emg_type(grid_names: Any, grid: int) -> int:
         """The bandpass of grid ``grid`` from the grid catalogue (surface when unknown)."""
-        _, _, _, emg_types = format_hdemg_signal(list(grid_names or []) or [fallback_grid_name(0)])
-        return emg_types[grid] if grid < len(emg_types) else 1
+        specs = [grid_spec(name) for name in list(grid_names or []) or [fallback_grid_name(0)]]
+        return specs[grid].emg_type if grid < len(specs) else 1
 
     def _filter_rows(self, rows: FloatArray, out: FloatArray, fsamp: float, emg_type: int) -> None:
         """``rows`` notched and bandpassed into float32 ``out``, a few channels at once."""
