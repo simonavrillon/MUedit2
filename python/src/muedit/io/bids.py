@@ -939,10 +939,6 @@ def write_bids_dataset_description(
             },
         )
 
-    bidsignore_path = bids_root / ".bidsignore"
-    if not bidsignore_path.exists():
-        bidsignore_path.write_text("decomp/\n", encoding="utf-8")
-
     parts_json_path = bids_root / "participants.json"
     if not parts_json_path.exists():
         _write_json(
@@ -1045,6 +1041,9 @@ def write_derivative_description(deriv_root: Path, pipeline_name: str = "muedit"
             "SourceDatasets": [{"URL": "bids:raw:"}],
         },
     )
+    bidsignore_path = deriv_root / ".bidsignore"
+    if not bidsignore_path.exists():
+        bidsignore_path.write_text("decomp\n", encoding="utf-8")
 
 
 def _write_description_row(deriv_root: Path, desc: str, text: str) -> None:

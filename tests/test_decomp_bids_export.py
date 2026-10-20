@@ -322,6 +322,7 @@ def test_export_follows_emg_bids(tmp_path: Path) -> None:
     assert deriv_description["SourceDatasets"] == [{"URL": "bids:raw:"}]
     assert deriv_description["DatasetLinks"] == {"raw": "../../"}
     assert "desc-decomposition" in {r["desc_id"] for r in tsv_rows(deriv / "descriptions.tsv")}
+    assert (deriv / ".bidsignore").read_text() == "decomp\n"
 
     # [S] the scheme Other without its REQUIRED description writes nothing.
     elsewhere = tmp_path / "elsewhere"
