@@ -46,6 +46,7 @@ export async function initializeApp() {
   if (await waitForBackend(app.api.healthUrl())) {
     if (els.browseSignalBtn) els.browseSignalBtn.disabled = false;
     app.setStatus("", "muted");
+    await app.loadProjects().catch(() => app.setBidsProject(""));
     // A reloaded page picks up the open edit session.
     await restoreEditSession(app);
   } else {

@@ -60,6 +60,8 @@ Displays the rectified average across all active channels. Use this to identify 
 
 **Artifact windows:** use the **+** button (top-right of the chart card) to arm artifact selection, then drag on the chart to mark a time region as an artifact. Marked windows are shaded on the chart. Use the **-** button to remove the last window. The count next to the buttons shows how many windows are active. Artifact windows are excluded from decomposition filter updates and state propagation — they prevent transient noise from corrupting the separation. These windows are combined with any automatically detected artifacts (from the Automatic QC button) and travel with the decomposition request.
 
+**Segment target:** press **Segment target** to split the force target into up and down ramps, plateaus, sinusoids and irregular blocks, then click segments on either chart to make them the analysis windows; touching segments merge into one window. The menu next to the auxiliary channel picker lists each segment type found: tick one or more types (e.g. up ramp and down ramp) to choose every segment of them at once, untick to drop them. A type is half-ticked when only some of its segments are chosen. Segmenting also fills the **Task** field (`sinusoid`, `stairs`, `triangle`, `trapezoid`, `ramp up`, `ramp down` or `dynamic`) unless you typed a task yourself or the file named one.
+
 ### Auxiliary channels panel
 
 Shows force, torque, or other auxiliary signals recorded alongside the EMG. Use the dropdown to select individual channels or view all overlaid.
@@ -77,7 +79,7 @@ Open the panel with the button on the rail on the left. It contains three collap
 |---|---|
 | File | Loaded filename (read-only) |
 | Fs (Hz) | Sampling frequency (read-only, from file) |
-| Project | Project name — output is saved under `<output>/<project>/` (your BIDS dataset root). A folder name, not a path |
+| Project | Pick a project from the output folder, or **+ New project…** and type its name — output is saved under `<output>/<project>/` (your BIDS dataset root). A folder name, not a path |
 | Subject | BIDS subject label — alphanumeric (e.g. `01`, `S06`, `pilot01`) |
 | Session | BIDS session label — alphanumeric (e.g. `1`, `pre`, `post`) |
 | Acquisition | BIDS `acq` label, for sequential recordings of the same task (e.g. one grid/finger recorded at a time). Optional, alphanumeric |
@@ -280,14 +282,17 @@ Additional history action types:
 
 MUedit saves into a **per-project folder inside its output folder**, which is
 the repository's `data/` directory unless you set another one. You don't type a
-full path — you just name the project in the **Project** field of the Settings
-panel (Session info), and that becomes your BIDS dataset root:
+full path — you just pick the project in the **Project** field of the Settings
+panel (Session info), and that becomes your BIDS dataset root. The dropdown lists
+every BIDS dataset (a folder with a `dataset_description.json`) in the output
+folder, and remembers the last one you picked:
 
 ```
 <output>/<project>/    ← BIDS dataset root (the folder that contains sub-<subject>/)
 ```
 
-- Enter a project name (e.g. `study1`) → output is written under `<output>/study1/`.
+- Pick a project, or choose **+ New project…** and type a name (e.g. `study1`)
+  → output is written under `<output>/study1/`.
 - Leave it empty → MUedit uses `<output>/muedit_out/`.
 - The project is a single folder name: a path such as `../study1` or `/data/x`
   is refused, so outputs always stay inside the output folder.
@@ -302,7 +307,7 @@ to another folder before launching, and MUedit saves there instead.
 **Files opened from elsewhere.** A decomposition opened from a BIDS dataset
 outside the output folder is saved back into that dataset, under its own
 `derivatives/muedit/`, as long as you leave its **Project** field unchanged.
-Type a project name to save it into the output folder instead.
+Pick another project to save it into the output folder instead.
 
 ---
 

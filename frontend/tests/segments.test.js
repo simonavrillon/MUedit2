@@ -4,6 +4,7 @@ import { test, describe, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  dispatchWindow,
   fakeCanvas,
   fakeElement,
   installDom,
@@ -19,13 +20,17 @@ const { state: initialState } = await import("../src/state/state.js");
 const { createApp } = await import("../src/app/create-app.js");
 const { toSegments } = await import("../src/api/payloads.js");
 const { drawRoiRects } = await import("../src/view/plots.js");
-const { buildSelections, enableRoiSelection } =
+const { buildSelections, enableRoiSelection, renderSegmentTypes } =
   await import("../src/view/qc-renderer.js");
+const { setupQcEvents } = await import("../src/app/stages/qc-stage.js");
 const {
+  chooseSegmentType,
   describeWindow,
+  inferTask,
   isSegmentChosen,
   requestSegmentation,
   segmentAt,
+  segmentTypes,
   toggleSegment,
 } = await import("../src/signal/segments.js");
 
@@ -70,6 +75,11 @@ beforeEach(() => {
     auxSelector: Object.assign(fakeElement("select"), { value: "-1" }),
     nwindows: Object.assign(fakeElement("input"), { value: "1" }),
     qcSegmentBtn: fakeElement("button"),
+    segmentTypeBtn: fakeElement("button"),
+    segmentTypeMenu: Object.assign(fakeElement("div"), {
+      hidden: true,
+      contains: () => false,
+    }),
   };
   app = createApp({ state, els, api: {} });
   Object.assign(app, {
@@ -130,6 +140,143 @@ describe("toggleSegment", () => {
     assert.equal(toggleSegment(app.state, 3), 0);
     assert.deepEqual(app.state.rois, [{ start: 0, end: 1000 }]);
     assert.deepEqual(chosen(), [false, false, false, false]);
+  });
+});
+
+describe("segment types", () => {
+  const ramps = () => [
+    seg(100, 200, "ramp", { direction: "up" }),
+    seg(200, 300, "ramp", { direction: "down" }),
+    seg(400, 500, "ramp", { direction: "up" }),
+    seg(500, 550, "plateau"),
+    seg(550, 650, "ramp", { direction: "down" }),
+  ];
+
+  test("segmentTypes keeps up and down ramps apart, in a fixed order", () => {
+    app.state.segments = ramps();
+    toggleSegment(app.state, 0);
+    assert.deepEqual(segmentTypes(app.state), [
+      { type: "up ramp", kind: "ramp", glyph: "↗", count: 2, chosen: 1 },
+      { type: "down ramp", kind: "ramp", glyph: "↘", count: 2, chosen: 0 },
+      { type: "plateau", kind: "plateau", glyph: "—", count: 1, chosen: 0 },
+    ]);
+  });
+
+  test("choosing up then down ramps merges the touching ones", () => {
+    app.state.segments = ramps();
+    assert.equal(chooseSegmentType(app.state, "up ramp", true), 2);
+    assert.equal(chooseSegmentType(app.state, "down ramp", true), 3);
+    assert.deepEqual(app.state.rois, [
+      { start: 100, end: 300 },
+      { start: 400, end: 500 },
+      { start: 550, end: 650 },
+    ]);
+  });
+
+  test("dropping a type keeps the other type's segments", () => {
+    app.state.segments = ramps();
+    chooseSegmentType(app.state, "up ramp", true);
+    chooseSegmentType(app.state, "down ramp", true);
+    assert.equal(chooseSegmentType(app.state, "up ramp", false), 2);
+    assert.deepEqual(app.state.rois, [
+      { start: 200, end: 300 },
+      { start: 550, end: 650 },
+    ]);
+  });
+
+  test("a type after a clicked segment of it holds each segment once", () => {
+    app.state.segments = ramps();
+    toggleSegment(app.state, 2);
+    chooseSegmentType(app.state, "up ramp", true);
+    assert.deepEqual(app.state.rois, [
+      { start: 100, end: 200 },
+      { start: 400, end: 500 },
+    ]);
+    assert.equal(chooseSegmentType(app.state, "up ramp", false), 0);
+    assert.deepEqual(app.state.rois, [{ start: 0, end: 1000 }]);
+  });
+});
+
+describe("inferTask", () => {
+  const up = seg(0, 1, "ramp", { direction: "up" });
+  const down = seg(0, 1, "ramp", { direction: "down" });
+  const flat = seg(0, 1, "plateau");
+  const sine = seg(0, 1, "sinusoid");
+  const rough = seg(0, 1, "irregular");
+
+  for (const [segments, task] of [
+    [[up, flat, sine], "sinusoid"],
+    [[up, flat, up, flat, up], "stairs"],
+    [[up, down], "triangle"],
+    [[up, down, up, down], "triangle"],
+    [[up, flat, down], "trapezoid"],
+    [[up, flat, down, rough, up, flat, down], "trapezoid"],
+    [[up], "ramp up"],
+    [[up, flat], "ramp up"],
+    [[flat, down], "ramp down"],
+    [[up, down, up, flat, down], "dynamic"],
+    [[rough], "dynamic"],
+  ]) {
+    test(`${segments.map((s) => s.direction ?? s.kind).join(" ")} is ${task}`, () => {
+      assert.equal(inferTask(segments), task);
+    });
+  }
+});
+
+describe("the segment-type picker", () => {
+  const rows = () => els.segmentTypeMenu.children;
+  const box = (i) => rows()[i].children[0];
+
+  test("lists the types, ticked when chosen, half-ticked when partly", () => {
+    app.state.segments.push(seg(950, 990, "ramp", { direction: "up" }));
+    toggleSegment(app.state, 1);
+    toggleSegment(app.state, 0);
+    renderSegmentTypes(els, app.state);
+    assert.equal(els.segmentTypeBtn.disabled, false);
+    assert.equal(els.segmentTypeBtn.textContent, "— plateau");
+    assert.deepEqual(
+      rows().map((r) => r.children[2].textContent),
+      ["up ramp (2)", "down ramp (1)", "plateau (1)", "sinusoid (1)"],
+    );
+    assert.deepEqual(
+      [0, 1, 2, 3].map((i) => [box(i).checked, box(i).indeterminate]),
+      [
+        [false, true],
+        [false, false],
+        [true, false],
+        [false, false],
+      ],
+    );
+  });
+
+  test("keeps its rows while the types stay, and empties without segments", () => {
+    renderSegmentTypes(els, app.state);
+    const first = rows()[0];
+    toggleSegment(app.state, 0);
+    renderSegmentTypes(els, app.state);
+    assert.equal(rows()[0], first);
+    assert.equal(box(0).checked, true);
+    els.segmentTypeMenu.hidden = false;
+    app.state.segments = [];
+    renderSegmentTypes(els, app.state);
+    assert.equal(rows().length, 0);
+    assert.equal(els.segmentTypeBtn.disabled, true);
+    assert.equal(els.segmentTypeBtn.textContent, "No segments");
+    assert.equal(els.segmentTypeMenu.hidden, true);
+  });
+
+  test("a ticked box chooses its type and syncs the window count", () => {
+    setupQcEvents(app);
+    renderSegmentTypes(els, app.state);
+    els.segmentTypeBtn.dispatch("click");
+    assert.equal(els.segmentTypeMenu.hidden, false);
+    box(0).checked = true;
+    els.segmentTypeMenu.dispatch("change", { target: box(0) });
+    assert.deepEqual(app.state.rois, [{ start: 100, end: 200 }]);
+    assert.equal(els.nwindows.value, "1");
+    assert.deepEqual(app.setStatus.calls.at(-1), ["Added up ramps — 1 window"]);
+    dispatchWindow("keydown", { key: "Escape" });
+    assert.equal(els.segmentTypeMenu.hidden, true);
   });
 });
 
@@ -291,6 +438,25 @@ describe("requestSegmentation", () => {
       [{ upload_token: "tok", target_index: 0 }],
       [{ upload_token: "tok" }],
     ]);
+  });
+
+  test("fills the task, unless one was typed in", async () => {
+    els.bidsTask = Object.assign(fakeElement("input"), { value: "trapezoid" });
+    app.api.segmentTarget = async () => ({
+      segments: [
+        { start: 100, end: 200, kind: "ramp", direction: "up" },
+        { start: 200, end: 300, kind: "ramp", direction: "down" },
+      ],
+    });
+    await requestSegmentation(app);
+    assert.equal(els.bidsTask.value, "triangle");
+    assert.match(app.setStatus.calls.at(-1)[0], /Task set to triangle\./);
+    setupQcEvents(app);
+    els.bidsTask.value = "dynamic";
+    els.bidsTask.dispatch("input");
+    await requestSegmentation(app);
+    assert.equal(els.bidsTask.value, "dynamic");
+    assert.doesNotMatch(app.setStatus.calls.at(-1)[0], /Task set/);
   });
 
   test("reports a refusal and keeps the segments it had", async () => {

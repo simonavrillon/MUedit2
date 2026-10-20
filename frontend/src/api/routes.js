@@ -23,4 +23,5 @@ export const routes = {
   dialogOpenFile: "/dialog/open-file",
   sessionClose: "/session/close",
   health: "/health",
+  projects: "/projects",
 };

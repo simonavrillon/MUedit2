@@ -23,6 +23,7 @@ All HTTP endpoints used by the frontend, their payloads, and binary formats.
 | 11 | GET | `/edit/session` | `api.editSessionState(token)` | `restoreEditSession` (page reload), and `requestEditOp` after an edit timed out | 10min | The whole state of the session this page had open, once the edit it may be running is done |
 | 12 | POST | `/edit/ops/{op}` | `api.editOp(op, payload)` | `requestEditOp` ← every edit action | 120s; `update-filter` 10min (it waits for the grid's filtering) | Apply one edit; the frame says what changed. An edit that times out may still be carried out, so the page then takes the session's state from #11 |
 | 13 | POST | `/edit/session/save` | `api.editSessionSave(payload)` | `saveEditedFile` | 120s | Save the session's edits |
+| 14b | GET | `/projects` | `api.listProjects()` | `fileSession.loadProjects` ← `initializeApp`, once the backend answers | 120s | The output folder's projects, for the Project dropdown |
 | 14 | POST | `/session/close` | `api.closeSession()` | `initializeApp`'s `pagehide` handler | — | Free what the server holds for this tab and stop its run |
 
 > **Origin.** The page and the API share one origin (the server serves `frontend/` at `/`), so `API_BASE` is `${location.origin}/api/v1` and there is no CORS. `closeSession()` posts `/session/close` with `fetch(..., { keepalive: true })` rather than a beacon, because a beacon cannot carry the session header.

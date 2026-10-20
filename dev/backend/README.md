@@ -64,7 +64,7 @@ python/src/muedit/
 │   ├── cache.py                              The session-scoped caches (upload, preview, run, edit session)
 │   ├── memory.py                             MemoryBudget + BudgetedLRU: one byte budget over every cache
 │   ├── common.py                             Response envelope, shared parsing + serialization utilities
-│   ├── config.py                             DATA_ROOT, resolve_bids_root(), project_of()
+│   ├── config.py                             DATA_ROOT, resolve_bids_root(), list_projects(), project_of()
 │   └── errors.py                             Exception handlers + error envelope
 │
 ├── decomp/

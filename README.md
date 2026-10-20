@@ -194,8 +194,9 @@ Each save also writes the discharges as a standard BIDS events table, one row
 per spike, regenerated from your current edits.
 
 By default everything lands under `data/` inside the MUedit folder, in a
-subfolder named after the **Project** field you filled in: type `study1` there
-and your results appear in `data/study1/`. The project is a folder name, not a
+subfolder named after the **Project** field you filled in: pick a project from
+the dropdown, or choose **+ New project…** and type `study1`, and your results
+appear in `data/study1/`. The project is a folder name, not a
 path. To keep your data somewhere else entirely, set the `MUEDIT_DATA_ROOT`
 environment variable to that folder before launching.
 

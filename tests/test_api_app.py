@@ -39,6 +39,7 @@ LIVE_ENDPOINTS: list[tuple[str, str]] = [
     ("POST", "/edit/ops/{op}"),
     ("POST", "/edit/save"),
     ("POST", "/session/close"),
+    ("GET", "/projects"),
 ]
 
 
@@ -125,6 +126,17 @@ class TestRouteTable:
 
 def test_health(client: TestClient) -> None:
     assert ok(client.get(f"{API}/health")) == {"status": "ok"}
+
+
+def test_projects_lists_the_bids_datasets_in_the_output_folder(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from muedit.api import config
+
+    (tmp_path / "study1").mkdir()
+    (tmp_path / "study1" / "dataset_description.json").write_text("{}")
+    monkeypatch.setattr(config, "DATA_ROOT", tmp_path)
+    assert ok(client.get(f"{API}/projects")) == {"projects": ["study1"]}
 
 
 # ── Tab sessions ────────────────────────────────────────────────────────────

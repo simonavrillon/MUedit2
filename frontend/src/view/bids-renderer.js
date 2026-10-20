@@ -14,7 +14,10 @@ export function resetBidsEntityDefaults(els, fileName) {
   if (els.bidsSession) els.bidsSession.value = "1";
   if (els.bidsAcquisition) els.bidsAcquisition.value = "";
   if (els.bidsRun) els.bidsRun.value = "";
-  if (els.bidsTask) els.bidsTask.value = "trapezoid";
+  if (els.bidsTask) {
+    els.bidsTask.value = "trapezoid";
+    delete els.bidsTask.dataset.keep;
+  }
   if (els.fileName && fileName) {
     els.fileName.textContent = fileName;
     els.fileName.classList.remove("loading");
@@ -95,8 +98,10 @@ export function applySessionInfoToDom(els, payload) {
 
   if (els.bidsSubject && payload.entities?.subject)
     els.bidsSubject.value = payload.entities.subject;
-  if (els.bidsTask && payload.entities?.task)
+  if (els.bidsTask && payload.entities?.task) {
     els.bidsTask.value = payload.entities.task;
+    els.bidsTask.dataset.keep = "1";
+  }
   if (els.bidsSession && payload.entities?.session)
     els.bidsSession.value = payload.entities.session;
   if (els.bidsAcquisition && payload.entities?.acq)

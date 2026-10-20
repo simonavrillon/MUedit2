@@ -21,6 +21,12 @@ Signals and decompositions are always opened by server path. `/decompose_stream`
 `upload_token` minted by `/preview-by-path`, and the edit stage works on an edit session opened by
 `/edit/session/open`.
 
+### Projects Router (`routes/projects.py`)
+
+| Method | Path | Accepts | Returns | Service |
+|---|---|---|---|---|
+| GET | `/projects` | — | `{projects}` (`config.list_projects()`: the BIDS datasets in the output folder) | — |
+
 ### Preview Router (`routes/preview.py`)
 
 | Method | Path | Accepts | Returns | Service |

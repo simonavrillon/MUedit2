@@ -28,7 +28,6 @@ import {
 } from "../services/editing-service.js";
 import {
   setEditMode as setEditModeAction,
-  setEditProject,
   setEditCurrentMu,
   setEditCurrentMuGrid,
   setEditPulseView,
@@ -351,9 +350,9 @@ export function setupEditEvents(app) {
     );
   }
 
-  els.bidsProject?.addEventListener("input", () => {
-    setEditProject(state, app.getBidsProject());
-  });
+  for (const field of [els.bidsProject, els.bidsProjectNew]) {
+    field?.addEventListener("input", () => app.syncBidsProject());
+  }
 
   els.bidsPlacementScheme?.addEventListener("change", () => {
     const row = els.bidsPlacementDescRow;

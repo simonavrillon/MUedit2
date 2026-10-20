@@ -62,7 +62,7 @@ User clicks #browseSignalBtn
                                fall back to decomposition on failure
 ```
 
-For `.bdf`/`.edf` files that open, BIDS entities are parsed from the filename. The project comes from the preview (`project`, the file's folder under the output folder), which `applyPreviewMetadata` puts in the Project field. For a recording in a BIDS dataset, `applyPreviewMetadata` also sets the placement scheme, its description and the reference and ground locations its `_emg.json` gives.
+For `.bdf`/`.edf` files that open, BIDS entities are parsed from the filename. The project comes from the preview (`project`, the file's folder under the output folder), which `applyPreviewMetadata` selects in the Project field. For a recording in a BIDS dataset, `applyPreviewMetadata` also sets the placement scheme, its description and the reference and ground locations its `_emg.json` gives.
 
 ### State Written
 
@@ -170,7 +170,8 @@ Artifact windows are visually shaded on the EMG overview. They are OR'd into the
 | Field ID | Type | Default | Purpose |
 |---|---|---|---|
 | `fileName` | span (display) | "None" | Loaded filename |
-| `bidsProject` | text input | — | BIDS project name |
+| `bidsProject` | select | the last project picked, else the first | The output folder's projects (`GET /projects`), then "+ New project…" (value `""`); a project the field is set to that is not listed is added |
+| `bidsProjectNew` | text input | — | The new project's name; its row (`bidsProjectNewRow`) shows only with "+ New project…" |
 | `bidsSubject` | text input | "1" | BIDS subject entity |
 | `bidsSession` | text input | "1" | BIDS session entity |
 | `bidsAcquisition` | text input | — | BIDS acquisition entity |

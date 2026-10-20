@@ -108,18 +108,82 @@ describe("session form", () => {
 });
 
 describe("project field", () => {
-  test("setting it sets the edit session's project too, even to empty", () => {
-    const els = { bidsProject: { value: "old" } };
-    const state = { edit: { project: "old" } };
-    const session = createFileSessionService(
-      /** @type {any} */ ({ els, state, api: {} }),
+  globalThis.Option ??= /** @type {any} */ (
+    function Option(text, value) {
+      return { text, value };
+    }
+  );
+
+  /** A select over `projects`, then "New project…", and the new-name row. */
+  function projectField(projects, listProjects = projects) {
+    const options = [...projects, ""].map(
+      (value) => new globalThis.Option(value, value),
     );
-    session.setBidsProject("study-1");
-    assert.equal(els.bidsProject.value, "study-1");
-    assert.equal(state.edit.project, "study-1");
+    const hidden = new Set();
+    const els = {
+      bidsProject: {
+        value: projects[0] ?? "",
+        options,
+        add: (option, before) => options.splice(before, 0, option),
+        replaceChildren: (...next) => options.splice(0, Infinity, ...next),
+      },
+      bidsProjectNew: { value: "" },
+      bidsProjectNewRow: {
+        classList: {
+          toggle: (c, on) => (on ? hidden.add(c) : hidden.delete(c)),
+        },
+      },
+    };
+    const state = { edit: { project: "" } };
+    const api = { listProjects: async () => ({ projects: listProjects }) };
+    const session = createFileSessionService(
+      /** @type {any} */ ({ els, state, api }),
+    );
+    const listed = () => options.map((option) => option.value);
+    return { session, els, state, listed, rowHidden: () => hidden.size > 0 };
+  }
+
+  test("setting it sets the edit session's project too, even to empty", () => {
+    const { session, els, state, rowHidden } = projectField(["study1"]);
+    session.setBidsProject("study1");
+    assert.equal(state.edit.project, "study1");
+    assert.ok(rowHidden());
     session.setBidsProject("");
     assert.equal(els.bidsProject.value, "");
     assert.equal(state.edit.project, "");
+    assert.equal(rowHidden(), false);
+  });
+
+  test("a project missing from the list is added before New project", () => {
+    const { session, listed } = projectField(["study1"]);
+    session.setBidsProject("study2");
+    assert.deepEqual(listed(), ["study1", "study2", ""]);
+    assert.equal(session.getBidsProject(), "study2");
+  });
+
+  test("New project takes the typed name", () => {
+    const { session, els, state } = projectField(["study1"]);
+    els.bidsProject.value = "";
+    els.bidsProjectNew.value = " study3 ";
+    session.syncBidsProject();
+    assert.equal(session.getBidsProject(), "study3");
+    assert.equal(state.edit.project, "study3");
+    els.bidsProject.value = "study1";
+    assert.equal(session.getBidsProject(), "study1");
+  });
+
+  test("loading lists the output folder's projects and picks one", async () => {
+    const { session, listed } = projectField([], ["MUsic", "study1"]);
+    await session.loadProjects();
+    assert.deepEqual(listed(), ["MUsic", "study1", ""]);
+    assert.ok(["MUsic", "study1"].includes(session.getBidsProject()));
+  });
+
+  test("an empty output folder starts on New project", async () => {
+    const { session, els, rowHidden } = projectField([], []);
+    await session.loadProjects();
+    assert.equal(els.bidsProject.value, "");
+    assert.equal(rowHidden(), false);
   });
 });
 
@@ -195,17 +259,18 @@ describe("required session fields", () => {
   test("empty fields are marked and the panel opens on the first", () => {
     const { session, els, muscle, section, opened } = formWith({
       ...filled,
-      bidsProject: " ",
+      bidsProject: "",
+      bidsProjectNew: " ",
       muscle: "",
     });
     assert.equal(session.checkSessionForm(), false);
-    assert.equal(els.bidsProject.getAttribute("aria-invalid"), "true");
+    assert.equal(els.bidsProjectNew.getAttribute("aria-invalid"), "true");
     assert.equal(muscle.getAttribute("aria-invalid"), "true");
     assert.equal(els.bidsSubject.getAttribute("aria-invalid"), null);
     assert.deepEqual(opened, [true]);
     assert.equal(section.classes.has("collapsed"), false);
     assert.equal(section.header.getAttribute("aria-expanded"), "true");
-    assert.ok(els.bidsProject.focused);
+    assert.ok(els.bidsProjectNew.focused);
   });
 
   test("the Other scheme needs a placement description", () => {

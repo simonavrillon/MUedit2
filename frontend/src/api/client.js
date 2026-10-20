@@ -283,6 +283,11 @@ export function createApiClient({ apiFetch, apiJson, API_BASE, sessionId }) {
       return postJson(`${API_BASE}${routes.editSave}`, payload);
     },
 
+    /** The projects in the output folder. */
+    listProjects() {
+      return apiJson(`${API_BASE}${routes.projects}`);
+    },
+
     healthUrl() {
       return `${API_BASE}${routes.health}`;
     },

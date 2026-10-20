@@ -273,6 +273,13 @@ OS, not `.` or `..`, not absolute); `common.bids_root_for()` turns that into a 4
 the `project` field.
 
 ```python
+def list_projects() -> list[str]
+```
+The folders directly under `DATA_ROOT` that hold a `dataset_description.json`, sorted,
+hidden folders skipped (`[]` when `DATA_ROOT` does not exist). `GET /projects` returns
+them for the Project dropdown; a raw-recording folder in `DATA_ROOT` is not listed.
+
+```python
 def project_of(bids_root: Path) -> str
 ```
 The first folder of `bids_root` under `DATA_ROOT`, or `""` outside it. The preview

@@ -36,7 +36,9 @@ All elements are registered in `dom.js` as `els.*` properties.
 | `settingsToggleBtn` | [U] | Settings panel toggle (inside the panel, on the rail) |
 | `settingsOverlay` | [U] | Settings overlay backdrop |
 | `settingsPanel` | [U] | Settings panel container |
-| `bidsProject` | [U] | BIDS project input |
+| `bidsProject` | [U] | BIDS project dropdown |
+| `bidsProjectNew` | [U] | New project name input |
+| `bidsProjectNewRow` | [U] | Row of the new project name, hidden unless "+ New project…" is picked |
 | `bidsSubject` | [U] | BIDS subject input |
 | `bidsSession` | [U] | BIDS session input |
 | `bidsAcquisition` | [U] | BIDS acquisition input |
@@ -252,8 +254,10 @@ All elements are registered in `dom.js` as `els.*` properties.
 
 | Function | [A/?] | Called By |
 |---|---|---|
-| `getBidsProject` | [A] | runDecomposition (buildRunPayload), withBidsSaveFields, the Project field's input listener |
-| `setBidsProject` | [A] | setBidsEntitiesInput, showEditSession (the file's project), resetEditState (empty): the field and `state.edit.project` together |
+| `getBidsProject` | [A] | runDecomposition (buildRunPayload), withBidsSaveFields, syncBidsProject: the picked project, else the typed new name |
+| `setBidsProject` | [A] | setBidsEntitiesInput, showEditSession (the file's project), resetEditState (empty, "+ New project…"): the field and `state.edit.project` together; an unlisted project is added to the dropdown |
+| `syncBidsProject` | [A] | setBidsProject, the Project fields' input listeners: the new-name row, `state.edit.project`, and the pick kept in `localStorage` |
+| `loadProjects` | [A] | initializeApp: fills the dropdown from `GET /projects`, on the last project picked |
 | `resetSessionForm` | [A] | qc-stage.handleRawFilePath (the entity fields back to their defaults) |
 | `getBidsMuscleNames` | [A] | autoSaveRunDecomposition, saveEditedFile, readSessionForm |
 | `setUploadLoading` | [A] | import-stage, qc.js requestPreview, loadDecompositionForEdit |

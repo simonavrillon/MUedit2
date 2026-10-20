@@ -38,6 +38,23 @@ class TestProjects:
         assert config.project_of(tmp_path / "data") == ""
         assert config.project_of(tmp_path / "elsewhere" / "study1") == ""
 
+    def test_list_projects_keeps_the_bids_datasets(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        for name in ["study2", "study1", ".hidden"]:
+            (tmp_path / name).mkdir()
+            (tmp_path / name / "dataset_description.json").write_text("{}")
+        (tmp_path / "Intan").mkdir()
+        (tmp_path / "recording.otb4").write_text("")
+        monkeypatch.setattr(config, "DATA_ROOT", tmp_path)
+        assert config.list_projects() == ["study1", "study2"]
+
+    def test_list_projects_is_empty_without_a_data_root(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        monkeypatch.setattr(config, "DATA_ROOT", tmp_path / "missing")
+        assert config.list_projects() == []
+
 
 class TestDataRoot:
     def test_the_env_override_comes_first(

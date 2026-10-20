@@ -16,6 +16,7 @@ import {
   isSegmentChosen,
   segmentAt,
   segmentGlyph,
+  segmentTypes,
   toggleSegment,
 } from "../signal/segments.js";
 import { getCurrentGrid } from "../state/selectors.js";
@@ -96,11 +97,63 @@ export function renderArtifactControls(els, state) {
   }
 }
 
+/**
+ * Sync the segment-type picker with state: a type is ticked when the windows
+ * cover all its segments, half-ticked when they cover some. The rows are
+ * rebuilt only when the types change, so a ticked box keeps focus.
+ *
+ * @param {Els} els
+ * @param {State} state
+ */
+export function renderSegmentTypes(els, state) {
+  const btn = els.segmentTypeBtn;
+  const menu = els.segmentTypeMenu;
+  if (!btn || !menu) return;
+  const types = segmentTypes(state);
+  btn.disabled = !types.length;
+  const picked = types.filter((t) => t.chosen === t.count);
+  btn.textContent = !types.length
+    ? "No segments"
+    : picked.map((t) => `${t.glyph} ${t.type}`).join(" + ") || "Segment types";
+  if (!types.length) {
+    menu.hidden = true;
+    btn.setAttribute("aria-expanded", "false");
+  }
+  const key = types.map((t) => `${t.type}:${t.count}`).join(",");
+  if (menu.dataset.types !== key) {
+    menu.dataset.types = key;
+    menu.innerHTML = "";
+    for (const t of types) {
+      const row = document.createElement("label");
+      row.className = "segment-picker-row";
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.value = t.type;
+      const glyph = document.createElement("span");
+      glyph.className = "segment-picker-glyph";
+      glyph.dataset.kind = t.kind;
+      glyph.textContent = t.glyph;
+      const name = document.createElement("span");
+      name.textContent = `${t.type} (${t.count})`;
+      row.appendChild(box);
+      row.appendChild(glyph);
+      row.appendChild(name);
+      menu.appendChild(row);
+    }
+  }
+  types.forEach((t, i) => {
+    const box = /** @type {HTMLInputElement} */ (menu.children[i].children[0]);
+    box.checked = t.chosen === t.count;
+    box.indeterminate = t.chosen > 0 && t.chosen < t.count;
+  });
+}
+
 /** @param {App} app */
 export function refreshVisuals(app) {
   const { state, els, renderAuxiliaryChannels } = app;
   const selections = buildSelections(state);
   renderArtifactControls(els, state);
+  renderSegmentTypes(els, state);
   drawGridOverlay(
     els.emgCanvas,
     state.gridSeries,

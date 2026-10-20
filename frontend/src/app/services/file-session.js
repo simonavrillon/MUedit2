@@ -27,6 +27,9 @@ import {
 /** @typedef {import("../context.js").App} App */
 /** @typedef {import("../context.js").FileSessionService} FileSessionService */
 
+/** The project last picked in the Project field, kept across visits. */
+const LAST_PROJECT_KEY = "muedit.project";
+
 /**
  * @param {App} app
  * @returns {import("../context.js").FileSessionService}
@@ -34,15 +37,53 @@ import {
 export function createFileSessionService(app) {
   const { els, state, api } = app;
 
+  // The "New project…" option has the empty value: its name is typed below.
   /** @type {FileSessionService["getBidsProject"]} */
   function getBidsProject() {
-    return (els.bidsProject?.value || "").trim();
+    const project = els.bidsProject?.value || els.bidsProjectNew?.value || "";
+    return project.trim();
   }
 
   /** @type {FileSessionService["setBidsProject"]} */
   function setBidsProject(project) {
-    if (els.bidsProject) els.bidsProject.value = project;
-    setEditProject(state, project);
+    const select = els.bidsProject;
+    if (select) {
+      const listed = Array.from(select.options, (option) => option.value);
+      if (project && !listed.includes(project)) {
+        select.add(new Option(project, project), select.options.length - 1);
+      }
+      select.value = project;
+    }
+    if (els.bidsProjectNew) els.bidsProjectNew.value = "";
+    syncBidsProject();
+  }
+
+  /** @type {FileSessionService["syncBidsProject"]} */
+  function syncBidsProject() {
+    const picked = els.bidsProject?.value || "";
+    els.bidsProjectNewRow?.classList.toggle("hidden", !!picked);
+    setEditProject(state, getBidsProject());
+    try {
+      if (picked) localStorage.setItem(LAST_PROJECT_KEY, picked);
+    } catch {
+      // storage blocked: the field starts on the first project next time
+    }
+  }
+
+  /** @type {FileSessionService["loadProjects"]} */
+  async function loadProjects() {
+    const { projects = [] } = await api.listProjects();
+    let last = "";
+    try {
+      last = localStorage.getItem(LAST_PROJECT_KEY) || "";
+    } catch {
+      // storage blocked
+    }
+    els.bidsProject?.replaceChildren(
+      ...projects.map((/** @type {string} */ name) => new Option(name, name)),
+      new Option("+ New project…", ""),
+    );
+    setBidsProject(projects.includes(last) ? last : projects[0] || "");
   }
 
   /** @type {FileSessionService["resetSessionForm"]} */
@@ -133,7 +174,10 @@ export function createFileSessionService(app) {
   function setBidsEntitiesInput(entities) {
     if (els.bidsSubject && entities.subject)
       els.bidsSubject.value = entities.subject;
-    if (els.bidsTask && entities.task) els.bidsTask.value = entities.task;
+    if (els.bidsTask && entities.task) {
+      els.bidsTask.value = entities.task;
+      els.bidsTask.dataset.keep = "1";
+    }
     if (els.bidsSession && entities.session)
       els.bidsSession.value = entities.session;
     if (els.bidsAcquisition && entities.acq)
@@ -222,7 +266,7 @@ export function createFileSessionService(app) {
       )
     );
     return [
-      els.bidsProject,
+      els.bidsProject?.value ? els.bidsProject : els.bidsProjectNew,
       els.bidsSubject,
       els.bidsSession,
       els.bidsTask,
@@ -319,6 +363,8 @@ export function createFileSessionService(app) {
   return {
     getBidsProject,
     setBidsProject,
+    syncBidsProject,
+    loadProjects,
     resetSessionForm,
     getBidsMuscleNames,
     collectBidsEntities,

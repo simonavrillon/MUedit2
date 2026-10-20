@@ -36,6 +36,17 @@ def resolve_bids_root(project: str | None) -> Path:
     return DATA_ROOT / name
 
 
+def list_projects() -> list[str]:
+    """The folders under DATA_ROOT that hold a BIDS dataset, sorted by name."""
+    if not DATA_ROOT.is_dir():
+        return []
+    return sorted(
+        folder.name
+        for folder in DATA_ROOT.iterdir()
+        if not folder.name.startswith(".") and (folder / "dataset_description.json").is_file()
+    )
+
+
 def project_of(bids_root: Path) -> str:
     """The project folder ``bids_root`` lies in under ``DATA_ROOT``, or ``""`` outside it."""
     try:

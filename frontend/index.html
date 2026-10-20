@@ -189,9 +189,15 @@
                 </div>
                 <div class="form-row">
                   <label for="bidsProject">Project</label>
+                  <select id="bidsProject">
+                    <option value="">+ New project…</option>
+                  </select>
+                </div>
+                <div class="form-row" id="bidsProjectNewRow">
+                  <label for="bidsProjectNew">New project</label>
                   <input
                     type="text"
-                    id="bidsProject"
+                    id="bidsProjectNew"
                     placeholder="e.g. study1"
                   />
                 </div>
@@ -242,6 +248,7 @@
                     <option value="ramp up"></option>
                     <option value="ramp down"></option>
                     <option value="trapezoid"></option>
+                    <option value="triangle"></option>
                     <option value="stairs"></option>
                     <option value="sinusoid"></option>
                     <option value="dynamic"></option>
@@ -596,8 +603,29 @@
                     </div>
                     <div class="chart-card glass">
                       <div class="chart-title">Auxiliary channels</div>
-                      <div class="form-row slim aux-selector-row">
+                      <div class="form-row aux-selector-row">
                         <select id="auxSelector"></select>
+                        <div class="segment-picker">
+                          <button
+                            class="segment-picker-btn"
+                            id="segmentTypeBtn"
+                            type="button"
+                            aria-haspopup="true"
+                            aria-expanded="false"
+                            aria-controls="segmentTypeMenu"
+                            title="Choose every segment of a type"
+                            disabled
+                          >
+                            No segments
+                          </button>
+                          <div
+                            class="segment-picker-menu"
+                            id="segmentTypeMenu"
+                            role="group"
+                            aria-label="Segment types"
+                            hidden
+                          ></div>
+                        </div>
                       </div>
                       <canvas id="auxCanvas" height="120"></canvas>
                     </div>

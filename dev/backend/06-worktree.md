@@ -155,9 +155,10 @@ Use this to trace what the user can reach.
 | `errors.http_exception_handler` | App-internal | Registered on app |
 | `errors.validation_exception_handler` | App-internal | Registered on app |
 | `errors.unhandled_exception_handler` | App-internal | Registered on app |
-| `config.DATA_ROOT` | App-internal | Used by `resolve_bids_root`, `project_of` |
+| `config.DATA_ROOT` | App-internal | Used by `resolve_bids_root`, `list_projects`, `project_of` |
 | `config.default_data_root()` | App-internal | Sets `DATA_ROOT` at import |
 | `config.resolve_bids_root()` | App-internal | Called through `common.bids_root_for()` and the edit session |
+| `config.list_projects()` | App-internal | Called by `GET /projects` |
 | `config.project_of()` | App-internal | Called by preview and edit services |
 | `common.bids_root_for()` | App-internal | Called by the decompose route and the edit saves (400 on a bad project) |
 | `common.make_json_safe()` | App-internal | Called by many services |

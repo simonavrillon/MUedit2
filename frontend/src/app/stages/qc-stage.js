@@ -17,11 +17,15 @@ import {
   setCurrentGrid,
 } from "../../state/actions.js";
 import { oncePerFrame } from "../../view/plots.js";
-import { requestSegmentation } from "../../signal/segments.js";
+import {
+  chooseSegmentType,
+  requestSegmentation,
+} from "../../signal/segments.js";
 import { getCurrentGrid } from "../../state/selectors.js";
 
 /** @typedef {import("../context.js").App} App */
 /** @typedef {import("../context.js").QcStage} QcStage */
+/** @typedef {import("../context.js").Els} Els */
 
 /**
  * @param {App} app
@@ -122,6 +126,33 @@ function removeLastArtifact(app) {
   );
 }
 
+/**
+ * @param {Els} els
+ * @param {boolean} open
+ */
+function setSegmentMenuOpen(els, open) {
+  if (!els.segmentTypeMenu) return;
+  els.segmentTypeMenu.hidden = !open;
+  els.segmentTypeBtn?.setAttribute("aria-expanded", String(open));
+}
+
+/**
+ * Choose or drop every segment of the type a picker box names.
+ *
+ * @param {App} app
+ * @param {HTMLInputElement} box
+ */
+function chooseTypeFromBox(app, box) {
+  const { els, state } = app;
+  const count = chooseSegmentType(state, box.value, box.checked);
+  if (els.nwindows) els.nwindows.value = String(Math.max(1, count));
+  app.ensureQcTraces();
+  app.refreshVisuals();
+  app.setStatus(
+    `${box.checked ? "Added" : "Removed"} ${box.value}s — ${count} window${count === 1 ? "" : "s"}`,
+  );
+}
+
 /** @param {App} app */
 export function setupQcEvents(app) {
   const { els, state } = app;
@@ -131,6 +162,24 @@ export function setupQcEvents(app) {
     "click",
     () => void requestSegmentation(app),
   );
+  els.segmentTypeBtn?.addEventListener("click", () =>
+    setSegmentMenuOpen(els, !!els.segmentTypeMenu?.hidden),
+  );
+  els.segmentTypeMenu?.addEventListener("change", (e) =>
+    chooseTypeFromBox(app, /** @type {HTMLInputElement} */ (e.target)),
+  );
+  window.addEventListener("pointerdown", (e) => {
+    const target = /** @type {Node} */ (e.target);
+    if (target !== els.segmentTypeBtn && !els.segmentTypeMenu?.contains(target))
+      setSegmentMenuOpen(els, false);
+  });
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") setSegmentMenuOpen(els, false);
+  });
+  // A task typed in stays when the target is segmented.
+  els.bidsTask?.addEventListener("input", () => {
+    els.bidsTask.dataset.keep = "1";
+  });
   els.artifactAddBtn?.addEventListener("click", () => toggleArtifactMode(app));
   els.artifactRemoveBtn?.addEventListener("click", () =>
     removeLastArtifact(app),

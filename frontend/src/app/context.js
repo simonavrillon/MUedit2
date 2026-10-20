@@ -63,7 +63,9 @@
 /**
  * @typedef {object} FileSessionService
  * @property {() => string} getBidsProject
- * @property {(project: string) => void} setBidsProject The Project field, and the edit session's project with it.
+ * @property {(project: string) => void} setBidsProject The Project field, and the edit session's project with it; `""` picks "New project…".
+ * @property {() => void} syncBidsProject After the Project field changes: the new-name row, the edit session's project and the remembered pick.
+ * @property {() => Promise<void>} loadProjects Fill the Project field with the output folder's projects, on the last one picked.
  * @property {(fileName: string) => void} resetSessionForm The entity fields back to their defaults for a new raw file.
  * @property {() => string[]} getBidsMuscleNames
  * @property {() => JsonObject} collectBidsEntities

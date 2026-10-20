@@ -9,6 +9,15 @@ import { MIN_ROI_S } from "../config.js";
 /** @typedef {import("../app/context.js").Span} Span */
 /** @typedef {import("../state/state.js").State} State */
 /** @typedef {import("../state/state.js").TargetSegment} TargetSegment */
+/** @typedef {import("../state/state.js").SegmentKind} SegmentKind */
+
+const SEGMENT_TYPES = [
+  "up ramp",
+  "down ramp",
+  "plateau",
+  "sinusoid",
+  "irregular",
+];
 
 /**
  * @param {TargetSegment} seg
@@ -19,11 +28,19 @@ export function segmentGlyph(seg) {
 }
 
 /**
+ * The segment's kind, with ramps split by direction, e.g. "up ramp".
+ *
+ * @param {TargetSegment} seg
+ */
+export function segmentType(seg) {
+  return seg.kind === "ramp" ? `${seg.direction} ramp` : seg.kind;
+}
+
+/**
  * @param {TargetSegment} seg
  */
 function segmentLabel(seg) {
-  const name = seg.kind === "ramp" ? `${seg.direction} ramp` : seg.kind;
-  return `${segmentGlyph(seg)} ${name}`;
+  return `${segmentGlyph(seg)} ${segmentType(seg)}`;
 }
 
 /**
@@ -65,8 +82,29 @@ export function segmentAt(segments, sample) {
 }
 
 /**
- * Choose segment `idx`, or drop it when chosen: chosen segments that touch
- * merge into one window, and dropping one from inside a window splits it.
+ * Choose `segs`, or drop them: chosen segments that touch merge into one
+ * window, and dropping one from inside a window splits it.
+ *
+ * @param {State} state
+ * @param {TargetSegment[]} segs
+ * @param {boolean} on
+ * @returns {number} How many windows are drawn now.
+ */
+function chooseSegments(state, segs, on) {
+  const drawn = drawnRois(state);
+  const minLength = MIN_ROI_S * (state.fsamp || 0);
+  const next = on
+    ? unionSpans([...drawn, ...segs])
+    : segs.reduce((spans, seg) => subtractSpan(spans, seg, minLength), drawn);
+  setRois(
+    state,
+    next.length ? next : [{ start: 0, end: state.seriesLength || 0 }],
+  );
+  return next.length;
+}
+
+/**
+ * Choose segment `idx`, or drop it when chosen.
  *
  * @param {State} state
  * @param {number} idx
@@ -74,16 +112,66 @@ export function segmentAt(segments, sample) {
  */
 export function toggleSegment(state, idx) {
   const seg = state.segments[idx];
-  const drawn = drawnRois(state);
-  const minLength = MIN_ROI_S * (state.fsamp || 0);
-  const next = isCovered(drawn, seg)
-    ? subtractSpan(drawn, seg, minLength)
-    : unionSpans([...drawn, seg]);
-  setRois(
-    state,
-    next.length ? next : [{ start: 0, end: state.seriesLength || 0 }],
-  );
-  return next.length;
+  return chooseSegments(state, [seg], !isSegmentChosen(state, seg));
+}
+
+/**
+ * Choose every segment of `type`, or drop them all.
+ *
+ * @param {State} state
+ * @param {string} type
+ * @param {boolean} on
+ * @returns {number} How many windows are drawn now.
+ */
+export function chooseSegmentType(state, type, on) {
+  const segs = state.segments.filter((s) => segmentType(s) === type);
+  return chooseSegments(state, segs, on);
+}
+
+/**
+ * The segment types present, in a fixed order, with how many of each the windows cover.
+ *
+ * @param {State} state
+ * @returns {{ type: string, kind: SegmentKind, glyph: string, count: number, chosen: number }[]}
+ */
+export function segmentTypes(state) {
+  return SEGMENT_TYPES.flatMap((type) => {
+    const segs = state.segments.filter((s) => segmentType(s) === type);
+    if (!segs.length) return [];
+    return [
+      {
+        type,
+        kind: segs[0].kind,
+        glyph: segmentGlyph(segs[0]),
+        count: segs.length,
+        chosen: segs.filter((s) => isSegmentChosen(state, s)).length,
+      },
+    ];
+  });
+}
+
+/**
+ * The BIDS task the segments' order describes, e.g. "trapezoid"; irregular
+ * blocks are skipped unless they are all there is.
+ *
+ * @param {TargetSegment[]} segments
+ */
+export function inferTask(segments) {
+  if (segments.some((s) => s.kind === "sinusoid")) return "sinusoid";
+  // One letter per segment: Up ramp, Down ramp, Plateau.
+  const order = segments
+    .map(
+      (s) =>
+        ({ "up ramp": "U", "down ramp": "D", plateau: "P" })[segmentType(s)],
+    )
+    .join("");
+  const steps = order.match(/UP/g)?.length ?? 0;
+  if (/^[UP]*$/.test(order) && steps >= 2) return "stairs";
+  if (/^(UD)+$/.test(order)) return "triangle";
+  if (/^(UPD)+$/.test(order)) return "trapezoid";
+  if (/^[UP]*U[UP]*$/.test(order)) return "ramp up";
+  if (/^[DP]*D[DP]*$/.test(order)) return "ramp down";
+  return "dynamic";
 }
 
 /**
@@ -154,13 +242,19 @@ export async function requestSegmentation(app) {
     );
     const segments = toSegments(data?.segments);
     setSegments(state, segments);
+    // A task typed in, or read from the file, stays.
+    const task =
+      els.bidsTask && !els.bidsTask.dataset.keep && segments.length
+        ? inferTask(segments)
+        : null;
+    if (task) els.bidsTask.value = task;
     setTargetIndex(state, data?.target_index);
     if (els.auxSelector && state.targetIndex !== null) {
       els.auxSelector.value = String(state.targetIndex);
     }
     app.refreshVisuals();
     setStatus(
-      `${data?.target_name ?? "Target"}: ${summarize(segments)}. Click the windows to decompose`,
+      `${data?.target_name ?? "Target"}: ${summarize(segments)}.${task ? ` Task set to ${task}.` : ""} Click the windows to decompose`,
       "success",
     );
     return true;

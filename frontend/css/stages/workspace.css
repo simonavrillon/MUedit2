@@ -467,15 +467,101 @@
   grid-template-columns: auto 160px;
 }
 
+/* The channel and segment-type pickers split the plot's width. */
 .aux-selector-row {
+  grid-template-columns: 1fr 1fr;
   margin-bottom: 8px;
 }
 
 /* Reads as the plot's heading, like the chart titles. */
-.form-row.aux-selector-row select {
+.form-row.aux-selector-row select,
+.segment-picker-btn {
   color: var(--muted);
   font-size: var(--fs-sm);
   font-weight: var(--fw-semibold);
+}
+
+.segment-picker {
+  position: relative;
+  min-width: 0;
+}
+
+/* Drawn like the select beside it. */
+.segment-picker-btn {
+  width: 100%;
+  background: var(--surface)
+    conic-gradient(
+      from 315deg at 50% 100%,
+      var(--muted) 0 90deg,
+      transparent 90deg
+    )
+    no-repeat calc(100% - 18px) center / 10px 5px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 28px 8px 10px;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.segment-picker-btn:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.segment-picker-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 10;
+  display: grid;
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.segment-picker-menu[hidden] {
+  display: none;
+}
+
+.segment-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.segment-picker-row:hover {
+  background: var(--surface-active);
+}
+
+.segment-picker-glyph {
+  width: 1em;
+  text-align: center;
+}
+
+.segment-picker-glyph[data-kind="ramp"] {
+  color: var(--plot-ramp-stroke);
+}
+
+.segment-picker-glyph[data-kind="plateau"] {
+  color: var(--plot-plateau-stroke);
+}
+
+.segment-picker-glyph[data-kind="sinusoid"] {
+  color: var(--plot-sinusoid-stroke);
+}
+
+.segment-picker-glyph[data-kind="irregular"] {
+  color: var(--plot-irregular-stroke);
 }
 
 .form-row label {
