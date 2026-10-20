@@ -87,17 +87,6 @@ def score_pairs(
     return candidates
 
 
-def best_per_detected(candidates: list[Match]) -> list[Match]:
-    """Give every detected MU its highest-RoA reference, without exclusivity."""
-    best: dict[int, Match] = {}
-    for match in candidates:
-        det_idx, roa = match[0], match[4]
-        current = best.get(det_idx)
-        if current is None or roa > current[4]:
-            best[det_idx] = match
-    return [best[k] for k in sorted(best)]
-
-
 def greedy_one_to_one(candidates: list[Match], roa_threshold: float) -> list[Match]:
     """Greedily select one-to-one matches from all candidate pairs."""
     ordered = sorted(candidates, key=lambda m: m[4], reverse=True)
@@ -116,13 +105,6 @@ def greedy_one_to_one(candidates: list[Match], roa_threshold: float) -> list[Mat
 
 
 # ── ROI / signal shaping shared by the decomposition test modules ────────────
-
-
-def central_roi(data: np.ndarray, fsamp: float, width_sec: float) -> tuple[int, int]:
-    """Return the (start, end) sample indices of the central ``width_sec`` window."""
-    center = data.shape[1] // 2
-    half = int(round(width_sec / 2.0 * fsamp))
-    return (center - half, center + half)
 
 
 def filter_to_roi(spike_times: list[np.ndarray], roi: tuple[int, int]) -> list[np.ndarray]:

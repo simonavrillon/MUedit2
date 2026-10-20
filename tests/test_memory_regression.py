@@ -8,7 +8,6 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-import h5py
 import numpy as np
 import pytest
 import scipy.io
@@ -52,9 +51,8 @@ EXT_WINDOW_MB = EXT_ROWS * ROI_SAMPLES * 8 / 1e6
 # smallest full-size array the stage must materialise.  The factors are the
 # tracemalloc baseline on this input plus 25% headroom; re-measure when a change
 # lowers them. A factor that grows means the stage started keeping an
-# extra full copy.  ``load`` reads a v5 .mat, which scipy can only read whole;
-# ``load_store`` reads the same recording as v7.3 into a store, slice by slice.
-# Loaded, filtered and pulse arrays are memory-mapped in session stores, and
+# extra full copy.  ``load`` reads a v5 .mat, which scipy can only read whole
+# (test_io_factory checks that sliced loads into a store hold no full copy). Loaded, filtered and pulse arrays are memory-mapped in session stores, and
 # edit_load opens a server-side edit session that holds little more than the
 # float32 pulse frame. Full-trace and adaptive stream the recording: full-trace
 # holds one ~64 MB batch, adaptive one calibration chunk; their pulse trains are
@@ -66,7 +64,6 @@ EXT_WINDOW_MB = EXT_ROWS * ROI_SAMPLES * 8 / 1e6
 
 BUDGETS_MB: dict[str, float] = {
     "load": 1.9 * RAW_MB,
-    "load_store": 0.35 * RAW_MB,
     "preview": 0.65 * RAW_MB,
     "series": 2.0,
     "qc_auto": 3.2 * RAW_MB,
@@ -141,20 +138,6 @@ def mat_path(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 
 @pytest.fixture(scope="session")
-def mat73_path(mat_path: Path) -> Path:
-    """The same recording as a v7.3 (HDF5) ``.mat``, which loaders read by slices."""
-    data = scipy.io.loadmat(str(mat_path))["signal"]["data"][0, 0]
-    path = mat_path.with_name("mid_size_v73.mat")
-    with h5py.File(path, "w") as f:
-        group = f.create_group("signal")
-        group.create_dataset("data", data=data.T)
-        group.create_dataset("fsamp", data=np.array([[FSAMP]]))
-        name = np.frombuffer(GRID_NAME.encode(), dtype=np.uint8).astype(np.uint16)
-        group.create_dataset("gridname", data=name.reshape(-1, 1))
-    return path
-
-
-@pytest.fixture(scope="session")
 def run_store() -> SessionStore:
     """The T1 folder a decompose run writes its filtered EMG and pulse trains into."""
     return SessionStore.create("memory-regression")
@@ -180,8 +163,7 @@ def prepared(mat_path: Path, upload_token: str, run_store: SessionStore) -> Any:
         loaded=loaded,
         duration=None,
         manual_roi=False,
-        roi=ROI,
-        rois=None,
+        rois=[ROI],
         params=DecompositionParameters(niter=NITER),
         discard_overrides=None,
         store=run_store,
@@ -219,7 +201,7 @@ def saved_decomposition(mat_path: Path, tmp_path_factory: pytest.TempPathFactory
     """A saved decomposition (NPZ with embedded EMG) for the edit stages."""
     result = run_decomposition(
         str(mat_path),
-        roi=ROI,
+        rois=[ROI],
         params=DecompositionParameters(niter=NITER),
         save_npz=True,
     )
@@ -239,16 +221,6 @@ def test_load_stage(mat_path: Path) -> None:
     signal, peak = _peak_mb(lambda: load_signal(str(mat_path)))
     assert signal.data.shape == (N_CHANNELS, N_SAMPLES)
     _check("load", peak)
-
-
-def test_load_store_stage(mat73_path: Path) -> None:
-    """A v7.3 file goes into the session store by slices: no full-size heap copy."""
-    store = SessionStore.create("memory-regression-load")
-    signal, peak = _peak_mb(lambda: load_signal(str(mat73_path), store=store))
-    assert signal.data.shape == (N_CHANNELS, N_SAMPLES)
-    assert signal.nbytes == 0
-    store.close()
-    _check("load_store", peak)
 
 
 def test_preview_stage(mat_path: Path) -> None:
@@ -289,8 +261,7 @@ def test_preprocess_stage(mat_path: Path, upload_token: str, run_store: SessionS
             loaded=loaded,
             duration=None,
             manual_roi=False,
-            roi=ROI,
-            rois=None,
+            rois=[ROI],
             params=DecompositionParameters(niter=NITER),
             discard_overrides=None,
             store=run_store,

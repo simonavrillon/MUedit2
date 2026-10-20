@@ -18,8 +18,6 @@ from muedit.api.routes import include_routers
 from muedit.app_log import log_to_file
 from muedit.decomp.pipeline import run_decomposition
 from muedit.decomp.types import (
-    DEFAULT_NBEXTCHAN,
-    DEFAULT_PEEL_OFF_WIN_SEC,
     DEFAULT_POSTPROCESS_MODE,
     POSTPROCESS_MODES,
     ComputeDtype,
@@ -28,31 +26,24 @@ from muedit.decomp.types import (
 )
 from muedit.errors import MueditError
 from muedit.io.factory import supported_extensions
-from muedit.paths import frontend_dir, log_dir, repo_root
+from muedit.paths import frontend_dir, log_dir
 
 _DEFAULT_PARAMS = DecompositionParameters()
 
 
-def _parse_roi_arg(value: str) -> tuple[int, int]:
-    """Parse a single ROI argument in ``start,end`` sample format."""
-    parts = value.split(",")
-    if len(parts) != 2:
-        raise argparse.ArgumentTypeError("ROI must be 'start,end' in samples.")
-    try:
-        start = int(parts[0].strip())
-        end = int(parts[1].strip())
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError("ROI values must be integers.") from exc
-    return start, end
-
-
-def _parse_roi_args(value: str) -> list[tuple[int, int]]:
-    """Parse multiple ROI ranges separated by ``;``."""
+def _parse_rois(value: str) -> list[tuple[int, int]]:
+    """Parse ``start,end`` sample ranges separated by ``;``."""
     rois: list[tuple[int, int]] = []
     for part in value.split(";"):
         if not part.strip():
             continue
-        rois.append(_parse_roi_arg(part))
+        bounds = part.split(",")
+        if len(bounds) != 2:
+            raise argparse.ArgumentTypeError("ROI must be 'start,end' in samples.")
+        try:
+            rois.append((int(bounds[0].strip()), int(bounds[1].strip())))
+        except ValueError as exc:
+            raise argparse.ArgumentTypeError("ROI values must be integers.") from exc
     if not rois:
         raise argparse.ArgumentTypeError("ROIs must include at least one 'start,end'.")
     return rois
@@ -68,7 +59,7 @@ def serve_api() -> None:
     log_to_file(log_dir() / "muedit.log")
     # /preview-by-path reads any local path, so only this machine's frontend may call it.
     host = os.environ.get("MUEDIT_HOST", "127.0.0.1")
-    port = int(os.environ.get("MUEDIT_PORT") or os.environ.get("MUEDIT_BACKEND_PORT", "8000"))
+    port = int(os.environ.get("MUEDIT_PORT", "8000"))
     app = create_app(allowed_hosts=LOOPBACK_HOSTS if host in LOOPBACK_HOSTS else None)
     include_routers(app)
     frontend = frontend_dir()
@@ -85,13 +76,14 @@ def run_decomposition_cli(argv: list[str] | None = None) -> None:
             format="%(asctime)s %(levelname)s %(name)s: %(message)s",
         )
 
-    parser = argparse.ArgumentParser(description="Run MUedit decomposition.")
+    parser = argparse.ArgumentParser(
+        prog="muedit decompose", description="Run MUedit decomposition."
+    )
     parser.add_argument(
         "filepath",
-        nargs="?",
         help=(
             f"Recording file ({', '.join(supported_extensions())}) or a BIDS EMG, Intan or "
-            "Open Ephys recording folder. If omitted, uses sample data."
+            "Open Ephys recording folder."
         ),
     )
     parser.add_argument(
@@ -106,33 +98,27 @@ def run_decomposition_cli(argv: list[str] | None = None) -> None:
         help="Select ROI interactively with a plot.",
     )
     parser.add_argument(
-        "--roi",
-        type=_parse_roi_arg,
-        default=None,
-        help="Single ROI in samples: 'start,end'.",
-    )
-    parser.add_argument(
         "--rois",
-        type=_parse_roi_args,
+        type=_parse_rois,
         default=None,
-        help="Multiple ROIs in samples: 'start,end;start,end'.",
+        help="ROIs in samples: 'start,end' or 'start,end;start,end'.",
     )
     parser.add_argument(
         "--niter",
         type=int,
-        default=150,
+        default=_DEFAULT_PARAMS.niter,
         help="Iterations (app setting: Iterations).",
     )
     parser.add_argument(
         "--nwindows",
         type=int,
-        default=1,
+        default=_DEFAULT_PARAMS.nwindows,
         help="Analysis windows count (app setting: Analysis windows).",
     )
     parser.add_argument(
         "--duplicatesthresh",
         type=float,
-        default=0.3,
+        default=_DEFAULT_PARAMS.duplicatesthresh,
         help="Duplicate-removal threshold (app setting: Duplicates thresh).",
     )
     parser.add_argument(
@@ -150,13 +136,13 @@ def run_decomposition_cli(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--cov-thr",
         type=float,
-        default=0.5,
+        default=_DEFAULT_PARAMS.cov_thr,
         help="COV threshold (app setting: COV threshold).",
     )
     parser.add_argument(
-        "--cov-filter",
+        "--covfilter",
         action=argparse.BooleanOptionalAction,
-        default=False,
+        default=_DEFAULT_PARAMS.covfilter,
         help="Enable/disable COV filter (app setting: COV tool).",
     )
     parser.add_argument(
@@ -179,16 +165,16 @@ def run_decomposition_cli(argv: list[str] | None = None) -> None:
         help="Seed each ICA filter randomly instead of from the most active sample.",
     )
     parser.add_argument(
-        "--peel-off",
+        "--peel-off-enabled",
         action=argparse.BooleanOptionalAction,
-        default=False,
+        default=_DEFAULT_PARAMS.peel_off_enabled,
         help="Enable/disable peel-off (app setting: Peeloff).",
     )
     parser.add_argument(
-        "--peel-off-window-ms",
+        "--peel-off-win",
         type=float,
-        default=DEFAULT_PEEL_OFF_WIN_SEC * 1000,
-        help="Peel-off window in milliseconds (app setting: Window (ms)).",
+        default=_DEFAULT_PARAMS.peel_off_win,
+        help="Peel-off window in seconds (app setting: Window (ms), divided by 1000).",
     )
     parser.add_argument(
         "--postprocess",
@@ -247,7 +233,7 @@ def run_decomposition_cli(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--auto-mask-artifacts",
         action=argparse.BooleanOptionalAction,
-        default=False,
+        default=_DEFAULT_PARAMS.auto_mask_artifacts,
         help=("Enable/disable automatic QC pipeline (bad-channel detection and artifact masking)."),
     )
     parser.add_argument(
@@ -274,9 +260,6 @@ def run_decomposition_cli(argv: list[str] | None = None) -> None:
     )
     args = parser.parse_args(argv)
 
-    if args.roi and args.rois:
-        parser.error("Use either --roi or --rois, not both.")
-
     postprocess_flags = POSTPROCESS_MODES[args.postprocess]
     if args.bids_metadata and args.bids_metadata_file:
         parser.error("Use either --bids-metadata or --bids-metadata-file, not both.")
@@ -287,15 +270,14 @@ def run_decomposition_cli(argv: list[str] | None = None) -> None:
         params = DecompositionParameters(
             niter=args.niter,
             nwindows=args.nwindows,
-            nbextchan=DEFAULT_NBEXTCHAN,
             duplicatesthresh=args.duplicatesthresh,
             sil_thr=(float("-inf") if not args.sil_filter else args.sil_thr),
             cov_thr=args.cov_thr,
-            covfilter=args.cov_filter,
+            covfilter=args.covfilter,
             contrast_func=args.contrast_func,
             random_init=args.random_init,
-            peel_off_enabled=args.peel_off,
-            peel_off_win=args.peel_off_window_ms / 1000.0,
+            peel_off_enabled=args.peel_off_enabled,
+            peel_off_win=args.peel_off_win,
             use_adaptive=postprocess_flags["use_adaptive"],
             adapt_batch_ms=args.adapt_batch_ms,
             adapt_wh=args.adapt_wh,
@@ -312,31 +294,9 @@ def run_decomposition_cli(argv: list[str] | None = None) -> None:
     except ValueError as exc:
         parser.error(str(exc))
 
-    if args.filepath:
-        full_path = Path(args.filepath)
-        if not full_path.exists():
-            parser.error(f"File not found: {full_path}")
-        file_label = full_path.name
-    else:
-        checkout = repo_root()
-        if checkout is None:
-            parser.error("No input filepath provided, and no sample data outside a checkout.")
-        sample_dir = checkout / "data" / "datasamples"
-        if not sample_dir.exists():
-            parser.error(
-                f"No input filepath provided and sample directory is missing: {sample_dir}"
-            )
-        sample_candidates = sorted(
-            [
-                p
-                for p in sample_dir.iterdir()
-                if p.is_file() and p.suffix.lower() in {".mat", ".otb4", ".otb+"}
-            ]
-        )
-        if not sample_candidates:
-            parser.error("No input filepath provided and no sample file found in data/datasamples.")
-        full_path = sample_candidates[0]
-        file_label = full_path.name
+    full_path = Path(args.filepath)
+    if not full_path.exists():
+        parser.error(f"File not found: {full_path}")
 
     bids_entities = None
     bids_metadata = None
@@ -347,40 +307,32 @@ def run_decomposition_cli(argv: list[str] | None = None) -> None:
             "session": args.session,
             "run": args.run,
         }
-        if args.bids_metadata:
+        source, text = "--bids-metadata", args.bids_metadata
+        if args.bids_metadata_file:
+            source = "--bids-metadata-file"
             try:
-                parsed_meta = json.loads(args.bids_metadata)
-            except json.JSONDecodeError as exc:
-                parser.error(f"--bids-metadata must be valid JSON: {exc}")
-            if not isinstance(parsed_meta, dict):
-                parser.error("--bids-metadata must decode to a JSON object")
-            bids_metadata = parsed_meta
-        elif args.bids_metadata_file:
-            meta_path = Path(args.bids_metadata_file)
-            if not meta_path.exists():
-                parser.error(f"--bids-metadata-file not found: {meta_path}")
-            try:
-                parsed_meta = json.loads(meta_path.read_text(encoding="utf-8"))
-            except json.JSONDecodeError as exc:
-                parser.error(f"--bids-metadata-file must contain valid JSON: {exc}")
+                text = Path(args.bids_metadata_file).read_text(encoding="utf-8")
             except OSError as exc:
-                parser.error(f"Could not read --bids-metadata-file: {exc}")
-            if not isinstance(parsed_meta, dict):
-                parser.error("--bids-metadata-file must decode to a JSON object")
-            bids_metadata = parsed_meta
+                parser.error(f"Could not read {source}: {exc}")
+        if text is not None:
+            try:
+                bids_metadata = json.loads(text)
+            except json.JSONDecodeError as exc:
+                parser.error(f"{source} must be valid JSON: {exc}")
+            if not isinstance(bids_metadata, dict):
+                parser.error(f"{source} must decode to a JSON object")
 
     try:
         run_decomposition(
             str(full_path),
             duration=args.duration,
             manual_roi=args.manual_roi,
-            roi=args.roi,
             rois=args.rois,
             params=params,
             bids_root=args.bids_root,
             bids_entities=bids_entities,
             bids_metadata=bids_metadata,
-            file_label=file_label,
+            file_label=full_path.name,
         )
     except MueditError as exc:
         parser.exit(1, f"muedit: {exc}\n")

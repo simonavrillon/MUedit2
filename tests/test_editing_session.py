@@ -67,12 +67,6 @@ def pulse_trains() -> np.ndarray:
 
 
 @pytest.fixture()
-def cache_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    monkeypatch.setenv("MUEDIT_CACHE_DIR", str(tmp_path / "cache"))
-    return tmp_path / "cache"
-
-
-@pytest.fixture()
 def edit(pulse_trains: np.ndarray) -> Iterator[EditSession]:
     session = _session([spike_train(10.0, seed=s).tolist() for s in (1, 2, 3)], pulse_trains.copy())
     yield session
@@ -161,7 +155,6 @@ def _decomposition_filtered(ctx: EditSignalContext) -> np.ndarray:
         loaded=LoadStepOutput("x", signal),
         duration=None,
         manual_roi=False,
-        roi=None,
         rois=None,
         params=DecompositionParameters(),
         discard_overrides=None,
@@ -666,7 +659,7 @@ def test_detach_copies_what_is_mapped_from_the_file(tmp_path: Path) -> None:
         fsamp=2048.0,
         total_samples=n_samples,
         spike_times=decomp.spike_times,
-        pulse_trains=decomp.pulse_trains_full,
+        pulse_trains=decomp.pulse_trains,
         mu_grid_index=decomp.mu_grid_index,
         mu_uids=["g0_mu0", "g0_mu1"],
         signal=ctx,

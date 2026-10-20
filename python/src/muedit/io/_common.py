@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from muedit.errors import SignalLoadError
-from muedit.models import _as_name_list
+from muedit.models import as_name_list
 
 #: Amplifier gain both supported acquisition systems record with (Intan RHD, Open Ephys board).
 _AMPLIFIER_GAIN = 192.0
@@ -26,8 +26,8 @@ def _read_grid_sidecar(sidecar: Path) -> tuple[list[str], list[str]]:
     except (OSError, json.JSONDecodeError) as exc:
         raise SignalLoadError(f"Cannot read grid sidecar {sidecar}: {exc}") from exc
     return (
-        _as_name_list(payload.get("grid_names") or payload.get("gridname")),
-        _as_name_list(payload.get("muscle_names") or payload.get("muscle")),
+        as_name_list(payload.get("grid_names") or payload.get("gridname")),
+        as_name_list(payload.get("muscle_names") or payload.get("muscle")),
     )
 
 
@@ -38,7 +38,7 @@ def _resolve_muscles(
     group_noun: str,
 ) -> list[str]:
     """Resolve per-group muscle labels: the argument wins over the sidecar, one label broadcasts."""
-    resolved = _as_name_list(muscle_names) or sidecar_muscle_names
+    resolved = as_name_list(muscle_names) or sidecar_muscle_names
     if len(resolved) == 1 and n_groups > 1:
         resolved = resolved * n_groups
     if resolved and len(resolved) != n_groups:

@@ -265,7 +265,7 @@ unknown key is a 422.
 
 ### Post-processing Mode Flags
 
-Mode keys match `POSTPROCESS_MODES` in `decomp/types.py` and the CLI `--postprocess` choices (checked by `tests/test_frontend_param_parity.py`).
+Mode keys match `POSTPROCESS_MODES` in `decomp/types.py` and the CLI `--postprocess` choices (checked by `tests/test_decomp_types.py`).
 
 | Mode | `use_adaptive` | `full_trace` |
 |---|---|---|

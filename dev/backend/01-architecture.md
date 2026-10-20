@@ -14,8 +14,7 @@
 
 | Script | Function | Purpose |
 |---|---|---|
-| `muedit-api` | `muedit.cli:serve_api` | Start the server: the API, and the frontend at `/` |
-| `muedit-decompose` | `muedit.cli:run_decomposition_cli` | Run decomposition from the command line |
+| `muedit` | `muedit.cli:main` | `muedit api` starts the server (the API, and the frontend at `/`); `muedit decompose` runs a decomposition from the command line |
 
 ### Dependencies
 
@@ -55,7 +54,7 @@ cli.serve_api()
         Cache-Control: no-cache so a pulled update is never stale
   → uvicorn.run(app, host, port)
       → host: MUEDIT_HOST env (default 127.0.0.1)
-      → port: MUEDIT_PORT or MUEDIT_BACKEND_PORT env (default 8000)
+      → port: MUEDIT_PORT env (default 8000)
       → log_level: warning, access_log: off
 ```
 
@@ -63,7 +62,7 @@ cli.serve_api()
 
 ```
 cli.run_decomposition_cli(argv)
-  → argparse: filepath, --duration, --roi, --rois, --niter, --sil-thr,
+  → argparse: filepath, --duration, --rois, --niter, --sil-thr,
               --postprocess (windowed|full-trace|adaptive),
               --bids-root, --subject, --task, --session, --run, etc.
   → decomp.pipeline.run_decomposition(filepath, ...)
@@ -76,18 +75,9 @@ cli.run_decomposition_cli(argv)
 
 ### `muedit.__init__`
 
-```python
-__all__ = [
-    "DecompositionParameters",   # decomp.types
-    "DecompositionResult",       # decomp.types
-    "load_signal",               # io.factory
-    "register_loader",           # io.factory
-    "run_decomposition",         # decomp.pipeline
-]
-```
-
-The names are imported on first use (module `__getattr__`), so `import muedit.paths`
-does not load SciPy.
+Exports only `installed_version()`, the package version the BIDS sidecars and the API
+report. Everything else is imported from its sub-package, so `import muedit.paths` does
+not load SciPy.
 
 ### Sub-package `__all__`
 
@@ -128,7 +118,7 @@ it, and it is passed as-is through the pipeline and the upload cache.
 | `aux_names` | `list[str]` | `[]` |
 | `metadata` | `dict[str, Any]` | `{}` |
 
-Methods: `clone()`, `readonly_view()`, `without_data()`, `nbytes` (property)
+Methods: `readonly_view()`, `without_data()`, `nbytes` (property)
 
 ### `EditSignalContext`
 EMG embedded in a decomposition file (`.mat`/`.npz`), built by
@@ -160,9 +150,9 @@ Decomposition state loaded from `.npz`/`.mat` for editing. Returned by `load_dec
 
 | Field | Type | Default |
 |---|---|---|
-| `pulse_trains_full` | `FloatArray` `(n_mu, total_samples)` | empty `(0, 0)` |
+| `pulse_trains` | `FloatArray` `(n_mu, total_samples)` | empty `(0, 0)` |
 | `spike_times` | `list[IntArray]` (one `spike_array` per MU) | `[]` |
-| `fsamp` | `float | None` | `None` |
+| `fsamp` | `float` (0.0 when the file does not record it) | `0.0` |
 | `grid_names` | `list[str]` | `[]` |
 | `total_samples` | `int` | `0` |
 | `mu_grid_index` | `list[int]` | `[]` |
@@ -297,7 +287,7 @@ save goes back into that dataset (`EditSession.bids_root`), wherever it lies.
 | `MUEDIT_DATA_ROOT` | `<repo>/data` | Output folder |
 | `MUEDIT_HOST` | `127.0.0.1` | Server bind host; `0.0.0.0` opens it to the network and drops the Host check |
 | `MUEDIT_PORT` | `8000` | Server bind port |
-| `MUEDIT_BACKEND_PORT` | `8000` | Fallback port; the launchers copy it into `MUEDIT_PORT` |
+| `MUEDIT_BACKEND_PORT` | `8000` | Read by the launchers only, which copy it into `MUEDIT_PORT` |
 | `MUEDIT_OPEN_BROWSER` | `1` | Open the browser once the server answers (launchers) |
 | `MUEDIT_LOG_FILE` | set by `serve_api` | The log file its spawned workers append to |
 | `MUEDIT_CACHE_DIR` | the per-user cache folder | Session stores, edit logs |

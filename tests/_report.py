@@ -97,22 +97,3 @@ def write_csvs() -> list[Path]:
                 writer.writerow({c: row.get(c, "") for c in cols})
         written.append(path)
     return written
-
-
-# ── Small summary helpers used by the recording call sites ───────────────────
-
-
-def describe(values: list[float]) -> dict[str, Any]:
-    """Return count/min/median/mean/max for a list of numbers."""
-    import numpy as np
-
-    if not values:
-        return {"n": 0, "min": None, "median": None, "mean": None, "max": None}
-    arr = np.asarray(values, dtype=float)
-    return {
-        "n": int(arr.size),
-        "min": float(arr.min()),
-        "median": float(np.median(arr)),
-        "mean": float(arr.mean()),
-        "max": float(arr.max()),
-    }

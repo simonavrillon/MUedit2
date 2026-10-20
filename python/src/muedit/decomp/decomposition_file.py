@@ -470,7 +470,7 @@ def _finish_decomposition(
     """Flatten per-grid layouts and fill what the file leaves out, for the edit stage.
 
     Without pulse trains in the file, ``binary_trains`` draws them from the discharge times;
-    otherwise ``pulse_trains_full`` is left empty.
+    otherwise ``pulse_trains`` is left empty.
     """
     if d.one_row_per_mu:
         pulse_trains, spike_times, mu_grid_index = (
@@ -516,9 +516,9 @@ def _finish_decomposition(
         mu_grid_index = [0] * len(spike_times)
 
     return LoadedDecomposition(
-        pulse_trains_full=pulse_matrix,
+        pulse_trains=pulse_matrix,
         spike_times=spike_times,
-        fsamp=d.fsamp,
+        fsamp=d.fsamp or 0.0,
         grid_names=grid_names,
         total_samples=int(total_samples or 0),
         mu_grid_index=mu_grid_index,
@@ -770,7 +770,7 @@ def load_decomposition(
 ) -> tuple[LoadedDecomposition, EditSignalContext | None]:
     """Read a .npz or .mat decomposition once: the decomposition, and its EMG context into ``store``.
 
-    ``binary_trains=False`` leaves ``pulse_trains_full`` empty for a file without pulse trains.
+    ``binary_trains=False`` leaves ``pulse_trains`` empty for a file without pulse trains.
     """
     store = store if store is not None else RamStore()
     ext = Path(filepath).suffix.lower()

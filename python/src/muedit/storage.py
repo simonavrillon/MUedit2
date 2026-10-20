@@ -98,7 +98,7 @@ class SessionStore:
         self._closing = False  # ``close`` was asked for; it runs once the last hold is released
 
     @classmethod
-    def create(cls, label: str = "session") -> SessionStore:
+    def create(cls, label: str) -> SessionStore:
         """A new, empty store folder owned by this process."""
         root = sessions_dir()
         root.mkdir(parents=True, exist_ok=True)

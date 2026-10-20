@@ -118,7 +118,6 @@ def _run_export(root: Path, sig: SignalImport, form: dict[str, Any]) -> Preproce
         loaded=loaded,
         duration=None,
         manual_roi=False,
-        roi=None,
         rois=None,
         params=DecompositionParameters(),
         discard_overrides=None,

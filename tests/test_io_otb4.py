@@ -39,7 +39,7 @@ def _synthetic(device: str) -> Expected:
     novecento = device == "Novecento+"
     if novecento:
         # 24-bit counts in int32 files, one per stream, scaled in float32.
-        scale = np.float32(5 / 2**24 * 1000 / 256)
+        scale = float(np.float32(5 / 2**24 * 1000 / 256))
         grids = otb4_frames(np.int32, 128).T.astype(np.float32) * scale
         aux = otb4_frames(np.int32, 1)[:, 0].astype(np.float32) * scale
     else:

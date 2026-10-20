@@ -239,8 +239,8 @@ shortcut in detail — read it when you want to know exactly what an option does
 the contents of each output file, which is what you want when you start
 analysing the results in your own scripts.
 
-MUedit also has two command-line entry points, for batch work and scripting:
-`muedit-api` starts just the backend, and `muedit-decompose` runs a
+MUedit also has a command line, for batch work and scripting:
+`muedit api` starts just the backend, and `muedit decompose` runs a
 decomposition without the interface.
 
 ## For developers

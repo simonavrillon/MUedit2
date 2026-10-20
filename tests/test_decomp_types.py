@@ -1,4 +1,4 @@
-"""Frontend decomposition defaults and mode names must match the Python owner."""
+"""``decomp.types`` owns the decomposition defaults and mode names: the frontend must match them."""
 
 from __future__ import annotations
 

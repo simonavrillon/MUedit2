@@ -97,7 +97,6 @@ def _resolve_rois(
     fsamp: float,
     duration: float | None,
     manual_roi: bool,
-    roi: tuple[int, int] | None,
     rois: list[tuple[int, int]] | None,
     nwindows: int = 1,
 ) -> list[tuple[int, int]]:
@@ -114,10 +113,9 @@ def _resolve_rois(
             nwindows,
             n_rois,
         )
-    requested = rois or ([roi] if roi else [])
-    if requested:
+    if rois:
         resolved = []
-        for r in requested:
+        for r in rois:
             s = max(0, min(int(r[0]), total_len - 1))
             e = max(s + 1, min(int(r[1]), total_len))
             resolved.append((s, e))
@@ -231,7 +229,6 @@ def preprocess_step(
     loaded: LoadStepOutput,
     duration: float | None,
     manual_roi: bool,
-    roi: tuple[int, int] | None,
     rois: list[tuple[int, int]] | None,
     params: DecompositionParameters,
     discard_overrides: list[list[int]] | None,
@@ -271,7 +268,7 @@ def preprocess_step(
     declared_discard = list(discard_channels)
     _filter_grids(data, fsamp, discard_channels, emg_types)
 
-    resolved = _resolve_rois(data, fsamp, duration, manual_roi, roi, rois, params.nwindows)
+    resolved = _resolve_rois(data, fsamp, duration, manual_roi, rois, params.nwindows)
 
     artifact_mask: BoolArray | None = None
     if params.auto_mask_artifacts:

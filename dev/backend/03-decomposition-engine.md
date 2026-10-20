@@ -27,7 +27,6 @@ def run_decomposition(
     params: DecompositionParameters | None = None,
     save_npz: bool = True,
     progress_cb: Callable[[str, dict[str, Any]], None] | None = None,
-    roi: tuple[int, int] | None = None,
     rois: list[tuple[int, int]] | None = None,
     discard_overrides: list[list[int]] | None = None,
     bids_root: str | None = None,
@@ -158,14 +157,14 @@ POSTPROCESS_MODES = {
 ```python
 def load_step(filepath, file_label, preloaded_signal, progress_cb) -> LoadStepOutput
 ```
-Loads input signal from disk via `load_signal(filepath)` or copies a preloaded `SignalImport` via `.clone()`.
+Loads input signal from disk via `load_signal(filepath)` or shares a preloaded `SignalImport` read-only via `.readonly_view()`.
 
 ---
 
 ## Stage 2: Preprocess (`preprocess.py: preprocess_step`)
 
 ```python
-def preprocess_step(loaded, duration, manual_roi, roi, rois, params, discard_overrides,
+def preprocess_step(loaded, duration, manual_roi, rois, params, discard_overrides,
                     artifact_regions=None, store=None, target_index=None) -> PreprocessStepOutput
 ```
 
@@ -202,7 +201,7 @@ changed), which `export_step` reads to save the decomposition in the dataset's d
 | Function | Description |
 |---|---|
 | `select_roi_interactively(data, fsamp) -> (start, end)` | Matplotlib ginput ROI selection |
-| `_resolve_rois(data, fsamp, duration, manual_roi, roi, rois, nwindows)` | Resolves analysis ROI from various input methods |
+| `_resolve_rois(data, fsamp, duration, manual_roi, rois, nwindows)` | Resolves analysis ROI from various input methods |
 | `_build_coordinates_plateau(ngrid, rois)` | Flattens the ROI bounds of every grid into `[s0, e0, s1, e1, ...]` |
 | `_filter_grids(data, fsamp, discard_channels, emg_types)` | Per-grid notch then bandpass filtering (in place), for each grid's EMG type |
 | `build_manual_artifact_mask(artifact_regions, n_samples)` | Rasterize user-drawn `(start, end)` ranges into a boolean mask |

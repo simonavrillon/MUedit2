@@ -1,4 +1,4 @@
-"""Data models for the MUedit decomposition pipeline."""
+"""Data models shared by the loaders, the decomposition pipeline and the editing stage."""
 
 from __future__ import annotations
 
@@ -63,7 +63,7 @@ def _readonly(arr: np.ndarray) -> np.ndarray:
     return view
 
 
-def _as_name_list(value: str | Iterable[Any] | None) -> list[str]:
+def as_name_list(value: str | Iterable[Any] | None) -> list[str]:
     """Normalize a name or sequence of names to a list of strings."""
     if value is None:
         return []
@@ -122,23 +122,11 @@ class SignalImport:
         return cls(
             data=data_arr,
             fsamp=float(fsamp) if fsamp is not None else 0.0,
-            grid_names=_as_name_list(grid_names),
-            muscle_names=_as_name_list(muscle_names),
+            grid_names=as_name_list(grid_names),
+            muscle_names=as_name_list(muscle_names),
             aux_data=_ensure_channel_matrix(aux_data, n_samples),
-            aux_names=_as_name_list(aux_names),
+            aux_names=as_name_list(aux_names),
             metadata=dict(cast(dict[str, Any], metadata)) if isinstance(metadata, dict) else {},
-        )
-
-    def clone(self) -> SignalImport:
-        """Return a copy with independent arrays, lists and top-level metadata."""
-        return SignalImport(
-            data=self.data.copy(),
-            fsamp=self.fsamp,
-            grid_names=list(self.grid_names),
-            muscle_names=list(self.muscle_names),
-            aux_data=self.aux_data.copy(),
-            aux_names=list(self.aux_names),
-            metadata=dict(self.metadata),
         )
 
     def readonly_view(self) -> SignalImport:
@@ -207,9 +195,9 @@ class EditSignalContext:
 class LoadedDecomposition:
     """Decomposition state loaded from a .npz or .mat file for the interactive editing stage."""
 
-    pulse_trains_full: FloatArray = field(default_factory=lambda: np.zeros((0, 0)))  # (n_mu, T)
+    pulse_trains: FloatArray = field(default_factory=lambda: np.zeros((0, 0)))  # (n_mu, T)
     spike_times: list[IntArray] = field(default_factory=list)  # one spike_array per MU
-    fsamp: float | None = None
+    fsamp: float = 0.0  # 0.0 when the file does not record it
     grid_names: list[str] = field(default_factory=list)
     total_samples: int = 0
     mu_grid_index: list[int] = field(default_factory=list)

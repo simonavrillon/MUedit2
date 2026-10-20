@@ -54,19 +54,27 @@ def _not_mat(path: Path) -> Path:
     return path
 
 
+def _no_signal_struct(version: str) -> Callable[[Path], Path]:
+    def write(path: Path) -> Path:
+        return write_mat(path, version, "emg", {"data": np.zeros((4, 10))})
+
+    return write
+
+
+def _a_decomposition(version: str) -> Callable[[Path], Path]:
+    def write(path: Path) -> Path:
+        return write_mat(path, version, "signal", _DECOMPOSITION)
+
+    return write
+
+
 _BAD_FILES: dict[str, tuple[Callable[[Path], Path], str]] = {
     **{
-        f"no-signal-struct-{v}": (
-            lambda p, v=v: write_mat(p, v, "emg", {"data": np.zeros((4, 10))}),
-            "Key 'signal' not found",
-        )
+        f"no-signal-struct-{v}": (_no_signal_struct(v), "Key 'signal' not found")
         for v in ("v5", "v7.3")
     },
     **{
-        f"a-decomposition-{v}": (
-            lambda p, v=v: write_mat(p, v, "signal", _DECOMPOSITION),
-            "open it in edit mode",
-        )
+        f"a-decomposition-{v}": (_a_decomposition(v), "open it in edit mode")
         for v in ("v5", "v7.3")
     },
     "not-a-mat-file": (_not_mat, "Failed to load MAT"),

@@ -78,7 +78,6 @@ def _run_save(tmp_path: Path) -> tuple[Path, dict[str, Any]]:
         loaded=loaded,
         duration=None,
         manual_roi=False,
-        roi=None,
         rois=[(0, 3000), (3500, T)],
         params=params,
         discard_overrides=[[0] * 64, [1] + [0] * 63],
@@ -109,7 +108,7 @@ def _edit_save(tmp_path: Path) -> tuple[Path, dict[str, Any]]:
     """An edit of the run's file: one MU flagged and removed, one discharge added."""
     run_path, _ = _run_save(tmp_path)
     decomp, ctx = df.load_decomposition(str(run_path), RamStore(), binary_trains=False)
-    pulse_trains = decomp.pulse_trains_full
+    pulse_trains = decomp.pulse_trains
     reads: list[tuple[int, int]] = []
 
     def rows(kept: list[int]) -> npz.RowSource:
@@ -132,7 +131,7 @@ def _edit_save(tmp_path: Path) -> tuple[Path, dict[str, Any]]:
         grid_names=decomp.grid_names,
         parameters=decomp.parameters,
         muscle_names=decomp.muscle_names,
-        sil=decomp.sil,
+        sil=list(decomp.sil),
         rois=decomp.rois,
         artifact_mask=ctx.artifact_mask if ctx is not None else None,
         form=BidsSaveFields(entity_label="sub-01_task-ramp", remove_flagged=True),
@@ -179,7 +178,7 @@ def test_saves_and_reloads(
     decomp, ctx = df.load_decomposition(str(path), RamStore())
     spikes = [[10, 20, 30, 40], [5999]] if edited else SPIKES
     assert [s.tolist() for s in decomp.spike_times] == spikes
-    np.testing.assert_array_equal(decomp.pulse_trains_full, _pulse()[kept])
+    np.testing.assert_array_equal(decomp.pulse_trains, _pulse()[kept])
     assert (decomp.fsamp, decomp.total_samples, decomp.grid_names) == (FSAMP, T, GRIDS)
     assert decomp.mu_grid_index == [[0, 1, 1][i] for i in kept]
     assert decomp.muscle_names == expected["muscle_names"]
@@ -259,7 +258,7 @@ def test_loads_older_decompositions(
     path = _v1(tmp_path / "old.npz", _V1_LAYOUTS[case](_emg()))
     decomp, ctx = df.load_decomposition(str(path), RamStore())
     assert [s.tolist() for s in decomp.spike_times] == SPIKES
-    np.testing.assert_array_equal(decomp.pulse_trains_full, _pulse())
+    np.testing.assert_array_equal(decomp.pulse_trains, _pulse())
     assert (decomp.grid_names, decomp.muscle_names) == (GRIDS, ["TA", "GM"])
     assert decomp.parameters == {"nbextchan": 1000, "duplicatesthresh": 0.3}
     assert decomp.sil == [0.9, 0.8, 0.95]

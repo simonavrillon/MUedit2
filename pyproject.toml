@@ -62,8 +62,7 @@ research = [
 ]
 
 [project.scripts]
-muedit-api = "muedit.cli:serve_api"
-muedit-decompose = "muedit.cli:run_decomposition_cli"
+muedit = "muedit.cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "python/src"}

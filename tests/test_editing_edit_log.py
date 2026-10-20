@@ -10,12 +10,6 @@ from muedit.editing.edit_log import EditLog, find_recoverable
 
 
 @pytest.fixture()
-def cache_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    monkeypatch.setenv("MUEDIT_CACHE_DIR", str(tmp_path / "cache"))
-    return tmp_path / "cache"
-
-
-@pytest.fixture()
 def source(tmp_path: Path) -> Path:
     path = tmp_path / "rec_decomp.npz"
     path.write_bytes(b"decomposition")

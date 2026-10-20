@@ -129,7 +129,7 @@ _TWO_GRIDS = Expected(
     data=_traces(list(range(18))),
     data_atol=0.02,
 )
-_TUTORIAL_PHASES = [
+_TUTORIAL_PHASES: list[tuple[object, ...]] = [
     ("ramp", "up", 10240, 20480),
     ("plateau", None, 20480, 61440),
     ("ramp", "down", 61440, 71680),

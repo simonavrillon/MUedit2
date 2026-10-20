@@ -188,9 +188,9 @@ Use this to trace what the user can reach.
 
 | Symbol | Category | Reachable via |
 |---|---|---|
-| `run_decomposition()` | User-exposed | `muedit.__init__`, CLI, API `/decompose_stream` |
-| `DecompositionParameters` | User-exposed | `muedit.__init__`, `muedit.decomp.__init__` |
-| `DecompositionResult` | User-exposed | Returned by `run_decomposition`; `muedit.__init__`, `muedit.decomp.__init__` |
+| `run_decomposition()` | User-exposed | `muedit.decomp.__init__`, CLI, API `/decompose_stream` |
+| `DecompositionParameters` | User-exposed | `muedit.decomp.__init__` |
+| `DecompositionResult` | User-exposed | Returned by `run_decomposition`; `muedit.decomp.__init__` |
 | `load_step()` | App-internal | Called by `run_decomposition` |
 | `preprocess_step()` | App-internal | Called by `run_decomposition` |
 | `bids_export_step()` | App-internal | Called by `run_decomposition` when it is given a `bids_root` |
@@ -234,9 +234,9 @@ Use this to trace what the user can reach.
 
 | Symbol | Category | Reachable via |
 |---|---|---|
-| `load_signal()` | User-exposed | `muedit.__init__`, `muedit.io.__init__`, pipeline |
+| `load_signal()` | User-exposed | `muedit.io.__init__`, pipeline |
 | `get_loader()` | User-exposed | `muedit.io.__init__` |
-| `register_loader()` | Extension API | `muedit.__init__`, `muedit.io.__init__` (no internal callers) |
+| `register_loader()` | Extension API | `muedit.io.__init__` (no internal callers) |
 | `supported_extensions()` | User-exposed | `muedit.io.__init__` |
 | `load_mat()` | App-internal | Called via `factory._LOADERS` |
 | `load_otb_plus()` | App-internal | Called via `factory._LOADERS` |
@@ -318,7 +318,7 @@ Use this to trace what the user can reach.
 | `EditSignalContext` | App-internal | Built by `decomp.decomposition_file`; held by the `EditSession` |
 | `LoadedDecomposition` | App-internal | Used by `decomp.decomposition_file` |
 | `_as_2d_float_array()` | App-internal | Called by `SignalImport.build` |
-| `_as_name_list()` | App-internal | Called by `SignalImport.build` for grid_names/muscle_names coercion |
+| `as_name_list()` | App-internal | Called by `SignalImport.build` and the loaders for grid_names/muscle_names coercion |
 | `_ensure_channel_matrix()` | App-internal | Called by `SignalImport.build` |
 
 ---
@@ -337,8 +337,7 @@ Use this to trace what the user can reach.
 
 | Symbol | Category | Reachable via |
 |---|---|---|
-| `serve_api()` | User-exposed | `muedit-api` entry point |
-| `run_decomposition_cli()` | User-exposed | `muedit-decompose` entry point |
-| `main()` | User-exposed | `python -m muedit.cli` (dispatcher) |
-| `_parse_roi_arg(value)` | App-internal | Called by `run_decomposition_cli` |
-| `_parse_roi_args(value)` | App-internal | Called by `run_decomposition_cli` |
+| `serve_api()` | App-internal | `muedit api` |
+| `run_decomposition_cli()` | App-internal | `muedit decompose` |
+| `main()` | User-exposed | `muedit` entry point, `python -m muedit.cli` (dispatcher) |
+| `_parse_rois(value)` | App-internal | Called by `run_decomposition_cli` |

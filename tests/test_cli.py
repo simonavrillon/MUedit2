@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -9,7 +10,7 @@ import pytest
 from fastapi import FastAPI
 from starlette.testclient import TestClient
 
-from muedit.cli import run_decomposition_cli
+from muedit.cli import main, run_decomposition_cli
 from tests._api import API, error
 
 
@@ -28,8 +29,18 @@ def test_cli_reports_a_file_it_cannot_load_without_a_traceback(
 
 def test_cli_rejects_through_the_same_checks(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit):
-        run_decomposition_cli(["--niter", "0"])
+        run_decomposition_cli(["recording.otb4", "--niter", "0"])
     assert "niter must be >= 1" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(("args", "code"), [(["--help"], 0), ([], 2), (["serve"], 2)])
+def test_main_exits_without_a_known_command(
+    monkeypatch: pytest.MonkeyPatch, args: list[str], code: int
+) -> None:
+    monkeypatch.setattr(sys, "argv", ["muedit", *args])
+    with pytest.raises(SystemExit) as exited:
+        main()
+    assert exited.value.code == code
 
 
 # ── serve_api ───────────────────────────────────────────────────────────────

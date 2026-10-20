@@ -16,7 +16,7 @@ import numpy as np
 from muedit.errors import SignalLoadError
 from muedit.io._common import _AMPLIFIER_GAIN, _GRID_SIDECAR, _read_grid_sidecar, _resolve_muscles
 from muedit.io.aux_channels import aux_kinds
-from muedit.models import SignalImport, _as_name_list
+from muedit.models import SignalImport, as_name_list
 from muedit.signal.grid import grid_spec
 from muedit.storage import ArrayStore, RamStore, sample_blocks
 
@@ -255,7 +255,7 @@ def _resolve_openephys_grids(
 ) -> tuple[list[str], list[str]]:
     """Split the ephys channels, in file order, across the grids that cover them."""
     sidecar_grid_names, sidecar_muscle_names = _sidecar(directory)
-    resolved = _as_name_list(grid_names) or sidecar_grid_names
+    resolved = as_name_list(grid_names) or sidecar_grid_names
     if not resolved:
         groups = headstages if sum(headstages) == n_emg else []
         if not groups:

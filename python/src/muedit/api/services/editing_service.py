@@ -215,7 +215,7 @@ def _dataset_root(edit: EditSession, project: str | None) -> Path:
 
 def _session_pulse_trains(decomp: LoadedDecomposition, store: SessionStore) -> FloatArray | None:
     """The file's pulse trains as float32 outside the heap, or None when it has none."""
-    pulse_trains = decomp.pulse_trains_full
+    pulse_trains = decomp.pulse_trains
     n_mu, total = len(decomp.spike_times), int(decomp.total_samples)
     if pulse_trains.ndim != 2 or n_mu == 0 or pulse_trains.shape != (n_mu, total):
         return None
@@ -233,7 +233,7 @@ def _new_session(
     file_label = Path(filepath).name
     extras = _file_extras(filepath, file_label, decomp)
     n_mu = len(decomp.spike_times)
-    fsamp = float(decomp.fsamp or 0.0)
+    fsamp = float(decomp.fsamp)
     total = int(decomp.total_samples)
     parameters = dict(decomp.parameters)
     entity_label = parse_entity_label(file_label)
@@ -266,14 +266,14 @@ def _new_session(
         bids_grid=bids_grid,
         duplicates=duplicates,
     )
-    decomp.pulse_trains_full = np.zeros((0, 0), dtype=np.float32)
+    decomp.pulse_trains = np.zeros((0, 0), dtype=np.float32)
     edit.bids_root = extras.bids_root
     if len(decomp.sil) == n_mu:
         edit.sil_by_uid = dict(zip(edit.mu_uids, map(float, decomp.sil), strict=True))
     edit.meta = {
         "file_label": file_label,
         "source_path": str(Path(filepath).resolve()),
-        "fsamp": decomp.fsamp,
+        "fsamp": fsamp or None,
         "total_samples": total,
         "grid_names": list(decomp.grid_names),
         "rois": [(int(s), int(e)) for s, e in decomp.rois],

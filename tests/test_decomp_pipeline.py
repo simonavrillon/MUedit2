@@ -25,7 +25,7 @@ def _run(store: SessionStore | None) -> DecompositionResult:
         "synthetic.mat",
         params=_STORE_PARAMS,
         save_npz=False,
-        roi=ACTIVE_ROI,
+        rois=[ACTIVE_ROI],
         include_full_preview=True,
         preloaded_signal=synthetic_recording(),
         store=store,

@@ -14,7 +14,9 @@ import pytest
 import scipy.io
 from starlette.testclient import TestClient
 
+from muedit import storage
 from muedit.models import SignalImport
+from muedit.paths import CACHE_DIR_ENV
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = REPO_ROOT / "data"
@@ -53,6 +55,15 @@ def pytest_configure(config: pytest.Config) -> None:
         folder = tempfile.mkdtemp(prefix="muedit-test-cache-")
         os.environ["MUEDIT_CACHE_DIR"] = folder
         config.add_cleanup(lambda: shutil.rmtree(folder, ignore_errors=True))
+
+
+@pytest.fixture
+def cache_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A per-test cache folder for session stores, with the default disk reserve."""
+    folder = tmp_path / "cache"
+    monkeypatch.setenv(CACHE_DIR_ENV, str(folder))
+    monkeypatch.delenv(storage.DISK_RESERVE_ENV, raising=False)
+    return folder
 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:

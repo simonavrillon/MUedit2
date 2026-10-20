@@ -15,7 +15,7 @@ import numpy as np
 from muedit.errors import SignalLoadError
 from muedit.io._common import _AMPLIFIER_GAIN, _GRID_SIDECAR, _read_grid_sidecar, _resolve_muscles
 from muedit.io.aux_channels import aux_kinds
-from muedit.models import SignalImport, _as_name_list
+from muedit.models import SignalImport, as_name_list
 from muedit.storage import ArrayStore, RamStore, sample_blocks
 
 logger = logging.getLogger(__name__)
@@ -558,7 +558,7 @@ def _resolve_intan_grids(
 ) -> tuple[list[str], list[str]]:
     """Resolve the grid model and muscle label of each amplifier port."""
     sidecar_grid_names, sidecar_muscle_names = _read_grid_sidecar(rec.directory / _GRID_SIDECAR)
-    resolved = _as_name_list(grid_names) or sidecar_grid_names
+    resolved = as_name_list(grid_names) or sidecar_grid_names
     if not resolved:
         missing = sorted({n for n in channels_per_port if n not in _DEFAULT_GRIDS})
         if missing:

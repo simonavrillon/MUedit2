@@ -25,8 +25,7 @@ def _decompose_with_events() -> tuple[Any, list[dict[str, Any]]]:
         loaded=loaded,
         duration=None,
         manual_roi=False,
-        roi=ACTIVE_ROI,
-        rois=None,
+        rois=[ACTIVE_ROI],
         params=_PARAMS,
         discard_overrides=None,
     )
