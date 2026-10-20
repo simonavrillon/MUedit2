@@ -20,6 +20,7 @@ import { oncePerFrame } from "../../view/plots.js";
 import {
   chooseSegmentType,
   requestSegmentation,
+  syncChosenWindows,
 } from "../../signal/segments.js";
 import { getCurrentGrid } from "../../state/selectors.js";
 
@@ -143,13 +144,11 @@ function setSegmentMenuOpen(els, open) {
  * @param {HTMLInputElement} box
  */
 function chooseTypeFromBox(app, box) {
-  const { els, state } = app;
-  const count = chooseSegmentType(state, box.value, box.checked);
-  if (els.nwindows) els.nwindows.value = String(Math.max(1, count));
-  app.ensureQcTraces();
+  const count = chooseSegmentType(app.state, box.value, box.checked);
+  const total = syncChosenWindows(app, count);
   app.refreshVisuals();
   app.setStatus(
-    `${box.checked ? "Added" : "Removed"} ${box.value}s — ${count} window${count === 1 ? "" : "s"}`,
+    `${box.checked ? "Added" : "Removed"} ${box.value}s — ${total}`,
   );
 }
 

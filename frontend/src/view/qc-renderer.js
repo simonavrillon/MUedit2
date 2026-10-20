@@ -17,6 +17,7 @@ import {
   segmentAt,
   segmentGlyph,
   segmentTypes,
+  syncChosenWindows,
   toggleSegment,
 } from "../signal/segments.js";
 import { getCurrentGrid } from "../state/selectors.js";
@@ -153,7 +154,8 @@ export function refreshVisuals(app) {
   const { state, els, renderAuxiliaryChannels } = app;
   const selections = buildSelections(state);
   renderArtifactControls(els, state);
-  renderSegmentTypes(els, state);
+  // A drag redraws every frame but leaves the windows as they were.
+  if (!state.roiDraft && !state.artifactDraft) renderSegmentTypes(els, state);
   drawGridOverlay(
     els.emgCanvas,
     state.gridSeries,
@@ -231,14 +233,11 @@ export function enableRoiSelection(app, canvasId) {
   const toggleSegmentAt = (/** @type {number} */ x) => {
     const idx = segmentAt(state.segments, toSamples(x, x).startSample);
     if (idx < 0) return;
-    const count = toggleSegment(state, idx);
-    if (els.nwindows) els.nwindows.value = String(Math.max(1, count));
-    app.ensureQcTraces();
+    const total = syncChosenWindows(app, toggleSegment(state, idx));
     const seg = state.segments[idx];
     const holder = drawnRois(state).find(
       (r) => r.start <= seg.start && r.end >= seg.end,
     );
-    const total = `${count} window${count === 1 ? "" : "s"}`;
     setStatus(
       holder
         ? `Window ${state.rois.indexOf(holder) + 1}: ${describeWindow(state, holder)} — ${total}`

@@ -11,13 +11,9 @@ import { MIN_ROI_S } from "../config.js";
 /** @typedef {import("../state/state.js").TargetSegment} TargetSegment */
 /** @typedef {import("../state/state.js").SegmentKind} SegmentKind */
 
-const SEGMENT_TYPES = [
-  "up ramp",
-  "down ramp",
-  "plateau",
-  "sinusoid",
-  "irregular",
-];
+const SEGMENT_TYPES = SEGMENT_KINDS.flatMap((kind) =>
+  kind === "ramp" ? ["up ramp", "down ramp"] : [kind],
+);
 
 /**
  * @param {TargetSegment} seg
@@ -113,6 +109,19 @@ function chooseSegments(state, segs, on) {
 export function toggleSegment(state, idx) {
   const seg = state.segments[idx];
   return chooseSegments(state, [seg], !isSegmentChosen(state, seg));
+}
+
+/**
+ * Sync the window count and the traces after choosing segments.
+ *
+ * @param {App} app
+ * @param {number} count How many windows are drawn now.
+ * @returns {string} The count for the status, e.g. "2 windows".
+ */
+export function syncChosenWindows(app, count) {
+  if (app.els.nwindows) app.els.nwindows.value = String(Math.max(1, count));
+  app.ensureQcTraces();
+  return `${count} window${count === 1 ? "" : "s"}`;
 }
 
 /**

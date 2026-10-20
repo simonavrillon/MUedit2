@@ -539,6 +539,15 @@
   cursor: pointer;
 }
 
+/* Undo the text-field look `.form-row input` gives every input. */
+.segment-picker-row input[type="checkbox"] {
+  appearance: auto;
+  width: auto;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--accent);
+}
+
 .segment-picker-row:hover {
   background: var(--surface-active);
 }
