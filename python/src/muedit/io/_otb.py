@@ -82,16 +82,22 @@ def _group_tracks(
     return grouped
 
 
-def _sample_frames(file_path: str, dtype: np.dtype, n_channels: int) -> np.ndarray:
-    """A ``.sig`` file as a read-only ``(samples, channels)`` map: channels are interleaved."""
+def _frame_count(file_path: str, dtype: np.dtype, n_channels: int) -> int:
+    """The samples of a ``.sig`` file of ``n_channels`` interleaved channels."""
     n_values = os.path.getsize(file_path) // dtype.itemsize
     if n_values % n_channels != 0:
         raise SignalLoadError(
             f"Cannot reshape {os.path.basename(file_path)} into {n_channels} channels"
         )
-    if n_values == 0:
+    return n_values // n_channels
+
+
+def _sample_frames(file_path: str, dtype: np.dtype, n_channels: int) -> np.ndarray:
+    """A ``.sig`` file as a read-only ``(samples, channels)`` map: channels are interleaved."""
+    n_frames = _frame_count(file_path, dtype, n_channels)
+    if n_frames == 0:
         return np.zeros((0, n_channels), dtype=dtype)
-    return np.memmap(file_path, dtype=dtype, mode="r", shape=(n_values // n_channels, n_channels))
+    return np.memmap(file_path, dtype=dtype, mode="r", shape=(n_frames, n_channels))
 
 
 def _write_rows(out: np.ndarray, frames: np.ndarray, rows: np.ndarray, scale: np.ndarray) -> None:
@@ -150,11 +156,31 @@ def _otb_plus_scale(device_name: str, adapter_id: str, gain: float, ad_bits: int
     return 4.8 / (2**24) * 1000 / gain_val
 
 
+@dataclass(frozen=True)
+class _SigFile:
+    """A ``.sig`` file of interleaved channels, mapped only while it is read."""
+
+    path: str
+    dtype: np.dtype
+    n_channels: int
+    n_frames: int
+
+    @classmethod
+    def open(cls, path: str, dtype: np.dtype, n_channels: int) -> _SigFile:
+        """The file at ``path``, its length checked against ``n_channels``."""
+        return cls(path, dtype, n_channels, _frame_count(path, dtype, n_channels))
+
+    def frames(self) -> np.ndarray:
+        """The file as a read-only ``(samples, channels)`` map, to drop once read."""
+        # Windows cannot delete a mapped file, so no map may outlive the extraction folder.
+        return _sample_frames(self.path, self.dtype, self.n_channels)
+
+
 @dataclass
 class _Segment:
-    """One track's channels: their columns in a ``.sig`` map and their scale factor."""
+    """One track's channels: their columns in a ``.sig`` file and their scale factor."""
 
-    frames: np.ndarray  # (samples, channels) map of the track's .sig file
+    sig: _SigFile
     rows: np.ndarray
     scale: float
 
@@ -239,7 +265,7 @@ def _write_segments(
     row = 0
     for seg in segments:
         scale = np.full(len(seg.rows), seg.scale, dtype=dtype)
-        _write_rows(out[row : row + len(seg.rows), :width], seg.frames, seg.rows, scale)
+        _write_rows(out[row : row + len(seg.rows), :width], seg.sig.frames(), seg.rows, scale)
         row += len(seg.rows)
     for i, trace in enumerate(traces):
         out[n_rows + i] = _fit_trace(trace, fsamp, n_samples)
@@ -485,10 +511,8 @@ def _description_name(block: dict[str, Any]) -> str:
     return str(desc.get("Name") or desc.get("@Name") or "") if isinstance(desc, dict) else ""
 
 
-def _track(
-    block: dict[str, Any], name: str, is_emg: bool, frames: np.ndarray, first_row: int
-) -> _Track:
-    """The track ``block`` describes, its channels from ``first_row`` on in ``frames``."""
+def _track(block: dict[str, Any], name: str, is_emg: bool, sig: _SigFile, first_row: int) -> _Track:
+    """The track ``block`` describes, its channels from ``first_row`` on in ``sig``."""
     gain = _safe_gain(block["Gain"])
     fsamp = int(block["SamplingFrequency"])
     strings = block.get("StringsDescriptions") or {}
@@ -496,7 +520,7 @@ def _track(
         name=name,
         is_emg=is_emg,
         segment=_Segment(
-            frames=frames,
+            sig=sig,
             rows=np.arange(first_row, first_row + int(block["NumberOfChannels"])),
             scale=float(block["ADC_Range"]) / (2 ** int(block["ADC_Nbits"])) * 1000.0 / gain,
         ),
@@ -517,15 +541,15 @@ def _novecento_tracks(tmpdir: str, track_list: list[dict[str, Any]]) -> list[_Tr
                 f"OTB4 archive is missing {os.path.basename(sig_name)}, the signal file "
                 f"of {len(blocks)} track(s)"
             )
-        frames = _sample_frames(sig_path, np.dtype(np.int32), int(blocks[0]["ChannelsInBlock"]))
+        sig = _SigFile.open(sig_path, np.dtype(np.int32), int(blocks[0]["ChannelsInBlock"]))
         for block in blocks:
             title = block.get("Title") or f"block_{block['AcquisitionChannel']}"
             desc_name = _description_name(block)
             if title.upper().startswith("IN"):
-                tracks.append(_track(block, title, True, frames, int(block["AcquisitionChannel"])))
+                tracks.append(_track(block, title, True, sig, int(block["AcquisitionChannel"])))
             elif desc_name.upper().startswith("AUX"):
                 tracks.append(
-                    _track(block, desc_name, False, frames, int(block["AcquisitionChannel"]))
+                    _track(block, desc_name, False, sig, int(block["AcquisitionChannel"]))
                 )
     return tracks
 
@@ -545,7 +569,7 @@ def _generic_tracks(tmpdir: str, track_list: list[dict[str, Any]]) -> list[_Trac
     sig_path = (_find_file(tmpdir, stream) if stream else None) or sig_paths[0]
     n_channels = sum(int(block["NumberOfChannels"]) for block in track_list)
     try:
-        frames = _sample_frames(sig_path, np.dtype(np.int16), n_channels)
+        sig = _SigFile.open(sig_path, np.dtype(np.int16), n_channels)
     except OSError as exc:
         raise SignalLoadError("Cannot reshape .sig into channels x samples") from exc
 
@@ -555,9 +579,9 @@ def _generic_tracks(tmpdir: str, track_list: list[dict[str, Any]]) -> list[_Trac
         title = block.get("Title") or f"block_{block['AcquisitionChannel']}"
         grid_name = _description_name(block) or title
         if title.upper().startswith("IN") or grid_name.upper().startswith(("GR", "HD")):
-            tracks.append(_track(block, grid_name, True, frames, first_row))
+            tracks.append(_track(block, grid_name, True, sig, first_row))
         elif not any(adapter in title for adapter in _CONTROL_ADAPTERS):
-            aux_track = _track(block, title, False, frames, first_row)
+            aux_track = _track(block, title, False, sig, first_row)
             tracks.append(replace(aux_track, hpf="n/a", lpf="n/a"))
         first_row += int(block["NumberOfChannels"])
     return tracks
@@ -588,8 +612,8 @@ def load_otb4(filepath: str, store: ArrayStore | None = None) -> SignalImport:
         if not emg_tracks:
             raise SignalLoadError("OTB4 archive holds no EMG track (titled IN…, GR… or HD…).")
         fsamp = emg_tracks[0].fsamp
-        n_samples = min(track.segment.frames.shape[0] for track in emg_tracks)
-        aux_samples = min((track.segment.frames.shape[0] for track in aux_tracks), default=0)
+        n_samples = min(track.segment.sig.n_frames for track in emg_tracks)
+        aux_samples = min((track.segment.sig.n_frames for track in aux_tracks), default=0)
         # Each device path has always scaled in its own precision.
         dtype = np.float32 if novecento else np.float64
         traces = _read_feedback_traces(tmpdir)

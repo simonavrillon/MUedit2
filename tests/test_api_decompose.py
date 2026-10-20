@@ -282,7 +282,7 @@ class TestWorkerProcess:
             "message": "Decomposition failed",
             "detail": INTERNAL_ERROR_DETAIL,
         }
-        assert _run_folders() == before
+        assert all(deleted(path) for path in _run_folders() - before)
 
 
 class TestErrorEvents:
