@@ -31,10 +31,14 @@ import { syncRois } from "./segments.js";
 import { createViewFetcher } from "../app/services/view-fetcher.js";
 import { withUpload } from "../app/services/upload.js";
 import { beginRawPreviewTransition } from "../state/transitions.js";
-import { OVERVIEW_BINS, QC_TRACE_BINS } from "../config.js";
 
 /** @typedef {import("../app/context.js").App} App */
 /** @typedef {import("../state/state.js").FileRef} FileRef */
+
+/** Bins of the whole-recording envelopes (grid overview, aux): about a wide canvas in pixels. */
+export const OVERVIEW_BINS = 2048;
+/** Bins of each channel's mini trace in the QC grid, a few dozen pixels wide. */
+export const QC_TRACE_BINS = 128;
 
 /**
  * Run the automatic QC pipeline server-side and load the result into the

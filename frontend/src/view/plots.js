@@ -209,8 +209,8 @@ const SEGMENT_COLORS = {
 function overlayStyle(overlay) {
   if (overlay.kind === "artifact") {
     return {
-      fill: COLORS.artifactFill,
-      stroke: COLORS.artifactStroke,
+      fill: COLORS.artifactWindowFill,
+      stroke: COLORS.artifactWindowStroke,
       dashed: false,
     };
   }
@@ -223,7 +223,7 @@ function overlayStyle(overlay) {
     };
   }
   return {
-    fill: overlay.strong ? COLORS.roiChosenFill : COLORS.roiFill,
+    fill: overlay.strong ? COLORS.roiStrongFill : COLORS.roiFill,
     stroke: COLORS.roiStroke,
     dashed: false,
   };

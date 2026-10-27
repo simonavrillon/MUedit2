@@ -353,7 +353,7 @@ describe("drawing", () => {
       COLORS.rampFill,
       COLORS.rampFill,
       COLORS.sinusoidFill,
-      COLORS.roiChosenFill,
+      COLORS.roiStrongFill,
     ]);
     assert.deepEqual(texts(canvas.ctx), ["↗", "—", "↘", "∿"]);
   });

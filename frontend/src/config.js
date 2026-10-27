@@ -1,3 +1,5 @@
+// The page's environment: the API origin, and the CSS tokens canvases draw with.
+
 // The MUedit server serves the page and the API on one origin.
 export const API_BASE = `${window.location.origin}/api/v1`;
 
@@ -25,15 +27,15 @@ const COLOR_TOKENS = {
   primary: "--text",
   warning: "--accent-2",
   muted: "--muted",
-  mu4: "--mu-4",
+  discharge: "--mu-4",
   artifactMarker: "--artifact",
-  pulse: "--plot-trace-2",
+  pulseTrain: "--plot-trace-2",
   empty: "--plot-empty",
   roiFill: "--plot-roi-fill",
   roiStroke: "--plot-roi-stroke",
-  artifactFill: "--plot-artifact-fill",
-  artifactStroke: "--plot-artifact-stroke",
-  roiChosenFill: "--plot-roi-chosen-fill",
+  artifactWindowFill: "--plot-artifact-fill",
+  artifactWindowStroke: "--plot-artifact-stroke",
+  roiStrongFill: "--plot-roi-chosen-fill",
   rampFill: "--plot-ramp-fill",
   rampStroke: "--plot-ramp-stroke",
   plateauFill: "--plot-plateau-fill",
@@ -63,22 +65,27 @@ const COLOR_TOKENS = {
  */
 export const COLORS = /** @type {any} */ ({});
 for (const [key, name] of Object.entries(COLOR_TOKENS)) {
-  Object.defineProperty(COLORS, key, {
-    get: () => cssToken(name),
-    enumerable: true,
-  });
+  Object.defineProperty(COLORS, key, { get: () => cssToken(name) });
 }
+
+/** @type {string | undefined} */
+let fontCache;
 
 /** Canvas text: the page's font at its small size. */
 export function canvasFont() {
+  if (fontCache) return fontCache;
   // Canvas text is drawn in pixels, so the rem token is resolved against the root size.
   const rootPx = parseFloat(
     getComputedStyle(document.documentElement).fontSize,
   );
-  const sizePx = parseFloat(cssToken("--fs-xs")) * (rootPx || 16);
-  return `${sizePx}px ${cssToken("--font")}`;
+  const size = cssToken("--fs-xs");
+  const family = cssToken("--font");
+  const font = `${parseFloat(size) * (rootPx || 16)}px ${family}`;
+  if (size && family) fontCache = font;
+  return font;
 }
 
+// One per --plot-trace-N in css/tokens.css.
 const TRACE_COLOR_COUNT = 7;
 
 /** One colour per grid or auxiliary trace, cycled past the last. */
@@ -87,10 +94,3 @@ export function traceColors() {
     cssToken(`--plot-trace-${i + 1}`),
   );
 }
-
-/** Bins of the whole-recording envelopes (grid overview, aux): about a wide canvas in pixels. */
-export const OVERVIEW_BINS = 2048;
-/** Bins of each channel's mini trace in the QC grid, a few dozen pixels wide. */
-export const QC_TRACE_BINS = 128;
-/** Shortest window a deselected segment may leave of the window it was cut from. */
-export const MIN_ROI_S = 0.5;

@@ -8,7 +8,6 @@ import { setRois, setSegments, setTargetIndex } from "../state/actions.js";
 import { SEGMENT_KINDS, toSegmentation } from "../api/payloads.js";
 import { handleError } from "../app/services/error-service.js";
 import { withUpload } from "../app/services/upload.js";
-import { MIN_ROI_S } from "../config.js";
 
 /** @typedef {import("../app/context.js").App} App */
 /** @typedef {import("../app/context.js").Span} Span */
@@ -136,6 +135,9 @@ export function isSegmentChosen(state, seg) {
 export function segmentAt(segments, sample) {
   return segments.findIndex((s) => s.start <= sample && sample < s.end);
 }
+
+/** Shortest window a deselected segment may leave of the window it was cut from. */
+const MIN_ROI_S = 0.5;
 
 /**
  * Choose `segs`, or drop them: chosen segments that touch merge into one

@@ -255,7 +255,7 @@ export function drawEditPulse(els, state) {
       !!state.edit.flagged[mu],
     );
     drawTrace(canvasEl, trace, view, {
-      color: COLORS.pulse,
+      color: COLORS.pulseTrain,
       range,
       selections,
       fsamp: state.edit.fsamp,
@@ -263,7 +263,7 @@ export function drawEditPulse(els, state) {
         {
           positions: shown.spikes,
           values: spikeValues,
-          color: COLORS.mu4,
+          color: COLORS.discharge,
         },
         {
           positions: shown.artifacts,
@@ -303,7 +303,11 @@ export function drawEditRates(els, state) {
     range: { min: 0, max: fastestRateInView(rates, view) },
     fsamp: state.edit.fsamp,
     markers: [
-      { positions: rates.positions, values: rates.rates, color: COLORS.mu4 },
+      {
+        positions: rates.positions,
+        values: rates.rates,
+        color: COLORS.discharge,
+      },
     ],
   });
 }

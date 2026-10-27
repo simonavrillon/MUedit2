@@ -400,7 +400,7 @@ describe("drawOverlayRects", () => {
     assert.deepEqual(rects[0].args, [20, 0, 40, 50]);
     assert.equal(rects[0].fillStyle, COLORS.roiFill);
     assert.deepEqual(rects[1].args, [100, 0, 20, 50]);
-    assert.equal(rects[1].fillStyle, COLORS.artifactFill);
+    assert.equal(rects[1].fillStyle, COLORS.artifactWindowFill);
   });
 
   test("draws nothing without a signal length", () => {

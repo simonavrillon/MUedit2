@@ -17,7 +17,7 @@ console.error = () => {};
 
 const { state: initialState } = await import("../src/state/state.js");
 const { createApp } = await import("../src/app/create-app.js");
-const { OVERVIEW_BINS, QC_TRACE_BINS } = await import("../src/config.js");
+const { OVERVIEW_BINS, QC_TRACE_BINS } = await import("../src/signal/qc.js");
 
 function recorder() {
   const calls = [];
