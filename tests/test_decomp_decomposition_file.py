@@ -14,7 +14,7 @@ import h5py
 import numpy as np
 import pytest
 
-from muedit import storage
+from muedit import installed_version, storage
 from muedit.api.schemas import BidsSaveFields
 from muedit.api.services.editing_service import _file_extras, _save, _SaveRequest
 from muedit.decomp import decomposition_file as df
@@ -167,6 +167,7 @@ def test_saves_and_reloads(
     # The file: plain arrays only, uncompressed, each aligned so it can be memory-mapped.
     with np.load(path) as z:  # allow_pickle=False
         assert int(z["schema_version"]) == df.SCHEMA_VERSION
+        assert str(z["muedit_version"]) == installed_version()
     with zipfile.ZipFile(path) as zf:
         assert {info.compress_type for info in zf.infolist()} == {zipfile.ZIP_STORED}
     with NpzArchive(path) as archive:

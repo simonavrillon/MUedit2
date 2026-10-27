@@ -16,6 +16,7 @@ import numpy as np
 import scipy.io
 from numpy.typing import ArrayLike, DTypeLike
 
+from muedit import installed_version
 from muedit.decomp._mat_layout import (
     coerce_pulse_matrix,
     first_non_none,
@@ -152,8 +153,11 @@ def save_decomposition_npz(
 ) -> None:
     """Save a decomposition in the app's pickle-free, memory-mappable .npz schema v2."""
     spikes, spike_offsets = pack_csr([spike_array(d) for d in spike_times], np.int32)
+    version = installed_version()
     with NpzWriter(out_path) as npz:
         npz.add(SCHEMA_KEY, np.int64(SCHEMA_VERSION))
+        if version:
+            npz.add("muedit_version", np.array(version))
         npz.add("fsamp", np.float64(fsamp))
         npz.add("total_samples", np.int64(total_samples))
         npz.add("spike_times", spikes)

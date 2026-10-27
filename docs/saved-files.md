@@ -203,6 +203,7 @@ arrays (`pulse_trains`, `emg_data`) can be memory-mapped straight from the file.
 | Key | dtype, shape | Content | In |
 |---|---|---|---|
 | `schema_version` | int64, `()` | `2` | all |
+| `muedit_version` | unicode, `()` | The MUedit version that wrote the file, e.g. `2.2.0` | 2.2.0 and later |
 | `fsamp` | float64, `()` | Sampling rate, Hz | all |
 | `total_samples` | int64, `()` | Recording length in samples | all |
 | `spike_times` | int32, `(n_spikes,)` | Discharge times of all MUs, concatenated; 0-based sample indices, sorted within each MU | all |

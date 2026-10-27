@@ -15,6 +15,7 @@ has its own `AGENTS.md` with its conventions; read it before editing there.
 | Doc | Audience | What it's for |
 |---|---|---|
 | [README.md](README.md) | everyone | what MUedit is, install, launch, 5-minute tour |
+| [CHANGELOG.md](CHANGELOG.md) | everyone | what changed in each release |
 | [docs/user-guide.md](docs/user-guide.md) | app users | the app stage by stage: controls, settings, shortcuts |
 | [docs/saved-files.md](docs/saved-files.md) | analysing outputs | every file MUedit writes; NPZ schema; edit log |
 | [docs/cli.md](docs/cli.md) | scripters | `muedit api` / `muedit decompose` flags; environment variables |
@@ -127,6 +128,8 @@ npm run check                     # eslint, prettier --check, tsc, node --test
   changes with ", and": *Pick projects from a dropdown, and choose segment types in bulk in QC*.
 - Body: prose saying what changed and why, wrapped at ~72 columns; bullets only for a long list.
 - One logical change per commit, with its docs and tests.
+- A user-visible change adds a line under `## [Unreleased]` in [CHANGELOG.md](CHANGELOG.md),
+  in the same commit. Internal refactors, tests and dev docs don't.
 
 ## Glossary
 
