@@ -91,7 +91,7 @@ export function setEditProject(state, value) {
  * @param {State} state
  * @param {string[]} muscleNames
  */
-export function setMuscle(state, muscleNames) {
+export function setMuscleNames(state, muscleNames) {
   state.muscleNames = muscleNames;
 }
 
@@ -123,8 +123,8 @@ export function setUploadToken(state, token) {
  * @param {State} state
  * @param {number | null | undefined} totalSamples
  */
-export function setSeriesLength(state, totalSamples) {
-  state.seriesLength = totalSamples ?? null;
+export function setTotalSamples(state, totalSamples) {
+  state.totalSamples = totalSamples ?? null;
 }
 
 /**
@@ -326,18 +326,10 @@ export function resetEditSlice(state) {
 
 /**
  * @param {State} state
- * @param {boolean} inFlight
+ * @param {string} token  The run result token of the run last saved.
  */
-export function setRunDownloadInFlight(state, inFlight) {
-  state.runDownloadInFlight = inFlight;
-}
-
-/**
- * @param {State} state
- * @param {string} key
- */
-export function setLastRunDownloadKey(state, key) {
-  state.lastRunDownloadKey = key;
+export function setSavedRunToken(state, token) {
+  state.savedRunToken = token;
 }
 
 /**
@@ -456,7 +448,7 @@ export function setDiscardMaskChannel(state, gridIdx, chIdx, value) {
  * @param {State} state
  * @param {number[]} keptIdx
  */
-export function keepEditMus(state, keptIdx) {
+function keepEditMus(state, keptIdx) {
   const e = state.edit;
   /** @param {Int32Array[]} times */
   const pick = (times) => keptIdx.map((i) => times[i] ?? new Int32Array(0));
@@ -464,12 +456,12 @@ export function keepEditMus(state, keptIdx) {
   e.artifactTimes = pick(e.artifactTimes);
   e.currentMu = Math.max(0, keptIdx.indexOf(e.currentMu ?? 0));
   const bookmarkIdx = e.bookmarkPosition
-    ? keptIdx.indexOf(e.bookmarkPosition.muIdx)
+    ? keptIdx.indexOf(e.bookmarkPosition.mu)
     : -1;
   e.bookmarkPosition =
     bookmarkIdx === -1 || !e.bookmarkPosition
       ? null
-      : { ...e.bookmarkPosition, muIdx: bookmarkIdx };
+      : { ...e.bookmarkPosition, mu: bookmarkIdx };
 }
 
 /**

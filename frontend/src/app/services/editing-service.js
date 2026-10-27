@@ -3,8 +3,8 @@
  * edit sends `{op, mu, window}` and applies the change it returns (the edited
  * MU's discharge times, flags and log entries); the pulse trains never come
  * to the page except as the window on screen. Every exported action takes the
- * `app` context, so this module stays free of direct DOM or transport
- * coupling. State mutations go exclusively through `state/actions.js`.
+ * `app` context and reaches the server through `app.api`. State mutations go
+ * exclusively through `state/actions.js`.
  */
 import { handleError } from "./error-service.js";
 import { RequestTimeout } from "../http.js";
@@ -75,11 +75,11 @@ function forgetSessionToken() {
 
 /**
  * @param {State} state
- * @param {number} muIdx
+ * @param {number} mu
  * @param {number} position
  */
-function setEditBookmarkAndHide(state, muIdx, position) {
-  setEditBookmark(state, { muIdx, position });
+function setEditBookmarkAndHide(state, mu, position) {
+  setEditBookmark(state, { mu, position });
   setShowBookmark(state, false);
 }
 
@@ -206,16 +206,14 @@ export async function requestRoiEdit(app, action, payload) {
     failed: "ROI failed",
     async run() {
       await requestEditOp(app, action, {
-        mu: payload.muIdx,
+        mu: payload.mu,
         x_start: payload.xStart,
         x_end: payload.xEnd,
         y_min: payload.yMin,
         y_max: payload.yMax,
       });
-      const bookmarkPos = Math.round(
-        (payload.xStart + (payload.xEnd ?? payload.xStart)) / 2,
-      );
-      setEditBookmarkAndHide(state, payload.muIdx, bookmarkPos);
+      const bookmarkPos = Math.round((payload.xStart + payload.xEnd) / 2);
+      setEditBookmarkAndHide(state, payload.mu, bookmarkPos);
       clearEditPulseSelections(state);
       app.setEditMode(null);
       return ["ROI applied", "success"];
@@ -252,8 +250,8 @@ export async function requestFilterUpdate(app) {
     return;
   }
   const view = state.edit.view || { start: 0, end: total };
-  const start = Math.max(0, view.start ?? 0);
-  const end = Math.min(total, view.end ?? total);
+  const start = Math.max(0, view.start);
+  const end = Math.min(total, view.end);
   return editAction(app, {
     pending: "Updating filter from BIDS EMG...",
     failed: "Filter update failed",
@@ -478,7 +476,7 @@ function resumePosition(state) {
     ) {
       targetView = { start: viewStart, end: viewEnd };
       targetBookmark = {
-        muIdx: idx,
+        mu: idx,
         position: Math.round((viewStart + viewEnd) / 2),
       };
     } else {
@@ -501,7 +499,7 @@ function resumePosition(state) {
           end: Math.min(total, mean + halfSpan),
         };
         targetBookmark = {
-          muIdx: idx,
+          mu: idx,
           position: Math.round((targetView.start + targetView.end) / 2),
         };
       }
@@ -526,7 +524,7 @@ function showEditSession(app, file, frame, { open = true } = {}) {
     minimumCount: inferGridCount({
       gridNames: meta.grid_names,
       muGridIndex: meta.mu_grid_index,
-      muscles: meta.muscle_names ?? meta.muscle,
+      muscleNames: meta.muscle_names ?? meta.muscle,
     }),
   });
   setGridNames(state, resolvedGridNames);
@@ -579,23 +577,18 @@ function confirmRecovery(count) {
  *
  * @param {App} app
  * @param {FileRef} file
- * @param {string} filePath
+ * @param {string} path
  * @param {{ open?: boolean }} [options] `open: false` loads it without leaving the current page.
  */
-export async function loadDecompositionForEdit(
-  app,
-  file,
-  filePath,
-  options = {},
-) {
+export async function loadDecompositionForEdit(app, file, path, options = {}) {
   const { api, setUploadLoading, setStatus, resetEditState } = app;
 
-  if (!filePath) return;
+  if (!path) return;
   setUploadLoading(true);
   setStatus("Loading...", "muted");
   let opened = false;
   try {
-    let frame = await api.editOpen(filePath);
+    let frame = await api.editOpen(path);
     opened = true;
     const recoverable = Number(frame.meta.recoverable_edits) || 0;
     let recovered = 0;
@@ -630,16 +623,14 @@ export async function loadDecompositionForEdit(
  */
 export async function restoreEditSession(app) {
   const token = rememberedSessionToken();
-  if (!token) return false;
+  if (!token) return;
   try {
     const frame = await app.api.editSessionState(token);
     showEditSession(app, { name: String(frame.meta.file_label || "") }, frame);
     app.setStatus(
       ...withRecoveryNote(app.state, "Edit session restored", "success"),
     );
-    return true;
   } catch {
     forgetSessionToken();
-    return false;
   }
 }

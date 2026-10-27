@@ -216,7 +216,7 @@ describe("createApp", () => {
   test("merges every service into one context", () => {
     for (const name of [
       "setStatus",
-      "persistNpzBySaveTarget",
+      "saveRun",
       "handleRawFilePath",
       "renderRunStage",
       "loadDecompositionForEditByPath",

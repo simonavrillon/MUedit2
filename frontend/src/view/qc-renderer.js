@@ -59,7 +59,7 @@ export function buildSelections(state) {
     glyph: segmentGlyph(s),
     cycles: s.cycles,
   }));
-  const total = state.seriesLength || 0;
+  const total = state.totalSamples || 0;
   // A whole-recording placeholder stays faint, or it would hide every segment.
   const rois = (
     state.roiDraft ? [...(state.rois || []), state.roiDraft] : state.rois || []
@@ -165,7 +165,7 @@ export function refreshVisuals(app) {
     state.gridSeries,
     traceColors(),
     selections,
-    state.seriesLength,
+    state.totalSamples,
   );
   renderAuxiliaryChannels();
 }
@@ -190,7 +190,7 @@ export function enableRoiSelection(app, canvasId) {
 
   const toSamples = (/** @type {number} */ sx, /** @type {number} */ ex) => {
     const width = canvas.clientWidth || 1;
-    const total = state.seriesLength || 0;
+    const total = state.totalSamples || 0;
     const s = Math.max(0, Math.min(width, Math.min(sx, ex)));
     const e = Math.max(0, Math.min(width, Math.max(sx, ex)));
     const startSample = Math.round((s / width) * total);
@@ -199,7 +199,7 @@ export function enableRoiSelection(app, canvasId) {
   };
 
   const commitSelection = () => {
-    if (!state.seriesLength) return;
+    if (!state.totalSamples) return;
     const { startSample, endSample } = toSamples(startX, endX);
     const nwin = Number(els.nwindows?.value) || 1;
     syncRois(state, nwin);
@@ -209,7 +209,7 @@ export function enableRoiSelection(app, canvasId) {
     };
     setRoiForIndex(
       state,
-      pickRoiSlot(state.rois, span, state.seriesLength),
+      pickRoiSlot(state.rois, span, state.totalSamples),
       span,
     );
     setRoiDraft(state, null);
@@ -221,7 +221,7 @@ export function enableRoiSelection(app, canvasId) {
   };
 
   const commitArtifact = () => {
-    if (!state.seriesLength) return;
+    if (!state.totalSamples) return;
     const { startSample, endSample } = toSamples(startX, endX);
     addArtifactRegion(state, {
       start: startSample,
@@ -250,7 +250,7 @@ export function enableRoiSelection(app, canvasId) {
   };
 
   canvas.addEventListener("pointerdown", (e) => {
-    if (!state.seriesLength) return;
+    if (!state.totalSamples) return;
     canvas.setPointerCapture(e.pointerId);
     dragging = true;
     dragIsArtifact = !!state.artifactMode;
@@ -262,7 +262,7 @@ export function enableRoiSelection(app, canvasId) {
   });
 
   canvas.addEventListener("pointermove", (e) => {
-    if (!dragging || !state.seriesLength) return;
+    if (!dragging || !state.totalSamples) return;
     const rect = canvas.getBoundingClientRect();
     endX = e.clientX - rect.left;
     const { startSample, endSample } = toSamples(startX, endX);
@@ -284,7 +284,7 @@ export function enableRoiSelection(app, canvasId) {
   });
 
   canvas.addEventListener("pointerup", () => {
-    if (!dragging || !state.seriesLength) {
+    if (!dragging || !state.totalSamples) {
       dragging = false;
       return;
     }
@@ -456,7 +456,7 @@ export function renderAuxiliaryChannels(els, state) {
   const span = globalMax - globalMin || 1;
 
   const selections = buildSelections(state);
-  drawRoiRects(ctx, selections, state.seriesLength, width, height);
+  drawRoiRects(ctx, selections, state.totalSamples, width, height);
 
   const colors = traceColors();
   let labelCount = 0;

@@ -8,12 +8,8 @@ import {
   runDecomposition,
   handleStreamMessage as handleStreamMessageFeature,
 } from "../../decomp/run.js";
-import { renderRunStage as renderRunStageView } from "../../view/run-live.js";
-import {
-  DEFAULT_POSTPROCESS_MODE,
-  POSTPROCESS_MODES,
-  buildDecomposeParams,
-} from "../../decomp/params.js";
+import { renderRunStage as renderRunStageFeature } from "../../view/run-live.js";
+import { buildDecomposeParams, postprocessMode } from "../../decomp/params.js";
 import { oncePerFrame } from "../../view/plots.js";
 import {
   isToggleOn,
@@ -49,19 +45,19 @@ export function createRunStageService(app) {
     return buildDecomposeParams({
       niter: Number(els.niter?.value) || 150,
       nwindows: Number(els.nwindows?.value) || 1,
-      peelOn: isToggleOn(els.peelOffToggle),
-      postprocessMode: els.postprocessMode?.value || "windowed",
-      covOn: isToggleOn(els.covToggle),
-      peelWindow: Number(els.peelOffWindow?.value) || 25,
-      covVal: Number(els.covValue?.value) || 0.5,
-      silVal: Number(els.silValue?.value) || 0.9,
+      peelOffEnabled: isToggleOn(els.peelOffToggle),
+      postprocessMode: els.postprocessMode?.value,
+      covFilter: isToggleOn(els.covToggle),
+      peelOffWinMs: Number(els.peelOffWindow?.value) || 25,
+      covThr: Number(els.covValue?.value) || 0.5,
+      silThr: Number(els.silValue?.value) || 0.9,
       duplicatesthresh: Number(els.duplicatesthresh?.value) || 0.3,
     });
   }
 
   /** @type {RunStage["renderRunStage"]} */
   function renderRunStage() {
-    renderRunStageView(els, state.runLive, {
+    renderRunStageFeature(els, state.runLive, {
       gridNames: state.gridNames || [],
       now: Date.now(),
     });
@@ -94,10 +90,9 @@ export function setupRunEvents(app) {
   );
   const renderPostprocessHint = () => {
     if (!els.postprocessModeHint) return;
-    const mode =
-      POSTPROCESS_MODES[els.postprocessMode?.value] ||
-      POSTPROCESS_MODES[DEFAULT_POSTPROCESS_MODE];
-    els.postprocessModeHint.textContent = mode.hint;
+    els.postprocessModeHint.textContent = postprocessMode(
+      els.postprocessMode?.value,
+    ).hint;
   };
   renderPostprocessHint();
   els.postprocessMode?.addEventListener("change", () => {
@@ -109,14 +104,4 @@ export function setupRunEvents(app) {
     toggleConditional("silSettings", on),
   );
   app.updateStartAvailability();
-
-  // A session field marked missing clears once it is filled.
-  const clearFilled = (/** @type {Event} */ e) => {
-    const field = /** @type {HTMLInputElement} */ (e.target);
-    if (field.getAttribute?.("aria-invalid") && field.value.trim()) {
-      field.removeAttribute("aria-invalid");
-    }
-  };
-  els.settingsPanel?.addEventListener("input", clearFilled);
-  els.settingsPanel?.addEventListener("change", clearFilled);
 }

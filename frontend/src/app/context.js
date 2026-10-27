@@ -19,9 +19,7 @@
 /** @typedef {import("../state/state.js").FileRef} FileRef */
 /** @typedef {import("../state/state.js").Selection} Selection */
 /** @typedef {import("../state/state.js").EditMode} EditMode */
-/** @typedef {import("../state/state.js").EditHistoryEntry} EditHistoryEntry */
 /** @typedef {import("../io/bids.js").BidsEntities} BidsEntities */
-/** @typedef {import("../editing/operations.js").PulseViewMeta} PulseViewMeta */
 /** @typedef {import("../decomp/params.js").DecomposeParams} DecomposeParams */
 /** @typedef {"emgCanvas" | "auxCanvas"} RoiCanvasId Canvases that take ROI and artifact drags. */
 /** @typedef {"add-spikes" | "add-artifact" | "delete-spikes"} RoiAction */
@@ -31,7 +29,7 @@
  * discharge-rate plot).
  *
  * @typedef {object} RoiEditRequest
- * @property {number} muIdx
+ * @property {number} mu
  * @property {number} xStart
  * @property {number} xEnd
  * @property {number} yMin
@@ -76,7 +74,7 @@
  * @property {(file: FileRef | null, data?: JsonObject) => void} applySessionInfoFromDecomposition
  * @property {() => void} prefillHardwareFields Fill the empty manufacturer, device and power-line fields from the file's metadata.
  * @property {() => void} renderBidsMuscleFields
- * @property {(payload: JsonObject, fallbackName?: string) => Promise<{ path: string }>} persistNpzBySaveTarget
+ * @property {(payload: JsonObject, fallbackName?: string) => Promise<{ path: string }>} saveRun
  * @property {(payload: JsonObject) => JsonObject} withBidsSaveFields
  * @property {(active: boolean) => void} setUploadLoading
  */
@@ -86,7 +84,7 @@
  * @property {() => void} populateAuxSelector
  * @property {() => void} renderAuxiliaryChannels
  * @property {() => void} ensureQcTraces Fetch the current grid's channel traces over the first window, unless they are shown or on their way.
- * @property {(path: string, name: string, options?: { silentPreviewFailure?: boolean }) => Promise<boolean>} handleRawFilePath
+ * @property {(path: string, name: string, options?: { silentFailure?: boolean }) => Promise<boolean>} handleRawFilePath
  * @property {() => void} renderChannelQC Draw the current grid's channels (the first grid when the data has no other), and ask for its traces.
  * @property {() => void} refreshVisuals
  * @property {() => void} scheduleRefreshVisuals Redraw the QC plots at the next frame, once however often asked.
@@ -111,7 +109,6 @@
  * @property {(mode: EditMode | null, message?: string) => void} setEditMode
  * @property {() => void} renderEditExplorer Settle the MU and view the data allows, draw the edit page, and ask for the pulse window it lacks.
  * @property {() => void} scheduleEditRender Redraw the edit plots at the next frame, once however often asked.
- * @property {() => void} ensureEditPulseView Fetch the current MU's window when the one shown is not it.
  * @property {(action: RoiAction, payload: RoiEditRequest) => Promise<void>} requestRoiEdit
  * @property {(sel: Selection) => void} addSpikesInSelection
  * @property {(sel: Selection) => void} addArtifactInSelection

@@ -1,22 +1,10 @@
 /**
- * Decomposition parameter shape. Extracted from the container so the
- * domain owns the wire format — the container only reads DOM inputs and
- * passes raw values through.
+ * The /decompose run parameters: the post-processing modes and the mapping
+ * from the run form's values to the wire names.
  */
 
 /**
- * The three post-processing routes, in the order they appear in the selector.
- * Keys match `POSTPROCESS_MODES` in `python/src/muedit/decomp/types.py` and the
- * CLI's `--postprocess` choices.
- *
- * They are mutually exclusive on the backend: `postprocess_step` checks
- * `use_adaptive` first and only falls through to the `full_trace` branch when
- * it is off, so the two flags must never both be set. Keeping the choice as a
- * single mode here makes that impossible to express.
- */
-/**
  * @typedef {object} PostprocessMode
- * @property {string} label
  * @property {string} hint
  * @property {{ use_adaptive: number, full_trace: number }} flags
  */
@@ -28,46 +16,54 @@
  * @property {number} niter
  * @property {number} nwindows
  * @property {number} duplicatesthresh
- * @property {number} silVal
- * @property {number} covVal
- * @property {boolean} covOn
- * @property {boolean} peelOn
- * @property {number} peelWindow  Milliseconds.
- * @property {string} postprocessMode
+ * @property {number} silThr
+ * @property {number} covThr
+ * @property {boolean} covFilter
+ * @property {boolean} peelOffEnabled
+ * @property {number} peelOffWinMs  Milliseconds.
+ * @property {string | undefined} postprocessMode
  */
 
 /** @typedef {ReturnType<typeof buildDecomposeParams>} DecomposeParams The /decompose run parameters. */
 
-/** @type {Record<string, PostprocessMode>} */
-export const POSTPROCESS_MODES = {
+/**
+ * The three post-processing routes, in the order they appear in the selector.
+ * Keys match `POSTPROCESS_MODES` in `python/src/muedit/decomp/types.py` and the
+ * CLI's `--postprocess` choices.
+ *
+ * They are mutually exclusive on the backend: `postprocess_step` checks
+ * `use_adaptive` first and only falls through to the `full_trace` branch when
+ * it is off, so the two flags must never both be set. Keeping the choice as a
+ * single mode here makes that impossible to express.
+ *
+ * @type {Record<string, PostprocessMode>}
+ */
+const POSTPROCESS_MODES = {
   windowed: {
-    label: "Windowed",
     hint: "Filters applied inside each analysis window only. Pulse trains are zero outside the ROI.",
     flags: { use_adaptive: 0, full_trace: 0 },
   },
   "full-trace": {
-    label: "Full trace",
     hint: "Filters applied batch by batch across the whole recording, without adaptation. Units extend beyond the ROI.",
     flags: { use_adaptive: 0, full_trace: 1 },
   },
   adaptive: {
-    label: "Adaptive",
     hint: "Filters and whitening are adapted batch by batch across the whole recording.",
     flags: { use_adaptive: 1, full_trace: 0 },
   },
 };
 
-export const DEFAULT_POSTPROCESS_MODE = "windowed";
+const DEFAULT_POSTPROCESS_MODE = "windowed";
 
 /**
- * Resolve a mode key to its backend flags, falling back to the default.
+ * Resolve a mode key, falling back to the default.
  *
- * @param {string} mode
+ * @param {string | undefined} mode
  */
-export function postprocessFlags(mode) {
+export function postprocessMode(mode) {
   return (
-    POSTPROCESS_MODES[mode] || POSTPROCESS_MODES[DEFAULT_POSTPROCESS_MODE]
-  ).flags;
+    POSTPROCESS_MODES[mode ?? ""] || POSTPROCESS_MODES[DEFAULT_POSTPROCESS_MODE]
+  );
 }
 
 /**
@@ -78,11 +74,11 @@ export function buildDecomposeParams(raw) {
     niter: raw.niter,
     nwindows: raw.nwindows,
     duplicatesthresh: raw.duplicatesthresh,
-    sil_thr: raw.silVal,
-    cov_thr: raw.covVal,
-    covfilter: raw.covOn ? 1 : 0,
-    peel_off_enabled: raw.peelOn ? 1 : 0,
-    peel_off_win: raw.peelWindow / 1000,
-    ...postprocessFlags(raw.postprocessMode),
+    sil_thr: raw.silThr,
+    cov_thr: raw.covThr,
+    covfilter: raw.covFilter ? 1 : 0,
+    peel_off_enabled: raw.peelOffEnabled ? 1 : 0,
+    peel_off_win: raw.peelOffWinMs / 1000,
+    ...postprocessMode(raw.postprocessMode).flags,
   };
 }

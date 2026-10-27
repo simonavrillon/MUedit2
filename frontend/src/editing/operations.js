@@ -9,7 +9,6 @@ import { traceRange } from "../signal/series.js";
 /** @typedef {import("../state/state.js").Selection} Selection */
 /** @typedef {import("../app/context.js").Span} Span */
 /** @typedef {ReturnType<typeof buildEditDropdownModel>} EditDropdownModel */
-/** @typedef {NonNullable<ReturnType<typeof getPulseViewMeta>>} PulseViewMeta */
 
 /** @typedef {import("../app/context.js").App} App */
 
@@ -180,7 +179,7 @@ export function addSpikesInSelection(app, sel) {
   const box = pulseBox(app, sel);
   if (!box) return;
   app.requestRoiEdit("add-spikes", {
-    muIdx: app.state.edit.currentMu ?? 0,
+    mu: app.state.edit.currentMu ?? 0,
     xStart: box.start,
     xEnd: box.end,
     yMin: box.low,
@@ -195,7 +194,7 @@ export function addArtifactInSelection(app, sel) {
   const box = pulseBox(app, sel);
   if (!box) return;
   app.requestRoiEdit("add-artifact", {
-    muIdx: app.state.edit.currentMu ?? 0,
+    mu: app.state.edit.currentMu ?? 0,
     xStart: box.start,
     xEnd: box.end,
     yMin: box.low,
@@ -210,7 +209,7 @@ export function deleteSpikesInSelection(app, sel) {
   const box = pulseBox(app, sel);
   if (!box) return;
   app.requestRoiEdit("delete-spikes", {
-    muIdx: app.state.edit.currentMu ?? 0,
+    mu: app.state.edit.currentMu ?? 0,
     xStart: box.start,
     xEnd: box.end,
     yMin: box.low,

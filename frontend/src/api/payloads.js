@@ -1,6 +1,7 @@
 /**
  * Normalises backend JSON at the boundary: the preview payload, regions
- * as `Span`s and `/qc/segment` segments. Malformed entries are dropped here.
+ * as `Span`s, `/qc/segment` segments and a run's `done` summary. Malformed
+ * entries are dropped here.
  */
 /** @typedef {import("../app/context.js").JsonObject} JsonObject */
 /** @typedef {import("../app/context.js").Span} Span */
@@ -91,4 +92,29 @@ export function normalizePreviewPayload(payload) {
       ? Number(source.total_samples)
       : 0,
   };
+}
+
+/**
+ * The finished run from its `done` event, with its units counted per grid.
+ *
+ * @param {JsonObject} summary The event's summary.
+ * @param {JsonObject | null | undefined} preview Its preview metadata.
+ * @returns {import("../decomp/live.js").RunSummary}
+ */
+export function toRunSummary(summary, preview) {
+  const nMu = Math.max(0, Number(summary.n_mu) || 0);
+  const muGridIndex = (
+    Array.isArray(preview?.mu_grid_index) ? preview.mu_grid_index : []
+  ).map((g) => Math.max(0, Number(g) || 0));
+  const ngrid = Math.max(
+    Array.isArray(summary.grid_names) ? summary.grid_names.length : 0,
+    muGridIndex.length ? Math.max(...muGridIndex) + 1 : 0,
+    nMu > 0 ? 1 : 0,
+  );
+  const nMuByGrid = new Array(ngrid).fill(0);
+  for (let mu = 0; mu < nMu; mu++) {
+    const g = muGridIndex[mu] ?? 0;
+    nMuByGrid[g < ngrid ? g : 0] += 1;
+  }
+  return { nMu, nMuByGrid, muGridIndex };
 }

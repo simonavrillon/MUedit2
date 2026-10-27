@@ -25,7 +25,7 @@ describe("inferGridCount", () => {
 
   test("takes the largest of names, muscles and MU grid indices", () => {
     assert.equal(inferGridCount({ gridNames: ["A", "B"] }), 2);
-    assert.equal(inferGridCount({ muscles: ["TA", "GM", "SOL"] }), 3);
+    assert.equal(inferGridCount({ muscleNames: ["TA", "GM", "SOL"] }), 3);
     assert.equal(inferGridCount({ muGridIndex: [0, 0, 3] }), 4);
   });
 
@@ -198,8 +198,6 @@ describe("buildBidsMuscleRowsModel", () => {
 });
 
 describe("buildSessionInfoFromDecomposition", () => {
-  const deps = { parseBidsEntitiesFromLabel, listifyMuscles };
-
   test("reads entities from the file name and muscles from the payload", () => {
     const info = buildSessionInfoFromDecomposition(
       { name: "sub-07_ses-post_task-ramp_decomp.npz" },
@@ -212,13 +210,12 @@ describe("buildSessionInfoFromDecomposition", () => {
         powerline_freq: 50,
         software_versions: "MUedit 2.1.0",
       },
-      deps,
     );
     assert.equal(info.fileLabel, "sub-07_ses-post_task-ramp_decomp.npz");
     assert.equal(info.fsampText, "2048");
     assert.equal(info.entities.subject, "07");
     assert.equal(info.entities.session, "post");
-    assert.deepEqual(info.muscles, ["TA"]);
+    assert.deepEqual(info.muscleNames, ["TA"]);
     assert.deepEqual(info.participant, { age: "31", sex: "", handedness: "" });
     assert.equal(info.hardware.manufacturer, "OT Bioelettronica");
     assert.equal(info.bids.powerlineFreq, 50);
@@ -226,13 +223,12 @@ describe("buildSessionInfoFromDecomposition", () => {
   });
 
   test("falls back to the target muscle parameter and the payload label", () => {
-    const info = buildSessionInfoFromDecomposition(
-      null,
-      { file_label: "sub-02_task-x", parameters: { target_muscle: "GM" } },
-      deps,
-    );
+    const info = buildSessionInfoFromDecomposition(null, {
+      file_label: "sub-02_task-x",
+      parameters: { target_muscle: "GM" },
+    });
     assert.equal(info.fileLabel, "sub-02_task-x");
-    assert.deepEqual(info.muscles, ["GM"]);
+    assert.deepEqual(info.muscleNames, ["GM"]);
     assert.equal(info.fsampText, "");
     assert.equal(info.bids.softwareVersions, null);
   });

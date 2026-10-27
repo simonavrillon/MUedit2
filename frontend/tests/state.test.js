@@ -255,29 +255,29 @@ describe("edit slice", () => {
     assert.equal(state.edit.editHistoryStart, 30);
   });
 
-  test("keepEditMus reorders the times and follows the current MU", () => {
+  test("kept MUs reorder the times and follow the current MU", () => {
     Object.assign(state.edit, {
       spikeTimes: [ints(0), ints(1), ints(2)],
       artifactTimes: [ints(30), ints(31), ints(32)],
       currentMu: 2,
-      bookmarkPosition: { muIdx: 1, position: 50 },
+      bookmarkPosition: { mu: 1, position: 50 },
     });
-    actions.keepEditMus(state, [2, 1]);
+    actions.applyEditSave(state, { kept_indices: [2, 1], n_mu: 2 });
     const e = state.edit;
     assert.deepEqual(rows(e.spikeTimes), [[2], [1]]);
     assert.deepEqual(rows(e.artifactTimes), [[32], [31]]);
     assert.equal(e.currentMu, 0);
-    assert.deepEqual(e.bookmarkPosition, { muIdx: 1, position: 50 });
+    assert.deepEqual(e.bookmarkPosition, { mu: 1, position: 50 });
   });
 
-  test("keepEditMus falls back to MU 0 and drops a bookmark on a removed MU", () => {
+  test("removing the current MU falls back to MU 0 and drops its bookmark", () => {
     Object.assign(state.edit, {
       spikeTimes: [ints(0), ints(1)],
       muUids: ["g0_mu0", "g0_mu1"],
       currentMu: 1,
-      bookmarkPosition: { muIdx: 1, position: 5 },
+      bookmarkPosition: { mu: 1, position: 5 },
     });
-    actions.keepEditMus(state, [0]);
+    actions.applyEditSave(state, { kept_indices: [0], n_mu: 1 });
     assert.equal(state.edit.currentMu, 0);
     assert.equal(state.edit.bookmarkPosition, null);
   });

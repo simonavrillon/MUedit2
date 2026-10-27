@@ -11,7 +11,7 @@ import {
 import {
   populateAuxSelector as populateAuxSelectorFeature,
   renderAuxiliaryChannels as renderAuxiliaryChannelsFeature,
-  refreshVisuals as refreshVisualsController,
+  refreshVisuals as refreshVisualsFeature,
   enableRoiSelection,
   drawChannelQC,
 } from "../../view/qc-renderer.js";
@@ -55,7 +55,7 @@ export function createQcStageService(app) {
   /** @type {QcStage["handleRawFilePath"]} */
   async function handleRawFilePath(path, name, options = {}) {
     const ok = await requestPreview(app, {
-      silentFailure: options.silentPreviewFailure ?? false,
+      silentFailure: options.silentFailure,
       file: { name, path },
     });
     if (ok) app.updateStartAvailability();
@@ -73,7 +73,7 @@ export function createQcStageService(app) {
 
   /** @type {QcStage["refreshVisuals"]} */
   function refreshVisuals() {
-    refreshVisualsController(app);
+    refreshVisualsFeature(app);
   }
 
   /** @type {QcStage["scheduleRefreshVisuals"]} */
@@ -178,10 +178,6 @@ export function setupQcEvents(app) {
   });
   window.addEventListener("keydown", (e) => {
     if (e.key === "Escape") setSegmentMenuOpen(els, false);
-  });
-  // A task typed in stays when the target is segmented.
-  els.bidsTask?.addEventListener("input", () => {
-    els.bidsTask.dataset.keep = "1";
   });
   els.artifactAddBtn?.addEventListener("click", () => toggleArtifactMode(app));
   els.artifactRemoveBtn?.addEventListener("click", () =>

@@ -3,16 +3,16 @@
  * `app` context so features call them as `app.x()`.
  */
 import {
-  setStatus as setStatusController,
-  showWorkspace as showWorkspaceController,
-  populateGridTabs as populateGridTabsController,
-  updateStepAvailability as updateStepAvailabilityController,
-  updateWorkflowStepper as updateWorkflowStepperController,
+  setStatus as setStatusFeature,
+  showWorkspace as showWorkspaceFeature,
+  populateGridTabs as populateGridTabsFeature,
+  updateStepAvailability as updateStepAvailabilityFeature,
+  updateWorkflowStepper as updateWorkflowStepperFeature,
 } from "./navigation.js";
-import { setSettingsOpen as setSettingsOpenController } from "./layout.js";
+import { setSettingsOpen as setSettingsOpenFeature } from "./layout.js";
 import {
   renderActiveStage,
-  switchStage as switchStageController,
+  switchStage as switchStageFeature,
 } from "../stages/lifecycle.js";
 import { oncePerFrame } from "../../view/plots.js";
 
@@ -28,25 +28,25 @@ export function createUiService(app) {
 
   /** @type {UiService["setStatus"]} */
   function setStatus(text, tone = "muted") {
-    setStatusController(els, text, tone);
+    setStatusFeature(els, text, tone);
   }
 
   /** @type {UiService["updateWorkflowStepper"]} */
   const updateWorkflowStepper = (targetStage) =>
-    updateWorkflowStepperController(app, targetStage);
+    updateWorkflowStepperFeature(app, targetStage);
   /** @type {UiService["updateStepAvailability"]} */
-  const updateStepAvailability = () => updateStepAvailabilityController(app);
+  const updateStepAvailability = () => updateStepAvailabilityFeature(app);
 
   /** @type {UiService["scheduleLayoutRerender"]} */
   const scheduleLayoutRerender = oncePerFrame(() => renderActiveStage(app));
   /** @type {UiService["setSettingsOpen"]} */
-  const setSettingsOpen = (open) => setSettingsOpenController(app, open);
+  const setSettingsOpen = (open) => setSettingsOpenFeature(app, open);
   /** @type {UiService["switchStage"]} */
-  const switchStage = (target) => switchStageController(app, target);
+  const switchStage = (target) => switchStageFeature(app, target);
   /** @type {UiService["populateGridTabs"]} */
-  const populateGridTabs = () => populateGridTabsController(app);
+  const populateGridTabs = () => populateGridTabsFeature(app);
   /** @type {UiService["showWorkspace"]} */
-  const showWorkspace = (target) => showWorkspaceController(app, target);
+  const showWorkspace = (target) => showWorkspaceFeature(app, target);
 
   return {
     setStatus,

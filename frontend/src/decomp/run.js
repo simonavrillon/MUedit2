@@ -4,9 +4,8 @@
  */
 import {
   setIsRunning,
-  setLastRunDownloadKey,
+  setSavedRunToken,
   setParameters,
-  setRunDownloadInFlight,
   setRunLive,
   setRunResultToken,
 } from "../state/actions.js";
@@ -14,7 +13,6 @@ import { getSuggestedNpzName } from "../io/bids.js";
 import { errorMessage, handleError } from "../app/services/error-service.js";
 import {
   applyRunEvent,
-  buildRunSummary,
   createRunLive,
   failRun,
   failSave,
@@ -24,6 +22,7 @@ import {
 } from "./live.js";
 import { renderRunTime, updateRunDots } from "../view/run-live.js";
 import { readNdjson } from "../api/ndjson.js";
+import { toRunSummary } from "../api/payloads.js";
 import { withUpload } from "../app/services/upload.js";
 
 /** @typedef {import("../app/context.js").App} App */
@@ -38,7 +37,7 @@ const RUN_START_TIMEOUT_MS = 15 * 60 * 1000;
 export async function autoSaveRunDecomposition(app) {
   const {
     state,
-    persistNpzBySaveTarget,
+    saveRun,
     getBidsMuscleNames,
     setStatus,
     loadDecompositionForEditByPath,
@@ -46,18 +45,16 @@ export async function autoSaveRunDecomposition(app) {
   } = app;
   const live = state.runLive;
 
-  if (state.runDownloadInFlight || !live?.summary?.nMu) return;
+  if (!live?.summary?.nMu || live.saving) return;
   // The server kept this run's pulse trains and discharge times under its token.
   const token = state.runResultToken;
-  if (!token) return;
+  if (!token || state.savedRunToken === token) return;
   const fileBase = state.file?.name || "decomposition";
   const suggestedName = getSuggestedNpzName(fileBase, "_decomposition");
-  const key = `${suggestedName}:${token}`;
-  if (state.lastRunDownloadKey === key) return;
 
   const payload = {
     run_result_token: token,
-    total_samples: state.seriesLength || 0,
+    total_samples: state.totalSamples || 0,
     fsamp: state.fsamp,
     grid_names: state.gridNames,
     mu_grid_index: live.summary.muGridIndex,
@@ -66,13 +63,12 @@ export async function autoSaveRunDecomposition(app) {
     artifact_regions: state.artifactRegions,
     file_label: suggestedName,
   };
-  setRunDownloadInFlight(state, true);
   startSave(live);
   renderRunStage();
   try {
     setStatus("Saving decomposition...", "muted");
-    const saved = await persistNpzBySaveTarget(payload, suggestedName);
-    setLastRunDownloadKey(state, key);
+    const saved = await saveRun(payload, suggestedName);
+    setSavedRunToken(state, token);
     finishSave(live, saved.path);
     setStatus(
       saved.path
@@ -88,7 +84,6 @@ export async function autoSaveRunDecomposition(app) {
     handleError(err, setStatus, "Save failed");
     failSave(live, errorMessage(err));
   } finally {
-    setRunDownloadInFlight(state, false);
     renderRunStage();
   }
 }
@@ -123,8 +118,8 @@ export async function runDecomposition(app) {
   }
 
   setIsRunning(state, true);
-  setParameters(state, buildParams());
-  setLastRunDownloadKey(state, "");
+  const params = buildParams();
+  setParameters(state, params);
   setRunResultToken(state, "");
   setRunLive(state, createRunLive(Date.now()));
   updateStartAvailability();
@@ -140,7 +135,7 @@ export async function runDecomposition(app) {
     const bidsEntities = collectBidsEntities();
     return {
       upload_token: token,
-      params: buildParams(),
+      params,
       discard_channels: state.discardMasks.length ? state.discardMasks : null,
       rois: state.rois.length ? state.rois : null,
       artifact_regions: state.artifactRegions.length
@@ -238,9 +233,7 @@ export function handleStreamMessage(app, msg) {
   if (!live) return;
 
   if (msg.stage === "error") {
-    const detail = msg.detail
-      ? `: ${typeof msg.detail === "string" ? msg.detail : JSON.stringify(msg.detail)}`
-      : "";
+    const detail = msg.detail ? `: ${msg.detail}` : "";
     setStatus(`Error${detail}`, "error");
     failRun(live, `${msg.message || "Run failed"}${detail}`, Date.now());
     renderRunStage();
@@ -272,7 +265,7 @@ export function handleStreamMessage(app, msg) {
   if (msg.summary?.parameters) setParameters(state, msg.summary.parameters);
   finishRun(
     live,
-    msg.summary ? buildRunSummary(msg.summary, msg.preview) : null,
+    msg.summary ? toRunSummary(msg.summary, msg.preview) : null,
     Date.now(),
   );
   setStatus("Complete", "success");

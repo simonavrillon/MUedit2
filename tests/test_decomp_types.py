@@ -12,7 +12,7 @@ FRONTEND = REPO_ROOT / "frontend"
 
 def _js_mode_keys() -> set[str]:
     js = (FRONTEND / "src" / "decomp" / "params.js").read_text(encoding="utf-8")
-    block = js[js.index("export const POSTPROCESS_MODES = {") :]
+    block = js[js.index("const POSTPROCESS_MODES = {") :]
     block = block[: block.index("\n};")]
     return set(re.findall(r'^  "?([\w-]+)"?: \{', block, flags=re.MULTILINE))
 

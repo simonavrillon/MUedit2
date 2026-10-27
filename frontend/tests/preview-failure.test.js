@@ -44,7 +44,7 @@ function loadedState() {
     gridNames: ["GR08MM1305"],
     channelMeans: [[1, 1]],
     channelTraces: [[0.5]],
-    seriesLength: 3,
+    totalSamples: 3,
     discardMasks: [[0, 1]],
   });
   return state;
@@ -131,7 +131,7 @@ describe("raw preview failure", () => {
   test("silent failure skips the status message", async () => {
     const app = testApp(state, failingApi);
     const ok = await app.handleRawFilePath("/data/new.mat", "new.mat", {
-      silentPreviewFailure: true,
+      silentFailure: true,
     });
 
     assert.equal(ok, false);

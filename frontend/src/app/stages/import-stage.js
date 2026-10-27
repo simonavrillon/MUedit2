@@ -4,6 +4,7 @@
  */
 import { parseBidsEntitiesFromLabel } from "../../io/bids.js";
 import { handleError } from "../services/error-service.js";
+import { showLanding } from "../services/navigation.js";
 
 /** @typedef {import("../context.js").App} App */
 /** @typedef {import("../context.js").Els} Els */
@@ -160,7 +161,7 @@ async function handleNativeDialogOpen(app) {
     await loadDecompositionForEditByPath(path);
   } else {
     const ok = await handleRawFilePath(path, name, {
-      silentPreviewFailure: true,
+      silentFailure: true,
     });
     if (!ok) await loadDecompositionForEditByPath(path);
   }
@@ -168,7 +169,7 @@ async function handleNativeDialogOpen(app) {
 
 /** @param {App} app */
 export function setupImportEvents(app) {
-  const { els, state, setStatus, showWorkspace, updateWorkflowStepper } = app;
+  const { els, state, setStatus, showWorkspace } = app;
 
   if (els.browseSignalBtn) {
     els.browseSignalBtn.addEventListener("click", () => {
@@ -179,9 +180,7 @@ export function setupImportEvents(app) {
   const openStageFromStepper = (/** @type {StageKey} */ target) => {
     if (!state.file && target !== "edit") {
       setStatus("Import a file first", "muted");
-      if (els.landing) els.landing.hidden = false;
-      if (els.workspace) els.workspace.hidden = true;
-      updateWorkflowStepper("import");
+      showLanding(app);
       return;
     }
     showWorkspace(target);
@@ -196,9 +195,5 @@ export function setupImportEvents(app) {
   els.stepEdit?.addEventListener("click", () => {
     openStageFromStepper("edit");
   });
-  els.stepImport?.addEventListener("click", () => {
-    if (els.landing) els.landing.hidden = false;
-    if (els.workspace) els.workspace.hidden = true;
-    updateWorkflowStepper("import");
-  });
+  els.stepImport?.addEventListener("click", () => showLanding(app));
 }

@@ -3,19 +3,9 @@
  * the NDJSON run stream. Pure state, no DOM; `view/run-live.js` draws it.
  */
 /** @typedef {import("../app/context.js").JsonObject} JsonObject */
-/** @typedef {import("../state/state.js").State} State */
 
 /** @typedef {"load" | "preprocess" | "decompose" | "postprocess" | "save"} RunPhase */
 /** @typedef {"running" | "done" | "failed"} RunStatus */
-
-/** The pipeline's phases, in order, as the phase track shows them. */
-export const RUN_PHASES = /** @type {const} */ ([
-  { key: "load", label: "Load" },
-  { key: "preprocess", label: "Filter" },
-  { key: "decompose", label: "Decompose" },
-  { key: "postprocess", label: "Post-process" },
-  { key: "save", label: "Save" },
-]);
 
 /** What became of one iteration of the search, as its dot shows it. */
 export const DOT = /** @type {const} */ ({
@@ -53,7 +43,7 @@ const PHASE_OF_EVENT = {
  *
  * @typedef {object} RunSummary
  * @property {number} nMu Units kept after post-processing.
- * @property {number[]} perGrid
+ * @property {number[]} nMuByGrid
  * @property {number[]} muGridIndex
  */
 
@@ -225,50 +215,4 @@ export function searchSecondsLeft(live, now) {
   const elapsed = (now - live.searchStartedAt) / 1000;
   if (!total || done < Math.min(10, total) || elapsed < 3) return null;
   return Math.max(0, ((total - done) * elapsed) / done);
-}
-
-/**
- * "1:05", "12:40", "1:02:03".
- *
- * @param {number} seconds
- */
-export function formatClock(seconds) {
-  const s = Math.max(0, Math.round(seconds));
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const ss = String(s % 60).padStart(2, "0");
-  return h ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
-}
-
-/**
- * "about 2 min", "under a minute".
- *
- * @param {number} seconds
- */
-export function formatRemaining(seconds) {
-  if (seconds < 60) return "under a minute";
-  return `about ${Math.round(seconds / 60)} min`;
-}
-
-/**
- * @param {JsonObject} summary The `done` event's summary.
- * @param {JsonObject | null | undefined} preview Its preview metadata.
- * @returns {RunSummary}
- */
-export function buildRunSummary(summary, preview) {
-  const nMu = Math.max(0, Number(summary.n_mu) || 0);
-  const muGridIndex = (
-    Array.isArray(preview?.mu_grid_index) ? preview.mu_grid_index : []
-  ).map((g) => Math.max(0, Number(g) || 0));
-  const ngrid = Math.max(
-    Array.isArray(summary.grid_names) ? summary.grid_names.length : 0,
-    muGridIndex.length ? Math.max(...muGridIndex) + 1 : 0,
-    nMu > 0 ? 1 : 0,
-  );
-  const perGrid = new Array(ngrid).fill(0);
-  for (let mu = 0; mu < nMu; mu++) {
-    const g = muGridIndex[mu] ?? 0;
-    perGrid[g < ngrid ? g : 0] += 1;
-  }
-  return { nMu, perGrid, muGridIndex };
 }

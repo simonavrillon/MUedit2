@@ -62,7 +62,7 @@ function pxToViewSample(canvas, px, view) {
  */
 function renderBookmark(canvas, state, muIdx, view) {
   const bookmark = state.edit.bookmarkPosition;
-  if (!view || !bookmark || bookmark.muIdx !== muIdx) return;
+  if (!view || !bookmark || bookmark.mu !== muIdx) return;
   if (!state.edit.showBookmark) return;
 
   const ctx = canvas.getContext("2d");

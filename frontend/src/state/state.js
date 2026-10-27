@@ -8,7 +8,7 @@
 /** @typedef {{ name?: string, path?: string }} FileRef */
 /** @typedef {Span & { yMin?: number, yMax?: number }} Selection */
 /** @typedef {"add" | "add_artifact" | "delete_spikes"} EditMode */
-/** @typedef {{ muIdx: number, position: number }} Bookmark Where the user last edited an MU. */
+/** @typedef {{ mu: number, position: number }} Bookmark Where the user last edited an MU. */
 /** @typedef {import("../api/binary-payloads.js").SeriesRow} ChannelTrace One row of a viewport: its samples, or their min/max per bin. */
 /** @typedef {import("../api/binary-payloads.js").PulseView} PulseView */
 /** @typedef {"ramp" | "plateau" | "sinusoid" | "irregular"} SegmentKind */
@@ -89,7 +89,7 @@
  * @property {FileRef | null} file
  * @property {string | null} uploadToken
  * @property {boolean} isRunning
- * @property {number | null} seriesLength
+ * @property {number | null} totalSamples
  * @property {Span[]} rois
  * @property {string[]} gridNames
  * @property {ChannelTrace[]} gridSeries Per grid, the smoothed mean |EMG| of the whole recording.
@@ -103,8 +103,7 @@
  * @property {StageKey} currentStage
  * @property {number} currentGrid
  * @property {import("../decomp/live.js").RunLive | null} runLive The latest decomposition, as the run page shows it.
- * @property {boolean} runDownloadInFlight
- * @property {string} lastRunDownloadKey
+ * @property {string} savedRunToken
  * @property {string} runResultToken
  * @property {Span | null} roiDraft
  * @property {Span[]} artifactRegions
@@ -161,7 +160,7 @@ export const state = {
   file: null,
   uploadToken: null,
   isRunning: false,
-  seriesLength: null,
+  totalSamples: null,
   rois: [],
   gridNames: [],
   gridSeries: [],
@@ -175,8 +174,7 @@ export const state = {
   currentStage: "qc",
   currentGrid: 0,
   runLive: null,
-  runDownloadInFlight: false,
-  lastRunDownloadKey: "",
+  savedRunToken: "",
   runResultToken: "",
   roiDraft: null,
   artifactRegions: [],

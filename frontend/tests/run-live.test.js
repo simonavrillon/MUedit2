@@ -9,6 +9,9 @@ installDom();
 
 const live = await import("../src/decomp/live.js");
 const { DOT, applyRunEvent, createRunLive } = live;
+const { formatClock, formatRemaining } =
+  await import("../src/view/run-live.js");
+const { toRunSummary } = await import("../src/api/payloads.js");
 const { state: initialState } = await import("../src/state/state.js");
 const { createApp } = await import("../src/app/create-app.js");
 
@@ -106,26 +109,26 @@ describe("searchSecondsLeft", () => {
   });
 
   test("formats clocks and estimates", () => {
-    assert.equal(live.formatClock(65), "1:05");
-    assert.equal(live.formatClock(3723), "1:02:03");
-    assert.equal(live.formatRemaining(30), "under a minute");
-    assert.equal(live.formatRemaining(150), "about 3 min");
+    assert.equal(formatClock(65), "1:05");
+    assert.equal(formatClock(3723), "1:02:03");
+    assert.equal(formatRemaining(30), "under a minute");
+    assert.equal(formatRemaining(150), "about 3 min");
   });
 });
 
-describe("buildRunSummary", () => {
+describe("toRunSummary", () => {
   test("counts units per grid", () => {
-    const summary = live.buildRunSummary(
+    const summary = toRunSummary(
       { n_mu: 3, grid_names: ["A", "B"] },
       { mu_grid_index: [0, 1, 1] },
     );
-    assert.deepEqual(summary.perGrid, [1, 2]);
+    assert.deepEqual(summary.nMuByGrid, [1, 2]);
     assert.deepEqual(summary.muGridIndex, [0, 1, 1]);
   });
 
   test("no units", () => {
-    const summary = live.buildRunSummary({ n_mu: 0, grid_names: ["A"] }, null);
-    assert.deepEqual(summary.perGrid, [0]);
+    const summary = toRunSummary({ n_mu: 0, grid_names: ["A"] }, null);
+    assert.deepEqual(summary.nMuByGrid, [0]);
   });
 });
 
@@ -213,7 +216,7 @@ describe("run stream handling", () => {
     const payloads = [];
     Object.assign(app, {
       getBidsMuscleNames: () => ["ta"],
-      persistNpzBySaveTarget: async (payload) => {
+      saveRun: async (payload) => {
         payloads.push(payload);
         return { path: "/out/x.npz" };
       },
@@ -222,13 +225,13 @@ describe("run stream handling", () => {
     const { autoSaveRunDecomposition } = await import("../src/decomp/run.js");
     Object.assign(app.state, {
       runResultToken: "run-1",
-      seriesLength: 10,
+      totalSamples: 10,
       fsamp: 2000,
       gridNames: ["A"],
     });
     app.state.runLive.summary = {
       nMu: 2,
-      perGrid: [2],
+      nMuByGrid: [2],
       muGridIndex: [0, 0],
     };
     await autoSaveRunDecomposition(app);

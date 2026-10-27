@@ -270,7 +270,7 @@ describe("selection to ROI request", () => {
     app.addSpikesInSelection({ start: 2, end: 6, yMin: 20, yMax: 60 });
     const [[action, payload]] = app.requestRoiEdit.calls;
     assert.equal(action, "add-spikes");
-    assert.equal(payload.muIdx, 0);
+    assert.equal(payload.mu, 0);
     assert.equal(payload.xStart, 2);
     assert.equal(payload.xEnd, 6);
     // 60 px down a 100 px plot is 40% up a 0..9 range.
@@ -344,7 +344,7 @@ describe("edits on the server", () => {
       );
     };
     await app.requestRoiEdit("delete-spikes", {
-      muIdx: 0,
+      mu: 0,
       xStart: 4,
       xEnd: 6,
       yMin: 1,
@@ -363,7 +363,7 @@ describe("edits on the server", () => {
     assert.deepEqual(state.edit.versions, [5, 5]);
     assert.equal(state.edit.dirty, true);
     assert.equal(state.edit.canUndo, true);
-    assert.deepEqual(state.edit.bookmarkPosition, { muIdx: 0, position: 5 });
+    assert.deepEqual(state.edit.bookmarkPosition, { mu: 0, position: 5 });
     assert.equal(state.edit.editHistory.at(-1).type, "delete_spikes");
     assert.deepEqual(app.setStatus.calls.at(-1), ["ROI applied", "success"]);
   });

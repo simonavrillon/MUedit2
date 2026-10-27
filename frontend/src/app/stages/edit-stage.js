@@ -41,7 +41,7 @@ import { getEditMuIndicesForGrid } from "../../state/selectors.js";
 import { getCanvasPlotMetrics, oncePerFrame } from "../../view/plots.js";
 import { handleKeyboardNavigation } from "../services/navigation.js";
 import { createViewFetcher } from "../services/view-fetcher.js";
-import { errorMessage } from "../services/error-service.js";
+import { handleError } from "../services/error-service.js";
 import {
   applyLabeledToggle,
   isToggleOn,
@@ -83,11 +83,6 @@ export function createEditStageService(app) {
     if (mode) {
       app.setStatus(message || `Mode: ${mode}`, "muted");
     }
-  }
-
-  /** @param {HTMLCanvasElement | null | undefined} canvas */
-  function plotHeight(canvas) {
-    return canvas ? getCanvasPlotMetrics(canvas, true).plotHeight || 1 : 1;
   }
 
   /** @param {HTMLCanvasElement} canvas */
@@ -159,10 +154,10 @@ export function createEditStageService(app) {
       setEditPulseView(state, view);
       if (state.currentStage === "edit") renderEditExplorer();
     },
-    (err) => app.setStatus(`Pulse train failed: ${errorMessage(err)}`, "error"),
+    (err) => handleError(err, app.setStatus, "Pulse train failed"),
   );
 
-  /** @type {EditStage["ensureEditPulseView"]} */
+  /** Fetch the current MU's window when the one shown is not it. */
   function ensureEditPulseView() {
     const e = state.edit;
     const canvas = els.editPulseCanvas;
@@ -212,13 +207,13 @@ export function createEditStageService(app) {
   }
 
   return {
-    getPulsePlotHeight: () => plotHeight(els.editPulseCanvas),
+    getPulsePlotHeight: () =>
+      getCanvasPlotMetrics(els.editPulseCanvas, true).plotHeight || 1,
     resetEditState,
     refreshEditModeButtons,
     setEditMode,
     renderEditExplorer,
     scheduleEditRender,
-    ensureEditPulseView,
     requestRoiEdit,
     addSpikesInSelection,
     addArtifactInSelection,
@@ -342,15 +337,6 @@ export function setupEditEvents(app) {
       runCommand(app, command),
     );
   }
-
-  for (const field of [els.bidsProject, els.bidsProjectNew]) {
-    field?.addEventListener("input", () => app.syncBidsProject());
-  }
-
-  els.bidsPlacementScheme?.addEventListener("change", () => {
-    const row = els.bidsPlacementDescRow;
-    if (row) row.hidden = els.bidsPlacementScheme.value !== "Other";
-  });
 
   refreshEditModeButtons();
   window.addEventListener("keydown", (e) => {

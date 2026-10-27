@@ -1,27 +1,26 @@
 /**
  * The session form: the upload indicator, and the BIDS entity, participant
  * and hardware fields that travel with a run or a save. Every DOM read or
- * write of those fields goes through here.
+ * write of those fields, and every event binding on them, goes through here.
  */
 import {
   applyParticipantFields,
   applySessionInfoToDom,
-  renderBidsMuscleFields as renderBidsMuscleFieldsView,
+  renderBidsMuscleFields as renderBidsMuscleFieldsFeature,
   resetBidsEntityDefaults,
+  syncPlacementDescriptionRow,
 } from "../../view/bids-renderer.js";
 import {
   buildBidsMuscleRowsModel,
   buildEntityLabelFromSession,
   buildSessionInfoFromDecomposition,
-  listifyMuscles,
-  parseBidsEntitiesFromLabel,
   safeBidsToken,
 } from "../../io/bids.js";
 import {
   setEditProject,
   setEditSoftwareVersions,
   setFsamp,
-  setMuscle,
+  setMuscleNames,
 } from "../../state/actions.js";
 
 /** @typedef {import("../context.js").App} App */
@@ -125,7 +124,7 @@ export function createFileSessionService(app) {
       session: safeBidsToken(els.bidsSession?.value),
       run: safeBidsToken(els.bidsRun?.value),
       acquisition: safeBidsToken(els.bidsAcquisition?.value),
-      muscles: getBidsMuscleNames(),
+      muscleNames: getBidsMuscleNames(),
       participantMeta:
         age || sex || handedness
           ? {
@@ -155,7 +154,7 @@ export function createFileSessionService(app) {
       session: form.session,
       run: form.run,
       acquisition: form.acquisition,
-      target_muscle: form.muscles.length ? form.muscles : null,
+      target_muscle: form.muscleNames.length ? form.muscleNames : null,
       powerline_freq: form.powerlineFreq,
       manufacturer: form.manufacturer,
       manufacturers_model_name: form.deviceModel,
@@ -207,8 +206,7 @@ export function createFileSessionService(app) {
     const scheme = data?.placement_scheme || meta.placement_scheme;
     if (els.bidsPlacementScheme && scheme) {
       els.bidsPlacementScheme.value = String(scheme);
-      if (els.bidsPlacementDescRow)
-        els.bidsPlacementDescRow.hidden = scheme !== "Other";
+      syncPlacementDescriptionRow(els);
     }
     /** @type {[HTMLInputElement | null | undefined, unknown][]} */
     const placement = [
@@ -225,12 +223,9 @@ export function createFileSessionService(app) {
 
   /** @type {FileSessionService["applySessionInfoFromDecomposition"]} */
   function applySessionInfoFromDecomposition(file, data = {}) {
-    const payload = buildSessionInfoFromDecomposition(file, data, {
-      parseBidsEntitiesFromLabel,
-      listifyMuscles,
-    });
+    const payload = buildSessionInfoFromDecomposition(file, data);
     applySessionInfoToDom(els, payload);
-    setMuscle(state, payload.muscles);
+    setMuscleNames(state, payload.muscleNames);
     setEditSoftwareVersions(state, payload.bids?.softwareVersions ?? null);
     setFsamp(state, payload.fsampText);
   }
@@ -256,7 +251,7 @@ export function createFileSessionService(app) {
 
   /** @type {FileSessionService["renderBidsMuscleFields"]} */
   function renderBidsMuscleFields() {
-    renderBidsMuscleFieldsView(els, buildBidsMuscleRowsModel(state));
+    renderBidsMuscleFieldsFeature(els, buildBidsMuscleRowsModel(state));
   }
 
   /** The session fields a run cannot start without; Acquisition and Run are optional. */
@@ -350,8 +345,8 @@ export function createFileSessionService(app) {
     };
   }
 
-  /** @type {FileSessionService["persistNpzBySaveTarget"]} */
-  async function persistNpzBySaveTarget(payload, fallbackName) {
+  /** @type {FileSessionService["saveRun"]} */
+  async function saveRun(payload, fallbackName) {
     const data = await api.saveRun(
       withBidsSaveFields({
         ...payload,
@@ -376,8 +371,34 @@ export function createFileSessionService(app) {
     applySessionInfoFromDecomposition,
     prefillHardwareFields,
     renderBidsMuscleFields,
-    persistNpzBySaveTarget,
+    saveRun,
     withBidsSaveFields,
     setUploadLoading,
   };
+}
+
+/** @param {App} app */
+export function setupSessionFormEvents(app) {
+  const { els } = app;
+
+  for (const field of [els.bidsProject, els.bidsProjectNew]) {
+    field?.addEventListener("input", () => app.syncBidsProject());
+  }
+  els.bidsPlacementScheme?.addEventListener("change", () =>
+    syncPlacementDescriptionRow(els),
+  );
+  // A task typed in stays when the target is segmented.
+  els.bidsTask?.addEventListener("input", () => {
+    els.bidsTask.dataset.keep = "1";
+  });
+
+  // A session field marked missing clears once it is filled.
+  const clearFilled = (/** @type {Event} */ e) => {
+    const field = /** @type {HTMLInputElement} */ (e.target);
+    if (field.getAttribute?.("aria-invalid") && field.value.trim()) {
+      field.removeAttribute("aria-invalid");
+    }
+  };
+  els.settingsPanel?.addEventListener("input", clearFilled);
+  els.settingsPanel?.addEventListener("change", clearFilled);
 }

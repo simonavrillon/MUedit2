@@ -23,6 +23,8 @@ const { drawRoiRects } = await import("../src/view/plots.js");
 const { buildSelections, enableRoiSelection, renderSegmentTypes } =
   await import("../src/view/qc-renderer.js");
 const { setupQcEvents } = await import("../src/app/stages/qc-stage.js");
+const { setupSessionFormEvents } =
+  await import("../src/app/services/file-session.js");
 const {
   chooseSegmentType,
   describeWindow,
@@ -61,7 +63,7 @@ beforeEach(() => {
   resetDom();
   const state = structuredClone(pristine);
   Object.assign(state, {
-    seriesLength: 1000,
+    totalSamples: 1000,
     fsamp: 10,
     uploadToken: "tok",
     auxNames: ["Acc", "Target"],
@@ -451,7 +453,7 @@ describe("requestSegmentation", () => {
     await requestSegmentation(app);
     assert.equal(els.bidsTask.value, "triangle");
     assert.match(app.setStatus.calls.at(-1)[0], /Task set to triangle\./);
-    setupQcEvents(app);
+    setupSessionFormEvents(app);
     els.bidsTask.value = "dynamic";
     els.bidsTask.dispatch("input");
     await requestSegmentation(app);

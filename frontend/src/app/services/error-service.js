@@ -1,9 +1,8 @@
 /**
- * Logs an error and surfaces it through a status callback.
- * Centralises the console.error + setStatus("...", "error") pattern used
- * across service and domain modules, and provides a single integration point
- * for future error-tracking tools (e.g. Sentry).
- *
+ * Reports caught errors: logs them, and shows them on the status line.
+ */
+
+/**
  * @param {unknown} err
  * @param {(text: string, tone?: import("../context.js").Tone) => void} setStatus
  * @param {string} label  Human-readable action name, e.g. "ROI failed"

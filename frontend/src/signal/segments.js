@@ -32,7 +32,7 @@ export function segmentGlyph(seg) {
  *
  * @param {TargetSegment} seg
  */
-export function segmentType(seg) {
+function segmentType(seg) {
   return seg.kind === "ramp" ? `${seg.direction} ramp` : seg.kind;
 }
 
@@ -60,7 +60,7 @@ export function isPlaceholder(roi, total) {
  * @returns {Span[]}
  */
 export function drawnRois(state) {
-  return state.rois.filter((r) => !isPlaceholder(r, state.seriesLength || 0));
+  return state.rois.filter((r) => !isPlaceholder(r, state.totalSamples || 0));
 }
 
 /**
@@ -98,7 +98,7 @@ function chooseSegments(state, segs, on) {
     : segs.reduce((spans, seg) => subtractSpan(spans, seg, minLength), drawn);
   setRois(
     state,
-    next.length ? next : [{ start: 0, end: state.seriesLength || 0 }],
+    next.length ? next : [{ start: 0, end: state.totalSamples || 0 }],
   );
   return next.length;
 }

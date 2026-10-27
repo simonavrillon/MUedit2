@@ -99,6 +99,18 @@ export function showWorkspace(app, target) {
   });
 }
 
+/**
+ * Go back to the landing page.
+ *
+ * @param {App} app
+ */
+export function showLanding(app) {
+  const { els } = app;
+  if (els.landing) els.landing.hidden = false;
+  if (els.workspace) els.workspace.hidden = true;
+  app.updateWorkflowStepper("import");
+}
+
 /** @param {App} app */
 export function updateStepAvailability(app) {
   const { els, state } = app;
@@ -134,13 +146,12 @@ export function populateGridTabs(app) {
 }
 
 /**
- * @param {Span | null} view
+ * @param {Span} view
  * @param {number} total
  * @param {ViewAction} action
- * @returns {Span | null}
+ * @returns {Span}
  */
 function adjustView(view, total, action) {
-  if (!view || total <= 0) return view;
   const span = Math.max(1, view.end - view.start);
   const center = view.start + span / 2;
   let nextSpan = span;
@@ -217,9 +228,7 @@ export function handleKeyboardNavigation(app, e) {
     ? state.edit.totalSamples || 0
     : 0;
   if (!total) return;
-  if (!state.edit.view) setEditView(state, { start: 0, end: total });
-  const view = state.edit.view;
-  if (!view) return;
+  const view = state.edit.view || { start: 0, end: total };
   setEditView(state, adjustView(view, total, action));
   app.renderEditExplorer();
   e.preventDefault();

@@ -10,6 +10,7 @@ import { apiFetch, apiJson, SESSION_ID, waitForBackend } from "./http.js";
 import { state } from "../state/state.js";
 import { setupEditEvents } from "./stages/edit-stage.js";
 import { restoreEditSession } from "./services/editing-service.js";
+import { setupSessionFormEvents } from "./services/file-session.js";
 import { setupImportEvents } from "./stages/import-stage.js";
 import { setupLayoutEvents } from "./stages/layout-stage.js";
 import { setupQcEvents } from "./stages/qc-stage.js";
@@ -41,6 +42,7 @@ export async function initializeApp() {
   setupRunEvents(app);
   setupEditEvents(app);
   setupLayoutEvents(app);
+  setupSessionFormEvents(app);
   app.updateStepAvailability();
   app.updateWorkflowStepper("import");
 

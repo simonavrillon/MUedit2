@@ -15,10 +15,10 @@ import {
   setGridNames,
   setGridSeries,
   setMetadata,
-  setMuscle,
+  setMuscleNames,
   setRois,
   setSegments,
-  setSeriesLength,
+  setTotalSamples,
   setTargetIndex,
   setUploadToken,
 } from "../state/actions.js";
@@ -83,7 +83,7 @@ export function pickRoiSlot(rois, span, total) {
 export function syncRois(state, nwin) {
   if (state.rois.length > nwin) state.rois = state.rois.slice(0, nwin);
   while (state.rois.length < nwin) {
-    state.rois.push({ start: 0, end: state.seriesLength || 0 });
+    state.rois.push({ start: 0, end: state.totalSamples || 0 });
   }
 }
 
@@ -183,7 +183,7 @@ export function createQcTraces(app) {
     const grid = getCurrentGrid(state);
     const roi = state.rois[0];
     const start = roiStart(roi);
-    const end = roiEnd(roi, state.seriesLength ?? 0);
+    const end = roiEnd(roi, state.totalSamples ?? 0);
     const key = `${token}:${grid}:${start}:${end}`;
     wanted.set(grid, key);
     if (shown.get(grid) === key && state.channelTraces[grid]?.length) return;
@@ -231,11 +231,11 @@ export async function requestPreview(app, { file, silentFailure = false }) {
     setUploadToken(state, data.upload_token || null);
     setGridSeries(state, overview.rows);
     setGridNames(state, data.grid_names);
-    setSeriesLength(state, data.total_samples);
+    setTotalSamples(state, data.total_samples);
     setChannelMeans(state, data.channel_means);
     setCoordinates(state, data.coordinates);
     setMetadata(state, data.metadata);
-    setMuscle(state, data.muscle_names);
+    setMuscleNames(state, data.muscle_names);
     setAuxData(state, aux.rows, data.aux_names);
     // A BIDS recording brings the target phases its events.tsv lists.
     setSegments(state, toSegments(data.segments));

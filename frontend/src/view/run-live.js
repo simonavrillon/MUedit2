@@ -2,14 +2,7 @@
  * Draws the run page from the live run model (`decomp/live.js`): the phase
  * track, per-iteration dots, timing and the summary.
  */
-import {
-  DOT,
-  RUN_PHASES,
-  formatClock,
-  formatRemaining,
-  keptTotal,
-  searchSecondsLeft,
-} from "../decomp/live.js";
+import { DOT, keptTotal, searchSecondsLeft } from "../decomp/live.js";
 
 /** @typedef {import("../app/context.js").Els} Els */
 /** @typedef {import("../decomp/live.js").RunLive} RunLive */
@@ -23,6 +16,29 @@ const DOT_CLASS = ["", "is-kept", "is-rejected", "is-few", "is-skipped"];
 /** The run whose dots are on screen; a new run rebuilds them. */
 /** @type {RunLive | null} */
 let dotsFor = null;
+
+/**
+ * "1:05", "12:40", "1:02:03".
+ *
+ * @param {number} seconds
+ */
+export function formatClock(seconds) {
+  const s = Math.max(0, Math.round(seconds));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = String(s % 60).padStart(2, "0");
+  return h ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
+}
+
+/**
+ * "about 2 min", "under a minute".
+ *
+ * @param {number} seconds
+ */
+export function formatRemaining(seconds) {
+  if (seconds < 60) return "under a minute";
+  return `about ${Math.round(seconds / 60)} min`;
+}
 
 /** @param {number} grid */
 function gridColor(grid) {
@@ -145,10 +161,11 @@ export function renderRunTime(els, live, now) {
  * @param {RunLive} live
  */
 function renderPhases(els, live) {
-  const current = RUN_PHASES.findIndex((p) => p.key === live.phase);
+  const items = [...(els.runPhases?.querySelectorAll("li") ?? [])];
+  const current = items.findIndex((li) => li.dataset.phase === live.phase);
   const saveFailed = live.status === "done" && !!live.saveError;
   const finished = live.status === "done" && !live.saving && !saveFailed;
-  els.runPhases?.querySelectorAll("li").forEach((li, idx) => {
+  items.forEach((li, idx) => {
     const active = idx === current && !finished;
     li.classList.toggle("is-done", finished || idx < current);
     li.classList.toggle(
@@ -182,7 +199,7 @@ function renderCount(els, live) {
   if (els.runCountGrids) {
     renderGridCounts(
       els.runCountGrids,
-      summary ? summary.perGrid : live.keptByGrid,
+      summary ? summary.nMuByGrid : live.keptByGrid,
     );
   }
 }

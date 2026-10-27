@@ -107,7 +107,7 @@ describe("QC series requests", () => {
     const app = testApp(api);
     Object.assign(app.state, {
       uploadToken: "tok",
-      seriesLength: 1000,
+      totalSamples: 1000,
       rois: [{ start: 100, end: 900 }],
     });
     app.ensureQcTraces();
@@ -131,7 +131,7 @@ describe("QC series requests", () => {
   test("traces already on screen are not asked for again", async () => {
     const api = seriesApi();
     const app = testApp(api);
-    Object.assign(app.state, { uploadToken: "tok", seriesLength: 1000 });
+    Object.assign(app.state, { uploadToken: "tok", totalSamples: 1000 });
     app.ensureQcTraces();
     await settle();
     app.ensureQcTraces();
@@ -144,7 +144,7 @@ describe("QC series requests", () => {
     const app = testApp(api);
     Object.assign(app.state, {
       uploadToken: "tok",
-      seriesLength: 1000,
+      totalSamples: 1000,
       rois: [{ start: 0, end: 1000 }],
     });
     app.ensureQcTraces();
@@ -168,7 +168,7 @@ describe("QC series requests", () => {
   test("each grid keeps the traces of its own window", async () => {
     const api = heldSeriesApi();
     const app = testApp(api);
-    Object.assign(app.state, { uploadToken: "tok", seriesLength: 1000 });
+    Object.assign(app.state, { uploadToken: "tok", totalSamples: 1000 });
     app.ensureQcTraces();
     app.state.currentGrid = 1;
     app.ensureQcTraces();

@@ -31,7 +31,7 @@ beforeEach(() => {
   resetDom();
   const state = structuredClone(pristine);
   Object.assign(state, {
-    seriesLength: 1000,
+    totalSamples: 1000,
     rois: [
       { start: 0, end: 1000 },
       { start: 600, end: 1000 },
@@ -162,7 +162,7 @@ describe("ROI drag on the overview", () => {
   });
 
   test("without a loaded signal the canvas ignores drags", () => {
-    app.state.seriesLength = null;
+    app.state.totalSamples = null;
     dragOverview(50, 150);
     assert.equal(app.state.roiDraft, null);
     assert.equal(app.ensureQcTraces.calls.length, 0);

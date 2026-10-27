@@ -15,12 +15,6 @@ import { inferGridCount, normalizeGridNames } from "./grid.js";
 /** @typedef {ReturnType<typeof parseBidsEntitiesFromLabel>} BidsEntities */
 
 /**
- * @typedef {object} SessionInfoDeps
- * @property {typeof parseBidsEntitiesFromLabel} parseBidsEntitiesFromLabel
- * @property {typeof listifyMuscles} listifyMuscles
- */
-
-/**
  * @param {string | null | undefined} value
  * @param {string} [fallback]
  * @returns {string}
@@ -114,16 +108,16 @@ export function buildBidsMuscleRowsModel(state) {
     inEditStage || editGridNames.length ? editGridNames : runGridNames,
   );
 
-  const muscles = Array.isArray(state.muscleNames) ? state.muscleNames : [];
+  const muscleNames = Array.isArray(state.muscleNames) ? state.muscleNames : [];
   const rowCount = inferGridCount({
     gridNames,
     muGridIndex: inEditStage ? state.edit?.muGridIndex : [],
-    muscles,
+    muscleNames,
   });
   return Array.from({ length: rowCount }, (_, i) => ({
     id: `bidsMuscle_${i}`,
     label: `Muscle Grid ${i + 1}`,
-    value: muscles[i] || "",
+    value: muscleNames[i] || "",
   }));
 }
 
@@ -138,17 +132,15 @@ export function naToEmpty(v) {
 /**
  * @param {FileRef | null | undefined} file
  * @param {JsonObject | null | undefined} data
- * @param {SessionInfoDeps} deps
  */
-export function buildSessionInfoFromDecomposition(file, data, deps) {
-  const { parseBidsEntitiesFromLabel, listifyMuscles } = deps;
+export function buildSessionInfoFromDecomposition(file, data) {
   const fileLabel = file?.name || data?.file_label || "decomposition";
   const fsamp = Number(data?.fsamp);
   const entities = parseBidsEntitiesFromLabel(fileLabel);
 
   const fromParams = data?.parameters?.target_muscle;
   const fromPayload = data?.muscle_names ?? data?.muscle;
-  const muscles = listifyMuscles(fromPayload).length
+  const muscleNames = listifyMuscles(fromPayload).length
     ? listifyMuscles(fromPayload)
     : listifyMuscles(fromParams);
 
@@ -159,7 +151,7 @@ export function buildSessionInfoFromDecomposition(file, data, deps) {
     fsampText:
       Number.isFinite(fsamp) && fsamp > 0 ? String(Math.round(fsamp)) : "",
     entities,
-    muscles,
+    muscleNames,
     participant: {
       age: naToEmpty(participant.age),
       sex: naToEmpty(participant.sex),

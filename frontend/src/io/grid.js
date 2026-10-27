@@ -11,18 +11,18 @@ function safeNonNegativeInt(value) {
 }
 
 /**
- * @param {{ gridNames?: string[], muGridIndex?: number[], muscles?: string[], minimum?: number }} [options]
+ * @param {{ gridNames?: string[], muGridIndex?: number[], muscleNames?: string[], minimum?: number }} [options]
  * @returns {number}
  */
 export function inferGridCount({
   gridNames = [],
   muGridIndex = [],
-  muscles = [],
+  muscleNames = [],
   minimum = 1,
 } = {}) {
   let count = Math.max(1, Number(minimum) || 1);
   if (Array.isArray(gridNames)) count = Math.max(count, gridNames.length);
-  if (Array.isArray(muscles)) count = Math.max(count, muscles.length);
+  if (Array.isArray(muscleNames)) count = Math.max(count, muscleNames.length);
   if (Array.isArray(muGridIndex) && muGridIndex.length) {
     const maxIdx = Math.max(
       ...muGridIndex.map(safeNonNegativeInt).filter((v) => v !== null),

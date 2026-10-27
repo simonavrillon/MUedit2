@@ -338,7 +338,7 @@ describe("timeline", () => {
 
 describe("pulse plot", () => {
   test("marks where the user stopped, midway across the view", () => {
-    app.state.edit.bookmarkPosition = { muIdx: 0, position: 127 };
+    app.state.edit.bookmarkPosition = { mu: 0, position: 127 };
     app.state.edit.showBookmark = true;
     drawEditPulse(els, app.state);
     const label = ops(els.editPulseCanvas.ctx, "fillText").find(
@@ -348,10 +348,10 @@ describe("pulse plot", () => {
   });
 
   test("the bookmark is hidden when dismissed or for another MU", () => {
-    app.state.edit.bookmarkPosition = { muIdx: 0, position: 127 };
+    app.state.edit.bookmarkPosition = { mu: 0, position: 127 };
     app.state.edit.showBookmark = false;
     drawEditPulse(els, app.state);
-    app.state.edit.bookmarkPosition = { muIdx: 3, position: 127 };
+    app.state.edit.bookmarkPosition = { mu: 3, position: 127 };
     app.state.edit.showBookmark = true;
     drawEditPulse(els, app.state);
     assert.ok(!texts(els.editPulseCanvas.ctx).includes("You stopped here"));

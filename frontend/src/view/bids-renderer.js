@@ -128,7 +128,15 @@ export function applySessionInfoToDom(els, payload) {
     els.bidsReferenceLocation.value = payload.bids.referenceLocation;
   if (els.bidsGroundLocation && payload.bids?.groundLocation)
     els.bidsGroundLocation.value = payload.bids.groundLocation;
-  // The description row shows with the Other scheme, which requires it.
+  syncPlacementDescriptionRow(els);
+}
+
+/**
+ * The description row shows with the Other scheme, which requires it.
+ *
+ * @param {Els} els
+ */
+export function syncPlacementDescriptionRow(els) {
   if (els.bidsPlacementDescRow)
     els.bidsPlacementDescRow.hidden =
       (els.bidsPlacementScheme?.value || "Other") !== "Other";
