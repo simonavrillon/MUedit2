@@ -543,7 +543,6 @@ describe("saveEditedFile", () => {
     assert.deepEqual(payloads[0], {
       token: "tok",
       muscle_names: ["TA"],
-      entity_label: "sub-01_task-x",
       file_label: "sub-01_task-x_decomp_edited.npz",
       software_versions: null,
       project: "p",

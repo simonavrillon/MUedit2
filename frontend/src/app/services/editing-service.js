@@ -398,14 +398,6 @@ export async function duplicateMu(app) {
   });
 }
 
-/** @param {string} filename */
-function entityLabelOf(filename) {
-  const stem = filename.replace(/\.[^.]+$/, "");
-  return stem.includes("_grid-")
-    ? stem.split("_grid-")[0]
-    : stem.replace(/(_decomp|_edited)+$/, "");
-}
-
 /** @param {App} app */
 export async function saveEditedFile(app) {
   const { state, api, withBidsSaveFields, getBidsMuscleNames, setStatus } = app;
@@ -428,7 +420,6 @@ export async function saveEditedFile(app) {
         withBidsSaveFields({
           token,
           muscle_names: getBidsMuscleNames(),
-          entity_label: entityLabelOf(filename),
           file_label: getSuggestedNpzName(filename, "_edited"),
           software_versions: state.edit.softwareVersions || null,
         }),
@@ -527,9 +518,8 @@ function showEditSession(app, file, frame, { open = true } = {}) {
   const { meta } = frame;
   const resolvedGridNames = normalizeGridNames(meta.grid_names, {
     minimumCount: inferGridCount({
-      gridNames: meta.grid_names,
       muGridIndex: meta.mu_grid_index,
-      muscleNames: meta.muscle_names ?? meta.muscle,
+      muscleNames: meta.muscle_names,
     }),
   });
   setGridNames(state, resolvedGridNames);

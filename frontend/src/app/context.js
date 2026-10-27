@@ -75,7 +75,7 @@
  * @property {() => boolean} checkPlacementForm Whether the placement fields BIDS requires are filled; if not, mark them and open the panel on them.
  * @property {(entities: Partial<BidsEntities> & { project?: string }) => void} setBidsEntitiesInput
  * @property {(data: JsonObject) => void} applyPreviewMetadata
- * @property {(file: FileRef | null, data?: JsonObject) => void} applySessionInfoFromDecomposition
+ * @property {(file: FileRef | null, data: JsonObject) => void} applySessionInfoFromDecomposition
  * @property {() => void} prefillHardwareFields Fill the empty manufacturer, device and power-line fields from the file's metadata.
  * @property {() => void} renderBidsMuscleFields
  * @property {(payload: JsonObject, fallbackName?: string) => Promise<{ path: string }>} saveRun

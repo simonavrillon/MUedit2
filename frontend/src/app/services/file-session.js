@@ -4,16 +4,17 @@
  * write of those fields, and every event binding on them, goes through here.
  */
 import {
-  applyParticipantFields,
-  applySessionInfoToDom,
+  applySidecarFields,
   renderBidsMuscleFields as renderBidsMuscleFieldsFeature,
   resetBidsEntityDefaults,
+  resetSidecarFields,
+  showFsamp,
   syncPlacementDescriptionRow,
 } from "../../view/bids-renderer.js";
 import {
   buildBidsMuscleRowsModel,
   buildEntityLabelFromSession,
-  buildSessionInfoFromDecomposition,
+  parseBidsEntitiesFromLabel,
   safeBidsToken,
 } from "../../io/bids.js";
 import {
@@ -179,55 +180,41 @@ export function createFileSessionService(app) {
     }
     if (els.bidsSession && entities.session)
       els.bidsSession.value = entities.session;
-    if (els.bidsAcquisition && entities.acq)
-      els.bidsAcquisition.value = entities.acq;
+    if (els.bidsAcquisition && entities.acquisition)
+      els.bidsAcquisition.value = entities.acquisition;
     if (els.bidsRun && entities.run) els.bidsRun.value = entities.run;
     if (entities.project) setBidsProject(entities.project);
   }
 
   /** @type {FileSessionService["applyPreviewMetadata"]} */
   function applyPreviewMetadata(data) {
-    if (els.fsamp) {
-      const fsamp = Number(data.fsamp);
-      els.fsamp.value =
-        Number.isFinite(fsamp) && fsamp > 0 ? String(Math.round(fsamp)) : "";
-    }
-    applyParticipantFields(els, data?.participant_meta || {});
+    showFsamp(els, data.fsamp);
     // The project folder the file lies in under the output folder, when it does.
-    if (typeof data?.project === "string" && data.project) {
-      setBidsEntitiesInput({ project: data.project });
+    if (typeof data.project === "string" && data.project) {
+      setBidsProject(data.project);
     }
-    if (els.bidsManufacturer && data?.manufacturer)
-      els.bidsManufacturer.value = data.manufacturer;
-    if (els.bidsDeviceModel && data?.manufacturers_model_name)
-      els.bidsDeviceModel.value = data.manufacturers_model_name;
     // A recording in a BIDS dataset brings the placement its sidecar records.
-    const meta = data?.metadata || {};
-    const scheme = data?.placement_scheme || meta.placement_scheme;
-    if (els.bidsPlacementScheme && scheme) {
-      els.bidsPlacementScheme.value = String(scheme);
-      syncPlacementDescriptionRow(els);
-    }
-    /** @type {[HTMLInputElement | null | undefined, unknown][]} */
-    const placement = [
-      [
-        els.bidsPlacementDescription,
-        data?.placement_scheme_description || meta.placement_scheme_description,
-      ],
-      [els.bidsReferenceLocation, data?.reference_location],
-      [els.bidsGroundLocation, data?.ground_location],
-    ];
-    for (const [field, value] of placement)
-      if (field && value) field.value = String(value);
+    const meta = data.metadata || {};
+    applySidecarFields(els, {
+      ...data,
+      placement_scheme: data.placement_scheme || meta.placement_scheme,
+      placement_scheme_description:
+        data.placement_scheme_description || meta.placement_scheme_description,
+    });
   }
 
   /** @type {FileSessionService["applySessionInfoFromDecomposition"]} */
-  function applySessionInfoFromDecomposition(file, data = {}) {
-    const payload = buildSessionInfoFromDecomposition(file, data);
-    applySessionInfoToDom(els, payload);
-    setMuscleNames(state, payload.muscleNames);
-    setEditSoftwareVersions(state, payload.bids?.softwareVersions ?? null);
-    setFsamp(state, payload.fsampText);
+  function applySessionInfoFromDecomposition(file, data) {
+    const fileLabel = file?.name || data.file_label || "decomposition";
+    // The Project field is the caller's: it comes with the edit session's project.
+    resetBidsEntityDefaults(els, fileLabel);
+    resetSidecarFields(els);
+    setBidsEntitiesInput(parseBidsEntitiesFromLabel(fileLabel));
+    applySidecarFields(els, data);
+    showFsamp(els, data.fsamp);
+    setMuscleNames(state, data.muscle_names || []);
+    setEditSoftwareVersions(state, data.software_versions ?? null);
+    setFsamp(state, data.fsamp);
   }
 
   /** @type {FileSessionService["prefillHardwareFields"]} */
@@ -322,17 +309,9 @@ export function createFileSessionService(app) {
   /** @type {FileSessionService["withBidsSaveFields"]} */
   function withBidsSaveFields(payload) {
     const form = readSessionForm();
-    const entityLabel =
-      buildEntityLabelFromSession({
-        subject: form.subject,
-        task: form.task,
-        session: form.session,
-        run: form.run,
-        acq: form.acquisition,
-      }) || payload.entity_label;
     return {
       ...payload,
-      entity_label: entityLabel,
+      entity_label: buildEntityLabelFromSession(form),
       project: getBidsProject(),
       participant_meta: form.participantMeta,
       powerline_freq: form.powerlineFreq,

@@ -87,7 +87,10 @@ def build_preview_from_path(file_path: str, session: str = DEFAULT_SESSION) -> d
         bids_root = dataset_root_of(file_path)
         if bids_root is not None:
             result["project"] = config.project_of(bids_root)
-            entity_label = parse_entity_label(Path(file_path).name)
+            # A BIDS recording is named <label>_emg.<ext>: its loader knows the label.
+            entity_label = result["metadata"].get("bids_entity_label") or parse_entity_label(
+                Path(file_path).name
+            )
             result.update(read_sidecar_meta(bids_root, entity_label))
     except Exception:  # noqa: BLE001  (logged; sidecar errors never block the preview)
         logger.warning("Cannot read the BIDS sidecars of %s", file_path, exc_info=True)

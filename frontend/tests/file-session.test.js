@@ -65,6 +65,54 @@ describe("session form", () => {
     assert.equal(session.collectBidsEntities().placement_scheme, "Measured");
   });
 
+  test("an opened decomposition fills the form and clears the previous file's", () => {
+    const state = { edit: {} };
+    const els = {};
+    for (const id of [
+      "bidsSubject",
+      "bidsSession",
+      "bidsAcquisition",
+      "bidsRun",
+      "bidsManufacturer",
+      "bidsDeviceModel",
+      "bidsParticipantAge",
+      "bidsParticipantSex",
+      "bidsGroundLocation",
+      "fsamp",
+    ])
+      els[id] = { value: "stale" };
+    els.bidsTask = { value: "", dataset: {} };
+    const session = createFileSessionService(
+      /** @type {any} */ ({ els, state, api: {} }),
+    );
+    session.applySessionInfoFromDecomposition(
+      { name: "sub-07_ses-post_task-ramp_acq-hd_decomp.npz" },
+      {
+        fsamp: 2048.4,
+        muscle_names: ["TA"],
+        participant_meta: { age: "31", sex: "n/a" },
+        manufacturer: "OT Bioelettronica",
+        software_versions: "MUedit 2.1.0",
+      },
+    );
+    assert.deepEqual(
+      [els.bidsSubject, els.bidsSession, els.bidsTask, els.bidsAcquisition].map(
+        (el) => el.value,
+      ),
+      ["07", "post", "ramp", "hd"],
+    );
+    assert.equal(els.bidsRun.value, "");
+    assert.equal(els.bidsParticipantAge.value, "31");
+    assert.equal(els.bidsParticipantSex.value, "");
+    assert.equal(els.bidsManufacturer.value, "OT Bioelettronica");
+    assert.equal(els.bidsDeviceModel.value, "");
+    assert.equal(els.bidsGroundLocation.value, "");
+    assert.equal(els.fsamp.value, "2048");
+    assert.deepEqual(state.muscleNames, ["TA"]);
+    assert.equal(state.fsamp, 2048.4);
+    assert.equal(state.edit.softwareVersions, "MUedit 2.1.0");
+  });
+
   test("an unknown power line frequency is sent as unknown, not as 50", () => {
     const session = serviceWith({ bidsPowerlineFreq: "" });
     assert.equal("powerline_freq" in session.collectBidsEntities(), false);

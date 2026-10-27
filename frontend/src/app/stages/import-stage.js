@@ -2,7 +2,10 @@
  * The import stage: what a picked file is (a recording or a decomposition)
  * and opening it, one open at a time.
  */
-import { parseBidsEntitiesFromLabel } from "../../io/bids.js";
+import {
+  entityLabelFromFilename,
+  parseBidsEntitiesFromLabel,
+} from "../../io/bids.js";
 import { handleError } from "../services/error-service.js";
 import { showLanding } from "../services/navigation.js";
 
@@ -152,10 +155,9 @@ async function handleNativeDialogOpen(app) {
   if (kind === "raw") {
     const ok = await handleRawFilePath(path, name);
     if (ok && BIDS_EMG_FILE.test(name)) {
-      const entityLabel = name
-        .replace(/_emg\.[^.]+$/i, "")
-        .replace(/\.[^.]+$/, "");
-      setBidsEntitiesInput(parseBidsEntitiesFromLabel(entityLabel));
+      setBidsEntitiesInput(
+        parseBidsEntitiesFromLabel(entityLabelFromFilename(name)),
+      );
     }
   } else if (kind === "decomposition") {
     await loadDecompositionForEditByPath(path);

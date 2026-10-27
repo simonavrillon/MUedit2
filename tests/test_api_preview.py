@@ -15,8 +15,10 @@ from starlette.testclient import TestClient
 
 from muedit.api import cache
 from muedit.api.services.series_service import build_signal_views
+from muedit.io.bids import export_bids_emg
 from muedit.models import SignalImport
 from muedit.signal.filters import bandpass_signals
+from muedit.signal.grid import format_hdemg_signal
 from muedit.storage import SessionStore
 from tests._api import (
     API,
@@ -86,6 +88,31 @@ def _check_preview(data: dict[str, Any]) -> None:
 class TestPreview:
     def test_by_path(self, client: TestClient, signal_mat: Path) -> None:
         _check_preview(ok(client.post(f"{API}/preview-by-path", json={"path": str(signal_mat)})))
+
+    def test_by_path_bids_recording_brings_its_sidecar_fields(
+        self, client: TestClient, tmp_path: Path
+    ) -> None:
+        """A recording named ``<label>_emg.edf`` is found by its label, not by its file stem."""
+        coordinates, ied, discard, _ = format_hdemg_signal(["GR08MM1305"])
+        out = export_bids_emg(
+            np.random.default_rng(0).normal(size=(64, 4 * 2048)) * 0.05,
+            2048.0,
+            ["GR08MM1305"],
+            coordinates,
+            discard,
+            tmp_path / "study",
+            ied=ied,
+            subject="01",
+            task="ramp",
+            powerline_freq=60,
+            placement_scheme_description="Grid over the muscle belly.",
+            reference_location="wet band around the ankle",
+            ground_location="wet band around the wrist",
+        )
+        data = ok(client.post(f"{API}/preview-by-path", json={"path": str(out["edf"])}))
+        assert data["reference_location"] == "wet band around the ankle"
+        assert data["ground_location"] == "wet band around the wrist"
+        assert data["powerline_freq"] == 60
 
     def test_by_path_missing_body_is_422(self, client: TestClient) -> None:
         err = error(client.post(f"{API}/preview-by-path", json={}), 422, "validation_error")

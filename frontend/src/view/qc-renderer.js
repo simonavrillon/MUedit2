@@ -11,7 +11,7 @@ import {
   strokeSeries,
 } from "./plots.js";
 import { seriesPoints, seriesRange } from "../signal/series.js";
-import { gridDimensionsFor } from "../io/grid.js";
+import { gridColumnCount } from "../io/grid.js";
 import { pickRoiSlot, syncRois } from "../signal/qc.js";
 import {
   describeWindow,
@@ -329,7 +329,7 @@ const builtGrids = new WeakMap();
 function buildChannelGrid(app, section, grid, means, coords) {
   const { state } = app;
   const positions = coords || [];
-  const { cols } = gridDimensionsFor(positions);
+  const cols = gridColumnCount(positions);
   const wrap = document.createElement("div");
   wrap.className = "qc-grid";
   const cellsEl = document.createElement("div");

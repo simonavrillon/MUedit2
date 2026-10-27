@@ -1,13 +1,12 @@
 /**
- * Draws the BIDS session form: entity defaults, participant fields and
- * muscle rows. Reads and writes the DOM only.
+ * Draws the BIDS session form: entity defaults, the fields a file's BIDS
+ * sidecars fill, and muscle rows. Reads and writes the DOM only.
  */
 import { naToEmpty } from "../io/bids.js";
 
 /** @typedef {import("../app/context.js").Els} Els */
-/** @typedef {import("../io/bids.js").ParticipantFields} ParticipantFields */
+/** @typedef {import("../app/context.js").JsonObject} JsonObject */
 /** @typedef {import("../io/bids.js").BidsMuscleRows} BidsMuscleRows */
-/** @typedef {import("../io/bids.js").SessionInfo} SessionInfo */
 
 /**
  * @param {Els} els
@@ -27,31 +26,13 @@ export function resetBidsEntityDefaults(els, fileName) {
 
 /**
  * @param {Els} els
- * @param {ParticipantFields | null | undefined} participant
- */
-export function applyParticipantFields(els, participant) {
-  if (!participant) return;
-  if (els.bidsParticipantAge && participant.age != null)
-    els.bidsParticipantAge.value = naToEmpty(participant.age);
-  if (els.bidsParticipantSex && participant.sex != null)
-    els.bidsParticipantSex.value = naToEmpty(participant.sex);
-  if (els.bidsParticipantHandedness && participant.handedness != null)
-    els.bidsParticipantHandedness.value = naToEmpty(participant.handedness);
-}
-
-/**
- * @param {Els} els
  * @param {BidsMuscleRows} rows
  */
 export function renderBidsMuscleFields(els, rows) {
   const container = els.bidsMuscleContainer;
   if (!container) return;
   container.innerHTML = "";
-  const safeRows =
-    Array.isArray(rows) && rows.length
-      ? rows
-      : [{ id: "bidsMuscle_0", label: "Muscle", value: "" }];
-  safeRows.forEach((rowDef) => {
+  rows.forEach((rowDef) => {
     const row = document.createElement("div");
     row.className = "form-row";
     const label = document.createElement("label");
@@ -69,21 +50,12 @@ export function renderBidsMuscleFields(els, rows) {
 }
 
 /**
+ * Clear the participant, hardware and placement fields to their HTML
+ * defaults, so a file that records none doesn't show the previous file's.
+ *
  * @param {Els} els
- * @param {SessionInfo | null | undefined} payload
  */
-export function applySessionInfoToDom(els, payload) {
-  if (!payload) return;
-  if (els.fileName)
-    els.fileName.textContent = payload.fileLabel || "decomposition";
-  if (els.fsamp && payload.fsampText) {
-    els.fsamp.value = payload.fsampText;
-  }
-
-  // Reset to HTML defaults before applying parsed values so stale values
-  // from a previously loaded file don't bleed into the new one. The Project
-  // field is the caller's: it comes with the edit session's project.
-  resetBidsEntityDefaults(els);
+export function resetSidecarFields(els) {
   if (els.bidsPlacementScheme) els.bidsPlacementScheme.value = "Other";
   if (els.bidsPlacementDescription) els.bidsPlacementDescription.value = "";
   if (els.bidsReferenceLocation) els.bidsReferenceLocation.value = "";
@@ -94,41 +66,51 @@ export function applySessionInfoToDom(els, payload) {
   if (els.bidsParticipantAge) els.bidsParticipantAge.value = "";
   if (els.bidsParticipantSex) els.bidsParticipantSex.value = "";
   if (els.bidsParticipantHandedness) els.bidsParticipantHandedness.value = "";
+}
 
-  if (els.bidsSubject && payload.entities?.subject)
-    els.bidsSubject.value = payload.entities.subject;
-  if (els.bidsTask && payload.entities?.task) {
-    els.bidsTask.value = payload.entities.task;
-    els.bidsTask.dataset.keep = "1";
+/**
+ * Fill the participant, hardware and placement fields a file's BIDS sidecars
+ * record, as the backend sends them; fields it leaves out keep their value.
+ *
+ * @param {Els} els
+ * @param {JsonObject} data
+ */
+export function applySidecarFields(els, data) {
+  const participant = data.participant_meta;
+  if (participant) {
+    if (els.bidsParticipantAge && participant.age != null)
+      els.bidsParticipantAge.value = naToEmpty(participant.age);
+    if (els.bidsParticipantSex && participant.sex != null)
+      els.bidsParticipantSex.value = naToEmpty(participant.sex);
+    if (els.bidsParticipantHandedness && participant.handedness != null)
+      els.bidsParticipantHandedness.value = naToEmpty(participant.handedness);
   }
-  if (els.bidsSession && payload.entities?.session)
-    els.bidsSession.value = payload.entities.session;
-  if (els.bidsAcquisition && payload.entities?.acq)
-    els.bidsAcquisition.value = payload.entities.acq;
-  if (els.bidsRun && payload.entities?.run)
-    els.bidsRun.value = payload.entities.run;
-
-  // Pre-fill participant fields from BIDS sidecar.
-  applyParticipantFields(els, payload.participant);
-
-  // Pre-fill hardware fields from the BIDS sidecar.
-  if (els.bidsManufacturer && payload.hardware?.manufacturer)
-    els.bidsManufacturer.value = payload.hardware.manufacturer;
-  if (els.bidsDeviceModel && payload.hardware?.deviceModel)
-    els.bidsDeviceModel.value = payload.hardware.deviceModel;
-
-  // Pre-fill BIDS recording metadata round-tripped from the EMG JSON sidecar.
-  if (els.bidsPowerlineFreq && Number(payload.bids?.powerlineFreq) > 0)
-    els.bidsPowerlineFreq.value = String(payload.bids.powerlineFreq);
-  if (els.bidsPlacementScheme && payload.bids?.placementScheme)
-    els.bidsPlacementScheme.value = payload.bids.placementScheme;
-  if (els.bidsPlacementDescription && payload.bids?.placementDescription)
-    els.bidsPlacementDescription.value = payload.bids.placementDescription;
-  if (els.bidsReferenceLocation && payload.bids?.referenceLocation)
-    els.bidsReferenceLocation.value = payload.bids.referenceLocation;
-  if (els.bidsGroundLocation && payload.bids?.groundLocation)
-    els.bidsGroundLocation.value = payload.bids.groundLocation;
+  if (els.bidsPowerlineFreq && Number(data.powerline_freq) > 0)
+    els.bidsPowerlineFreq.value = String(data.powerline_freq);
+  /** @type {[HTMLInputElement | HTMLSelectElement | null | undefined, unknown][]} */
+  const fields = [
+    [els.bidsManufacturer, data.manufacturer],
+    [els.bidsDeviceModel, data.manufacturers_model_name],
+    [els.bidsPlacementScheme, data.placement_scheme],
+    [els.bidsPlacementDescription, data.placement_scheme_description],
+    [els.bidsReferenceLocation, data.reference_location],
+    [els.bidsGroundLocation, data.ground_location],
+  ];
+  for (const [field, value] of fields)
+    if (field && value) field.value = String(value);
   syncPlacementDescriptionRow(els);
+}
+
+/**
+ * The sampling rate, rounded to whole hertz; blank when unknown.
+ *
+ * @param {Els} els
+ * @param {unknown} fsamp
+ */
+export function showFsamp(els, fsamp) {
+  if (!els.fsamp) return;
+  const n = Number(fsamp);
+  els.fsamp.value = Number.isFinite(n) && n > 0 ? String(Math.round(n)) : "";
 }
 
 /**

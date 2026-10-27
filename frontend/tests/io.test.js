@@ -1,18 +1,17 @@
-// Grid-count inference and BIDS naming, labels and metadata models.
+// Grid-count inference, and BIDS naming, labels and muscle rows.
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  gridDimensionsFor,
+  gridColumnCount,
   inferGridCount,
   normalizeGridNames,
 } from "../src/io/grid.js";
 import {
   buildBidsMuscleRowsModel,
   buildEntityLabelFromSession,
-  buildSessionInfoFromDecomposition,
+  entityLabelFromFilename,
   getSuggestedNpzName,
-  listifyMuscles,
   naToEmpty,
   parseBidsEntitiesFromLabel,
 } from "../src/io/bids.js";
@@ -20,7 +19,6 @@ import {
 describe("inferGridCount", () => {
   test("defaults to one grid", () => {
     assert.equal(inferGridCount(), 1);
-    assert.equal(inferGridCount({ minimum: 0 }), 1);
   });
 
   test("takes the largest of names, muscles and MU grid indices", () => {
@@ -52,22 +50,19 @@ describe("normalizeGridNames", () => {
   });
 });
 
-describe("gridDimensionsFor", () => {
-  test("rows and columns are one past the largest zero-based coordinate", () => {
+describe("gridColumnCount", () => {
+  test("is one past the largest zero-based column", () => {
     const coords = [
       [0, 0],
       [12, 4],
       [3, 1],
     ];
-    assert.deepEqual(gridDimensionsFor(coords), { rows: 13, cols: 5 });
+    assert.equal(gridColumnCount(coords), 5);
   });
 
   test("skips malformed coordinates", () => {
-    assert.deepEqual(gridDimensionsFor([[2], "x", null, [1, 1]]), {
-      rows: 2,
-      cols: 2,
-    });
-    assert.deepEqual(gridDimensionsFor(null), { rows: 1, cols: 1 });
+    assert.equal(gridColumnCount([[2], "x", null, [1, 1]]), 2);
+    assert.equal(gridColumnCount(null), 1);
   });
 });
 
@@ -78,7 +73,7 @@ describe("BIDS entity labels", () => {
         subject: "03",
         session: "pre",
         task: "ramp",
-        acq: "hdemg",
+        acquisition: "hdemg",
         run: "02",
       }),
       "sub-03_ses-pre_task-ramp_acq-hdemg_run-02",
@@ -106,7 +101,7 @@ describe("BIDS entity labels", () => {
       subject: "03",
       session: "pre",
       task: "ramp",
-      acq: "hdemg",
+      acquisition: "hdemg",
       run: "02",
     };
     const label = buildEntityLabelFromSession(entities);
@@ -118,7 +113,7 @@ describe("BIDS entity labels", () => {
       subject: "01",
       session: "",
       task: "x",
-      acq: "",
+      acquisition: "",
       run: "",
     });
     assert.equal(parseBidsEntitiesFromLabel(null).subject, "");
@@ -127,34 +122,33 @@ describe("BIDS entity labels", () => {
   test("an entity key inside another word is not matched", () => {
     assert.equal(parseBidsEntitiesFromLabel("mysub-99_task-x").subject, "");
   });
+
+  test("a recording's file name gives its label without _emg", () => {
+    assert.equal(
+      entityLabelFromFilename("sub-01_task-ramp_emg.edf"),
+      "sub-01_task-ramp",
+    );
+    assert.equal(entityLabelFromFilename("sub-01_task-x.bdf"), "sub-01_task-x");
+  });
 });
 
 describe("getSuggestedNpzName", () => {
   test("swaps the extension for the suffix", () => {
     assert.equal(
-      getSuggestedNpzName("sub-01_task-ramp.npz"),
+      getSuggestedNpzName("sub-01_task-ramp.npz", "_edited"),
       "sub-01_task-ramp_edited.npz",
     );
   });
 
   test("does not stack the suffix on a re-save", () => {
-    assert.equal(getSuggestedNpzName("run_edited.npz"), "run_edited.npz");
-  });
-
-  test("defaults the stem and honours an empty suffix", () => {
-    assert.equal(getSuggestedNpzName(""), "decomposition_edited.npz");
-    assert.equal(getSuggestedNpzName("run.mat", ""), "run.npz");
+    assert.equal(
+      getSuggestedNpzName("run_edited.npz", "_edited"),
+      "run_edited.npz",
+    );
   });
 });
 
-describe("muscles and metadata", () => {
-  test("listifyMuscles accepts a list or a single name", () => {
-    assert.deepEqual(listifyMuscles([" TA ", "", null, "GM"]), ["TA", "GM"]);
-    assert.deepEqual(listifyMuscles(" VL "), ["VL"]);
-    assert.deepEqual(listifyMuscles("  "), []);
-    assert.deepEqual(listifyMuscles(3), []);
-  });
-
+describe("naToEmpty", () => {
   test("naToEmpty blanks the BIDS n/a marker", () => {
     assert.equal(naToEmpty("n/a"), "");
     assert.equal(naToEmpty(undefined), "");
@@ -194,42 +188,5 @@ describe("buildBidsMuscleRowsModel", () => {
     assert.deepEqual(rows, [
       { id: "bidsMuscle_0", label: "Muscle Grid 1", value: "" },
     ]);
-  });
-});
-
-describe("buildSessionInfoFromDecomposition", () => {
-  test("reads entities from the file name and muscles from the payload", () => {
-    const info = buildSessionInfoFromDecomposition(
-      { name: "sub-07_ses-post_task-ramp_decomp.npz" },
-      {
-        fsamp: 2048.4,
-        muscle_names: ["TA"],
-        parameters: { target_muscle: "GM" },
-        participant_meta: { age: "31", sex: "n/a" },
-        manufacturer: "OT Bioelettronica",
-        powerline_freq: 50,
-        software_versions: "MUedit 2.1.0",
-      },
-    );
-    assert.equal(info.fileLabel, "sub-07_ses-post_task-ramp_decomp.npz");
-    assert.equal(info.fsampText, "2048");
-    assert.equal(info.entities.subject, "07");
-    assert.equal(info.entities.session, "post");
-    assert.deepEqual(info.muscleNames, ["TA"]);
-    assert.deepEqual(info.participant, { age: "31", sex: "", handedness: "" });
-    assert.equal(info.hardware.manufacturer, "OT Bioelettronica");
-    assert.equal(info.bids.powerlineFreq, 50);
-    assert.equal(info.bids.softwareVersions, "MUedit 2.1.0");
-  });
-
-  test("falls back to the target muscle parameter and the payload label", () => {
-    const info = buildSessionInfoFromDecomposition(null, {
-      file_label: "sub-02_task-x",
-      parameters: { target_muscle: "GM" },
-    });
-    assert.equal(info.fileLabel, "sub-02_task-x");
-    assert.deepEqual(info.muscleNames, ["GM"]);
-    assert.equal(info.fsampText, "");
-    assert.equal(info.bids.softwareVersions, null);
   });
 });
