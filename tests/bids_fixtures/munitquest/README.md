@@ -10,7 +10,7 @@ Sidecar files copied unchanged from the MUnitQuest EMG-BIDS tutorial dataset,
 - Both recordings keep their `events.tsv` (task phases in `event_type`: `muscle_on`,
   `linear_ramp`, `steady_hold`, `muscle_off`).
 
-The EDF recordings are not copied: `tests/test_bids_interop.py` writes short ones with the
-channel labels of each `channels.tsv`.
+The EDF recordings are not copied: `write_munitquest` in `tests/_io_files.py` writes short ones
+with the channel labels of each `channels.tsv`.
 The tutorial's grids are not in MUedit's catalogue, so the tests add catalogue entries and a
 `grid_name` column first, as a user would.

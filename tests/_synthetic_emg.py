@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import numpy as np
+from scipy.signal import filtfilt
 
 from muedit.decomp.algorithm import pca_extended_signal, whiten_extended_signal
 from muedit.decomp.types import DecompositionParameters
 from muedit.models import SignalImport
 from muedit.signal.decomp_primitives import extend_signal
-from muedit.signal.filters import bandpass_signals
+from muedit.signal.filters import _bandpass_coefficients
 
 FSAMP = 2000.0
 N_CHANNELS = 64
@@ -19,6 +20,11 @@ def grid_coords() -> np.ndarray:
     """(row, col) positions of a 13x5 grid, first 64 sites."""
     rows, cols = np.divmod(np.arange(N_CHANNELS), 5)
     return np.column_stack([rows, cols]).astype(float)
+
+
+def bandpass_signals(data: np.ndarray, fsamp: float = FSAMP, emg_type: int = 1) -> np.ndarray:
+    """The whole array band-passed at once, the reference ``bandpass_inplace`` matches row by row."""
+    return filtfilt(*_bandpass_coefficients(fsamp, emg_type), data, axis=-1)
 
 
 def bandpass(data: np.ndarray, fsamp: float = FSAMP) -> np.ndarray:

@@ -25,7 +25,7 @@ Tests are linted and type-checked like the package (`uv run ruff check .`, `uv r
 | `_frames.py` | decode MUB1 frames as the page does |
 | `_editing_data.py` | synthetic MUs, pulse trains, decomposition files |
 | `_io_files.py` | tiny synthetic recordings in every import format |
-| `_synthetic_emg.py` | synthetic HD-EMG for the QC and decomposition tests; `ACTIVE_ROI`, `STORE_PARAMS` |
+| `_synthetic_emg.py` | synthetic HD-EMG for the QC and decomposition tests; `ACTIVE_ROI`, `STORE_PARAMS`; `bandpass_signals`, the whole-array bandpass `bandpass_inplace` matches |
 | `_platform.py` | what a platform allows: `MAPPED_FILES_STAY`, `deleted`, `store_files` |
 | `_metrics_helpers.py`, `_report.py` | spike-train agreement metrics and benchmark reports |
 

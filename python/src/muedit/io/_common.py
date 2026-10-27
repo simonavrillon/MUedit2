@@ -11,13 +11,13 @@ from muedit.errors import SignalLoadError
 from muedit.models import as_name_list
 
 #: Amplifier gain both supported acquisition systems record with (Intan RHD, Open Ephys board).
-_AMPLIFIER_GAIN = 192.0
+AMPLIFIER_GAIN = 192.0
 
 #: Name of the JSON sidecar a recording folder may hold to name its grids and muscles.
-_GRID_SIDECAR = "muedit_grids.json"
+GRID_SIDECAR = "muedit_grids.json"
 
 
-def _read_grid_sidecar(sidecar: Path) -> tuple[list[str], list[str]]:
+def read_grid_sidecar(sidecar: Path) -> tuple[list[str], list[str]]:
     """Return the grid names and muscle labels a ``muedit_grids.json`` sidecar lists, if any."""
     if not sidecar.exists():
         return [], []
@@ -31,7 +31,7 @@ def _read_grid_sidecar(sidecar: Path) -> tuple[list[str], list[str]]:
     )
 
 
-def _resolve_muscles(
+def resolve_muscles(
     muscle_names: str | Iterable[Any] | None,
     sidecar_muscle_names: list[str],
     n_groups: int,

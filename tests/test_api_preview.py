@@ -17,7 +17,6 @@ from muedit.api import cache
 from muedit.api.services.series_service import build_signal_views
 from muedit.io.bids import export_bids_emg
 from muedit.models import SignalImport
-from muedit.signal.filters import bandpass_signals
 from muedit.signal.grid import format_hdemg_signal
 from muedit.storage import SessionStore
 from tests._api import (
@@ -32,6 +31,7 @@ from tests._api import (
     write_recording,
 )
 from tests._io_files import write_mat
+from tests._synthetic_emg import bandpass_signals
 
 
 @pytest.fixture(scope="module")

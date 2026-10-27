@@ -87,12 +87,6 @@ def _bandpass_coefficients(fsamp: float, emg_type: int) -> tuple[FloatArray, Flo
     return butter(3, [100, 4400], btype="bandpass", fs=fsamp)
 
 
-def bandpass_signals(data: FloatArray, fsamp: float, emg_type: int = 1) -> FloatArray:
-    """Zero-phase Butterworth bandpass: emg_type=1 → 20–500 Hz (surface), 2 → 100–4400 Hz (intramuscular)."""
-    b, a = _bandpass_coefficients(fsamp, emg_type)
-    return filtfilt(b, a, data, axis=-1)
-
-
 def _filter_rows_inplace(data: FloatArray, filter_one: Callable[[FloatArray], FloatArray]) -> None:
     """Write ``filter_one(row)`` back into each row of ``data``, on the filter threads."""
 
@@ -103,7 +97,7 @@ def _filter_rows_inplace(data: FloatArray, filter_one: Callable[[FloatArray], Fl
 
 
 def bandpass_inplace(data: FloatArray, fsamp: float, emg_type: int = 1) -> None:
-    """``bandpass_signals`` written back into ``data``, row by row on the filter threads."""
+    """Zero-phase Butterworth bandpass of ``data`` in place: emg_type=1 → 20–500 Hz (surface), 2 → 100–4400 Hz (intramuscular)."""
     # filtfilt filters each row on its own, so per-row results are bit-identical.
     b, a = _bandpass_coefficients(fsamp, emg_type)
     _filter_rows_inplace(data, lambda row: filtfilt(b, a, row))

@@ -257,7 +257,7 @@ def detect_bad_channels_per_grid(
     if keep is not None and (keep.all() or not keep.any()):
         keep = None
     per_grid_masks: list[BoolArray] = []
-    for grid_idx, rows in enumerate(grid_rows(grid_channel_counts)):
+    for grid, rows in enumerate(grid_rows(grid_channel_counts)):
         grid_data = data[rows, :]
         n_channels = rows.stop - rows.start
         if keep is not None:
@@ -267,8 +267,8 @@ def detect_bad_channels_per_grid(
                 kept[r] = grid_data[r][keep]
             grid_data = kept
         coords = None
-        if grid_coordinates is not None and grid_idx < len(grid_coordinates):
-            coords = grid_coordinates[grid_idx]
+        if grid_coordinates is not None and grid < len(grid_coordinates):
+            coords = grid_coordinates[grid]
         mask = _channel_qc_diagnostics(
             grid_data, fsamp, coords, config, structural_only=structural_only
         ).mask

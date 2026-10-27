@@ -7,8 +7,8 @@ from pathlib import Path
 import numpy as np
 
 from muedit.decomp.decomposition_file import save_decomposition_npz
-from muedit.signal.filters import bandpass_signals
 from muedit.signal.grid import format_hdemg_signal
+from tests._synthetic_emg import bandpass_signals
 
 FSAMP = 2000.0
 N_SAMPLES = 10_000

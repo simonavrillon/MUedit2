@@ -259,14 +259,14 @@ def detect_artifact_masks(
     rows_of: Sequence[slice | IntArray] = (
         grid_rows(grid_channel_counts) if kept_rows is None else kept_rows
     )
-    for grid_idx, rows in enumerate(rows_of):
+    for grid, rows in enumerate(rows_of):
         mask = _detect_artifact_mask(data, fsamp, config, rows, store)
         global_mask |= mask
 
         if mask.any():
             logger.info(
                 "Grid %d: %d / %d samples masked (%.2f%%)",
-                grid_idx,
+                grid,
                 int(mask.sum()),
                 n_samples,
                 100.0 * mask.sum() / n_samples,

@@ -24,7 +24,7 @@ from muedit.io import aux_channels
 from muedit.io._bids_events import export_bids_events
 from muedit.io._bids_layout import BidsEntities, dataset_root
 from muedit.io._bids_reader import (
-    _ensure_pyedflib,
+    ensure_pyedflib,
     read_bids_emg_grid,
     read_channel_groups,
     read_channels_summary,
@@ -55,7 +55,6 @@ __all__ = [
     "resolve_bids_channels_tsv",
     "resolve_bids_emg_path",
     "run_decomp_path",
-    "write_bids_dataset_description",
     "write_derivative_description",
     "write_participant",
 ]
@@ -402,7 +401,7 @@ def export_bids_emg(
     impedance: list[float | None] | None = None,
 ) -> dict[str, Path]:
     """Export EMG signals plus BIDS sidecars and return produced paths."""
-    pyedflib = _ensure_pyedflib()
+    pyedflib = ensure_pyedflib()
 
     def _write_json_if_missing(path: Path, payload: dict[str, Any]) -> None:
         if skip_existing and path.exists():
@@ -563,20 +562,20 @@ def export_bids_emg(
         [None] * len(grid_names) if ied is None else [float(x) for x in ied]
     )
 
-    _ch_placement = "measured" if (placement_scheme or "").lower() == "measured" else "other"
+    ch_placement = "measured" if (placement_scheme or "").lower() == "measured" else "other"
 
     spans = grid_rows([mask.size for mask in discard_channels])
-    for g_idx, grid_name in enumerate(grid_names):
-        mask = discard_channels[g_idx]
+    for grid, grid_name in enumerate(grid_names):
+        mask = discard_channels[grid]
         n_grid_ch = mask.size
-        auto = auto_discard_channels[g_idx] if auto_discard_channels is not None else None
+        auto = auto_discard_channels[grid] if auto_discard_channels is not None else None
 
         ied_mm = None
-        if ied_values and g_idx < len(ied_values):
-            ied_mm = ied_values[g_idx]
+        if ied_values and grid < len(ied_values):
+            ied_mm = ied_values[grid]
 
         for local_idx in range(n_grid_ch):
-            global_idx = spans[g_idx].start + local_idx
+            global_idx = spans[grid].start + local_idx
             ch_name = f"Ch{global_idx + 1:02d}"
             electrode_name = f"E{global_idx + 1}"
 
@@ -596,13 +595,13 @@ def export_bids_emg(
                     fsamp,
                     electrode_name,
                     _REFERENCE,
-                    group_labels[g_idx],
+                    group_labels[grid],
                     (
-                        target_muscle[g_idx]
-                        if isinstance(target_muscle, list) and g_idx < len(target_muscle)
+                        target_muscle[grid]
+                        if isinstance(target_muscle, list) and grid < len(target_muscle)
                         else (target_muscle if isinstance(target_muscle, str) else "n/a")
                     ),
-                    _ch_placement,
+                    ch_placement,
                     "n/a",
                     (f"{ied_mm}" if ied_mm else "n/a"),
                     grid_name,
@@ -746,12 +745,12 @@ def export_bids_emg(
     electrode_rows = []
     electrode_counter = 1
 
-    for g_idx, coords in enumerate(coordinates):
+    for grid, coords in enumerate(coordinates):
         ied_mm = 1.0
-        if ied and g_idx < len(ied):
-            ied_mm = float(ied[g_idx])
+        if ied and grid < len(ied):
+            ied_mm = float(ied[grid])
 
-        el_meta = el_meta_per_grid[g_idx]
+        el_meta = el_meta_per_grid[grid]
 
         for row in coords:
             x_val = row[0] * ied_mm
@@ -766,11 +765,11 @@ def export_bids_emg(
                     f"{x_val:.4f}",
                     f"{y_val:.4f}",
                     z_val,
-                    space_labels[g_idx],
+                    space_labels[grid],
                     el_meta["ElectrodeType"],
                     el_meta["ElectrodeMaterial"],
                     _impedance(impedance, electrode_counter - 1),
-                    group_labels[g_idx],
+                    group_labels[grid],
                 ]
             )
             electrode_counter += 1
@@ -783,13 +782,13 @@ def export_bids_emg(
 
     coordsys_paths: list[Path] = []
     seen_spaces: set[str] = set()
-    for g_idx, grid_name in enumerate(grid_names):
-        space_label = space_labels[g_idx]
+    for grid, grid_name in enumerate(grid_names):
+        space_label = space_labels[grid]
         if space_label in seen_spaces:
             continue
         seen_spaces.add(space_label)
         coordsys_path = emg_dir / f"{session_prefix}_space-{space_label}_coordsystem.json"
-        grid_ied = ied_values[g_idx] if ied_values and g_idx < len(ied_values) else None
+        grid_ied = ied_values[grid] if ied_values and grid < len(ied_values) else None
         coord_units = "mm" if grid_ied else "n/a"
         _write_json_if_missing(
             coordsys_path,
@@ -915,7 +914,7 @@ def export_bids_emg(
     return result
 
 
-def write_bids_dataset_description(
+def _write_bids_dataset_description(
     bids_root: Path,
     *,
     subject: str = "1",
@@ -1001,9 +1000,9 @@ def write_bids_dataset_description(
 def write_participant(
     bids_root: Path, subject: str, participant_meta: Mapping[str, Any] | None
 ) -> None:
-    """``write_bids_dataset_description`` from the session form's participant fields."""
+    """``_write_bids_dataset_description`` from the session form's participant fields."""
     meta = participant_meta or {}
-    write_bids_dataset_description(
+    _write_bids_dataset_description(
         bids_root,
         subject=subject,
         age=parse_age(meta.get("age")),

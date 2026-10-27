@@ -15,12 +15,12 @@ from muedit.api.services.series_service import (
 )
 from muedit.decomp.preview import abs_means
 from muedit.models import SignalImport
-from muedit.signal.filters import bandpass_signals
 from muedit.signal.pyramid import MinMaxPyramid
 from muedit.storage import RamStore, SessionStore
 from tests._api import API, FSAMP, GRID, N_CHANNELS, N_SAMPLES, error, frame, stored_run
 from tests._frames import unpack_frame
 from tests._platform import deleted
+from tests._synthetic_emg import bandpass_signals
 
 VIEW_SAMPLES = 40_011  # not a multiple of any level's bin
 

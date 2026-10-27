@@ -12,7 +12,7 @@ from muedit.signal.artifact_mask import (
     intervals_to_mask,
     mask_to_intervals,
 )
-from muedit.signal.filters import bandpass_signals
+from tests._synthetic_emg import bandpass_signals
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────
 

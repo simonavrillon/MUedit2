@@ -165,27 +165,25 @@ def unpack_gridwise_decomposition(
         if all(block.shape[1] == n_samples for block in pulse_blocks):
             pulse_trains = np.vstack(pulse_blocks)
             inferred_from_pulse = [
-                g_idx
-                for g_idx, block in enumerate(pulse_blocks)
-                for _ in range(int(block.shape[0]))
+                grid for grid, block in enumerate(pulse_blocks) for _ in range(int(block.shape[0]))
             ]
 
     inferred_from_spike_times: list[int] = []
     if spike_time_blocks:
         flat_spike_times: list[IntArray] = []
         if pulse_blocks:
-            for g_idx, pblock in enumerate(pulse_blocks):
+            for grid, pblock in enumerate(pulse_blocks):
                 expected_mu = int(pblock.shape[0])
-                mu_lists = spike_time_blocks[g_idx] if g_idx < len(spike_time_blocks) else []
+                mu_lists = spike_time_blocks[grid] if grid < len(spike_time_blocks) else []
                 aligned = list(mu_lists[:expected_mu])
                 if len(aligned) < expected_mu:
                     aligned.extend(spike_array([]) for _ in range(expected_mu - len(aligned)))
                 flat_spike_times.extend(aligned)
-                inferred_from_spike_times.extend([g_idx] * expected_mu)
+                inferred_from_spike_times.extend([grid] * expected_mu)
         else:
-            for g_idx, mu_lists in enumerate(spike_time_blocks):
+            for grid, mu_lists in enumerate(spike_time_blocks):
                 flat_spike_times.extend(mu_lists)
-                inferred_from_spike_times.extend([g_idx] * len(mu_lists))
+                inferred_from_spike_times.extend([grid] * len(mu_lists))
         spike_times_raw = flat_spike_times
 
     if not mu_grid_index:

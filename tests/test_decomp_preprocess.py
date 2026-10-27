@@ -10,9 +10,8 @@ import pytest
 from muedit.decomp.preprocess import build_manual_artifact_mask, preprocess_step
 from muedit.decomp.types import DecompositionParameters, LoadStepOutput, PreprocessStepOutput
 from muedit.models import SignalImport, resident_nbytes
-from muedit.signal.filters import bandpass_signals
 from muedit.signal.qc_pipeline import QCPipelineResult
-from tests._synthetic_emg import FSAMP, N_CHANNELS, N_SAMPLES, STORE_PARAMS
+from tests._synthetic_emg import FSAMP, N_CHANNELS, N_SAMPLES, STORE_PARAMS, bandpass_signals
 
 GRID = "GR08MM1305"
 

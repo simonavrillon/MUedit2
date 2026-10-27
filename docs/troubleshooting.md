@@ -10,8 +10,8 @@ and where to look. The [user guide](user-guide.md) covers normal use;
 
 | Symptom | Fix |
 |---|---|
-| The browser never opens | Go to <http://127.0.0.1:8000> manually. |
-| "Port already in use" at launch | MUedit needs port 8000. Close any earlier MUedit terminal window, or quit the other program holding the port. To use a different port, set `MUEDIT_PORT` before launching (see [cli.md](cli.md#environment-variables)). |
+| The browser never opens | Open the address the launcher's terminal prints, <http://127.0.0.1:8000> unless you set `MUEDIT_PORT`. |
+| "address already in use" at launch | Another program holds MUedit's port (8000), often an earlier MUedit terminal window. Close it, or set `MUEDIT_PORT` to another port before launching (see [cli.md](cli.md#environment-variables)). |
 | "Backend unreachable — please restart the app" | The Python process behind the interface has stopped or crashed. Close the terminal and run the launcher again; your saved work is on disk and unaffected. |
 | "Session expired, reloading file..." during a run | MUedit lost its cached copy of the signal and is reloading it from the original file, then retries once. This normally recovers by itself. If the file has moved since you opened it, reopen it. |
 | A file will not load | Check the extension is one of `.mat`, `.otb+`, `.otb4`, `.bdf`, `.edf`, `.rhd`, `.oebin` (raw) or `.npz` / a MUedit `.mat` (a saved decomposition). For BIDS recordings, confirm the `*_channels.tsv` sidecar really is sitting next to the `.bdf` / `.edf`. |

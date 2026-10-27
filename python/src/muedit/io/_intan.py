@@ -13,7 +13,7 @@ from typing import Any
 import numpy as np
 
 from muedit.errors import SignalLoadError
-from muedit.io._common import _AMPLIFIER_GAIN, _GRID_SIDECAR, _read_grid_sidecar, _resolve_muscles
+from muedit.io._common import AMPLIFIER_GAIN, GRID_SIDECAR, read_grid_sidecar, resolve_muscles
 from muedit.io.aux_channels import aux_kinds
 from muedit.models import SignalImport, as_name_list
 from muedit.storage import ArrayStore, RamStore, sample_blocks
@@ -554,7 +554,7 @@ def _resolve_intan_grids(
     muscle_names: str | list[str] | None,
 ) -> tuple[list[str], list[str]]:
     """Resolve the grid model and muscle label of each amplifier port."""
-    sidecar_grid_names, sidecar_muscle_names = _read_grid_sidecar(rec.directory / _GRID_SIDECAR)
+    sidecar_grid_names, sidecar_muscle_names = read_grid_sidecar(rec.directory / GRID_SIDECAR)
     resolved = as_name_list(grid_names) or sidecar_grid_names
     if not resolved:
         missing = sorted({n for n in channels_per_port if n not in _DEFAULT_GRIDS})
@@ -562,7 +562,7 @@ def _resolve_intan_grids(
             raise SignalLoadError(
                 f"Cannot infer the electrode array for Intan port(s) with {missing} channels: "
                 "the RHD header does not record one. Pass grid_names=... to load_intan, or "
-                f"write a '{_GRID_SIDECAR}' sidecar into {rec.directory} of the form "
+                f"write a '{GRID_SIDECAR}' sidecar into {rec.directory} of the form "
                 '{"grid_names": ["GR08MM1305", ...], "muscle_names": ["ta", ...]}.'
             )
         resolved = [_DEFAULT_GRIDS[n] for n in channels_per_port]
@@ -575,7 +575,7 @@ def _resolve_intan_grids(
             f"({', '.join(ports)}); pass one name per port or a single shared name."
         )
 
-    return resolved, _resolve_muscles(
+    return resolved, resolve_muscles(
         muscle_names, sidecar_muscle_names, len(ports), "amplifier port(s)"
     )
 
@@ -649,7 +649,7 @@ def load_intan(
         "hardware_filters": [hardware_filter],
         "powerline_freq": header.notch_hz,  # the notch setting; None when off
         "units": "mV",
-        "gains": [_AMPLIFIER_GAIN] * n_emg,
+        "gains": [AMPLIFIER_GAIN] * n_emg,
         "emg_hpf": [high_pass] * n_emg,
         "emg_lpf": [header.upper_bandwidth] * n_emg,
         "aux_units": "V",

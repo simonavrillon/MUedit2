@@ -54,8 +54,8 @@ def dedup_survivors(
     kept: list[int] = []
     kept_grids: list[int] = []
 
-    for g_idx in range(ngrid):
-        mu_indices = [idx for idx, g in enumerate(mu_grid_index) if g == g_idx]
+    for grid in range(ngrid):
+        mu_indices = [idx for idx, g in enumerate(mu_grid_index) if g == grid]
         if not mu_indices:
             continue
         dist_subset = [spike_times[idx] for idx in mu_indices]
@@ -68,7 +68,7 @@ def dedup_survivors(
             total_samples,
         )
         kept.extend(mu_indices[l] for l in kept_local)
-        kept_grids.extend([g_idx] * len(kept_local))
+        kept_grids.extend([grid] * len(kept_local))
 
     if params.duplicatesbgrids and kept:
         dist_kept = [spike_times[idx] for idx in kept]
@@ -196,8 +196,8 @@ def postprocess_step(
     ]
     sil_flat: list[float] = []
     sil_by_window: dict[int, list[float]] = {}
-    for mu_idx in kept_global:
-        win_global, sil = sil_rows[mu_idx]
+    for row in kept_global:
+        win_global, sil = sil_rows[row]
         sil_flat.append(sil)
         sil_by_window.setdefault(win_global, []).append(sil)
 

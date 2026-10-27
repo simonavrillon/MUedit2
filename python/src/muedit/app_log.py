@@ -7,7 +7,7 @@ import logging.handlers
 import os
 from pathlib import Path
 
-_LOG_FILE_ENV = "MUEDIT_LOG_FILE"
+LOG_FILE_ENV = "MUEDIT_LOG_FILE"
 _MAX_BYTES = 5 * 1024 * 1024
 _BACKUPS = 3
 _FORMAT = "%(asctime)s %(process)d %(levelname)s %(name)s: %(message)s"
@@ -29,12 +29,12 @@ def log_to_file(path: Path) -> None:
         )
     )
     logging.captureWarnings(True)
-    os.environ[_LOG_FILE_ENV] = str(path)
+    os.environ[LOG_FILE_ENV] = str(path)
 
 
 def log_to_inherited_file() -> None:
     """In a worker, append to the file the app logs to, when it logs to one."""
-    path = os.environ.get(_LOG_FILE_ENV, "").strip()
+    path = os.environ.get(LOG_FILE_ENV, "").strip()
     if path:
         # Appends only: the app process alone rotates the file.
         _attach(logging.FileHandler(path, encoding="utf-8"))

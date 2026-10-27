@@ -14,7 +14,7 @@ from typing import Any
 import numpy as np
 
 from muedit.errors import SignalLoadError
-from muedit.io._common import _AMPLIFIER_GAIN, _GRID_SIDECAR, _read_grid_sidecar, _resolve_muscles
+from muedit.io._common import AMPLIFIER_GAIN, GRID_SIDECAR, read_grid_sidecar, resolve_muscles
 from muedit.io.aux_channels import aux_kinds
 from muedit.models import SignalImport, as_name_list
 from muedit.signal.grid import grid_spec
@@ -240,7 +240,7 @@ def _acquisition_date(directory: Path) -> str | None:
 def _sidecar(directory: Path) -> tuple[list[str], list[str]]:
     """Read the nearest grid sidecar: the recording, its experiment, then its Record Node folder."""
     for folder in (directory, directory.parent, directory.parent.parent):
-        grid_names, muscle_names = _read_grid_sidecar(folder / _GRID_SIDECAR)
+        grid_names, muscle_names = read_grid_sidecar(folder / GRID_SIDECAR)
         if grid_names or muscle_names:
             return grid_names, muscle_names
     return [], []
@@ -269,7 +269,7 @@ def _resolve_openephys_grids(
                 f"Cannot infer the electrode array for {n_emg} Open Ephys ephys channels: "
                 "neither structure.oebin nor settings.xml records one. Pass grid_names=... "
                 "to load_openephys, "
-                f"or write a '{_GRID_SIDECAR}' sidecar into {directory} (or its experiment or "
+                f"or write a '{GRID_SIDECAR}' sidecar into {directory} (or its experiment or "
                 'Record Node folder) of the form {"grid_names": ["GR08MM1305", ...], "muscle_names": '
                 '["ta", ...]}.'
             )
@@ -286,7 +286,7 @@ def _resolve_openephys_grids(
             f"recording holds {n_emg} ephys channels."
         )
 
-    return resolved, _resolve_muscles(muscle_names, sidecar_muscle_names, len(resolved), "grid(s)")
+    return resolved, resolve_muscles(muscle_names, sidecar_muscle_names, len(resolved), "grid(s)")
 
 
 def _ttl_row(line: _TtlLine, start: int, stop: int) -> np.ndarray:
@@ -363,7 +363,7 @@ def load_openephys(
         "hardware_filters": [hardware_filter],
         "powerline_freq": None,
         "units": "mV",
-        "gains": [_AMPLIFIER_GAIN] * n_emg,
+        "gains": [AMPLIFIER_GAIN] * n_emg,
         "emg_hpf": ["n/a" if low_cut is None else low_cut] * n_emg,
         "emg_lpf": ["n/a" if high_cut is None else high_cut] * n_emg,
         "aux_units": "V",

@@ -41,7 +41,7 @@ _REFERENCE_KEYWORDS = {
 }
 
 
-def _ensure_pyedflib() -> Any:
+def ensure_pyedflib() -> Any:
     """Import and return ``pyedflib`` with a clear install hint on failure."""
     try:
         import pyedflib
@@ -54,7 +54,7 @@ def _ensure_pyedflib() -> Any:
 
 def _open_edf(path: Path) -> Any:
     """A ``pyedflib.EdfReader`` on ``path``; a file pyedflib cannot read is a ``SignalLoadError``."""
-    pyedflib = _ensure_pyedflib()
+    pyedflib = ensure_pyedflib()
     try:
         return pyedflib.EdfReader(str(path))
     except OSError as exc:
@@ -259,23 +259,21 @@ def _signal_index(edf_reader: Any, rows: list[dict[str, str]]) -> list[int]:
     return list(range(len(rows)))
 
 
-def _grid(
-    bids_root: Path, entity_label: str, grid_index: int
-) -> tuple[_BidsRecording, _GridLayout]:
-    """The recording of ``entity_label`` and its grid ``grid_index``."""
+def _grid(bids_root: Path, entity_label: str, grid: int) -> tuple[_BidsRecording, _GridLayout]:
+    """The recording of ``entity_label`` and its grid ``grid``."""
     emg_path = resolve_bids_emg_path(bids_root, entity_label)
     channels_tsv = resolve_bids_channels_tsv(emg_path.parent, entity_label)
     recording = _read_recording(emg_path, entity_label, channels_tsv)
-    if not 0 <= grid_index < len(recording.layouts):
-        raise SignalLoadError(f"No EMG grid {grid_index + 1} in {channels_tsv}")
-    return recording, recording.layouts[grid_index]
+    if not 0 <= grid < len(recording.layouts):
+        raise SignalLoadError(f"No EMG grid {grid + 1} in {channels_tsv}")
+    return recording, recording.layouts[grid]
 
 
 def read_bids_emg_grid(
-    bids_root: Path, entity_label: str, grid_index: int, store: ArrayStore
+    bids_root: Path, entity_label: str, grid: int, store: ArrayStore
 ) -> tuple[np.ndarray, float, np.ndarray]:
     """One BIDS grid over the whole recording as writable float32 rows of ``store``, a channel at a time."""
-    recording, layout = _grid(bids_root, entity_label, grid_index)
+    recording, layout = _grid(bids_root, entity_label, grid)
 
     reader = _open_edf(recording.emg_path)
     try:

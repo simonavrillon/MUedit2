@@ -13,10 +13,10 @@ from muedit.signal.filters import (
     _notch_params,
     _remove_line_interference,
     bandpass_inplace,
-    bandpass_signals,
     demean,
     notch_inplace,
 )
+from tests._synthetic_emg import bandpass_signals
 
 FSAMP = 2048.0
 # Band edges of the surface bandpass (emg_type=1).

@@ -62,8 +62,8 @@ header = {"meta": {...}, "arrays": [{"name", "dtype", "shape", "offset"}, ...]}
 dtype ∈ f4, i4, i8
 ```
 
-The alignment lets the page read every array as a zero-copy typed-array view. Per-MU lists
-(discharge times, artifacts) travel as CSR pairs (`<name>` + `<name>_offsets`). Media type
+The alignment lets the page read every array as a zero-copy typed-array view. Discharge times
+of several MUs travel as a CSR pair (`spikes` + `spike_offsets`). Media type
 `application/x-muedit-frame`, header `x-muedit-format: mub1`.
 
 Test helpers mirror both ends: `tests/_frames.py` decodes like the page; `frontend/tests/_frames.js`
