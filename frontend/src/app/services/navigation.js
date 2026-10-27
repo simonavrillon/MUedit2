@@ -5,9 +5,9 @@
 import {
   setEditCurrentMu,
   setEditView,
-  setShowBookmark,
+  setEditShowBookmark,
 } from "../../state/actions.js";
-import { getEditMuIndicesForGrid } from "../../state/selectors.js";
+import { getEditMuIndicesForGrid, getEditView } from "../../state/selectors.js";
 import { clampView } from "../../editing/operations.js";
 
 /** @typedef {import("../context.js").App} App */
@@ -16,7 +16,6 @@ import { clampView } from "../../editing/operations.js";
 /** @typedef {import("../context.js").StageKey} StageKey */
 /** @typedef {import("../context.js").Tone} Tone */
 /** @typedef {import("../context.js").WorkflowStep} WorkflowStep */
-/** @typedef {import("../../state/state.js").State} State */
 /** @typedef {"zoom_in" | "zoom_out" | "scroll_left" | "scroll_right"} ViewAction */
 
 /**
@@ -44,7 +43,7 @@ export function updateWorkflowStepper(app, targetStage) {
     {
       key: "edit",
       el: els.stepEdit,
-      complete: !!state.edit.spikeTimes?.length,
+      complete: !!state.edit.spikeTimes.length,
     },
   ];
   steps.forEach((step) => {
@@ -117,7 +116,7 @@ export function updateStepAvailability(app) {
   const hasFile = !!state.file;
   const hasPreview = !!state.gridSeries?.length;
   const hasRunResults = !!state.runResultToken;
-  const hasEditData = !!state.edit.spikeTimes?.length;
+  const hasEditData = !!state.edit.spikeTimes.length;
 
   if (els.stepRun) {
     // The run page only has something to show once a run has started; the QC
@@ -188,7 +187,7 @@ function adjustView(view, total, action) {
  */
 function goToMu(app, direction) {
   const { state } = app;
-  const mus = getEditMuIndicesForGrid(state, state.edit.currentMuGrid);
+  const mus = getEditMuIndicesForGrid(state, state.edit.currentGrid);
   if (!mus.length) return;
   const idx = mus.indexOf(state.edit.currentMu);
   const offset = direction === "prev" ? -1 : 1;
@@ -222,12 +221,11 @@ export function handleKeyboardNavigation(app, e) {
   };
   const action = actions[e.key];
   if (!action) return;
-  if (action === "zoom_out") setShowBookmark(state, true);
+  if (action === "zoom_out") setEditShowBookmark(state, true);
 
-  const total = state.edit.spikeTimes?.length ? state.edit.totalSamples : 0;
+  const total = state.edit.spikeTimes.length ? state.edit.totalSamples : 0;
   if (!total) return;
-  const view = state.edit.view || { start: 0, end: total };
-  setEditView(state, adjustView(view, total, action));
+  setEditView(state, adjustView(getEditView(state), total, action));
   app.renderEditExplorer();
   e.preventDefault();
 }

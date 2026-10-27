@@ -136,7 +136,9 @@ export async function runDecomposition(app) {
     return {
       upload_token: token,
       params,
-      discard_channels: state.discardMasks.length ? state.discardMasks : null,
+      discard_channels: state.discardChannels.length
+        ? state.discardChannels
+        : null,
       rois: state.rois.length ? state.rois : null,
       artifact_regions: state.artifactRegions.length
         ? state.artifactRegions
@@ -261,7 +263,8 @@ export function handleStreamMessage(app, msg) {
 
   // The rest of the preview is the recording the page already shows; the
   // session form the user filled in stays as it is.
-  if (msg.preview) setRunResultToken(state, msg.preview.run_result_token);
+  if (msg.preview)
+    setRunResultToken(state, String(msg.preview.run_result_token ?? ""));
   if (msg.summary?.parameters) setParameters(state, msg.summary.parameters);
   finishRun(
     live,

@@ -13,7 +13,6 @@ import { createEditSlice } from "./state.js";
 /** @typedef {import("./state.js").PulseView} PulseView */
 /** @typedef {import("../api/binary-payloads.js").EditSessionFrame} EditSessionFrame */
 /** @typedef {import("./state.js").Bookmark} Bookmark */
-/** @typedef {import("./state.js").EditHistoryEntry} EditHistoryEntry */
 /** @typedef {import("../app/context.js").Span} Span */
 /** @typedef {import("../app/context.js").StageKey} StageKey */
 /** @typedef {import("../app/context.js").JsonObject} JsonObject */
@@ -24,23 +23,6 @@ import { createEditSlice } from "./state.js";
  */
 export function setCurrentGrid(state, idx) {
   state.currentGrid = Math.max(0, idx || 0);
-}
-
-/**
- * @param {State} state
- */
-export function ensureDiscardMasks(state) {
-  if (!state.channelMeans.length) return;
-  if (state.discardMasks.length !== state.channelMeans.length) {
-    const badPerGrid = state.metadata?.bad_channels_per_grid;
-    state.discardMasks = state.channelMeans.map((cm, grid) => {
-      const bad = badPerGrid?.[grid];
-      if (Array.isArray(bad) && bad.length === cm.length) {
-        return bad.map((v) => (v === 1 ? 1 : 0));
-      }
-      return cm.map(() => 0);
-    });
-  }
 }
 
 /**
@@ -64,8 +46,8 @@ export function setEditMode(state, mode) {
  * @param {number} idx
  * @param {{ resetView?: boolean }} [options]
  */
-export function setEditCurrentMuGrid(state, idx, { resetView = true } = {}) {
-  state.edit.currentMuGrid = Math.max(0, idx || 0);
+export function setEditCurrentGrid(state, idx, { resetView = true } = {}) {
+  state.edit.currentGrid = Math.max(0, idx || 0);
   if (resetView) state.edit.view = null;
 }
 
@@ -75,7 +57,7 @@ export function setEditCurrentMuGrid(state, idx, { resetView = true } = {}) {
  * @param {{ resetView?: boolean }} [options]
  */
 export function setEditCurrentMu(state, idx, { resetView = true } = {}) {
-  state.edit.currentMu = Number.isNaN(idx) ? 0 : idx;
+  state.edit.currentMu = Math.max(0, idx || 0);
   if (resetView) state.edit.view = null;
 }
 
@@ -149,17 +131,10 @@ export function setGridSeries(state, series) {
  */
 export function setGridNames(state, names) {
   state.gridNames = names;
-  if (!state.gridNames.length) {
-    state.currentGrid = 0;
-    return;
-  }
-  if (!Number.isFinite(state.currentGrid) || state.currentGrid < 0) {
-    state.currentGrid = 0;
-    return;
-  }
-  if (state.currentGrid >= state.gridNames.length) {
-    state.currentGrid = state.gridNames.length - 1;
-  }
+  state.currentGrid = Math.min(
+    state.currentGrid,
+    Math.max(0, names.length - 1),
+  );
 }
 
 /**
@@ -249,16 +224,8 @@ export function setParameters(state, parameters) {
  * @param {State} state
  */
 export function clearEditPulseSelections(state) {
-  state.edit.selectionPulse = null;
-  state.edit.draftSelectionPulse = null;
-}
-
-/**
- * @param {State} state
- * @param {FileRef | null | undefined} file
- */
-export function setEditFile(state, file) {
-  state.edit.file = file || null;
+  state.edit.pulseSelection = null;
+  state.edit.pulseSelectionDraft = null;
 }
 
 /**
@@ -271,14 +238,6 @@ export function setEditFilename(state, filename) {
 
 /**
  * @param {State} state
- * @param {string[]} gridNames
- */
-export function setEditGridNames(state, gridNames) {
-  state.edit.gridNames = gridNames;
-}
-
-/**
- * @param {State} state
  * @param {boolean} busy
  */
 export function setEditBusy(state, busy) {
@@ -287,17 +246,17 @@ export function setEditBusy(state, busy) {
 
 /**
  * @param {State} state
- * @param {Bookmark | null} position
+ * @param {Bookmark | null} bookmark
  */
-export function setEditBookmark(state, position) {
-  state.edit.bookmarkPosition = position;
+export function setEditBookmark(state, bookmark) {
+  state.edit.bookmark = bookmark;
 }
 
 /**
  * @param {State} state
  * @param {boolean} show
  */
-export function setShowBookmark(state, show) {
+export function setEditShowBookmark(state, show) {
   state.edit.showBookmark = show;
 }
 
@@ -306,15 +265,15 @@ export function setShowBookmark(state, show) {
  * @param {Selection | null} selection
  */
 export function setEditPulseSelection(state, selection) {
-  state.edit.selectionPulse = selection;
+  state.edit.pulseSelection = selection;
 }
 
 /**
  * @param {State} state
  * @param {Selection | null} selection
  */
-export function setEditPulseDraftSelection(state, selection) {
-  state.edit.draftSelectionPulse = selection;
+export function setEditPulseSelectionDraft(state, selection) {
+  state.edit.pulseSelectionDraft = selection;
 }
 
 /**
@@ -334,10 +293,10 @@ export function setSavedRunToken(state, token) {
 
 /**
  * @param {State} state
- * @param {unknown} token  Server handle on the finished run's pulse trains.
+ * @param {string} token  Server handle on the finished run's pulse trains.
  */
 export function setRunResultToken(state, token) {
-  state.runResultToken = typeof token === "string" ? token : "";
+  state.runResultToken = token;
 }
 
 /**
@@ -421,9 +380,9 @@ export function removeLastArtifactRegion(state) {
  * @param {State} state
  * @param {(number | boolean)[][] | null | undefined} masks
  */
-export function setDiscardMasks(state, masks) {
+export function setDiscardChannels(state, masks) {
   if (!Array.isArray(masks)) return;
-  state.discardMasks = masks.map((grid) =>
+  state.discardChannels = masks.map((grid) =>
     Array.isArray(grid) ? grid.map((v) => (v ? 1 : 0)) : [],
   );
 }
@@ -431,35 +390,30 @@ export function setDiscardMasks(state, masks) {
 /**
  * @param {State} state
  * @param {number} grid
- * @param {number} chIdx
+ * @param {number} channel
  * @param {number} value
  */
-export function setDiscardMaskChannel(state, grid, chIdx, value) {
-  (state.discardMasks[grid] ??= [])[chIdx] = value ? 1 : 0;
+export function setDiscardChannel(state, grid, channel, value) {
+  (state.discardChannels[grid] ??= [])[channel] = value ? 1 : 0;
 }
 
 /**
- * Keep only the MUs at `keptIdx`, in that order: their discharge and artifact
- * times, and the current MU and bookmark moved to their new places. The other
- * per-MU fields come in full with the change that removed MUs.
+ * Keep only the MUs at `keptIdx`, in that order: their discharge times, and the
+ * current MU and bookmark moved to their new places. The other per-MU fields
+ * come in full with the change that removed MUs.
  *
  * @param {State} state
  * @param {number[]} keptIdx
  */
 function keepEditMus(state, keptIdx) {
   const e = state.edit;
-  /** @param {Int32Array[]} times */
-  const pick = (times) => keptIdx.map((i) => times[i] ?? new Int32Array(0));
-  e.spikeTimes = pick(e.spikeTimes);
-  e.artifactTimes = pick(e.artifactTimes);
+  e.spikeTimes = keptIdx.map((i) => e.spikeTimes[i] ?? new Int32Array(0));
   e.currentMu = Math.max(0, keptIdx.indexOf(e.currentMu));
-  const bookmarkIdx = e.bookmarkPosition
-    ? keptIdx.indexOf(e.bookmarkPosition.mu)
-    : -1;
-  e.bookmarkPosition =
-    bookmarkIdx === -1 || !e.bookmarkPosition
+  const bookmarkIdx = e.bookmark ? keptIdx.indexOf(e.bookmark.mu) : -1;
+  e.bookmark =
+    bookmarkIdx === -1 || !e.bookmark
       ? null
-      : { ...e.bookmarkPosition, mu: bookmarkIdx };
+      : { ...e.bookmark, mu: bookmarkIdx };
 }
 
 /**
@@ -491,43 +445,33 @@ function setEditPerMu(state, meta) {
  * @param {State} state
  * @param {EditSessionFrame} frame
  */
-export function setEditSession(state, { meta, spikeTimes, artifactTimes }) {
+export function setEditSession(state, { meta, spikeTimes }) {
   const e = state.edit;
   e.token = String(meta.token || "");
   e.spikeTimes = spikeTimes;
-  e.artifactTimes = spikeTimes.map(
-    (_, i) => artifactTimes[i] ?? new Int32Array(0),
-  );
   setEditPerMu(state, meta);
   e.editHistory = Array.isArray(meta.edit_history) ? meta.edit_history : [];
   e.editHistoryStart = Number(meta.edit_history_start) || 0;
   e.fsamp = meta.fsamp ?? null;
   e.totalSamples = Number(meta.total_samples) || 0;
-  e.parameters =
-    meta.parameters && typeof meta.parameters === "object"
-      ? meta.parameters
-      : {};
   e.pulseView = null;
 }
 
 /**
  * Apply what one edit changed: MUs kept (when some were removed), the
- * changed MUs' times, the per-MU fields and the new log entries.
+ * changed MUs' discharge times, the per-MU fields and the new log entries.
  *
  * @param {State} state
  * @param {EditSessionFrame} frame
  */
-export function applyEditChange(state, { meta, spikeTimes, artifactTimes }) {
+export function applyEditChange(state, { meta, spikeTimes }) {
   const e = state.edit;
   if (Array.isArray(meta.kept_indices)) keepEditMus(state, meta.kept_indices);
   const n = Number(meta.n_mu) || 0;
   while (e.spikeTimes.length < n) e.spikeTimes.push(new Int32Array(0));
-  while (e.artifactTimes.length < n) e.artifactTimes.push(new Int32Array(0));
   e.spikeTimes.length = n;
-  e.artifactTimes.length = n;
   (Array.isArray(meta.changed) ? meta.changed : []).forEach((mu, i) => {
     e.spikeTimes[mu] = spikeTimes[i] ?? new Int32Array(0);
-    e.artifactTimes[mu] = artifactTimes[i] ?? new Int32Array(0);
   });
   setEditPerMu(state, meta);
   const start = Math.max(0, Number(meta.history_start) || 0);

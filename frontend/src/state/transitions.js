@@ -4,11 +4,9 @@
 import {
   resetEditSlice,
   setChannelTraces,
-  setDiscardMasks,
   setFile,
   setRunLive,
   setRunResultToken,
-  setUploadToken,
 } from "./actions.js";
 
 /** @typedef {import("./state.js").State} State */
@@ -16,7 +14,8 @@ import {
 
 /**
  * A raw file whose preview has arrived replaces the one shown: its file, and
- * nothing of the previous file's upload, traces or edit session.
+ * nothing of the previous file's traces, run or edit session. The caller sets
+ * the new upload and discard channels.
  *
  * @param {State} state
  * @param {FileRef | null | undefined} fileLike
@@ -24,9 +23,7 @@ import {
 export function beginRawPreviewTransition(state, fileLike) {
   resetEditSlice(state);
   setFile(state, fileLike || null);
-  setUploadToken(state, null);
   setChannelTraces(state, []);
-  setDiscardMasks(state, []);
   // The previous file's run no longer applies; one still streaming keeps its page.
   if (!state.isRunning) {
     setRunLive(state, null);

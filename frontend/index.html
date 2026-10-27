@@ -464,15 +464,16 @@
                 <div class="toggle-row">
                   <button
                     class="pill-toggle on"
-                    id="silToggle"
                     data-state="on"
                     type="button"
                     aria-pressed="true"
+                    aria-disabled="true"
+                    title="This filter is always enabled"
                   >
                     SIL filter: On
                   </button>
                 </div>
-                <div class="form-row" id="silSettings">
+                <div class="form-row">
                   <label for="silValue">SIL threshold</label>
                   <input type="number" step="0.01" id="silValue" value="0.9" />
                 </div>

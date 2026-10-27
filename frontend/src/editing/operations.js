@@ -2,7 +2,7 @@
  * Edit-stage logic without DOM: the pulse view's range, the grid/MU
  * dropdown model, discharge rates, and selections turned into edit requests.
  */
-import { getEditMuIndicesForGrid } from "../state/selectors.js";
+import { getEditMuIndicesForGrid, getEditView } from "../state/selectors.js";
 import { traceRange } from "../signal/series.js";
 
 /** @typedef {import("../state/state.js").State} State */
@@ -28,7 +28,7 @@ export function getPulseViewMeta(state) {
     return null;
   }
   const totalSamples = state.edit.totalSamples;
-  const view = state.edit.view || { start: 0, end: totalSamples };
+  const view = getEditView(state);
   const start = Math.max(0, Math.min(totalSamples, view.start));
   const end = Math.max(start + 1, Math.min(totalSamples, view.end));
   const { min, max } = traceRange(shown);
@@ -43,14 +43,14 @@ export function getPulseViewMeta(state) {
  * @param {State} state
  */
 export function buildEditDropdownModel(state) {
-  const gridNames = state.edit.gridNames;
-  let targetGrid = state.edit.currentMuGrid;
-  let mus = getEditMuIndicesForGrid(state, targetGrid);
+  const gridNames = state.gridNames;
+  let currentGrid = state.edit.currentGrid;
+  let mus = getEditMuIndicesForGrid(state, currentGrid);
   if (!mus.length) {
     for (let grid = 0; grid < gridNames.length; grid++) {
       const list = getEditMuIndicesForGrid(state, grid);
       if (list.length) {
-        targetGrid = grid;
+        currentGrid = grid;
         mus = list;
         break;
       }
@@ -60,10 +60,10 @@ export function buildEditDropdownModel(state) {
   const needsMuSwitch = mus.length > 0 && !mus.includes(currentMu);
   return {
     gridNames,
-    targetGrid,
+    currentGrid,
     muOptions: mus,
     currentMu: needsMuSwitch ? mus[0] : currentMu,
-    needsGridSwitch: targetGrid !== state.edit.currentMuGrid,
+    needsGridSwitch: currentGrid !== state.edit.currentGrid,
     needsMuSwitch,
   };
 }
@@ -150,8 +150,8 @@ function pulseBox(app, sel) {
   const xStart = Math.max(meta.start, Math.min(meta.end, sel.start));
   const xEnd = Math.max(xStart + 1, Math.min(meta.end, sel.end));
   const height = app.getPulsePlotHeight();
-  const y1 = Math.max(0, Math.min(height, sel.yMin ?? 0));
-  const y2 = Math.max(0, Math.min(height, sel.yMax ?? height));
+  const y1 = Math.max(0, Math.min(height, sel.yMin));
+  const y2 = Math.max(0, Math.min(height, sel.yMax));
   /** @param {number} y */
   const toValue = (y) => meta.minVal + (1 - y / height) * meta.span;
   return {

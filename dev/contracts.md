@@ -73,8 +73,8 @@ encodes like `pack_frame`. Change all four together.
 |---|---|---|
 | series | `/series/emg`, `/series/overview`, `/series/aux` | `min`/`max` `f4[rows, bins]`, or `samples` `f4[rows, n]` when `meta.kind == "samples"` |
 | pulse | `/series/pulse` | as series, plus `spikes`, `spike_values` (and `artifacts`, `artifact_values` for an edit session); `meta.version` |
-| edit state | `/edit/session/open`, `GET /edit/session`, `/edit/session/recover` | CSR spikes and artifacts of every MU |
-| edit change | `/edit/ops/{op}` | CSR spikes and artifacts of the `changed` MUs only |
+| edit state | `/edit/session/open`, `GET /edit/session`, `/edit/session/recover` | CSR spikes of every MU |
+| edit change | `/edit/ops/{op}` | CSR spikes of the `changed` MUs only |
 
 ### Edit frames
 

@@ -45,7 +45,7 @@ function loadedState() {
     channelMeans: [[1, 1]],
     channelTraces: [[0.5]],
     totalSamples: 3,
-    discardMasks: [[0, 1]],
+    discardChannels: [[0, 1]],
   });
   return state;
 }
@@ -171,7 +171,7 @@ describe("decomposition upload-token recovery", () => {
     assert.equal(state.uploadToken, "fresh-token");
     // User selections survive the reload.
     assert.deepEqual(state.rois, [{ start: 0, end: 3 }]);
-    assert.deepEqual(state.discardMasks, [[0, 1]]);
+    assert.deepEqual(state.discardChannels, [[0, 1]]);
     assert.deepEqual(app.handleStreamMessage.calls, [[{ stage: "done" }]]);
     assert.equal(state.isRunning, false);
   });

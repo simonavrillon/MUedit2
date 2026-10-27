@@ -11,12 +11,7 @@ import {
 import { renderRunStage as renderRunStageFeature } from "../../view/run-live.js";
 import { buildDecomposeParams, postprocessMode } from "../../decomp/params.js";
 import { oncePerFrame } from "../../view/plots.js";
-import {
-  isToggleOn,
-  setupLockedOnToggle,
-  setupToggle,
-  toggleConditional,
-} from "../../view/controls.js";
+import { isToggleOn, setupToggle } from "../../view/controls.js";
 
 /** @typedef {import("../context.js").App} App */
 /** @typedef {import("../context.js").RunStage} RunStage */
@@ -85,9 +80,9 @@ export function setupRunEvents(app) {
     void app.autoSaveRunDecomposition();
   });
 
-  setupToggle(els.peelOffToggle, (on) =>
-    toggleConditional("peelOffSettings", on),
-  );
+  setupToggle(els.peelOffToggle, (on) => {
+    if (els.peelOffSettings) els.peelOffSettings.hidden = !on;
+  });
   const renderPostprocessHint = () => {
     if (!els.postprocessModeHint) return;
     els.postprocessModeHint.textContent = postprocessMode(
@@ -99,9 +94,8 @@ export function setupRunEvents(app) {
     renderPostprocessHint();
     els.postprocessMode.blur();
   });
-  setupToggle(els.covToggle, (on) => toggleConditional("covSettings", on));
-  setupLockedOnToggle(els.silToggle, (on) =>
-    toggleConditional("silSettings", on),
-  );
+  setupToggle(els.covToggle, (on) => {
+    if (els.covSettings) els.covSettings.hidden = !on;
+  });
   app.updateStartAvailability();
 }

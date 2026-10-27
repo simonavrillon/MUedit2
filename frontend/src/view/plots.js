@@ -14,6 +14,7 @@ import {
 
 /** @typedef {import("../app/context.js").Span} Span */
 /** @typedef {import("../state/state.js").ChannelTrace} ChannelTrace */
+/** @typedef {import("../state/state.js").Selection} Selection */
 /** @typedef {import("../signal/series.js").TraceWindow} TraceWindow */
 /** @typedef {{ left: number, right: number, top: number, bottom: number }} Padding */
 /**
@@ -23,8 +24,6 @@ import {
  * the window; `strong` windows sit over segments and fill more.
  *
  * @typedef {Span & {
- *   yMin?: number,
- *   yMax?: number,
  *   kind?: string,
  *   chosen?: boolean,
  *   strong?: boolean,
@@ -49,10 +48,8 @@ import {
  * @typedef {object} TraceOptions
  * @property {string} [color]
  * @property {MarkerSet[]} [markers]
- * @property {Overlay[]} [selections]
+ * @property {Selection[]} [selections]
  * @property {{ min: number, max: number }} [range] The y range; else the row's.
- * @property {boolean} [showAxes]
- * @property {boolean} [hideYAxis]
  * @property {number | null} [fsamp]
  * @property {string} [noDataText]
  */
@@ -152,30 +149,14 @@ export function viewScale(view, left, width) {
 }
 
 /**
- * @param {boolean} showAxes
- * @returns {Padding}
- */
-function getAxisPadding(showAxes) {
-  return showAxes
-    ? { left: 38, right: 8, top: 8, bottom: 20 }
-    : { left: 0, right: 0, top: 0, bottom: 0 };
-}
-
-/**
+ * The plot box inside a canvas: gutters for the value labels on the left and
+ * the time labels below.
+ *
  * @param {HTMLCanvasElement} canvas
- * @param {boolean} showAxes
- * @param {{ hideYAxis?: boolean }} [options]
  */
-export function getCanvasPlotMetrics(
-  canvas,
-  showAxes,
-  { hideYAxis = false } = {},
-) {
-  const padding = showAxes
-    ? hideYAxis
-      ? { left: 8, right: 8, top: 8, bottom: 20 }
-      : getAxisPadding(true)
-    : getAxisPadding(false);
+export function getCanvasPlotMetrics(canvas) {
+  /** @type {Padding} */
+  const padding = { left: 38, right: 8, top: 8, bottom: 20 };
   const width = canvas.clientWidth || canvas.width || 1;
   const height = canvas.clientHeight || canvas.height || 1;
   return {
@@ -191,20 +172,13 @@ export function getCanvasPlotMetrics(
  * @param {CanvasRenderingContext2D} ctx
  * @param {number} startX
  * @param {number} endX
- * @param {Overlay} sel
+ * @param {Selection} sel
  * @param {Padding} padding
  * @param {number} plotHeight
  */
 function drawSelectionRect(ctx, startX, endX, sel, padding, plotHeight) {
-  const top = sel?.yMin;
-  const bottom = sel?.yMax;
-  const hasY =
-    typeof top === "number" &&
-    typeof bottom === "number" &&
-    Number.isFinite(top) &&
-    Number.isFinite(bottom);
-  const yMin = hasY ? Math.max(0, Math.min(plotHeight, top)) : 0;
-  const yMax = hasY ? Math.max(0, Math.min(plotHeight, bottom)) : plotHeight;
+  const yMin = Math.max(0, Math.min(plotHeight, sel.yMin));
+  const yMax = Math.max(0, Math.min(plotHeight, sel.yMax));
   const rectTop = padding.top + Math.min(yMin, yMax);
   const rectHeight = Math.max(1, Math.abs(yMax - yMin));
   const x = Math.min(startX, endX);
@@ -230,17 +204,17 @@ const SEGMENT_COLORS = {
 /**
  * Segments are dashed in their kind's colours; windows are pink, stronger over segments.
  *
- * @param {Overlay} sel
+ * @param {Overlay} overlay
  */
-function overlayStyle(sel) {
-  if (sel.kind === "artifact") {
+function overlayStyle(overlay) {
+  if (overlay.kind === "artifact") {
     return {
       fill: COLORS.artifactFill,
       stroke: COLORS.artifactStroke,
       dashed: false,
     };
   }
-  const segment = SEGMENT_COLORS[sel.kind ?? ""];
+  const segment = SEGMENT_COLORS[overlay.kind ?? ""];
   if (segment) {
     return {
       fill: COLORS[segment[0]],
@@ -249,7 +223,7 @@ function overlayStyle(sel) {
     };
   }
   return {
-    fill: sel.strong ? COLORS.roiChosenFill : COLORS.roiFill,
+    fill: overlay.strong ? COLORS.roiChosenFill : COLORS.roiFill,
     stroke: COLORS.roiStroke,
     dashed: false,
   };
@@ -257,19 +231,19 @@ function overlayStyle(sel) {
 
 /**
  * @param {CanvasRenderingContext2D} ctx
- * @param {Overlay[] | null | undefined} selections
- * @param {number | null | undefined} totalSamples
+ * @param {Overlay[]} overlays
+ * @param {number | null} totalSamples
  * @param {number} width
  * @param {number} height
  */
-export function drawRoiRects(ctx, selections, totalSamples, width, height) {
-  if (!selections || !selections.length || !totalSamples) return;
+export function drawOverlayRects(ctx, overlays, totalSamples, width, height) {
+  if (!totalSamples) return;
   const toX = (/** @type {number} */ sample) => (sample / totalSamples) * width;
-  selections.forEach((sel) => {
-    const x = Math.min(toX(sel.start), toX(sel.end));
-    const w = Math.abs(toX(sel.end) - toX(sel.start));
-    const style = overlayStyle(sel);
-    if (!sel.chosen) {
+  overlays.forEach((overlay) => {
+    const x = Math.min(toX(overlay.start), toX(overlay.end));
+    const w = Math.abs(toX(overlay.end) - toX(overlay.start));
+    const style = overlayStyle(overlay);
+    if (!overlay.chosen) {
       ctx.fillStyle = style.fill;
       ctx.fillRect(x, 0, w, height);
     }
@@ -278,17 +252,17 @@ export function drawRoiRects(ctx, selections, totalSamples, width, height) {
     ctx.setLineDash(style.dashed ? [3, 3] : []);
     ctx.strokeRect(x, 0, w, height);
     ctx.setLineDash([]);
-    (sel.cycles || []).forEach((c) => {
+    (overlay.cycles || []).forEach((c) => {
       ctx.beginPath();
       ctx.moveTo(toX(c), height - SEGMENT_TICK_PX);
       ctx.lineTo(toX(c), height);
       ctx.stroke();
     });
-    if (sel.glyph && w >= SEGMENT_GLYPH_MIN_PX) {
+    if (overlay.glyph && w >= SEGMENT_GLYPH_MIN_PX) {
       ctx.fillStyle = style.stroke;
       ctx.font = canvasFont();
       ctx.textAlign = "center";
-      ctx.fillText(sel.glyph, x + w / 2, 12);
+      ctx.fillText(overlay.glyph, x + w / 2, 12);
       ctx.textAlign = "start";
     }
   });
@@ -323,14 +297,8 @@ export function drawTrace(canvas, trace, view, options = {}) {
     return;
   }
 
-  const showAxes = !!options.showAxes;
-  const hideYAxis = !!options.hideYAxis;
   const fsamp = options.fsamp || null;
-  const { padding, plotWidth, plotHeight } = getCanvasPlotMetrics(
-    canvasEl,
-    showAxes,
-    { hideYAxis },
-  );
+  const { padding, plotWidth, plotHeight } = getCanvasPlotMetrics(canvasEl);
   const { min, max } = options.range || traceRange(trace);
   const span = max - min || 1;
   const { toX } = viewScale(view, padding.left, plotWidth);
@@ -340,17 +308,14 @@ export function drawTrace(canvas, trace, view, options = {}) {
     sample >= view.start && sample < view.end;
 
   for (const sel of options.selections || []) {
-    if (!Number.isFinite(sel?.start) || !Number.isFinite(sel?.end)) continue;
     const last = view.end - 1;
     const s = Math.max(view.start, Math.min(last, sel.start));
     const e = Math.max(s, Math.min(last, sel.end));
     drawSelectionRect(ctx, toX(s), toX(e), sel, padding, plotHeight);
   }
 
-  if (showAxes) {
-    drawAxes(ctx, padding, plotWidth, plotHeight, { hideYAxis, min, span });
-    if (fsamp) drawTimeAxis(ctx, padding, plotWidth, plotHeight, view, fsamp);
-  }
+  drawAxes(ctx, padding, plotWidth, plotHeight, min, span);
+  if (fsamp) drawTimeAxis(ctx, padding, plotWidth, plotHeight, view, fsamp);
 
   const row = trace.row;
   if (row && seriesPoints(row)) {
@@ -417,27 +382,17 @@ export function drawTrace(canvas, trace, view, options = {}) {
  * @param {Padding} padding
  * @param {number} plotWidth
  * @param {number} plotHeight
- * @param {{ hideYAxis: boolean, min: number, span: number }} y
+ * @param {number} min
+ * @param {number} span
  */
-function drawAxes(
-  ctx,
-  padding,
-  plotWidth,
-  plotHeight,
-  { hideYAxis, min, span },
-) {
+function drawAxes(ctx, padding, plotWidth, plotHeight, min, span) {
   ctx.strokeStyle = COLORS.axis;
   ctx.lineWidth = 1;
   ctx.beginPath();
-  if (!hideYAxis) {
-    ctx.moveTo(padding.left, padding.top);
-    ctx.lineTo(padding.left, padding.top + plotHeight);
-  } else {
-    ctx.moveTo(padding.left, padding.top + plotHeight);
-  }
+  ctx.moveTo(padding.left, padding.top);
+  ctx.lineTo(padding.left, padding.top + plotHeight);
   ctx.lineTo(padding.left + plotWidth, padding.top + plotHeight);
   ctx.stroke();
-  if (hideYAxis) return;
 
   ctx.fillStyle = COLORS.muted;
   ctx.font = canvasFont();
@@ -527,23 +482,23 @@ function drawTimeAxis(ctx, padding, plotWidth, plotHeight, view, fsamp) {
  * per grid, behind the ROI and artifact windows.
  *
  * @param {CanvasRef} canvas
- * @param {ChannelTrace[]} [seriesList]
- * @param {string[]} [colors]
- * @param {Overlay[]} [selections]
- * @param {number | null} [totalSamples]
+ * @param {ChannelTrace[]} seriesList
+ * @param {string[]} colors
+ * @param {Overlay[]} overlays
+ * @param {number | null} totalSamples
  */
 export function drawGridOverlay(
   canvas,
-  seriesList = [],
-  colors = [],
-  selections = [],
-  totalSamples = null,
+  seriesList,
+  colors,
+  overlays,
+  totalSamples,
 ) {
   const prepared = prepareCanvas(canvas, { height: 220 });
   if (!prepared) return;
   const { ctx, width, height } = prepared;
 
-  const validSeries = (seriesList || []).filter((s) => seriesPoints(s) > 0);
+  const validSeries = seriesList.filter((s) => seriesPoints(s) > 0);
   if (!validSeries.length) {
     ctx.fillStyle = COLORS.muted;
     ctx.font = canvasFont();
@@ -560,14 +515,12 @@ export function drawGridOverlay(
   }
   const span = globalMax - globalMin || 1;
 
-  if (selections && selections.length && totalSamples) {
-    drawRoiRects(ctx, selections, totalSamples, width, height);
-  }
+  drawOverlayRects(ctx, overlays, totalSamples, width, height);
 
   const toY = (/** @type {number} */ v) =>
     height - ((v - globalMin) / span) * height;
   // Each grid keeps its own colour, whichever others have no data.
-  (seriesList || []).forEach((row, idx) => {
+  seriesList.forEach((row, idx) => {
     if (!seriesPoints(row)) return;
     ctx.strokeStyle = colors[idx % colors.length] || COLORS.primary;
     ctx.lineWidth = 1.2;

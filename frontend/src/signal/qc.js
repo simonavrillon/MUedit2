@@ -3,14 +3,13 @@
  * raw file's preview.
  */
 import {
-  ensureDiscardMasks,
   setArtifactMode,
   setArtifactRegions,
   setAuxData,
   setChannelMeans,
   setChannelTraceForGrid,
   setCoordinates,
-  setDiscardMasks,
+  setDiscardChannels,
   setFsamp,
   setGridNames,
   setGridSeries,
@@ -22,7 +21,6 @@ import {
   setTargetIndex,
   setUploadToken,
 } from "../state/actions.js";
-import { getCurrentGrid, roiStart, roiEnd } from "../state/selectors.js";
 import { handleError } from "../app/services/error-service.js";
 import {
   normalizePreviewPayload,
@@ -40,10 +38,10 @@ import { OVERVIEW_BINS, QC_TRACE_BINS } from "../config.js";
 
 /**
  * Run the automatic QC pipeline server-side and load the result into the
- * interactive controls: detected bad channels replace the discard masks (click
- * a cell to correct one) and detected artifacts replace the artifact windows
- * (+/- to correct those). Nothing is sent to the decomposition here — the
- * corrected masks travel with the run request.
+ * interactive controls: detected bad channels replace the discarded channels
+ * (click a cell to correct one) and detected artifacts replace the artifact
+ * windows (+/- to correct those). Nothing is sent to the decomposition here —
+ * the corrected channels travel with the run request.
  *
  * @param {App} app
  */
@@ -62,11 +60,11 @@ export async function requestAutoQc(app) {
     const { badChannelsPerGrid, artifactRegions } = toAutoQc(
       await withUpload(app, (token) => api.runAutoQc({ upload_token: token })),
     );
-    setDiscardMasks(state, badChannelsPerGrid);
+    setDiscardChannels(state, badChannelsPerGrid);
     setArtifactRegions(state, artifactRegions);
     setArtifactMode(state, false);
 
-    const nBad = state.discardMasks.flat().filter(Boolean).length;
+    const nBad = state.discardChannels.flat().filter(Boolean).length;
     const nArtifact = state.artifactRegions.length;
 
     // The channels' traces stand; only which ones are discarded changed.
@@ -129,10 +127,10 @@ export function createQcTraces(app) {
     const { state } = app;
     const token = state.uploadToken;
     if (!token) return;
-    const grid = getCurrentGrid(state);
+    const grid = state.currentGrid;
     const roi = state.rois[0];
-    const start = roiStart(roi);
-    const end = roiEnd(roi, state.totalSamples ?? 0);
+    const start = roi?.start ?? 0;
+    const end = roi?.end ?? state.totalSamples ?? 0;
     const key = `${token}:${grid}:${start}:${end}`;
     wanted.set(grid, key);
     if (shown.get(grid) === key && state.channelTraces[grid]?.length) return;
@@ -192,7 +190,7 @@ export async function requestPreview(app, { file, silentFailure = false }) {
     setFsamp(state, data.fsamp);
     applyPreviewMetadata(data);
     populateAuxSelector();
-    ensureDiscardMasks(state);
+    setDiscardChannels(state, data.discard_channels);
     populateGridTabs();
     // Every window starts as the whole recording, waiting for a drag.
     setRois(state, []);

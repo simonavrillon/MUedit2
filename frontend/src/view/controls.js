@@ -4,16 +4,22 @@
  */
 
 /**
- * @param {HTMLElement | null | undefined} btn
+ * @param {HTMLElement} btn
  * @param {boolean} on
  */
-function applyToggle(btn, on) {
-  if (!btn) return;
-  const label =
-    btn.dataset.label || (btn.textContent || "").split(":")[0] || "Toggle";
+function setToggleState(btn, on) {
   btn.dataset.state = on ? "on" : "off";
   btn.setAttribute("aria-pressed", on ? "true" : "false");
   btn.classList.toggle("on", on);
+}
+
+/**
+ * @param {HTMLElement} btn
+ * @param {boolean} on
+ */
+function applyToggle(btn, on) {
+  const label = (btn.textContent || "").split(":")[0];
+  setToggleState(btn, on);
   btn.textContent = `${label}: ${on ? "On" : "Off"}`;
 }
 
@@ -31,23 +37,12 @@ export function isToggleOn(btn) {
  */
 export function applyLabeledToggle(btn, on, prefix) {
   if (!btn) return;
-  btn.dataset.state = on ? "on" : "off";
-  btn.setAttribute("aria-pressed", on ? "true" : "false");
-  btn.classList.toggle("on", on);
+  setToggleState(btn, on);
   const label = on ? "On" : "Off";
   const shortEl = btn.querySelector(".toggle-short");
   const fullEl = btn.querySelector(".toggle-full");
   if (shortEl) shortEl.textContent = label;
   if (fullEl) fullEl.textContent = `${prefix}: ${label}`;
-}
-
-/**
- * @param {string} id
- * @param {boolean} show
- */
-export function toggleConditional(id, show) {
-  const el = document.getElementById(id);
-  if (el) el.hidden = !show;
 }
 
 /**
@@ -58,44 +53,12 @@ export function toggleConditional(id, show) {
  */
 export function setupToggle(btn, onChange) {
   if (!btn) return;
-  btn.setAttribute("tabindex", "0");
   applyToggle(btn, isToggleOn(btn));
   onChange?.(isToggleOn(btn));
   btn.addEventListener("click", () => {
     const next = !isToggleOn(btn);
     applyToggle(btn, next);
     onChange?.(next);
-  });
-  btn.addEventListener("keydown", (e) => {
-    if (e.key === " " || e.key === "Enter") {
-      e.preventDefault();
-      btn.click();
-    }
-  });
-}
-
-/**
- * A toggle shown on that cannot be turned off.
- *
- * @param {HTMLElement | null | undefined} btn
- * @param {(on: boolean) => void} [onChange]
- */
-export function setupLockedOnToggle(btn, onChange) {
-  if (!btn) return;
-  btn.setAttribute("tabindex", "0");
-  btn.setAttribute("aria-disabled", "true");
-  btn.title = "This filter is always enabled";
-  applyToggle(btn, true);
-  onChange?.(true);
-  btn.addEventListener("click", (e) => {
-    e.preventDefault();
-    applyToggle(btn, true);
-  });
-  btn.addEventListener("keydown", (e) => {
-    if (e.key === " " || e.key === "Enter") {
-      e.preventDefault();
-      applyToggle(btn, true);
-    }
   });
 }
 

@@ -25,47 +25,6 @@ beforeEach(() => {
   state = structuredClone(pristine);
 });
 
-describe("ensureDiscardMasks", () => {
-  test("seeds masks from the per-grid bad channels", () => {
-    state.channelMeans = [
-      [1, 1, 1],
-      [1, 1],
-    ];
-    state.metadata = {
-      bad_channels_per_grid: [
-        [0, 1, 0],
-        [1, 1],
-      ],
-    };
-    actions.ensureDiscardMasks(state);
-    assert.deepEqual(state.discardMasks, [
-      [0, 1, 0],
-      [1, 1],
-    ]);
-  });
-
-  test("zeros a grid whose bad-channel list has the wrong length", () => {
-    state.channelMeans = [[1, 1, 1]];
-    state.metadata = { bad_channels_per_grid: [[1, 1]] };
-    actions.ensureDiscardMasks(state);
-    assert.deepEqual(state.discardMasks, [[0, 0, 0]]);
-  });
-
-  test("keeps existing masks when the grid count matches", () => {
-    state.channelMeans = [[1, 1]];
-    state.discardMasks = [[1, 0]];
-    state.metadata = { bad_channels_per_grid: [[0, 1]] };
-    actions.ensureDiscardMasks(state);
-    assert.deepEqual(state.discardMasks, [[1, 0]]);
-  });
-
-  test("does nothing without channel means", () => {
-    state.discardMasks = [[1]];
-    actions.ensureDiscardMasks(state);
-    assert.deepEqual(state.discardMasks, [[1]]);
-  });
-});
-
 describe("setGridNames", () => {
   test("clamps a current grid past the end", () => {
     state.currentGrid = 5;
@@ -73,12 +32,9 @@ describe("setGridNames", () => {
     assert.equal(state.currentGrid, 1);
   });
 
-  test("resets a negative or non-finite current grid", () => {
-    state.currentGrid = -2;
-    actions.setGridNames(state, ["a", "b"]);
-    assert.equal(state.currentGrid, 0);
-    state.currentGrid = NaN;
-    actions.setGridNames(state, ["a", "b"]);
+  test("resets the current grid when there are no grids", () => {
+    state.currentGrid = 2;
+    actions.setGridNames(state, []);
     assert.equal(state.currentGrid, 0);
   });
 });
@@ -106,22 +62,22 @@ describe("ROIs and artifact regions", () => {
   });
 });
 
-describe("discard masks", () => {
-  test("setDiscardMasks coerces to 0/1 and replaces non-array grids", () => {
-    actions.setDiscardMasks(state, [[true, 0, 2], "bad"]);
-    assert.deepEqual(state.discardMasks, [[1, 0, 1], []]);
+describe("discard channels", () => {
+  test("setDiscardChannels coerces to 0/1 and replaces non-array grids", () => {
+    actions.setDiscardChannels(state, [[true, 0, 2], "bad"]);
+    assert.deepEqual(state.discardChannels, [[1, 0, 1], []]);
   });
 
-  test("setDiscardMasks ignores a non-array", () => {
-    state.discardMasks = [[1]];
-    actions.setDiscardMasks(state, null);
-    assert.deepEqual(state.discardMasks, [[1]]);
+  test("setDiscardChannels ignores a non-array", () => {
+    state.discardChannels = [[1]];
+    actions.setDiscardChannels(state, null);
+    assert.deepEqual(state.discardChannels, [[1]]);
   });
 
-  test("setDiscardMaskChannel creates a missing grid row", () => {
-    state.discardMasks = [];
-    actions.setDiscardMaskChannel(state, 1, 2, true);
-    assert.equal(state.discardMasks[1][2], 1);
+  test("setDiscardChannel creates a missing grid row", () => {
+    state.discardChannels = [];
+    actions.setDiscardChannel(state, 1, 2, true);
+    assert.equal(state.discardChannels[1][2], 1);
   });
 });
 
@@ -148,7 +104,6 @@ describe("edit slice", () => {
         parameters: { duplicatesthresh: 0.3 },
       },
       spikeTimes: [ints(10, 20), ints(30)],
-      artifactTimes: [ints(), ints(31)],
     };
   }
 
@@ -158,7 +113,6 @@ describe("edit slice", () => {
     const e = state.edit;
     assert.equal(e.token, "tok");
     assert.deepEqual(rows(e.spikeTimes), [[10, 20], [30]]);
-    assert.deepEqual(rows(e.artifactTimes), [[], [31]]);
     assert.deepEqual(e.flagged, [false, true]);
     assert.deepEqual(e.versions, [3, 4]);
     assert.equal(e.totalSamples, 5000);
@@ -184,7 +138,6 @@ describe("edit slice", () => {
         history: [{ type: "delete_spikes", mu_uid: "g0_mu0" }],
       },
       spikeTimes: [ints(10)],
-      artifactTimes: [ints()],
     });
     const e = state.edit;
     assert.deepEqual(rows(e.spikeTimes), [[10], [30]]);
@@ -215,7 +168,6 @@ describe("edit slice", () => {
         history: [{ type: "duplicate_mu" }],
       },
       spikeTimes: [ints(30)],
-      artifactTimes: [ints()],
     });
     assert.deepEqual(rows(state.edit.spikeTimes), [[10, 20], [30], [30]]);
     actions.applyEditChange(state, {
@@ -227,7 +179,6 @@ describe("edit slice", () => {
         history: [],
       },
       spikeTimes: [],
-      artifactTimes: [],
     });
     assert.deepEqual(rows(state.edit.spikeTimes), [[10, 20], [30]]);
     assert.equal(state.edit.editHistory.length, 1);
@@ -242,7 +193,6 @@ describe("edit slice", () => {
       actions.applyEditChange(state, {
         meta: { ...frame.meta, changed: [], history_start: start, history },
         spikeTimes: [],
-        artifactTimes: [],
       });
     change(42, [{ type: "delete_spikes" }]);
     assert.deepEqual(
@@ -262,16 +212,14 @@ describe("edit slice", () => {
   test("kept MUs reorder the times and follow the current MU", () => {
     Object.assign(state.edit, {
       spikeTimes: [ints(0), ints(1), ints(2)],
-      artifactTimes: [ints(30), ints(31), ints(32)],
       currentMu: 2,
-      bookmarkPosition: { mu: 1, position: 50 },
+      bookmark: { mu: 1, position: 50 },
     });
     actions.applyEditSave(state, { kept_indices: [2, 1], n_mu: 2 });
     const e = state.edit;
     assert.deepEqual(rows(e.spikeTimes), [[2], [1]]);
-    assert.deepEqual(rows(e.artifactTimes), [[32], [31]]);
     assert.equal(e.currentMu, 0);
-    assert.deepEqual(e.bookmarkPosition, { mu: 1, position: 50 });
+    assert.deepEqual(e.bookmark, { mu: 1, position: 50 });
   });
 
   test("removing the current MU falls back to MU 0 and drops its bookmark", () => {
@@ -279,11 +227,11 @@ describe("edit slice", () => {
       spikeTimes: [ints(0), ints(1)],
       muUids: ["g0_mu0", "g0_mu1"],
       currentMu: 1,
-      bookmarkPosition: { mu: 1, position: 5 },
+      bookmark: { mu: 1, position: 5 },
     });
     actions.applyEditSave(state, { kept_indices: [0], n_mu: 1 });
     assert.equal(state.edit.currentMu, 0);
-    assert.equal(state.edit.bookmarkPosition, null);
+    assert.equal(state.edit.bookmark, null);
   });
 
   test("applyEditSave mirrors the MUs the file kept", () => {
@@ -325,44 +273,21 @@ describe("setFsamp", () => {
 });
 
 describe("selectors", () => {
-  test("MU indices without a grid mapping belong to every grid", () => {
-    state.edit.spikeTimes = [ints(1), ints(2), ints(3)];
-    state.edit.muGridIndex = [];
-    assert.deepEqual(selectors.getEditMuIndicesForGrid(state, 4), [0, 1, 2]);
-  });
-
-  test("MU indices filter by grid, matching numeric strings", () => {
-    state.edit.spikeTimes = [ints(1), ints(2), ints(3), ints(4)];
-    state.edit.muGridIndex = [0, "1", 1, 0];
+  test("MU indices filter by grid", () => {
+    state.edit.muGridIndex = [0, 1, 1, 0];
     assert.deepEqual(selectors.getEditMuIndicesForGrid(state, 1), [1, 2]);
-    assert.deepEqual(selectors.getEditMuIndicesForGrid(state, "0"), [0, 3]);
-  });
-
-  test("ROI bounds use the fallback when not finite", () => {
-    assert.equal(selectors.roiStart({ start: 5 }), 5);
-    assert.equal(selectors.roiStart({ start: NaN }, 7), 7);
-    assert.equal(selectors.roiEnd(null, 9), 9);
-    assert.equal(selectors.roiEnd({ end: 0 }, 9), 0);
-  });
-
-  test("getCurrentGrid defaults to 0", () => {
-    state.currentGrid = undefined;
-    assert.equal(selectors.getCurrentGrid(state), 0);
+    assert.deepEqual(selectors.getEditMuIndicesForGrid(state, 0), [0, 3]);
   });
 });
 
 describe("raw preview transitions", () => {
-  test("begin resets the edit slice", () => {
+  test("begin resets the edit slice and the traces", () => {
     state.edit.dirty = true;
-    state.uploadToken = "old";
     state.channelTraces = [[1]];
-    state.discardMasks = [[1]];
     const file = { name: "new.otb+" };
     beginRawPreviewTransition(state, file);
     assert.deepEqual(state.edit, pristine.edit);
     assert.equal(state.file, file);
-    assert.equal(state.uploadToken, null);
     assert.deepEqual(state.channelTraces, []);
-    assert.deepEqual(state.discardMasks, []);
   });
 });

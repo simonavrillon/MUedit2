@@ -61,7 +61,7 @@ class TestSessionApi:
         assert meta["dirty"] is False and meta["can_undo"] is False
         assert meta["recoverable_edits"] == 0
         assert meta["crash_recovery"] is True
-        assert set(arrays) == {"spikes", "spike_offsets", "artifacts", "artifact_offsets"}
+        assert set(arrays) == {"spikes", "spike_offsets"}
         assert arrays["spikes"].dtype == np.int32
         rows = unpack_csr(arrays["spikes"], arrays["spike_offsets"])
         assert rows[1].tolist() == spike_train(10.0, seed=2).tolist()

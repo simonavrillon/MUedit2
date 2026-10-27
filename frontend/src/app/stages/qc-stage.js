@@ -26,7 +26,6 @@ import {
   syncChosenWindows,
   syncRois,
 } from "../../signal/segments.js";
-import { getCurrentGrid } from "../../state/selectors.js";
 
 /** @typedef {import("../context.js").App} App */
 /** @typedef {import("../context.js").QcStage} QcStage */
@@ -65,7 +64,7 @@ export function createQcStageService(app) {
   /** @type {QcStage["renderChannelQC"]} */
   function renderChannelQC() {
     // A grid the channel data does not reach shows the first one.
-    if (!state.channelMeans[getCurrentGrid(state)] && state.channelMeans.length)
+    if (!state.channelMeans[state.currentGrid] && state.channelMeans.length)
       setCurrentGrid(state, 0);
     drawChannelQC(app);
     app.ensureQcTraces();

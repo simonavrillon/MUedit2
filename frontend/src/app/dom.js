@@ -62,8 +62,6 @@ export const els = {
   covToggle: button("covToggle"),
   covSettings: element("covSettings"),
   covValue: input("covValue"),
-  silToggle: button("silToggle"),
-  silSettings: element("silSettings"),
   silValue: input("silValue"),
   bidsSubject: input("bidsSubject"),
   bidsTask: input("bidsTask"),

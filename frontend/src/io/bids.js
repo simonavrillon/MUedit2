@@ -90,14 +90,14 @@ export function parseBidsEntitiesFromLabel(label) {
  */
 export function buildBidsMuscleRowsModel(state) {
   const inEditStage = state.currentStage === "edit";
-  const editGridNames = state.edit?.gridNames || [];
+  // An open edit session's grids are `state.gridNames`; the edit stage has none without one.
   const gridNames = normalizeGridNames(
-    inEditStage || editGridNames.length ? editGridNames : state.gridNames,
+    inEditStage && !state.edit.token ? [] : state.gridNames,
   );
   const muscleNames = state.muscleNames || [];
   const rowCount = inferGridCount({
     gridNames,
-    muGridIndex: inEditStage ? state.edit?.muGridIndex : [],
+    muGridIndex: inEditStage ? state.edit.muGridIndex : [],
     muscleNames,
   });
   return Array.from({ length: rowCount }, (_, i) => ({

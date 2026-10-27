@@ -34,6 +34,21 @@ describe("normalizePreviewPayload", () => {
     assert.equal(out.total_samples, 20);
   });
 
+  test("discard channels start from the per-grid bad channels", () => {
+    const out = normalizePreviewPayload({
+      channel_means: [
+        [1, 1, 1],
+        [1, 1],
+      ],
+      metadata: { bad_channels_per_grid: [[0, 1, 0], [1]] },
+    });
+    // The second grid's list doesn't match its channels, so none are discarded.
+    assert.deepEqual(out.discard_channels, [
+      [0, 1, 0],
+      [0, 0],
+    ]);
+  });
+
   test("a non-numeric total falls back to 0", () => {
     assert.equal(
       normalizePreviewPayload({ total_samples: "n/a" }).total_samples,

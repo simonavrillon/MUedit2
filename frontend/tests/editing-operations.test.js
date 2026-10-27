@@ -68,15 +68,14 @@ function rampView(mu = 0, version = 1) {
 /** Two MUs on one grid, the window of MU 0 fetched. */
 function editState() {
   const state = structuredClone(pristine);
+  state.gridNames = ["GR08MM1305"];
   Object.assign(state.edit, {
     token: "tok",
     spikeTimes: [ints(2, 5, 8), ints(1, 4)],
-    artifactTimes: [ints(), ints()],
     flagged: [false, false],
     muUids: ["g0_mu0", "g0_mu1"],
     muGridIndex: [0, 0],
     versions: [1, 2],
-    gridNames: ["GR08MM1305"],
     fsamp: 2000,
     totalSamples: 10,
     pulseView: rampView(),
@@ -108,7 +107,6 @@ function changeFrame(meta, spikes = []) {
       ...meta,
     },
     spikeTimes: spikes.map((r) => ints(...r)),
-    artifactTimes: spikes.map(() => ints()),
   };
 }
 
@@ -197,14 +195,14 @@ describe("buildEditDropdownModel", () => {
   test("keeps the current grid and MU when both are valid", () => {
     state.edit.currentMu = 1;
     const model = ops.buildEditDropdownModel(state);
-    assert.equal(model.targetGrid, 0);
+    assert.equal(model.currentGrid, 0);
     assert.equal(model.currentMu, 1);
     assert.equal(model.needsGridSwitch, false);
     assert.ok(!model.needsMuSwitch);
   });
 
   test("switches to the grid's first MU when the current one is elsewhere", () => {
-    state.edit.gridNames = ["A", "B"];
+    state.gridNames = ["A", "B"];
     state.edit.currentMu = 5;
     onGrids([1, 1, 0, 0, 1, 1]);
     const model = ops.buildEditDropdownModel(state);
@@ -213,22 +211,22 @@ describe("buildEditDropdownModel", () => {
   });
 
   test("falls through to the first grid that has MUs", () => {
-    state.edit.gridNames = ["A", "B", "C"];
-    state.edit.currentMuGrid = 0;
+    state.gridNames = ["A", "B", "C"];
+    state.edit.currentGrid = 0;
     state.edit.currentMu = 1;
     onGrids([2]);
     const model = ops.buildEditDropdownModel(state);
-    assert.equal(model.targetGrid, 2);
+    assert.equal(model.currentGrid, 2);
     assert.deepEqual(model.muOptions, [0]);
     assert.equal(model.needsGridSwitch, true);
     assert.equal(model.currentMu, 0);
   });
 
   test("no MUs anywhere asks for no switch", () => {
-    state.edit.gridNames = ["A", "B"];
+    state.gridNames = ["A", "B"];
     onGrids([]);
     const model = ops.buildEditDropdownModel(state);
-    assert.equal(model.targetGrid, 0);
+    assert.equal(model.currentGrid, 0);
     assert.deepEqual(model.muOptions, []);
     assert.ok(!model.needsMuSwitch);
   });
@@ -286,13 +284,6 @@ describe("selection to ROI request", () => {
     assertClose(payload.yMin, 3.6, "yMin");
   });
 
-  test("a selection without a height spans the full plot", () => {
-    app.addSpikesInSelection({ start: 3, end: 7 });
-    const [[, payload]] = app.requestRoiEdit.calls;
-    assert.deepEqual([payload.xStart, payload.xEnd], [3, 7]);
-    assert.equal(payload.yMin, 0);
-  });
-
   test("the selection is clamped to the visible window and plot", () => {
     state.edit.view = { start: 3, end: 8 };
     state.edit.pulseView = {
@@ -309,8 +300,8 @@ describe("selection to ROI request", () => {
 
   test("nothing is sent before the window on screen has arrived", () => {
     state.edit.pulseView = null;
-    app.addSpikesInSelection({ start: 2, end: 6 });
-    app.deleteSpikesInSelection({ start: 2, end: 6 });
+    app.addSpikesInSelection({ start: 2, end: 6, yMin: 20, yMax: 60 });
+    app.deleteSpikesInSelection({ start: 2, end: 6, yMin: 20, yMax: 60 });
     assert.equal(app.requestRoiEdit.calls.length, 0);
   });
 
@@ -372,7 +363,7 @@ describe("edits on the server", () => {
     assert.deepEqual(state.edit.versions, [5, 5]);
     assert.equal(state.edit.dirty, true);
     assert.equal(state.edit.canUndo, true);
-    assert.deepEqual(state.edit.bookmarkPosition, { mu: 0, position: 5 });
+    assert.deepEqual(state.edit.bookmark, { mu: 0, position: 5 });
     assert.equal(state.edit.editHistory.at(-1).type, "delete_spikes");
     assert.deepEqual(app.setStatus.calls.at(-1), ["ROI applied", "success"]);
   });
@@ -380,7 +371,7 @@ describe("edits on the server", () => {
   test("undo asks the server and drops the log entries it took back", async () => {
     state.edit.canUndo = true;
     state.edit.editHistory = [{ type: "first" }, { type: "delete_spikes" }];
-    state.edit.selectionPulse = { start: 1, end: 2 };
+    state.edit.pulseSelection = { start: 1, end: 2 };
     app.api = fakeApi({
       undo: changeFrame(
         { changed: [1], history_start: 1, can_undo: false, dirty: false },
@@ -397,7 +388,7 @@ describe("edits on the server", () => {
       ["first"],
     );
     assert.equal(state.edit.canUndo, false);
-    assert.equal(state.edit.selectionPulse, null);
+    assert.equal(state.edit.pulseSelection, null);
     assert.deepEqual(app.setStatus.calls.at(-1), ["Undo applied", "success"]);
   });
 
@@ -454,7 +445,6 @@ describe("edits on the server", () => {
 
   test("removing duplicates keeps the MUs the server kept", async () => {
     state.edit.spikeTimes.push(ints(2, 5, 9));
-    state.edit.artifactTimes.push(ints(7));
     state.edit.muUids.push("g0_mu2");
     state.edit.currentMu = 2;
     app.api = fakeApi({
@@ -470,7 +460,6 @@ describe("edits on the server", () => {
       [1, 4],
       [2, 5, 9],
     ]);
-    assert.deepEqual(rows(state.edit.artifactTimes), [[], [7]]);
     assert.deepEqual(state.edit.muUids, ["g0_mu1", "g0_mu2"]);
     assert.equal(state.edit.currentMu, 1);
     assert.deepEqual(app.setStatus.calls.at(-1), [
@@ -600,7 +589,6 @@ describe("an edit the page gave up on", () => {
   test("the page takes the session as the server left it", async () => {
     const served = changeFrame({ token: "tok" }, []);
     served.spikeTimes = [ints(2, 6), ints(1, 4)];
-    served.artifactTimes = [ints(), ints()];
     app.api = {
       editOp: async () => {
         throw new RequestTimeout();

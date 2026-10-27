@@ -19,7 +19,7 @@ const { COLORS, traceColors } = await import("../src/config.js");
 const { state: initialState } = await import("../src/state/state.js");
 const { createApp } = await import("../src/app/create-app.js");
 const { requestAutoQc } = await import("../src/signal/qc.js");
-const { buildSelections, enableRoiSelection, renderArtifactControls } =
+const { buildOverlays, enableRoiSelection, renderArtifactControls } =
   await import("../src/view/qc-renderer.js");
 
 const pristine = structuredClone(initialState);
@@ -180,7 +180,7 @@ describe("selections and artifact controls", () => {
       artifactRegions: [{ start: 40, end: 50 }],
       artifactDraft: { start: 60, end: 70 },
     });
-    assert.deepEqual(buildSelections(app.state), [
+    assert.deepEqual(buildOverlays(app.state), [
       { start: 0, end: 10 },
       { start: 20, end: 30 },
       { start: 40, end: 50, kind: "artifact" },
@@ -216,7 +216,7 @@ describe("channel grid", () => {
           [1, 1],
         ],
       ],
-      discardMasks: [[0, 1, 0, 0]],
+      discardChannels: [[0, 1, 0, 0]],
       channelTraces: [[f32([0, 1]), f32([1, 0]), f32([0, 0]), f32([2, 2])]],
     });
   });
@@ -259,7 +259,7 @@ describe("channel grid", () => {
     const cells = cellsOf();
     const [first, second] = cells.children;
     first.dispatch("click");
-    assert.deepEqual(app.state.discardMasks[0], [1, 1, 0, 0]);
+    assert.deepEqual(app.state.discardChannels[0], [1, 1, 0, 0]);
     assert.equal(cellsOf(), cells, "the grid is not rebuilt");
     assert.ok(first.classList.contains("off"));
     assert.equal(
@@ -268,7 +268,7 @@ describe("channel grid", () => {
     );
     assert.equal(ops(second.children[1].ctx, "stroke").length, 1);
     first.dispatch("click");
-    assert.deepEqual(app.state.discardMasks[0], [0, 1, 0, 0]);
+    assert.deepEqual(app.state.discardChannels[0], [0, 1, 0, 0]);
     assert.ok(!first.classList.contains("off"));
   });
 
@@ -276,7 +276,7 @@ describe("channel grid", () => {
     await app.renderChannelQC();
     const cells = cellsOf();
     const first = cells.children[0];
-    app.state.discardMasks = [[1, 0, 0, 0]];
+    app.state.discardChannels = [[1, 0, 0, 0]];
     await app.renderChannelQC();
     assert.equal(cellsOf(), cells);
     assert.equal(cellsOf().children[0], first);
@@ -288,7 +288,7 @@ describe("channel grid", () => {
     await app.renderChannelQC();
     const cells = cellsOf();
     app.state.channelMeans = [[1, 2]];
-    app.state.discardMasks = [[0, 0]];
+    app.state.discardChannels = [[0, 0]];
     await app.renderChannelQC();
     assert.notEqual(cellsOf(), cells);
     assert.equal(cellsOf().children.length, 2);
@@ -416,7 +416,7 @@ describe("automatic QC", () => {
       { start: 100, end: 200 },
       { start: 400, end: 450 },
     ]);
-    assert.deepEqual(app.state.discardMasks, [[0, 1]]);
+    assert.deepEqual(app.state.discardChannels, [[0, 1]]);
   });
 
   test("keeps the traces it has and redraws them with the new marks", async () => {

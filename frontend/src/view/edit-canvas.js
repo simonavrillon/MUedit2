@@ -16,17 +16,17 @@ import {
 } from "./plots.js";
 import {
   clearEditPulseSelections,
-  setEditPulseDraftSelection,
+  setEditPulseSelectionDraft,
   setEditPulseSelection,
   setEditView,
-  setShowBookmark,
+  setEditShowBookmark,
 } from "../state/actions.js";
 import {
   cachedDischargeRates,
   clampView,
   fastestRateInView,
 } from "../editing/operations.js";
-import { renderSelectPair } from "./select-renderers.js";
+import { getEditView } from "../state/selectors.js";
 
 /** @typedef {import("../app/context.js").App} App */
 /** @typedef {import("../app/context.js").Els} Els */
@@ -46,7 +46,7 @@ const TIMELINE_BAR_H = 12;
  * @param {Span} view
  */
 function pxToViewSample(canvas, px, view) {
-  const { padding, plotWidth } = getCanvasPlotMetrics(canvas, true);
+  const { padding, plotWidth } = getCanvasPlotMetrics(canvas);
   const clamped = Math.max(
     padding.left,
     Math.min(padding.left + plotWidth, px),
@@ -61,13 +61,13 @@ function pxToViewSample(canvas, px, view) {
  * @param {Span | null} view
  */
 function renderBookmark(canvas, state, mu, view) {
-  const bookmark = state.edit.bookmarkPosition;
+  const bookmark = state.edit.bookmark;
   if (!view || !bookmark || bookmark.mu !== mu) return;
   if (!state.edit.showBookmark) return;
 
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
-  const metrics = getCanvasPlotMetrics(canvas, true);
+  const metrics = getCanvasPlotMetrics(canvas);
 
   const bookmarkPos = Math.max(
     view.start,
@@ -96,7 +96,7 @@ function renderBookmark(canvas, state, mu, view) {
  * @param {HTMLCanvasElement} canvas
  */
 function clampY(py, canvas) {
-  const metrics = getCanvasPlotMetrics(canvas, true);
+  const metrics = getCanvasPlotMetrics(canvas);
   const clamped = Math.max(
     metrics.padding.top,
     Math.min(metrics.padding.top + metrics.plotHeight, py),
@@ -162,26 +162,42 @@ function createDragState(canvas, pxToSample) {
 }
 
 /**
+ * @param {HTMLSelectElement} sel
+ * @param {number | string} value
+ * @param {string} label
+ */
+function addOption(sel, value, label) {
+  const opt = document.createElement("option");
+  opt.value = String(value);
+  opt.textContent = label;
+  sel.appendChild(opt);
+}
+
+/**
+ * The grid and MU dropdowns; the MU one is disabled when the grid has none.
+ *
  * @param {Els} els
  * @param {EditDropdownModel} model
  */
 export function renderEditDropdownsView(els, model) {
-  const gridOptions = model.gridNames.map((name, idx) => ({
-    value: idx,
-    label: `Grid ${idx + 1}${name ? ` • ${name}` : ""}`,
-  }));
-  const muOptions = model.muOptions.map((mu) => ({
-    value: mu,
-    label: `MU ${mu + 1}`,
-  }));
-  renderSelectPair(
-    els.editMuGridSelect,
-    els.editMuSelect,
-    gridOptions,
-    muOptions,
-    model.targetGrid,
-    model.currentMu,
+  const gridSel = els.editMuGridSelect;
+  const muSel = els.editMuSelect;
+  if (!gridSel || !muSel) return;
+
+  gridSel.innerHTML = "";
+  model.gridNames.forEach((name, grid) =>
+    addOption(gridSel, grid, `Grid ${grid + 1}${name ? ` • ${name}` : ""}`),
   );
+  gridSel.value = String(model.currentGrid);
+
+  muSel.innerHTML = "";
+  muSel.disabled = !model.muOptions.length;
+  if (!model.muOptions.length) {
+    addOption(muSel, "", "No motor units");
+    return;
+  }
+  model.muOptions.forEach((mu) => addOption(muSel, mu, `MU ${mu + 1}`));
+  muSel.value = String(model.currentMu);
 }
 
 /**
@@ -223,27 +239,25 @@ function displayedPulse(shown, flagged) {
  */
 export function drawEditPulse(els, state) {
   const mu = state.edit.currentMu;
-  const total = state.edit.totalSamples;
-  const view = state.edit.view || { start: 0, end: total };
-  const overlays = [];
-  if (state.edit.selectionPulse) overlays.push(state.edit.selectionPulse);
-  if (state.edit.draftSelectionPulse)
-    overlays.push(state.edit.draftSelectionPulse);
+  const totalSamples = state.edit.totalSamples;
+  const view = getEditView(state);
+  const selections = [];
+  if (state.edit.pulseSelection) selections.push(state.edit.pulseSelection);
+  if (state.edit.pulseSelectionDraft)
+    selections.push(state.edit.pulseSelectionDraft);
   // A window of another MU is not drawn; one of this MU still loading is.
   const shown = state.edit.pulseView?.mu === mu ? state.edit.pulseView : null;
   const canvasEl = els.editPulseCanvas;
-  const hasData = !!(state.edit.spikeTimes?.length && total);
+  const hasData = !!(state.edit.spikeTimes.length && totalSamples);
   if (shown) {
     const { trace, spikeValues, artifactValues, range } = displayedPulse(
       shown,
-      !!state.edit.flagged?.[mu],
+      !!state.edit.flagged[mu],
     );
     drawTrace(canvasEl, trace, view, {
       color: COLORS.pulse,
       range,
-      selections: overlays,
-      showAxes: true,
-      hideYAxis: false,
+      selections,
       fsamp: state.edit.fsamp,
       markers: [
         {
@@ -277,20 +291,20 @@ export function drawEditPulse(els, state) {
 export function drawEditRates(els, state) {
   const canvas = els.editDrCanvas;
   const mu = state.edit.currentMu;
-  const spikes = state.edit.spikeTimes?.[mu] || [];
-  const total = state.edit.totalSamples;
-  if (state.edit.flagged?.[mu] || !total || !spikes.length) {
+  const spikes = state.edit.spikeTimes[mu] || [];
+  const totalSamples = state.edit.totalSamples;
+  if (state.edit.flagged[mu] || !totalSamples || !spikes.length) {
     drawTrace(canvas, null, { start: 0, end: 0 });
     return;
   }
-  const view = state.edit.view || { start: 0, end: total };
-  const dr = cachedDischargeRates(spikes, state.edit.fsamp, total);
+  const view = getEditView(state);
+  const rates = cachedDischargeRates(spikes, state.edit.fsamp, totalSamples);
   drawTrace(canvas, { row: null, start: view.start, end: view.end }, view, {
-    range: { min: 0, max: fastestRateInView(dr, view) },
-    showAxes: true,
-    hideYAxis: false,
+    range: { min: 0, max: fastestRateInView(rates, view) },
     fsamp: state.edit.fsamp,
-    markers: [{ positions: dr.positions, values: dr.rates, color: COLORS.mu4 }],
+    markers: [
+      { positions: rates.positions, values: rates.rates, color: COLORS.mu4 },
+    ],
   });
 }
 
@@ -318,33 +332,29 @@ export function bindEditCanvas(app) {
 
   const hasMu = () =>
     !!state.edit.totalSamples &&
-    state.edit.spikeTimes?.[state.edit.currentMu] !== undefined;
+    state.edit.spikeTimes[state.edit.currentMu] !== undefined;
 
   const pxToSample = (/** @type {number} */ px) =>
-    pxToViewSample(
-      canvas,
-      px,
-      state.edit.view || { start: 0, end: state.edit.totalSamples },
-    );
+    pxToViewSample(canvas, px, getEditView(state));
 
   const drag = createDragState(canvas, pxToSample);
 
   canvas.addEventListener("pointerdown", (e) => {
     if (!hasMu()) return;
     drag.begin(e);
-    setEditPulseDraftSelection(state, null);
+    setEditPulseSelectionDraft(state, null);
   });
 
   canvas.addEventListener("pointermove", (e) => {
     if (!drag.dragging) return;
-    setEditPulseDraftSelection(state, drag.update(e));
+    setEditPulseSelectionDraft(state, drag.update(e));
     app.scheduleEditRender();
   });
 
   canvas.addEventListener("pointercancel", () => {
     if (!drag.dragging) return;
     drag.stop();
-    setEditPulseDraftSelection(state, null);
+    setEditPulseSelectionDraft(state, null);
     app.scheduleEditRender();
   });
 
@@ -353,7 +363,7 @@ export function bindEditCanvas(app) {
     drag.stop();
     const sel = drag.selection();
     // The box being drawn goes, however the gesture ends.
-    setEditPulseDraftSelection(state, null);
+    setEditPulseSelectionDraft(state, null);
     const armed = state.edit.mode ? PULSE_BOX_EDITS[state.edit.mode] : null;
     if (drag.delta < 6) {
       if (armed?.hint) setStatus(armed.hint, "muted");
@@ -377,7 +387,7 @@ export function bindEditCanvas(app) {
     if (!hasMu()) return;
     setEditView(state, { start: 0, end: state.edit.totalSamples });
     clearEditPulseSelections(state);
-    setShowBookmark(state, true);
+    setEditShowBookmark(state, true);
     renderEditExplorer();
   });
 }
@@ -387,13 +397,13 @@ export function bindEditCanvas(app) {
  *
  * @param {CanvasRenderingContext2D} ctx
  * @param {ArrayLike<number>} positions
- * @param {number} total
+ * @param {number} totalSamples
  * @param {number} bw
  */
-function fillTicks(ctx, positions, total, bw) {
+function fillTicks(ctx, positions, totalSamples, bw) {
   const drawn = new Set();
   for (let i = 0; i < positions.length; i++) {
-    const x = TIMELINE_PAD_L + Math.round((positions[i] / total) * bw);
+    const x = TIMELINE_PAD_L + Math.round((positions[i] / totalSamples) * bw);
     if (drawn.has(x)) continue;
     drawn.add(x);
     ctx.fillRect(x, TIMELINE_BAR_TOP, 2, TIMELINE_BAR_H);
@@ -408,21 +418,21 @@ function fillTicks(ctx, positions, total, bw) {
  * @param {State} state
  */
 export function drawEditTimeline(els, state) {
-  const prepared = prepareCanvas(els?.editTimelineCanvas, { height: 20 });
+  const prepared = prepareCanvas(els.editTimelineCanvas, { height: 20 });
   if (!prepared) return;
   const { ctx, width } = prepared;
 
   const mu = state.edit.currentMu;
-  const total = state.edit.spikeTimes?.[mu] ? state.edit.totalSamples : 0;
-  if (!total) return;
+  const totalSamples = state.edit.spikeTimes[mu] ? state.edit.totalSamples : 0;
+  if (!totalSamples) return;
 
   const bw = Math.max(1, width - TIMELINE_PAD_L - TIMELINE_PAD_R);
 
   ctx.fillStyle = COLORS.timelineTrack;
   ctx.fillRect(TIMELINE_PAD_L, TIMELINE_BAR_TOP, bw, TIMELINE_BAR_H);
 
-  // Last edit action for this MU: green = added, red = removed
-  const muUid = state.edit.muUids?.[mu];
+  // The MU's last edit: what it added, and what it removed.
+  const muUid = state.edit.muUids[mu];
   if (muUid) {
     const lastEntry = state.edit.editHistory.findLast(
       (e) => e.mu_uid === muUid,
@@ -437,20 +447,20 @@ export function drawEditTimeline(els, state) {
         ...(lastEntry.artifacts_removed || []),
       ];
       ctx.fillStyle = COLORS.timelineAdded;
-      fillTicks(ctx, added, total, bw);
+      fillTicks(ctx, added, totalSamples, bw);
       ctx.fillStyle = COLORS.timelineRemoved;
-      fillTicks(ctx, removed, total, bw);
+      fillTicks(ctx, removed, totalSamples, bw);
     }
   }
 
-  // Current spike positions (faint purple, drawn on top of history)
+  // The current discharges, over the last edit.
   ctx.fillStyle = COLORS.timelineSpikes;
-  fillTicks(ctx, state.edit.spikeTimes?.[mu] || [], total, bw);
+  fillTicks(ctx, state.edit.spikeTimes[mu] || [], totalSamples, bw);
 
-  // View window
-  const view = state.edit.view || { start: 0, end: total };
-  const x1 = TIMELINE_PAD_L + (Math.max(0, view.start) / total) * bw;
-  const x2 = TIMELINE_PAD_L + (Math.min(total, view.end) / total) * bw;
+  const view = getEditView(state);
+  const x1 = TIMELINE_PAD_L + (Math.max(0, view.start) / totalSamples) * bw;
+  const x2 =
+    TIMELINE_PAD_L + (Math.min(totalSamples, view.end) / totalSamples) * bw;
   const ww = Math.max(4, x2 - x1);
   ctx.fillStyle = COLORS.timelineViewFill;
   ctx.fillRect(x1, TIMELINE_BAR_TOP - 2, ww, TIMELINE_BAR_H + 4);
@@ -467,7 +477,7 @@ export function drawEditTimeline(els, state) {
 /** @param {App} app */
 export function bindEditTimeline(app) {
   const { els, state, renderEditExplorer } = app;
-  const canvas = els?.editTimelineCanvas;
+  const canvas = els.editTimelineCanvas;
   if (!canvas) return;
 
   let dragging = false;
@@ -475,38 +485,32 @@ export function bindEditTimeline(app) {
   let dragViewStart = 0;
   let didMove = false;
 
-  const getTotal = () => state.edit.totalSamples;
-
-  const fracFromClientX = (/** @type {number} */ clientX) => {
-    const rect = canvas.getBoundingClientRect();
-    const bw = Math.max(1, rect.width - TIMELINE_PAD_L - TIMELINE_PAD_R);
-    return Math.max(
-      0,
-      Math.min(1, (clientX - rect.left - TIMELINE_PAD_L) / bw),
+  const barWidth = () =>
+    Math.max(
+      1,
+      canvas.getBoundingClientRect().width - TIMELINE_PAD_L - TIMELINE_PAD_R,
     );
-  };
 
   canvas.addEventListener("pointerdown", (e) => {
     canvas.setPointerCapture(e.pointerId);
     dragging = true;
     didMove = false;
     startClientX = e.clientX;
-    const total = getTotal();
-    dragViewStart = (state.edit.view || { start: 0, end: total }).start;
+    dragViewStart = getEditView(state).start;
   });
 
   canvas.addEventListener("pointermove", (e) => {
     if (!dragging) return;
     if (Math.abs(e.clientX - startClientX) > 3) didMove = true;
     if (!didMove) return;
-    const total = getTotal();
-    if (!total) return;
-    const rect = canvas.getBoundingClientRect();
-    const bw = Math.max(1, rect.width - TIMELINE_PAD_L - TIMELINE_PAD_R);
-    const delta = Math.round(((e.clientX - startClientX) / bw) * total);
-    const view = state.edit.view || { start: 0, end: total };
+    const totalSamples = state.edit.totalSamples;
+    if (!totalSamples) return;
+    const delta = Math.round(
+      ((e.clientX - startClientX) / barWidth()) * totalSamples,
+    );
+    const view = getEditView(state);
     const span = view.end - view.start;
-    setEditView(state, clampView(dragViewStart + delta, span, total));
+    setEditView(state, clampView(dragViewStart + delta, span, totalSamples));
     app.scheduleEditRender();
   });
 
@@ -518,14 +522,15 @@ export function bindEditTimeline(app) {
     if (!dragging) return;
     dragging = false;
     if (didMove) return;
-    const total = getTotal();
-    if (!total) return;
-    const view = state.edit.view || { start: 0, end: total };
+    const totalSamples = state.edit.totalSamples;
+    if (!totalSamples) return;
+    const view = getEditView(state);
     const span = view.end - view.start;
-    const frac = fracFromClientX(e.clientX);
+    const x = e.clientX - canvas.getBoundingClientRect().left - TIMELINE_PAD_L;
+    const frac = Math.max(0, Math.min(1, x / barWidth()));
     setEditView(
       state,
-      clampView(Math.round(frac * total - span / 2), span, total),
+      clampView(Math.round(frac * totalSamples - span / 2), span, totalSamples),
     );
     renderEditExplorer();
   });

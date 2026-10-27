@@ -6,7 +6,7 @@
 /** @typedef {import("../app/context.js").JsonObject} JsonObject */
 
 /** @typedef {{ name?: string, path?: string }} FileRef */
-/** @typedef {Span & { yMin?: number, yMax?: number }} Selection */
+/** @typedef {Span & { yMin: number, yMax: number }} Selection A box dragged on the pulse plot; y in px from the plot top. */
 /** @typedef {"add" | "add_artifact" | "delete_spikes"} EditMode */
 /** @typedef {{ mu: number, position: number }} Bookmark Where the user last edited an MU. */
 /** @typedef {import("../api/binary-payloads.js").SeriesRow} ChannelTrace One row of a viewport: its samples, or their min/max per bin. */
@@ -52,34 +52,30 @@
  * stay on the server; `pulseView` holds the window of the current MU on screen.
  *
  * @typedef {object} EditSlice
- * @property {FileRef | null} file
  * @property {string} filename
  * @property {string} token The server's edit session.
  * @property {Int32Array[]} spikeTimes
- * @property {Int32Array[]} artifactTimes
  * @property {number[]} versions Per MU; changes whenever the server edits it.
- * @property {string[]} gridNames
  * @property {number[]} muGridIndex
  * @property {number | null} fsamp
  * @property {number} totalSamples
- * @property {number} currentMuGrid
+ * @property {number} currentGrid
  * @property {number} currentMu
  * @property {Span | null} view
- * @property {Selection | null} selectionPulse
- * @property {Selection | null} draftSelectionPulse
+ * @property {Selection | null} pulseSelection
+ * @property {Selection | null} pulseSelectionDraft
  * @property {EditMode | null} mode
  * @property {boolean} dirty
  * @property {boolean} canUndo
  * @property {boolean} crashRecovery The server logs the edits, so unsaved ones survive a crash.
  * @property {boolean} busy An edit or a save is on its way to the server.
- * @property {JsonObject | null} parameters
  * @property {boolean[]} flagged
  * @property {string} project
  * @property {PulseView | null} pulseView
  * @property {string[]} muUids
  * @property {EditHistoryEntry[]} editHistory The log's tail; older entries stay on the server.
  * @property {number} editHistoryStart Index in the server's log of `editHistory[0]`.
- * @property {Bookmark | null} bookmarkPosition
+ * @property {Bookmark | null} bookmark
  * @property {boolean} showBookmark
  * @property {string | null} softwareVersions
  */
@@ -96,7 +92,7 @@
  * @property {JsonObject | null} parameters
  * @property {number[][]} channelMeans
  * @property {number[][][]} coordinates Per grid, per channel: [row, col].
- * @property {number[][]} discardMasks Per grid, per channel: 1 = discarded.
+ * @property {number[][]} discardChannels Per grid, per channel: 1 = discarded.
  * @property {ChannelTrace[][]} channelTraces Per grid, per channel.
  * @property {JsonObject} metadata
  * @property {string[]} muscleNames
@@ -122,34 +118,30 @@
 /** @returns {EditSlice} */
 export function createEditSlice() {
   return {
-    file: null,
     filename: "",
     token: "",
     spikeTimes: [],
-    artifactTimes: [],
     versions: [],
-    gridNames: [],
     muGridIndex: [],
     fsamp: null,
     totalSamples: 0,
-    currentMuGrid: 0,
+    currentGrid: 0,
     currentMu: 0,
     view: null,
-    selectionPulse: null,
-    draftSelectionPulse: null,
+    pulseSelection: null,
+    pulseSelectionDraft: null,
     mode: null,
     dirty: false,
     canUndo: false,
     crashRecovery: true,
     busy: false,
-    parameters: null,
     flagged: [],
     project: "",
     pulseView: null,
     muUids: [],
     editHistory: [],
     editHistoryStart: 0,
-    bookmarkPosition: null,
+    bookmark: null,
     showBookmark: false,
     softwareVersions: null,
   };
@@ -167,7 +159,7 @@ export const state = {
   parameters: null,
   channelMeans: [],
   coordinates: [],
-  discardMasks: [],
+  discardChannels: [],
   channelTraces: [],
   metadata: {},
   muscleNames: [],

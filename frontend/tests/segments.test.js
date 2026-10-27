@@ -19,8 +19,8 @@ const { COLORS } = await import("../src/config.js");
 const { state: initialState } = await import("../src/state/state.js");
 const { createApp } = await import("../src/app/create-app.js");
 const { toSegments } = await import("../src/api/payloads.js");
-const { drawRoiRects } = await import("../src/view/plots.js");
-const { buildSelections, enableRoiSelection, renderSegmentTypes } =
+const { drawOverlayRects } = await import("../src/view/plots.js");
+const { buildOverlays, enableRoiSelection, renderSegmentTypes } =
   await import("../src/view/qc-renderer.js");
 const { setupQcEvents } = await import("../src/app/stages/qc-stage.js");
 const { setupSessionFormEvents } =
@@ -335,9 +335,9 @@ describe("segment helpers", () => {
 describe("drawing", () => {
   test("segments come first, chosen ones leave their fill to the window", () => {
     toggleSegment(app.state, 1);
-    const selections = buildSelections(app.state);
+    const overlays = buildOverlays(app.state);
     assert.deepEqual(
-      selections.map((s) => [s.kind, s.chosen, s.strong]),
+      overlays.map((s) => [s.kind, s.chosen, s.strong]),
       [
         ["ramp", false, undefined],
         ["plateau", true, undefined],
@@ -347,7 +347,7 @@ describe("drawing", () => {
       ],
     );
     const canvas = fakeCanvas({ width: 1000, height: 50 });
-    drawRoiRects(canvas.ctx, selections, 1000, 1000, 50);
+    drawOverlayRects(canvas.ctx, overlays, 1000, 1000, 50);
     const fills = ops(canvas.ctx, "fillRect").map((c) => c.fillStyle);
     assert.deepEqual(fills, [
       COLORS.rampFill,
@@ -359,7 +359,7 @@ describe("drawing", () => {
   });
 
   test("the whole-recording placeholder stays faint", () => {
-    const placeholder = buildSelections(app.state).find(
+    const placeholder = buildOverlays(app.state).find(
       (s) => s.kind === undefined,
     );
     assert.equal(placeholder.strong, undefined);

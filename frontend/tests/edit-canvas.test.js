@@ -71,7 +71,6 @@ function editApp({
   Object.assign(state.edit, {
     token: "tok",
     spikeTimes: [Int32Array.from([100, 200])],
-    artifactTimes: [new Int32Array(0)],
     flagged: [false],
     muUids: ["g0_mu0"],
     muGridIndex: [0],
@@ -125,7 +124,7 @@ describe("pulse canvas drag", () => {
       [{ start: 50, end: 150, yMin: 10, yMax: 60 }],
     ]);
     assert.equal(app.state.edit.mode, null);
-    assert.equal(app.state.edit.draftSelectionPulse, null);
+    assert.equal(app.state.edit.pulseSelectionDraft, null);
   });
 
   test("a box dragged right-to-left and bottom-to-top is the same box", () => {
@@ -170,8 +169,8 @@ describe("pulse canvas drag", () => {
     });
     assert.deepEqual(
       [
-        app.state.edit.draftSelectionPulse?.start,
-        app.state.edit.draftSelectionPulse?.end,
+        app.state.edit.pulseSelectionDraft?.start,
+        app.state.edit.pulseSelectionDraft?.end,
       ],
       [50, 80],
     );
@@ -198,14 +197,14 @@ describe("pulse canvas drag", () => {
     });
     canvas.dispatch("pointercancel");
     canvas.dispatch("pointerup");
-    assert.equal(app.state.edit.draftSelectionPulse, null);
+    assert.equal(app.state.edit.pulseSelectionDraft, null);
     assert.equal(app.addSpikesInSelection.calls.length, 0);
     assert.equal(app.state.edit.mode, "add");
   });
 
   test("without a mode the box is kept as the selection", () => {
     dragPulse([50, 10], [150, 60]);
-    assert.deepEqual(app.state.edit.selectionPulse, {
+    assert.deepEqual(app.state.edit.pulseSelection, {
       start: 50,
       end: 150,
       yMin: 10,
@@ -216,8 +215,8 @@ describe("pulse canvas drag", () => {
 
   test("a near-click without a mode leaves no box drawn", () => {
     dragPulse([100, 30], [103, 34]);
-    assert.equal(app.state.edit.draftSelectionPulse, null);
-    assert.equal(app.state.edit.selectionPulse, null);
+    assert.equal(app.state.edit.pulseSelectionDraft, null);
+    assert.equal(app.state.edit.pulseSelection, null);
     assert.equal(app.scheduleEditRender.calls.length, 2);
   });
 
@@ -225,7 +224,7 @@ describe("pulse canvas drag", () => {
     app.state.edit.mode = "add";
     dragPulse([50, 10], [150, 60]);
     assert.equal(app.addSpikesInSelection.calls.length, 1);
-    assert.equal(app.state.edit.draftSelectionPulse, null);
+    assert.equal(app.state.edit.pulseSelectionDraft, null);
     // Redrawn after the move and after the release, without the box.
     assert.equal(app.scheduleEditRender.calls.length, 2);
   });
@@ -262,10 +261,10 @@ describe("pulse canvas drag", () => {
   });
 
   test("double-click zooms out to the whole recording", () => {
-    app.state.edit.selectionPulse = { start: 1, end: 2 };
+    app.state.edit.pulseSelection = { start: 1, end: 2 };
     els.editPulseCanvas.dispatch("dblclick");
     assert.deepEqual(app.state.edit.view, { start: 0, end: 1000 });
-    assert.equal(app.state.edit.selectionPulse, null);
+    assert.equal(app.state.edit.pulseSelection, null);
     assert.equal(app.state.edit.showBookmark, true);
   });
 });
@@ -338,7 +337,7 @@ describe("timeline", () => {
 
 describe("pulse plot", () => {
   test("marks where the user stopped, midway across the view", () => {
-    app.state.edit.bookmarkPosition = { mu: 0, position: 127 };
+    app.state.edit.bookmark = { mu: 0, position: 127 };
     app.state.edit.showBookmark = true;
     drawEditPulse(els, app.state);
     const label = ops(els.editPulseCanvas.ctx, "fillText").find(
@@ -348,10 +347,10 @@ describe("pulse plot", () => {
   });
 
   test("the bookmark is hidden when dismissed or for another MU", () => {
-    app.state.edit.bookmarkPosition = { mu: 0, position: 127 };
+    app.state.edit.bookmark = { mu: 0, position: 127 };
     app.state.edit.showBookmark = false;
     drawEditPulse(els, app.state);
-    app.state.edit.bookmarkPosition = { mu: 3, position: 127 };
+    app.state.edit.bookmark = { mu: 3, position: 127 };
     app.state.edit.showBookmark = true;
     drawEditPulse(els, app.state);
     assert.ok(!texts(els.editPulseCanvas.ctx).includes("You stopped here"));
@@ -455,10 +454,10 @@ describe("MU dropdowns", () => {
       api: { fetchPulse: () => new Promise(() => {}) },
       stage: true,
     });
+    app.state.gridNames = ["A"];
     Object.assign(app.state.edit, {
       spikeTimes: [Int32Array.from([100]), Int32Array.from([200])],
       muGridIndex: [0, 0],
-      gridNames: ["A"],
     });
     els.editMuGridSelect = fakeElement("select");
     els.editMuSelect = fakeElement("select");

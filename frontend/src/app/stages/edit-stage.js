@@ -32,11 +32,12 @@ import {
 import {
   setEditMode as setEditModeAction,
   setEditCurrentMu,
-  setEditCurrentMuGrid,
+  setEditCurrentGrid,
   setEditPulseView,
   setEditView,
   resetEditSlice,
 } from "../../state/actions.js";
+import { getEditView } from "../../state/selectors.js";
 import { getCanvasPlotMetrics, oncePerFrame } from "../../view/plots.js";
 import { handleKeyboardNavigation } from "../services/navigation.js";
 import { createViewFetcher } from "../services/view-fetcher.js";
@@ -86,7 +87,7 @@ export function createEditStageService(app) {
 
   /** @param {HTMLCanvasElement} canvas */
   function plotWidth(canvas) {
-    return getCanvasPlotMetrics(canvas, true).plotWidth || 1;
+    return getCanvasPlotMetrics(canvas).plotWidth;
   }
 
   /** @type {EditStage["resetEditState"]} */
@@ -103,7 +104,7 @@ export function createEditStageService(app) {
   function settleEditSelection() {
     const model = buildEditDropdownModel(state);
     if (model.needsGridSwitch) {
-      setEditCurrentMuGrid(state, model.targetGrid, { resetView: false });
+      setEditCurrentGrid(state, model.currentGrid, { resetView: false });
     }
     if (model.needsMuSwitch) {
       setEditCurrentMu(state, model.currentMu, { resetView: false });
@@ -123,7 +124,7 @@ export function createEditStageService(app) {
     const shown = JSON.stringify([
       model.gridNames,
       model.muOptions,
-      model.targetGrid,
+      model.currentGrid,
       model.currentMu,
     ]);
     if (shown === shownDropdowns) return;
@@ -163,7 +164,7 @@ export function createEditStageService(app) {
     const mu = e.currentMu;
     if (!e.token || !canvas || !total || e.spikeTimes?.[mu] === undefined)
       return;
-    const { start, end } = e.view || { start: 0, end: total };
+    const { start, end } = getEditView(state);
     const bins = Math.max(1, Math.round(plotWidth(canvas)));
     const version = e.versions?.[mu] ?? 0;
     const shown = e.pulseView;
@@ -206,7 +207,7 @@ export function createEditStageService(app) {
 
   return {
     getPulsePlotHeight: () =>
-      getCanvasPlotMetrics(els.editPulseCanvas, true).plotHeight || 1,
+      getCanvasPlotMetrics(els.editPulseCanvas).plotHeight,
     resetEditState,
     refreshEditModeButtons,
     setEditMode,
@@ -315,7 +316,7 @@ export function setupEditEvents(app) {
 
   els.editMuGridSelect?.addEventListener("change", () => {
     const idx = Number(els.editMuGridSelect.value) || 0;
-    setEditCurrentMuGrid(state, idx, { resetView: true });
+    setEditCurrentGrid(state, idx, { resetView: true });
     renderEditExplorer();
     prepareEditGrid(app, idx);
     els.editMuGridSelect.blur();

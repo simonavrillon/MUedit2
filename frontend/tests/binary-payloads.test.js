@@ -80,27 +80,17 @@ function csr(rows) {
 }
 
 describe("decodeEditSessionFrame", () => {
-  test("splits discharge and artifact times per MU, as views", () => {
+  test("splits discharge times per MU, as views", () => {
     const spikes = csr([[10, 20], [30]]);
-    const artifacts = csr([[], [31]]);
     const buf = encodeFrame(
       { token: "abc", n_mu: 2 },
-      {
-        spikes: spikes.values,
-        spike_offsets: spikes.offsets,
-        artifacts: artifacts.values,
-        artifact_offsets: artifacts.offsets,
-      },
+      { spikes: spikes.values, spike_offsets: spikes.offsets },
     );
     const frame = decodeEditSessionFrame(buf);
     assert.deepEqual(frame.meta, { token: "abc", n_mu: 2 });
     assert.deepEqual(
       frame.spikeTimes.map((r) => Array.from(r)),
       [[10, 20], [30]],
-    );
-    assert.deepEqual(
-      frame.artifactTimes.map((r) => Array.from(r)),
-      [[], [31]],
     );
     assert.ok(frame.spikeTimes[0] instanceof Int32Array);
     assert.equal(frame.spikeTimes[0].buffer, buf, "views, not copies");

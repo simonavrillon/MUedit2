@@ -19,6 +19,7 @@
  *   muscle_names: string[],
  *   aux_names: string[],
  *   total_samples: number,
+ *   discard_channels: number[][],
  * }} PreviewPayload
  */
 
@@ -111,17 +112,29 @@ export function toSegmentation(data) {
 export function normalizePreviewPayload(payload) {
   /** @type {JsonObject} */
   const source = payload && typeof payload === "object" ? payload : {};
+  /** @type {number[][]} */
+  const channelMeans = Array.isArray(source.channel_means)
+    ? source.channel_means
+    : [];
+  /** @type {JsonObject} */
+  const metadata =
+    source.metadata && typeof source.metadata === "object"
+      ? source.metadata
+      : {};
+  const badPerGrid = metadata.bad_channels_per_grid;
   return {
     ...source,
     grid_names: Array.isArray(source.grid_names) ? source.grid_names : [],
-    channel_means: Array.isArray(source.channel_means)
-      ? source.channel_means
-      : [],
+    channel_means: channelMeans,
     coordinates: Array.isArray(source.coordinates) ? source.coordinates : [],
-    metadata:
-      source.metadata && typeof source.metadata === "object"
-        ? source.metadata
-        : {},
+    metadata,
+    // A grid whose bad-channel list doesn't match its channels starts with none discarded.
+    discard_channels: channelMeans.map((cm, grid) => {
+      const bad = badPerGrid?.[grid];
+      return Array.isArray(bad) && bad.length === cm.length
+        ? bad.map((v) => (v === 1 ? 1 : 0))
+        : cm.map(() => 0);
+    }),
     muscle_names: Array.isArray(source.muscle_names) ? source.muscle_names : [],
     aux_names: Array.isArray(source.aux_names) ? source.aux_names : [],
     total_samples: Number.isFinite(Number(source.total_samples))

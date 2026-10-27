@@ -98,10 +98,9 @@ function csrRows(values, offsets) {
 }
 
 /**
- * @typedef {object} EditSessionFrame What the edit session sends: its fields, and per-MU times.
+ * @typedef {object} EditSessionFrame What the edit session sends: its fields, and per-MU discharge times.
  * @property {JsonObject} meta
  * @property {Int32Array[]} spikeTimes Discharge times of every MU (open) or of the changed ones (an edit).
- * @property {Int32Array[]} artifactTimes Artifact times, likewise.
  */
 
 /**
@@ -113,7 +112,6 @@ export function decodeEditSessionFrame(buffer) {
   return {
     meta,
     spikeTimes: csrRows(arrays.spikes, arrays.spike_offsets),
-    artifactTimes: csrRows(arrays.artifacts, arrays.artifact_offsets),
   };
 }
 

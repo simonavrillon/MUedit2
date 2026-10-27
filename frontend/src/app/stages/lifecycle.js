@@ -61,10 +61,10 @@ const STAGES = {
     panel: "stageEdit",
     blocked: () => null,
     render(app) {
-      if (app.state.edit.spikeTimes?.length) app.renderEditExplorer();
+      if (app.state.edit.spikeTimes.length) app.renderEditExplorer();
     },
     enter(app) {
-      if (!app.state.edit.spikeTimes?.length) {
+      if (!app.state.edit.spikeTimes.length) {
         app.setStatus("Load a decomposition file to edit", "muted");
       }
     },

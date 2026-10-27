@@ -342,17 +342,9 @@ def _per_mu(edit: EditSession) -> dict[str, Any]:
     }
 
 
-def _spike_arrays(
-    spike_times: list[IntArray], artifact_times: list[IntArray]
-) -> dict[str, tuple[Any, str]]:
+def _spike_arrays(spike_times: list[IntArray]) -> dict[str, tuple[Any, str]]:
     values, offsets = pack_csr(spike_times, np.int32)
-    art_values, art_offsets = pack_csr(artifact_times, np.int32)
-    return {
-        "spikes": (values, "i4"),
-        "spike_offsets": (offsets, "i8"),
-        "artifacts": (art_values, "i4"),
-        "artifact_offsets": (art_offsets, "i8"),
-    }
+    return {"spikes": (values, "i4"), "spike_offsets": (offsets, "i8")}
 
 
 #: Log entries a state or save response carries; the sidecar keeps the whole log.
@@ -374,7 +366,7 @@ def _state_response(edit: EditSession, token: str, **extra: Any) -> Response:
         "recoverable_edits": recovery.edits if recovery is not None else 0,
         **extra,
     }
-    return frame_response(meta, _spike_arrays(edit.spike_times, edit.artifact_times))
+    return frame_response(meta, _spike_arrays(edit.spike_times))
 
 
 def _change_response(edit: EditSession, change: Change) -> Response:
@@ -386,11 +378,7 @@ def _change_response(edit: EditSession, change: Change) -> Response:
         **({"kept_indices": change.kept} if change.kept is not None else {}),
         **change.info,
     }
-    arrays = _spike_arrays(
-        [edit.spike_times[i] for i in change.changed],
-        [edit.artifact_times[i] for i in change.changed],
-    )
-    return frame_response(meta, arrays)
+    return frame_response(meta, _spike_arrays([edit.spike_times[i] for i in change.changed]))
 
 
 def edit_session_state(token: str, session: str = DEFAULT_SESSION) -> Response:

@@ -74,7 +74,6 @@ describe("edit commands", () => {
     answer({
       meta: { removed_count: 0, n_mu: 1 },
       spikeTimes: [],
-      artifactTimes: [],
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
     assert.equal(els.editOutliersBtn.dataset.busy, undefined);
@@ -107,7 +106,6 @@ describe("edit commands", () => {
     answer({
       meta: { removed_count: 0, n_mu: 1 },
       spikeTimes: [],
-      artifactTimes: [],
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
     press(" ");

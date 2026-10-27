@@ -6,7 +6,7 @@ import { COLORS, canvasFont, traceColors } from "../config.js";
 import {
   drawGridOverlay,
   drawMiniSeries,
-  drawRoiRects,
+  drawOverlayRects,
   prepareCanvas,
   strokeSeries,
 } from "./plots.js";
@@ -25,12 +25,11 @@ import {
   syncRois,
   toggleSegment,
 } from "../signal/segments.js";
-import { getCurrentGrid } from "../state/selectors.js";
 import {
   addArtifactRegion,
   setArtifactDraft,
   setArtifactMode,
-  setDiscardMaskChannel,
+  setDiscardChannel,
   setRoiDraft,
   setRoiForIndex,
 } from "../state/actions.js";
@@ -43,16 +42,16 @@ import {
 
 /**
  * Target segments, decomposition ROIs and artifact windows are drawn on the
- * same canvases, so they travel as one selection list, in drawing order:
+ * same canvases, so they travel as one overlay list, in drawing order:
  * segments under the windows, artifacts on top. `kind` is what tells
- * `drawRoiRects` to switch colour. Drafts are appended so an in-flight drag
- * renders alongside the committed windows.
+ * `drawOverlayRects` to switch colour. Drafts are appended so an in-flight
+ * drag renders alongside the committed windows.
  *
  * @param {State} state
  * @returns {Overlay[]}
  */
-export function buildSelections(state) {
-  const segments = (state.segments || []).map((s) => ({
+export function buildOverlays(state) {
+  const segments = state.segments.map((s) => ({
     start: s.start,
     end: s.end,
     kind: s.kind,
@@ -63,15 +62,15 @@ export function buildSelections(state) {
   const totalSamples = state.totalSamples || 0;
   // A whole-recording placeholder stays faint, or it would hide every segment.
   const rois = (
-    state.roiDraft ? [...(state.rois || []), state.roiDraft] : state.rois || []
+    state.roiDraft ? [...state.rois, state.roiDraft] : state.rois
   ).map((r) =>
     segments.length > 0 && !isPlaceholder(r, totalSamples)
       ? { start: r.start, end: r.end, strong: true }
       : r,
   );
   const artifacts = state.artifactDraft
-    ? [...(state.artifactRegions || []), state.artifactDraft]
-    : state.artifactRegions || [];
+    ? [...state.artifactRegions, state.artifactDraft]
+    : state.artifactRegions;
   return [
     ...segments,
     ...rois,
@@ -88,18 +87,16 @@ export function buildSelections(state) {
  * @param {State} state
  */
 export function renderArtifactControls(els, state) {
-  if (els?.artifactCount) {
-    els.artifactCount.textContent = String(
-      (state.artifactRegions || []).length,
-    );
+  if (els.artifactCount) {
+    els.artifactCount.textContent = String(state.artifactRegions.length);
   }
-  if (els?.artifactAddBtn) {
+  if (els.artifactAddBtn) {
     const armed = !!state.artifactMode;
     els.artifactAddBtn.classList.toggle("armed", armed);
     els.artifactAddBtn.setAttribute("aria-pressed", armed ? "true" : "false");
   }
-  if (els?.artifactRemoveBtn) {
-    els.artifactRemoveBtn.disabled = !(state.artifactRegions || []).length;
+  if (els.artifactRemoveBtn) {
+    els.artifactRemoveBtn.disabled = !state.artifactRegions.length;
   }
 }
 
@@ -157,7 +154,7 @@ export function renderSegmentTypes(els, state) {
 /** @param {App} app */
 export function refreshVisuals(app) {
   const { state, els, renderAuxiliaryChannels } = app;
-  const selections = buildSelections(state);
+  const overlays = buildOverlays(state);
   renderArtifactControls(els, state);
   // A drag redraws every frame but leaves the windows as they were.
   if (!state.roiDraft && !state.artifactDraft) renderSegmentTypes(els, state);
@@ -165,7 +162,7 @@ export function refreshVisuals(app) {
     els.emgCanvas,
     state.gridSeries,
     traceColors(),
-    selections,
+    overlays,
     state.totalSamples,
   );
   renderAuxiliaryChannels();
@@ -189,24 +186,21 @@ export function enableRoiSelection(app, canvasId) {
   let endX = 0;
   let dragIsArtifact = false;
 
-  const toSamples = (/** @type {number} */ sx, /** @type {number} */ ex) => {
+  /** The samples between two x positions, at least one. */
+  const toSpan = (/** @type {number} */ sx, /** @type {number} */ ex) => {
     const width = canvas.clientWidth || 1;
     const totalSamples = state.totalSamples || 0;
     const s = Math.max(0, Math.min(width, Math.min(sx, ex)));
     const e = Math.max(0, Math.min(width, Math.max(sx, ex)));
-    const startSample = Math.round((s / width) * totalSamples);
-    const endSample = Math.round((e / width) * totalSamples);
-    return { startSample, endSample };
+    const start = Math.round((s / width) * totalSamples);
+    const end = Math.round((e / width) * totalSamples);
+    return { start, end: Math.max(start + 1, end) };
   };
 
-  const commitSelection = () => {
+  const commitRoi = () => {
     if (!state.totalSamples) return;
-    const { startSample, endSample } = toSamples(startX, endX);
     syncRois(state, Number(els.nwindows?.value) || 1);
-    const span = {
-      start: startSample,
-      end: Math.max(startSample + 1, endSample),
-    };
+    const span = toSpan(startX, endX);
     setRoiForIndex(
       state,
       pickRoiSlot(state.rois, span, state.totalSamples),
@@ -222,11 +216,7 @@ export function enableRoiSelection(app, canvasId) {
 
   const commitArtifact = () => {
     if (!state.totalSamples) return;
-    const { startSample, endSample } = toSamples(startX, endX);
-    addArtifactRegion(state, {
-      start: startSample,
-      end: Math.max(startSample + 1, endSample),
-    });
+    addArtifactRegion(state, toSpan(startX, endX));
     setArtifactDraft(state, null);
     setArtifactMode(state, false);
     refreshVisuals();
@@ -235,7 +225,7 @@ export function enableRoiSelection(app, canvasId) {
   };
 
   const toggleSegmentAt = (/** @type {number} */ x) => {
-    const idx = segmentAt(state.segments, toSamples(x, x).startSample);
+    const idx = segmentAt(state.segments, toSpan(x, x).start);
     if (idx < 0) return;
     const windowsText = syncChosenWindows(app, toggleSegment(state, idx));
     const seg = state.segments[idx];
@@ -265,11 +255,7 @@ export function enableRoiSelection(app, canvasId) {
     if (!dragging || !state.totalSamples) return;
     const rect = canvas.getBoundingClientRect();
     endX = e.clientX - rect.left;
-    const { startSample, endSample } = toSamples(startX, endX);
-    const draft = {
-      start: startSample,
-      end: Math.max(startSample + 1, endSample),
-    };
+    const draft = toSpan(startX, endX);
     if (dragIsArtifact) setArtifactDraft(state, draft);
     else setRoiDraft(state, draft);
     app.scheduleRefreshVisuals();
@@ -284,11 +270,9 @@ export function enableRoiSelection(app, canvasId) {
   });
 
   canvas.addEventListener("pointerup", () => {
-    if (!dragging || !state.totalSamples) {
-      dragging = false;
-      return;
-    }
+    if (!dragging) return;
     dragging = false;
+    if (!state.totalSamples) return;
     if (Math.abs(endX - startX) < 4) {
       setRoiDraft(state, null);
       setArtifactDraft(state, null);
@@ -297,7 +281,7 @@ export function enableRoiSelection(app, canvasId) {
       return;
     }
     if (dragIsArtifact) commitArtifact();
-    else commitSelection();
+    else commitRoi();
   });
 }
 
@@ -319,15 +303,14 @@ const builtGrids = new WeakMap();
  * Lay out one cell per channel of `grid`. A click toggles that channel
  * alone: its mask, its cell and its trace.
  *
- * @param {App} app
+ * @param {State} state
  * @param {HTMLElement} section
  * @param {number} grid
  * @param {number[]} means
  * @param {number[][] | undefined} coords
  * @returns {BuiltGrid}
  */
-function buildChannelGrid(app, section, grid, means, coords) {
-  const { state } = app;
+function buildChannelGrid(state, section, grid, means, coords) {
   const positions = coords || [];
   const cols = gridColumnCount(positions);
   const wrap = document.createElement("div");
@@ -336,16 +319,16 @@ function buildChannelGrid(app, section, grid, means, coords) {
   cellsEl.className = "cells";
   cellsEl.style.gridTemplateColumns = `repeat(${cols}, minmax(26px, 1fr))`;
 
-  const cells = means.map((val, chIdx) => {
-    const pos = positions[chIdx] || [];
-    const r = pos[0] ?? Math.floor(chIdx / cols);
-    const c = pos[1] ?? chIdx % cols;
+  const cells = means.map((val, channel) => {
+    const pos = positions[channel] || [];
+    const r = pos[0] ?? Math.floor(channel / cols);
+    const c = pos[1] ?? channel % cols;
     const cell = document.createElement("button");
     cell.className = "qc-cell";
     cell.style.gridRow = `${r + 1}`;
     cell.style.gridColumn = `${c + 1}`;
     const label = document.createElement("div");
-    label.textContent = String(chIdx + 1);
+    label.textContent = String(channel + 1);
     label.className = "qc-label";
     const mini = document.createElement("canvas");
     mini.height = 26;
@@ -354,12 +337,12 @@ function buildChannelGrid(app, section, grid, means, coords) {
     cell.appendChild(mini);
     const meanVal = Number(val);
     const meanText = Number.isFinite(meanVal) ? meanVal.toFixed(3) : "n/a";
-    cell.title = `Channel ${chIdx + 1} • mean |EMG| ${meanText}`;
+    cell.title = `Channel ${channel + 1} • mean |EMG| ${meanText}`;
     cell.addEventListener("click", () => {
-      const off = state.discardMasks[grid]?.[chIdx] !== 1;
-      setDiscardMaskChannel(state, grid, chIdx, off ? 1 : 0);
+      const off = state.discardChannels[grid]?.[channel] !== 1;
+      setDiscardChannel(state, grid, channel, off ? 1 : 0);
       cell.classList.toggle("off", off);
-      drawMiniSeries(mini, state.channelTraces[grid]?.[chIdx], off);
+      drawMiniSeries(mini, state.channelTraces[grid]?.[channel], off);
     });
     cellsEl.appendChild(cell);
     return { cell, mini };
@@ -381,7 +364,7 @@ export function drawChannelQC(app) {
   const { state, els } = app;
   const section = els.qcSection;
   if (!section) return;
-  const grid = getCurrentGrid(state);
+  const grid = state.currentGrid;
   const means = state.channelMeans[grid];
   if (!means?.length) {
     section.innerHTML = "";
@@ -390,25 +373,25 @@ export function drawChannelQC(app) {
   }
   const coords = state.coordinates[grid];
   let built = builtGrids.get(section);
-  const fresh =
+  if (
     !built ||
     built.grid !== grid ||
     built.means !== means ||
-    built.coords !== coords;
-  if (!built || fresh) {
-    built = buildChannelGrid(app, section, grid, means, coords);
+    built.coords !== coords
+  ) {
+    built = buildChannelGrid(state, section, grid, means, coords);
     builtGrids.set(section, built);
   }
 
-  const mask = state.discardMasks[grid] || [];
+  const mask = state.discardChannels[grid] || [];
   const traces = state.channelTraces[grid] || [];
   const { cells } = built;
-  cells.forEach(({ cell }, chIdx) => {
-    cell.classList.toggle("off", mask[chIdx] === 1);
+  cells.forEach(({ cell }, channel) => {
+    cell.classList.toggle("off", mask[channel] === 1);
   });
   // Reading a new cell's size lays it out, so its trace is drawn to fit.
-  cells.forEach(({ mini }, chIdx) => {
-    drawMiniSeries(mini, traces[chIdx], mask[chIdx] === 1);
+  cells.forEach(({ mini }, channel) => {
+    drawMiniSeries(mini, traces[channel], mask[channel] === 1);
   });
 }
 
@@ -421,14 +404,12 @@ export function populateAuxSelector(els, state) {
   const sel = els.auxSelector;
   if (!sel) return;
   sel.innerHTML = '<option value="-1">All channels</option>';
-  if (state.auxNames && state.auxNames.length) {
-    state.auxNames.forEach((name, idx) => {
-      const opt = document.createElement("option");
-      opt.value = String(idx);
-      opt.textContent = name || `Aux ${idx + 1}`;
-      sel.appendChild(opt);
-    });
-  }
+  state.auxNames.forEach((name, idx) => {
+    const opt = document.createElement("option");
+    opt.value = String(idx);
+    opt.textContent = name || `Aux ${idx + 1}`;
+    sel.appendChild(opt);
+  });
 }
 
 /**
@@ -440,7 +421,7 @@ export function renderAuxiliaryChannels(els, state) {
   if (!prepared) return;
   const { ctx, width, height } = prepared;
 
-  if (!state.auxSeries || !state.auxSeries.length) {
+  if (!state.auxSeries.length) {
     ctx.fillStyle = COLORS.muted;
     ctx.font = canvasFont();
     ctx.fillText("No auxiliary data", 12, 24);
@@ -455,8 +436,13 @@ export function renderAuxiliaryChannels(els, state) {
   if (!Number.isFinite(globalMin) || !Number.isFinite(globalMax)) return;
   const span = globalMax - globalMin || 1;
 
-  const selections = buildSelections(state);
-  drawRoiRects(ctx, selections, state.totalSamples, width, height);
+  drawOverlayRects(
+    ctx,
+    buildOverlays(state),
+    state.totalSamples,
+    width,
+    height,
+  );
 
   const colors = traceColors();
   let labelCount = 0;

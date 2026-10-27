@@ -17,16 +17,15 @@ import {
   clearEditPulseSelections,
   setEditBookmark,
   setEditBusy,
-  setShowBookmark,
+  setEditShowBookmark,
   setEditCurrentMu,
-  setEditCurrentMuGrid,
-  setEditFile,
+  setEditCurrentGrid,
   setEditFilename,
-  setEditGridNames,
   setEditSession,
   setEditView,
   setGridNames,
 } from "../../state/actions.js";
+import { getEditView } from "../../state/selectors.js";
 
 /** @typedef {import("../context.js").App} App */
 /** @typedef {import("../context.js").JsonObject} JsonObject */
@@ -81,7 +80,7 @@ function forgetSessionToken() {
  */
 function setEditBookmarkAndHide(state, mu, position) {
   setEditBookmark(state, { mu, position });
-  setShowBookmark(state, false);
+  setEditShowBookmark(state, false);
 }
 
 /**
@@ -247,14 +246,14 @@ export function prepareEditGrid(app, grid) {
 /** @param {App} app */
 export async function requestFilterUpdate(app) {
   const { state, els, setStatus } = app;
-  if (!state.edit.spikeTimes?.length) return;
+  if (!state.edit.spikeTimes.length) return;
   const mu = state.edit.currentMu;
   const total = state.edit.totalSamples;
   if (!total) {
     setStatus("No pulse train available", "muted");
     return;
   }
-  const view = state.edit.view || { start: 0, end: total };
+  const view = getEditView(state);
   const start = Math.max(0, view.start);
   const end = Math.min(total, view.end);
   return editAction(app, {
@@ -279,7 +278,7 @@ export async function requestFilterUpdate(app) {
 export async function removeOutliers(app) {
   const { state, setStatus } = app;
   const mu = state.edit.currentMu;
-  if ((state.edit.spikeTimes?.[mu]?.length ?? 0) < 3) {
+  if ((state.edit.spikeTimes[mu]?.length ?? 0) < 3) {
     setStatus("Not enough discharges for outlier removal", "muted");
     return;
   }
@@ -303,7 +302,7 @@ export async function removeOutliers(app) {
 /** @param {App} app */
 export async function removeDuplicateMus(app) {
   const { state, setStatus } = app;
-  if ((state.edit.spikeTimes?.length ?? 0) < 2) {
+  if (state.edit.spikeTimes.length < 2) {
     setStatus("Need at least 2 MUs to deduplicate", "muted");
     return;
   }
@@ -314,7 +313,7 @@ export async function removeDuplicateMus(app) {
       const meta = await requestEditOp(app, "remove-duplicates");
       const removed = Number(meta.removed_count) || 0;
       if (!removed) return ["No duplicates found", "muted"];
-      setShowBookmark(state, false);
+      setEditShowBookmark(state, false);
       return [
         `${removed} duplicate${removed !== 1 ? "s" : ""} removed`,
         "success",
@@ -327,17 +326,17 @@ export async function removeDuplicateMus(app) {
 export async function flagMuForDeletion(app) {
   const { state, setStatus } = app;
   const mu = state.edit.currentMu;
-  if (!state.edit.spikeTimes?.length) {
+  if (!state.edit.spikeTimes.length) {
     setStatus("No MU loaded", "muted");
     return;
   }
-  const flag = !state.edit.flagged?.[mu];
+  const flag = !state.edit.flagged[mu];
   return editAction(app, {
     pending: flag ? "Flagging MU for deletion..." : "Unflagging MU...",
     failed: "Flagging failed",
     async run() {
       await requestEditOp(app, "flag", { mu, flag });
-      setShowBookmark(state, false);
+      setEditShowBookmark(state, false);
       return [flag ? "MU flagged for deletion" : "MU unflagged", "success"];
     },
   });
@@ -363,7 +362,7 @@ export async function undoEdit(app) {
 /** @param {App} app */
 export async function resetCurrentMuEdits(app) {
   const { state } = app;
-  if (!state.edit.spikeTimes?.length) return;
+  if (!state.edit.spikeTimes.length) return;
   return editAction(app, {
     failed: "Reset failed",
     async run() {
@@ -376,7 +375,7 @@ export async function resetCurrentMuEdits(app) {
 /** @param {App} app */
 export async function duplicateMu(app) {
   const { state, setStatus } = app;
-  if (!state.edit.spikeTimes?.length) {
+  if (!state.edit.spikeTimes.length) {
     setStatus("No MU loaded", "muted");
     return;
   }
@@ -389,7 +388,7 @@ export async function duplicateMu(app) {
       const newIdx = Number(
         meta.changed?.[0] ?? state.edit.spikeTimes.length - 1,
       );
-      setEditCurrentMuGrid(state, state.edit.muGridIndex[newIdx] ?? 0, {
+      setEditCurrentGrid(state, state.edit.muGridIndex[newIdx] ?? 0, {
         resetView: false,
       });
       setEditCurrentMu(state, newIdx, { resetView: false });
@@ -402,7 +401,7 @@ export async function duplicateMu(app) {
 export async function saveEditedFile(app) {
   const { state, api, withBidsSaveFields, getBidsMuscleNames, setStatus } = app;
 
-  if (!state.edit.spikeTimes?.length || !state.edit.token) {
+  if (!state.edit.spikeTimes.length || !state.edit.token) {
     setStatus("Load a decomposition first", "error");
     return;
   }
@@ -458,7 +457,7 @@ function resumePosition(state) {
   /** @type {Bookmark | null} */
   let targetBookmark = null;
   const idx = lastEntry?.mu_uid
-    ? (state.edit.muUids || []).indexOf(lastEntry.mu_uid)
+    ? state.edit.muUids.indexOf(lastEntry.mu_uid)
     : -1;
   if (lastEntry && idx !== -1) {
     targetMu = idx;
@@ -523,22 +522,20 @@ function showEditSession(app, file, frame, { open = true } = {}) {
     }),
   });
   setGridNames(state, resolvedGridNames);
-  setEditGridNames(state, resolvedGridNames);
   applySessionInfoFromDecomposition(file, meta);
   app.setBidsProject(String(meta.project || "").trim());
-  setEditFile(state, file);
   setEditFilename(state, file.name || meta.file_label || "decomposition");
   setEditSession(state, frame);
   rememberSessionToken(state.edit.token);
 
   const { targetMu, targetView, targetBookmark } = resumePosition(state);
-  const targetGrid = (state.edit.muGridIndex || [])[targetMu] ?? 0;
-  setEditCurrentMuGrid(state, targetGrid, { resetView: false });
+  const targetGrid = state.edit.muGridIndex[targetMu] ?? 0;
+  setEditCurrentGrid(state, targetGrid, { resetView: false });
   setEditCurrentMu(state, targetMu, { resetView: false });
   setEditView(state, targetView);
   if (targetBookmark) {
     setEditBookmark(state, targetBookmark);
-    setShowBookmark(state, true);
+    setEditShowBookmark(state, true);
   }
   clearEditPulseSelections(state);
   app.refreshEditModeButtons();
@@ -547,7 +544,7 @@ function showEditSession(app, file, frame, { open = true } = {}) {
   app.populateGridTabs();
   if (open) app.showWorkspace("edit");
   else app.updateStepAvailability();
-  prepareEditGrid(app, state.edit.currentMuGrid);
+  prepareEditGrid(app, state.edit.currentGrid);
 }
 
 /**
