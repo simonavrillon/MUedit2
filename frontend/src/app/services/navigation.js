@@ -1,3 +1,7 @@
+/**
+ * The status line, the workflow stepper, stage availability, the grid tabs
+ * and the edit page's keyboard navigation.
+ */
 import {
   setEditCurrentMu,
   setEditView,
@@ -88,9 +92,11 @@ export function positionStepIndicator(els) {
  */
 export function showWorkspace(app, target) {
   const { els } = app;
-  els.workspace?.classList.remove("hidden");
+  if (els.workspace) els.workspace.hidden = false;
   app.switchStage(target);
-  window.requestAnimationFrame(() => els.landing?.classList.add("hidden"));
+  window.requestAnimationFrame(() => {
+    if (els.landing) els.landing.hidden = true;
+  });
 }
 
 /** @param {App} app */

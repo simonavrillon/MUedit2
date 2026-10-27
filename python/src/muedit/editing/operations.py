@@ -150,10 +150,7 @@ def update_motor_unit_filter_window(
     artifact_mask: BoolArray | None = None,
     compute_dtype: ComputeDtype = DEFAULT_COMPUTE_DTYPE,
 ) -> tuple[FloatArray | None, IntArray]:
-    """Refit a motor-unit filter on the filtered EMG in ``[start, end)`` and redetect its spikes there.
-
-    The extended and whitened window is ``compute_dtype``; the pulse train and detection are float64.
-    """
+    """Refit an MU filter on the EMG in ``[start, end)`` and redetect its spikes there."""
     spikes = spike_array(spike_times)
     edge = edge_samples(fsamp)
     win_len = end - start

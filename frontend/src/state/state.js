@@ -1,3 +1,6 @@
+/**
+ * The app state: its shape (typedefs) and the single `state` object.
+ */
 /** @typedef {import("../app/context.js").Span} Span */
 /** @typedef {import("../app/context.js").StageKey} StageKey */
 /** @typedef {import("../app/context.js").JsonObject} JsonObject */

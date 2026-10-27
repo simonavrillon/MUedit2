@@ -80,7 +80,7 @@ def run_decomposition_cli(argv: list[str] | None = None) -> None:
         prog="muedit decompose", description="Run MUedit decomposition."
     )
     parser.add_argument(
-        "filepath",
+        "file_path",
         help=(
             f"Recording file ({', '.join(supported_extensions())}) or a BIDS EMG, Intan or "
             "Open Ephys recording folder."
@@ -294,7 +294,7 @@ def run_decomposition_cli(argv: list[str] | None = None) -> None:
     except ValueError as exc:
         parser.error(str(exc))
 
-    full_path = Path(args.filepath)
+    full_path = Path(args.file_path)
     if not full_path.exists():
         parser.error(f"File not found: {full_path}")
 

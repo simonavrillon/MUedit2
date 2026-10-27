@@ -1,5 +1,4 @@
-"""Normalizers for MATLAB-style decomposition payloads: cell arrays, matrices of either
-orientation and case-insensitive struct fields, as .mat and schema v1 .npz files hold them."""
+"""Normalizers for MATLAB-style cell arrays, matrices and struct fields (.mat, v1 .npz)."""
 
 from __future__ import annotations
 
@@ -209,27 +208,24 @@ def infer_total_samples_from_pulse(pulse_trains: Any) -> int | None:
     return None
 
 
-def _discard_mask(cell: np.ndarray, n_ch: int) -> np.ndarray:
+def _discard_mask(cell: np.ndarray, n_channels: int) -> np.ndarray:
     """A grid's 0/1 discard mask from a stored one, or from 1- or 0-based discarded indices."""
-    if cell.size == n_ch and np.all(np.isin(cell, [0, 1])):
+    if cell.size == n_channels and np.all(np.isin(cell, [0, 1])):
         return cell
-    mask = np.zeros(n_ch, dtype=int)
+    mask = np.zeros(n_channels, dtype=int)
     if cell.size > 0:
         max_val, min_val = int(np.max(cell)), int(np.min(cell))
-        if min_val >= 1 and max_val <= n_ch:
+        if min_val >= 1 and max_val <= n_channels:
             mask[cell - 1] = 1
-        elif min_val >= 0 and max_val < n_ch:
+        elif min_val >= 0 and max_val < n_channels:
             mask[cell] = 1
-        elif cell.size == n_ch:
+        elif cell.size == n_channels:
             mask = np.asarray(cell != 0, dtype=int)
     return mask
 
 
 def parse_discard_channels(raw: Any, grid_names: list[str]) -> list[np.ndarray]:
-    """Per-grid 0/1 channel masks (1 = discarded) from discard-channel cell arrays.
-
-    A cell of a grid the catalogue does not know is kept as stored.
-    """
+    """Per-grid 0/1 channel masks (1 = discarded); a cell for an unknown grid is kept as stored."""
 
     def _parse_mask_item(item: Any) -> np.ndarray:
         """Flatten one cell into a 1-D int array, preserving order and length."""
@@ -295,7 +291,7 @@ def parse_signal_coordinates(raw: Any) -> list[np.ndarray]:
         grids = [arr.astype(float)]
     else:
         return []
-    # (2, n_chan) → (n_chan, 2)
+    # (2, n_channels) → (n_channels, 2)
     return [c.T if c.shape[0] == 2 and c.shape[1] > 2 else c for c in grids if c.ndim == 2]
 
 

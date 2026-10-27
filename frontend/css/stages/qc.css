@@ -11,7 +11,7 @@
   flex: 1;
 }
 
-.qc-run-btn,
+.run-btn,
 .qc-auto-btn {
   display: inline-flex;
   align-items: center;
@@ -28,13 +28,13 @@
   line-height: normal;
 }
 
-.qc-run-btn svg,
+.run-btn svg,
 .qc-auto-btn svg {
   width: 16px;
   height: 16px;
 }
 
-.qc-run-btn:hover {
+.run-btn:hover {
   opacity: 1;
   border-color: var(--mu-3);
 }
@@ -92,13 +92,13 @@
 }
 
 .artifact-btn:hover {
-  border-color: var(--artifact-clr);
+  border-color: var(--artifact);
 }
 
 /* Armed: the next drag on the plot creates an artifact window. */
 .artifact-btn.armed {
-  border-color: var(--artifact-clr);
-  color: var(--artifact-clr);
+  border-color: var(--artifact);
+  color: var(--artifact);
   background: var(--surface-active);
 }
 
@@ -135,7 +135,7 @@
 
 /* ── QC Grid ── */
 
-.qc-card .qc-section {
+.qc-section {
   display: grid;
   gap: 14px;
 }
@@ -171,7 +171,7 @@
 
 .qc-cell.off {
   background: var(--danger-surface);
-  border-color: var(--danger-border-clr);
+  border-color: var(--danger-border);
   color: var(--accent-2);
 }
 
@@ -185,14 +185,12 @@
   font-weight: var(--fw-semibold);
 }
 
-.stage-qc .split {
-  flex: 1;
-  min-height: 0;
+.split {
+  display: grid;
   grid-template-columns: minmax(0, 1.65fr) minmax(0, 1fr);
   grid-auto-rows: minmax(0, 1fr);
-}
-
-.stage-qc .split .chart-card {
+  gap: 10px;
+  flex: 1;
   min-height: 0;
 }
 

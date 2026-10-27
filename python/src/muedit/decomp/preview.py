@@ -11,10 +11,7 @@ from muedit.signal.grid import grid_rows
 
 
 def abs_means(data: FloatArray, keep: BoolArray | None = None) -> tuple[FloatArray, FloatArray]:
-    """Mean of ``|data|`` over the kept rows per sample, and over samples per row, one row at a time.
-
-    Sums are taken in the data's own float type.
-    """
+    """Mean ``|data|`` per sample over kept rows and per row over samples, in the data's dtype."""
     # Rows are accumulated in order, which is bit-identical to np.mean(np.abs(data),
     # axis=0 / 1) for the C-contiguous arrays used here, without a full-size abs copy.
     # Fortran-ordered input (e.g. MAT v7.3 or OTB loaders) can differ in the last ulp.
@@ -46,12 +43,7 @@ def build_preview_payload(
     muscle_names: list[str],
     include_full_preview: bool,
 ) -> dict[str, Any]:
-    """Build the preview payload of a finished run.
-
-    With ``include_full_preview``, ``pulse_trains_full`` is ``pulse_trains`` itself: the server
-    keeps it for ``/series/pulse`` and the run save, and never sends it. Series the frontend
-    draws for the recording come from the upload's ``/series/*`` endpoints, not from here.
-    """
+    """Build a finished run's preview; ``pulse_trains_full`` stays on the server, never sent."""
     channel_means = [
         abs_means(data[rows])[1].tolist()
         for rows in grid_rows([len(mask) for mask in discard_channels])

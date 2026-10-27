@@ -107,10 +107,7 @@ def remove_duplicates_by_grid(
     fsamp: float,
     store: ArrayStore | None = None,
 ) -> tuple[FloatArray, list[IntArray], list[int], list[int]]:
-    """Remove duplicate motor units within each grid and optionally across grids.
-
-    The kept pulse trains are indexed once, into ``store`` when one is given.
-    """
+    """Remove duplicate MUs within each grid, optionally across grids, indexing into ``store``."""
     if len(spike_times) == 0:
         return np.array([]), [], [], []
 
@@ -129,11 +126,7 @@ def postprocess_step(
     progress_cb: Callable[[str, dict[str, Any]], None] | None,
     store: ArrayStore | None = None,
 ) -> PostprocessStepOutput:
-    """Batch filters and remove duplicates.
-
-    With ``store``, the pulse trains of every unit and then of the kept ones are
-    written there instead of the heap.
-    """
+    """Batch filters and remove duplicates, with the pulse trains in ``store`` when given."""
     logger.info("Batch processing...")
     if progress_cb:
         progress_cb("progress", {"message": "Batch processing filters", "phase": "postprocess"})

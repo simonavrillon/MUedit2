@@ -1,3 +1,7 @@
+/**
+ * Normalises backend JSON at the boundary: the preview payload, regions
+ * as `Span`s and `/qc/segment` segments. Malformed entries are dropped here.
+ */
 /** @typedef {import("../app/context.js").JsonObject} JsonObject */
 /** @typedef {import("../app/context.js").Span} Span */
 

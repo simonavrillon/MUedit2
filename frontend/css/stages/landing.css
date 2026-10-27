@@ -11,7 +11,6 @@
 }
 
 .landing-top-row {
-  width: auto;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -20,8 +19,6 @@
 
 .landing-card {
   width: min(880px, 100%);
-  border-radius: 0;
-  padding: 0;
   color: var(--text);
   text-align: center;
 }
@@ -53,7 +50,6 @@
   margin-top: 14px;
   font-size: var(--fs-md);
   color: var(--muted);
-  font-weight: var(--fw-regular);
 }
 
 .upload-format-error {
@@ -65,7 +61,6 @@
   color: var(--danger-text);
   border-radius: var(--radius-sm);
   font-size: var(--fs-md);
-  font-weight: var(--fw-regular);
 }
 
 .upload-loader {

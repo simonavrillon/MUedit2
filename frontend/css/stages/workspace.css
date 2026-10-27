@@ -16,20 +16,8 @@
   align-items: center;
   gap: 12px;
   padding: 8px 14px 4px;
-  border-radius: 0;
   /* Equal sides clear the settings rail and keep the stepper on the window's centre. */
   margin: 10px 52px 0;
-}
-
-.status-pill {
-  padding: 4px 6px;
-  border-radius: 999px;
-  border: none;
-  background: transparent;
-  color: var(--muted);
-  font-size: var(--fs-sm);
-  letter-spacing: 0.02em;
-  font-weight: var(--fw-regular);
 }
 
 .app-status {
@@ -37,6 +25,10 @@
   justify-self: end;
   min-width: 0;
   max-width: 100%;
+  padding: 4px 6px;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  letter-spacing: 0.02em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -44,6 +36,14 @@
 
 .app-status:empty {
   display: none;
+}
+
+.app-status[data-tone="error"] {
+  color: var(--danger);
+}
+
+.app-status[data-tone="success"] {
+  color: var(--success);
 }
 
 .settings-toggle-btn {
@@ -56,7 +56,6 @@
   height: var(--control-h);
   padding: 0;
   line-height: 0;
-  box-shadow: none;
   border-bottom: 1px solid var(--border);
 }
 
@@ -71,14 +70,6 @@
 .settings-toggle-btn svg {
   width: 20px;
   height: 20px;
-}
-
-.status-pill[data-tone="error"] {
-  color: var(--danger);
-}
-
-.status-pill[data-tone="success"] {
-  color: var(--success);
 }
 
 /* ── Workflow Stepper ── */
@@ -149,7 +140,6 @@
   color: var(--muted);
   padding: 2px 4px;
   border-radius: 0;
-  font-weight: var(--fw-regular);
   font-size: var(--fs-md);
   letter-spacing: 0.02em;
   cursor: pointer;
@@ -162,7 +152,6 @@
 
 .step-chip-label {
   display: inline-grid;
-  font-size: var(--fs-md);
   line-height: 1.05;
 }
 
@@ -181,7 +170,6 @@
 
 .step-chip:disabled {
   opacity: 0.6;
-  color: var(--muted);
   cursor: default;
   pointer-events: none;
 }
@@ -224,19 +212,6 @@
   min-height: 0;
 }
 
-.workspace-grid {
-  flex: 1;
-  min-height: 0;
-}
-
-.control-panel {
-  border-radius: var(--radius);
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
 .settings-overlay {
   position: fixed;
   inset: 0;
@@ -251,23 +226,16 @@
   position: fixed;
   top: 0;
   left: 0;
+  display: flex;
+  flex-direction: column;
   width: 52px;
   height: 100dvh;
   padding: 14px 16px 12px;
   background: var(--panel);
   border-right: 1px solid var(--border);
-  border-radius: 0;
   overflow: hidden;
   transition: width 0.2s ease;
   z-index: 21;
-  gap: 0;
-  font-weight: var(--fw-regular);
-}
-
-@supports not (height: 100dvh) {
-  .settings-panel {
-    height: 100vh;
-  }
 }
 
 .workspace.settings-open .settings-overlay {
@@ -293,7 +261,7 @@
   display: none;
 }
 
-/* ── Settings Panel Density ── */
+/* ── Settings Panel ── */
 
 /* The panel is a fixed-height column: a tall open section must make it scroll,
    not squeeze the rows above it. */
@@ -301,94 +269,20 @@
   flex-shrink: 0;
 }
 
-/* Each rail row, divider included, is one toolbar button tall. */
-.settings-panel .panel-section {
-  padding: 0;
+.panel-section {
+  border-bottom: 1px solid var(--border);
 }
 
-.settings-panel .panel-section:not(.collapsed) {
+.panel-section:not(.collapsed) {
   padding-bottom: 10px;
 }
 
-.settings-panel .section-header {
+/* Each rail row, divider included, is one toolbar button tall. */
+.section-header {
+  height: calc(var(--control-h) - 1px);
   font-size: var(--fs-sm);
   font-weight: var(--fw-semibold);
   color: var(--muted);
-  margin-bottom: 0;
-  height: calc(var(--control-h) - 1px);
-}
-
-.settings-panel .section-header::after {
-  font-size: var(--fs-xs);
-  line-height: 1;
-}
-
-.settings-panel .section-content {
-  gap: 5px;
-  margin-top: 0;
-}
-
-#bidsMuscleContainer {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-
-.settings-panel .field-label,
-.settings-panel .file-display,
-.settings-panel .form-row label {
-  font-size: var(--fs-sm);
-  font-weight: var(--fw-regular);
-}
-
-.settings-panel .form-row {
-  grid-template-columns: 116px minmax(0, 1fr);
-  gap: 5px;
-}
-
-.settings-panel .form-row input,
-.settings-panel .form-row select {
-  border-radius: 5px;
-  padding: 6px 8px;
-  font-size: var(--fs-md);
-  font-weight: var(--fw-regular);
-}
-
-.settings-panel .form-row [aria-invalid="true"] {
-  border-color: var(--danger);
-  background-color: var(--danger-bg);
-}
-
-.settings-panel .form-row:has([aria-invalid="true"]) label {
-  color: var(--danger-text);
-}
-
-.settings-panel .form-row select {
-  background-position: calc(100% - 13px) center;
-  background-size: 10px 5px;
-  padding-right: 24px;
-}
-
-.settings-panel .pill-toggle {
-  padding: 7px 10px;
-  border-radius: 5px;
-  font-size: var(--fs-sm);
-  font-weight: var(--fw-regular);
-  letter-spacing: 0.01em;
-}
-
-.panel-section {
-  border-radius: 0;
-  padding: 10px 0 12px;
-  border-bottom: 1px solid var(--border);
-  transition: none;
-}
-
-.section-header {
-  font-size: var(--fs-sm);
-  font-weight: var(--fw-semibold);
-  color: var(--text);
-  margin-bottom: 12px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -409,7 +303,8 @@
 
 .section-header::after {
   content: "▾";
-  font-size: var(--fs-md);
+  font-size: var(--fs-xs);
+  line-height: 1;
   transition: transform 0.2s ease;
   color: var(--muted);
 }
@@ -421,11 +316,17 @@
 .section-content {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 5px;
 }
 
 .panel-section.collapsed .section-content {
   display: none;
+}
+
+#bidsMuscleContainer {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
 }
 
 .row {
@@ -439,21 +340,15 @@
 }
 
 .field-label {
-  font-size: var(--fs-md);
+  font-size: var(--fs-sm);
   color: var(--muted);
-  font-weight: var(--fw-regular);
 }
 
 .file-display {
   flex: 1;
   text-align: right;
   color: var(--text);
-  font-weight: var(--fw-semibold);
-  font-size: var(--fs-md);
-}
-
-.file-display.loading {
-  color: var(--accent);
+  font-size: var(--fs-sm);
 }
 
 .form-row {
@@ -463,8 +358,69 @@
   gap: 10px;
 }
 
-.form-row.slim {
-  grid-template-columns: auto 160px;
+.form-row label {
+  color: var(--muted);
+  font-size: var(--fs-md);
+}
+
+.form-hint {
+  margin: -2px 0 0;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  line-height: 1.4;
+}
+
+.form-row input,
+.form-row select {
+  width: 100%;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  font-size: var(--fs-md);
+  appearance: none;
+}
+
+.form-row select {
+  background-image: conic-gradient(
+    from 315deg at 50% 100%,
+    var(--muted) 0 90deg,
+    transparent 90deg
+  );
+  background-position: calc(100% - 18px) center;
+  background-size: 10px 5px;
+  background-repeat: no-repeat;
+  padding-right: 28px;
+}
+
+.settings-panel .form-row {
+  grid-template-columns: 116px minmax(0, 1fr);
+  gap: 5px;
+}
+
+.settings-panel .form-row label {
+  font-size: var(--fs-sm);
+}
+
+.settings-panel .form-row input,
+.settings-panel .form-row select {
+  border-radius: 5px;
+  padding: 6px 8px;
+}
+
+.settings-panel .form-row select {
+  background-position: calc(100% - 13px) center;
+  padding-right: 24px;
+}
+
+.settings-panel .form-row [aria-invalid="true"] {
+  border-color: var(--danger);
+  background-color: var(--danger-bg);
+}
+
+.settings-panel .form-row:has([aria-invalid="true"]) label {
+  color: var(--danger-text);
 }
 
 /* The channel and segment-type pickers split the plot's width. */
@@ -524,18 +480,12 @@
   border-radius: var(--radius-sm);
 }
 
-.segment-picker-menu[hidden] {
-  display: none;
-}
-
 .segment-picker-row {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 6px 8px;
   border-radius: var(--radius-sm);
-  color: var(--text);
-  font-size: var(--fs-sm);
   cursor: pointer;
 }
 
@@ -573,45 +523,6 @@
   color: var(--plot-irregular-stroke);
 }
 
-.form-row label {
-  color: var(--muted);
-  font-size: var(--fs-md);
-  font-weight: var(--fw-regular);
-}
-
-.form-hint {
-  margin: -2px 0 0;
-  color: var(--muted);
-  font-size: var(--fs-sm);
-  font-weight: var(--fw-regular);
-  line-height: 1.4;
-}
-
-.form-row input,
-.form-row select {
-  width: 100%;
-  background: var(--surface);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 8px 10px;
-  font-size: var(--fs-md);
-  appearance: none;
-}
-
-.form-row select {
-  background-image: conic-gradient(
-    from 315deg at 50% 100%,
-    var(--muted) 0 90deg,
-    transparent 90deg
-  );
-  background-position: calc(100% - 18px) center;
-  background-size: 10px 5px;
-  background-repeat: no-repeat;
-  padding-right: 28px;
-  background-color: var(--surface);
-}
-
 .toggle-row {
   display: flex;
   align-items: center;
@@ -638,12 +549,19 @@
 .pill-toggle.on {
   background: var(--surface-active);
   border-color: var(--accent);
-  color: var(--text);
 }
 
 .pill-toggle:focus {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+.settings-panel .pill-toggle {
+  padding: 7px 10px;
+  border-radius: 5px;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-regular);
+  letter-spacing: 0.01em;
 }
 
 .start-btn {
@@ -672,21 +590,10 @@
 /* ── Visual Panel ── */
 
 .visual-panel {
-  border-radius: var(--radius);
-  padding: 0;
   display: flex;
   flex-direction: column;
   gap: 10px;
   flex: 1;
-  min-height: 0;
-}
-
-.split {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 10px;
-  flex: 1;
-  align-items: stretch;
   min-height: 0;
 }
 
@@ -704,14 +611,12 @@
 
 .scroll-card {
   height: 100%;
-  max-height: none;
   overflow: auto;
 }
 
 /* ── Chart Cards ── */
 
 .chart-card {
-  border-radius: 0;
   padding: 4px 0 12px;
   display: flex;
   flex-direction: column;

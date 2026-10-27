@@ -1,3 +1,7 @@
+/**
+ * The live run model: phases, the search's dots and timing, folded from
+ * the NDJSON run stream. Pure state, no DOM; `view/run-live.js` draws it.
+ */
 /** @typedef {import("../app/context.js").JsonObject} JsonObject */
 /** @typedef {import("../state/state.js").State} State */
 
@@ -48,7 +52,7 @@ const PHASE_OF_EVENT = {
  * The finished run, from its `done` event.
  *
  * @typedef {object} RunSummary
- * @property {number} muCount Units kept after post-processing.
+ * @property {number} nMu Units kept after post-processing.
  * @property {number[]} perGrid
  * @property {number[]} muGridIndex
  */
@@ -252,19 +256,19 @@ export function formatRemaining(seconds) {
  * @returns {RunSummary}
  */
 export function buildRunSummary(summary, preview) {
-  const muCount = Math.max(0, Number(summary.mu_count) || 0);
+  const nMu = Math.max(0, Number(summary.n_mu) || 0);
   const muGridIndex = (
     Array.isArray(preview?.mu_grid_index) ? preview.mu_grid_index : []
   ).map((g) => Math.max(0, Number(g) || 0));
   const ngrid = Math.max(
     Array.isArray(summary.grid_names) ? summary.grid_names.length : 0,
     muGridIndex.length ? Math.max(...muGridIndex) + 1 : 0,
-    muCount > 0 ? 1 : 0,
+    nMu > 0 ? 1 : 0,
   );
   const perGrid = new Array(ngrid).fill(0);
-  for (let mu = 0; mu < muCount; mu++) {
+  for (let mu = 0; mu < nMu; mu++) {
     const g = muGridIndex[mu] ?? 0;
     perGrid[g < ngrid ? g : 0] += 1;
   }
-  return { muCount, perGrid, muGridIndex };
+  return { nMu, perGrid, muGridIndex };
 }

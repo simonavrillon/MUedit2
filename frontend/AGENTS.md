@@ -29,6 +29,8 @@ Architecture: [dev/architecture.md](../dev/architecture.md#frontend-shape). Wire
   `applyEditChange` and `applyEditSave`; never patch discharge times locally.
 - Every scripted element has a typed handle in `app/dom.js`, used as `app.els.x`. Element ids
   in `index.html` are referenced by the docs, so rename them with care.
+- Hide elements with the `hidden` attribute (`el.hidden = true`); `css/base.css` makes it win
+  over any `display` a class sets. There is no `.hidden` class.
 - View modules (`view/`) only draw the state they're given. Ask for missing data in the stage's
   render member (`ensureEditPulseView`, `ensureQcTraces`), not in a draw function.
 - Colours are CSS tokens in `css/tokens.css`. Canvases read them through `COLORS` in

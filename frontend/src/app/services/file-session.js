@@ -61,7 +61,7 @@ export function createFileSessionService(app) {
   /** @type {FileSessionService["syncBidsProject"]} */
   function syncBidsProject() {
     const picked = els.bidsProject?.value || "";
-    els.bidsProjectNewRow?.classList.toggle("hidden", !!picked);
+    if (els.bidsProjectNewRow) els.bidsProjectNewRow.hidden = !!picked;
     setEditProject(state, getBidsProject());
     try {
       if (picked) localStorage.setItem(LAST_PROJECT_KEY, picked);
@@ -105,7 +105,7 @@ export function createFileSessionService(app) {
   /** @type {FileSessionService["setUploadLoading"]} */
   function setUploadLoading(active) {
     if (!els.uploadLoader) return;
-    els.uploadLoader.classList.toggle("hidden", !active);
+    els.uploadLoader.hidden = !active;
   }
 
   /**
@@ -207,7 +207,8 @@ export function createFileSessionService(app) {
     const scheme = data?.placement_scheme || meta.placement_scheme;
     if (els.bidsPlacementScheme && scheme) {
       els.bidsPlacementScheme.value = String(scheme);
-      els.bidsPlacementDescRow?.classList.toggle("hidden", scheme !== "Other");
+      if (els.bidsPlacementDescRow)
+        els.bidsPlacementDescRow.hidden = scheme !== "Other";
     }
     /** @type {[HTMLInputElement | null | undefined, unknown][]} */
     const placement = [

@@ -112,11 +112,7 @@ class MemoryBudget:
 
     @contextlib.contextmanager
     def locked(self) -> Iterator[None]:
-        """Hold ``lock``; entries dropped meanwhile are released once the outermost hold ends.
-
-        A release can wait on a lock a request holds while that request asks the budget, so
-        it never runs under ``lock``.
-        """
+        """Hold ``lock``; entries dropped meanwhile are released once the outermost hold ends."""
         dropped: list[tuple[BudgetedLRU[Any], str, Any]] = []
         try:
             with self.lock:
@@ -128,6 +124,7 @@ class MemoryBudget:
                     if self._depth == 0:
                         dropped, self._dropped = self._dropped, []
         finally:
+            # Outside ``lock``: a release can wait on a lock a request holds while it asks the budget.
             for cache, token, value in dropped:
                 cache.release(token, value)
 
@@ -265,10 +262,7 @@ class BudgetedLRU(Generic[V]):
         return sum(slot.nbytes for slot in self.slots.values())
 
     def drop(self, token: str) -> _Slot[V]:
-        """Remove the entry for ``token`` and release it.
-
-        The release runs once the budget's outermost hold of its lock ends.
-        """
+        """Remove the entry for ``token``; it is released once the outermost lock hold ends."""
         with self.budget.locked():
             slot = self.slots.pop(token)
             self.budget._dropped.append((self, token, slot.value))

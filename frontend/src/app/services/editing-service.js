@@ -277,7 +277,7 @@ export async function removeOutliers(app) {
   const { state, setStatus } = app;
   const muIdx = state.edit.currentMu ?? 0;
   if ((state.edit.spikeTimes?.[muIdx]?.length ?? 0) < 3) {
-    setStatus("Not enough spikes for outlier removal", "muted");
+    setStatus("Not enough discharges for outlier removal", "muted");
     return;
   }
   return editAction(app, {
@@ -579,23 +579,23 @@ function confirmRecovery(count) {
  *
  * @param {App} app
  * @param {FileRef} file
- * @param {string} filepath
+ * @param {string} filePath
  * @param {{ open?: boolean }} [options] `open: false` loads it without leaving the current page.
  */
 export async function loadDecompositionForEdit(
   app,
   file,
-  filepath,
+  filePath,
   options = {},
 ) {
   const { api, setUploadLoading, setStatus, resetEditState } = app;
 
-  if (!filepath) return;
+  if (!filePath) return;
   setUploadLoading(true);
   setStatus("Loading...", "muted");
   let opened = false;
   try {
-    let frame = await api.editOpen(filepath);
+    let frame = await api.editOpen(filePath);
     opened = true;
     const recoverable = Number(frame.meta.recoverable_edits) || 0;
     let recovered = 0;

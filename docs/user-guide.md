@@ -27,7 +27,7 @@ come back for the detail on any control or setting. For the files MUedit writes,
    channels, and mark any noisy stretches as artifact windows with the **+** button.
 5. **Decompose** — click **Decompose signal** and wait for the run to finish.
 6. **Edit and save** — the result opens in the **Edit** stage. Step through the motor
-   units, fix missed or extra spikes, and click **Save**.
+   units, fix missed or extra discharges, and click **Save**.
 
 ---
 
@@ -236,7 +236,7 @@ it happens:
 - **Phase track** — **Load → Filter → Decompose → Post-process → Save**. The active
   phase's dot bounces; done phases fill; a failed phase turns red.
 - **Search** — one row of dots per grid × window, one dot per iteration: **kept**,
-  **rejected**, or **too few spikes**. A fourth, fainter state, **skipped**, marks
+  **rejected**, or **too few discharges**. A fourth, fainter state, **skipped**, marks
   iterations of a window whose basis ran out early.
 - **Unit counter** — a big number labelled **"motor units found"** during the search and
   **"motor units kept"** once it finishes; with more than one grid, a per-grid count
@@ -275,9 +275,9 @@ landing page to resume work.
 - **Grid** and **Motor Unit** dropdowns at the top.
 - **Edit toolbar** — the tools below.
 - **Firing rate (pps)** — the unit's instantaneous discharge rate over time.
-- **Pulse train** — the unit's pulse train over the current view, with spike markers,
+- **Pulse train** — the unit's pulse train over the current view, with discharge markers,
   artifact markers, your selection boxes, and the bookmark.
-- **Timeline** — a whole-recording strip with the unit's spikes, your last edit's
+- **Timeline** — a whole-recording strip with the unit's discharges, your last edit's
   additions (green) and removals (red), and the visible window as a draggable rectangle.
   Drag it to pan; click it to centre the view.
 
@@ -290,22 +290,22 @@ current grid has no motor units, the dropdowns fall back to the first grid that 
 
 Pick a tool, then **drag a box** over the part of the pulse train you want it to act on.
 The tool acts once, on that box; pick it again for the next one. With **Delete
-spike/artifact**, a click also removes what is under it.
+discharge/artifact**, a click also removes what is under it.
 
 | Button | Shortcut | Description |
 |---|---|---|
-| Add spike | `A` | Add the missed discharges inside the box |
+| Add discharge | `A` | Add the missed discharges inside the box |
 | Add artifact | `X` | Mark a peak as an artifact so it is excluded rather than counted (see below) |
-| Delete spike/artifact | `D` | Remove both spikes and artifact markers inside the box (or click) |
-| Remove outliers | `R` | Automatically remove spikes with implausibly high discharge rates |
+| Delete discharge/artifact | `D` | Remove both discharges and artifact markers inside the box (or click) |
+| Remove outliers | `R` | Automatically remove discharges with implausibly high discharge rates |
 | Update filter | `Space` | Recompute the unit's filter from the EMG over the window you are looking at — the single most useful thing to do to a marginal unit |
 | Peel-off | `P` | Toggle peel-off for filter updates (see below) |
-| Lock spikes | `L` | Toggle spike-locking for filter updates (see below) |
+| Lock discharges | `L` | Toggle discharge-locking for filter updates (see below) |
 | Flag MU | — | Mark the current MU for deletion — it is dropped when you save |
 | Duplicate MU | — | Create an identical copy of the current MU in the same grid, as a starting point for separating two merged units |
 | Remove duplicates | — | Run duplicate detection immediately, exactly as the decomposition does (within each grid, then across grids) |
 | Undo | — | Take back the last edit, whichever MU it was on (up to 100 edits). **There is no redo** |
-| Reset | — | Return the current MU to how the file had it (spike times and pulse train), clearing its artifacts and flag. Reset can itself be undone |
+| Reset | — | Return the current MU to how the file had it (discharge times and pulse train), clearing its artifacts and flag. Reset can itself be undone |
 | Save | — | Write the edited decomposition to disk |
 
 A static hint line under the toolbar lists the shortcuts.
@@ -315,26 +315,26 @@ motor units' waveform contributions (same grid) from the whitened signal before
 recomputing the filter. It can improve separation in crowded windows, but may overcorrect
 if the other units are not well estimated. Off by default.
 
-**Lock spikes during filter update** (`L`) — when on, Update filter keeps the spikes you
-already have in the window instead of replacing them: each existing spike is realigned to
-its nearest signal peak (within ±10 samples) and merged with any newly detected spikes.
+**Lock discharges during filter update** (`L`) — when on, Update filter keeps the discharges you
+already have in the window instead of replacing them: each existing discharge is realigned to
+its nearest signal peak (within ±10 samples) and merged with any newly detected discharges.
 Use it when you have already curated a window and want a filter refresh to *add* missed
 discharges without discarding your edits. Off by default; independent of peel-off, so the
 two can be combined.
 
 **Add artifact workflow** (`X`) — for a high-amplitude peak that is clearly noise, not a
 real discharge. Drag a box around it; the peak is marked with an orange dot and recorded as
-an artifact. Artifacts are **not** added to the spike train — they are excluded from it.
+an artifact. Artifacts are **not** added to the discharges — they are excluded from it.
 The next **Update filter** subtracts the signal around each artifact peak (peel-off style,
 25 ms) before recomputing, so the artifact cannot corrupt the new filter. Artifact markers
-are preserved when you save and reload. Remove one with **Delete spike** (delete mode
-removes both spikes and artifact markers in the box); **Undo** takes back an artifact you
+are preserved when you save and reload. Remove one with **Delete discharge/artifact** (delete mode
+removes both discharges and artifact markers in the box); **Undo** takes back an artifact you
 just added; **Reset** clears all artifacts for the current MU.
 
 **Flag, duplicate, remove duplicates** — a flagged MU draws as a flat line at 0 and is
 dropped on save. Duplicate MU copies a unit so you can edit the two copies apart.
 **Remove duplicates** deduplicates within each grid and then across grids, at the
-**Duplicates thresh** setting, keeping the unit with the lowest inter-spike-interval
+**Duplicates thresh** setting, keeping the unit with the lowest inter-discharge-interval
 variability. An MU copied with **Duplicate MU** is removed on save unless you have edited
 it enough to fall below the threshold.
 
@@ -377,7 +377,7 @@ your project folder, alongside a sidecar recording the full history of every edi
 made, with timestamps. That history survives save-and-reload cycles, so you can come back
 to a file tomorrow and keep going, and anyone looking at the data later can see exactly
 what was done by hand. Each save also writes the discharges as a standard BIDS events
-table, one row per spike, regenerated from your current edits. Flagged and duplicate MUs
+table, one row per discharge, regenerated from your current edits. Flagged and duplicate MUs
 are removed on save.
 
 ---

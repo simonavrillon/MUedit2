@@ -119,7 +119,6 @@ describe("project field", () => {
     const options = [...projects, ""].map(
       (value) => new globalThis.Option(value, value),
     );
-    const hidden = new Set();
     const els = {
       bidsProject: {
         value: projects[0] ?? "",
@@ -128,11 +127,7 @@ describe("project field", () => {
         replaceChildren: (...next) => options.splice(0, Infinity, ...next),
       },
       bidsProjectNew: { value: "" },
-      bidsProjectNewRow: {
-        classList: {
-          toggle: (c, on) => (on ? hidden.add(c) : hidden.delete(c)),
-        },
-      },
+      bidsProjectNewRow: { hidden: false },
     };
     const state = { edit: { project: "" } };
     const api = { listProjects: async () => ({ projects: listProjects }) };
@@ -140,7 +135,13 @@ describe("project field", () => {
       /** @type {any} */ ({ els, state, api }),
     );
     const listed = () => options.map((option) => option.value);
-    return { session, els, state, listed, rowHidden: () => hidden.size > 0 };
+    return {
+      session,
+      els,
+      state,
+      listed,
+      rowHidden: () => els.bidsProjectNewRow.hidden,
+    };
   }
 
   test("setting it sets the edit session's project too, even to empty", () => {

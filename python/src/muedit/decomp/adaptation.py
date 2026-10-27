@@ -168,14 +168,7 @@ class AdaptiveDecomp:
         reverse: bool = False,
         sink: BatchSink | None = None,
     ) -> None:
-        """Adapt over ``[start, stop)`` forward or backward.
-
-        Only a full, artifact-free batch adapts everything (whitening, separation vectors,
-        centroids). The trailing partial batch is too short for a covariance: it keeps the
-        whitening, but still adapts the centroids and, without an artifact, the separation
-        vectors. A full batch with an artifact adapts nothing, so the artifact cannot steer
-        the model.
-        """
+        """Adapt over ``[start, stop)`` forward or backward."""
         stop = self.n_samples if stop is None else stop
         for batch_start, seg_end in self._batch_bounds(start, stop, reverse):
             full_batch = seg_end - batch_start == self.batch_size
@@ -200,6 +193,7 @@ class AdaptiveDecomp:
                 self._project(ext[-1:]) if seg_end < self.n_samples else None,
             )
 
+            # Only a full, artifact-free batch adapts the whitening, which needs a covariance.
             if not full_batch:
                 whitened_batch = self.whiten_mat @ batch.T
                 pulse_trains_batch = self._separate(whitened_batch)
@@ -211,6 +205,7 @@ class AdaptiveDecomp:
                         whitened_batch, pulse_trains_batch, spikes_batch
                     )
             elif batch_artifact:
+                # A full batch with an artifact adapts nothing, so the artifact cannot steer the model.
                 whitened_batch = self.whiten_mat @ batch.T
                 pulse_trains_batch = self._separate(whitened_batch)
                 spikes_batch = self._detect_spikes(

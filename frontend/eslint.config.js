@@ -46,6 +46,9 @@ export default [
     rules: {
       // Catches things like the two-statement import from the same module.
       "no-duplicate-imports": "error",
+      // "smart" keeps `x == null`, which tests null and undefined at once.
+      eqeqeq: ["error", "smart"],
+      "prefer-const": "error",
       // Underscore-prefixed args/vars are intentionally unused (DI placeholders).
       "no-unused-vars": [
         "error",

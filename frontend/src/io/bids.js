@@ -1,3 +1,7 @@
+/**
+ * BIDS naming without DOM: entity labels and tokens, suggested file names,
+ * muscle rows, and session info from a loaded decomposition.
+ */
 import { inferGridCount, normalizeGridNames } from "./grid.js";
 
 /** @typedef {import("../state/state.js").State} State */

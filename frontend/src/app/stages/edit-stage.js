@@ -1,3 +1,7 @@
+/**
+ * The edit stage: its service (rendering, edit mode, the pulse view, edit
+ * requests), the toolbar commands and their keys, and its event bindings.
+ */
 import {
   resetEditState as resetEditStateFeature,
   addSpikesInSelection as addSpikesInSelectionFeature,
@@ -223,27 +227,16 @@ export function createEditStageService(app) {
   };
 }
 
-/** @typedef {{ shortSel: string, fullSel: string, prefix: string }} ToggleLabels */
-
-/** @type {ToggleLabels} */
-const PEEL_OFF = {
-  shortSel: ".peeloff-short",
-  fullSel: ".peeloff-full",
-  prefix: "Peel-off",
-};
-/** @type {ToggleLabels} */
-const LOCK_SPIKES = {
-  shortSel: ".lockspikes-short",
-  fullSel: ".lockspikes-full",
-  prefix: "Lock",
-};
+/** Prefixes of the toggles' full labels. */
+const PEEL_OFF = "Peel-off";
+const LOCK_SPIKES = "Lock";
 
 /**
  * @param {HTMLButtonElement | null} btn
- * @param {ToggleLabels} labels
+ * @param {string} prefix
  */
-function flipToggle(btn, labels) {
-  if (btn) applyLabeledToggle(btn, !isToggleOn(btn), labels);
+function flipToggle(btn, prefix) {
+  if (btn) applyLabeledToggle(btn, !isToggleOn(btn), prefix);
 }
 
 /**
@@ -264,7 +257,7 @@ export const EDIT_COMMANDS = [
     button: "editAddBtn",
     key: "a",
     run: (app) =>
-      app.setEditMode("add", "Drag a box on pulse train to add spikes"),
+      app.setEditMode("add", "Drag a box on pulse train to add discharges"),
   },
   {
     button: "editDeleteSpikeBtn",
@@ -272,7 +265,7 @@ export const EDIT_COMMANDS = [
     run: (app) =>
       app.setEditMode(
         "delete_spikes",
-        "Drag a box on pulse train to delete spikes",
+        "Drag a box on pulse train to delete discharges",
       ),
   },
   {
@@ -356,14 +349,13 @@ export function setupEditEvents(app) {
 
   els.bidsPlacementScheme?.addEventListener("change", () => {
     const row = els.bidsPlacementDescRow;
-    if (row)
-      row.classList.toggle("hidden", els.bidsPlacementScheme.value !== "Other");
+    if (row) row.hidden = els.bidsPlacementScheme.value !== "Other";
   });
 
   refreshEditModeButtons();
   window.addEventListener("keydown", (e) => {
     // The landing page hides the workspace without leaving the edit stage.
-    const shown = !els.workspace?.classList.contains("hidden");
+    const shown = !els.workspace?.hidden;
     if (state.currentStage !== "edit" || !shown || typingInAField(e)) return;
     const key = e.key.toLowerCase();
     const command = EDIT_COMMANDS.find((c) => c.key === key);

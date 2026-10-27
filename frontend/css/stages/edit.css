@@ -4,8 +4,6 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-  align-items: stretch;
-  margin-bottom: 0;
 }
 
 /* The shortcut line is the last thing above the plots; its margin would only add a gap. */
@@ -16,10 +14,13 @@
 .edit-full {
   width: 100%;
   margin-top: 10px;
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .stage-edit .chart-card {
-  padding: 4px 12px 12px 12px;
+  padding: 4px 12px 12px;
 }
 
 .edit-controls-row {
@@ -28,15 +29,19 @@
   gap: 12px;
 }
 
-.edit-controls-row .mu-controls {
-  margin-bottom: 0;
-}
-
 .edit-selects {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
   align-items: center;
 }
 
 .edit-selects select {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: var(--radius-sm);
+  min-width: 160px;
   height: var(--control-h);
   padding: 0 12px;
   font-size: var(--fs-md);
@@ -80,29 +85,12 @@
   margin-right: 0;
 }
 
-.edit-toolbar-group-save {
-  border-right: none;
-}
-
-.edit-toolbar-row .pill-toggle {
-  width: auto;
-  flex: 0 0 auto;
-  height: var(--control-h);
-  padding: 0 12px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: var(--fs-md);
-  font-weight: var(--fw-semibold);
-  line-height: 1;
-}
-
+.edit-toolbar-row .pill-toggle,
 .edit-toolbar-row .start-btn {
   width: auto;
   margin-top: 0;
   flex: 0 0 auto;
   height: var(--control-h);
-  padding: 0 14px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -142,13 +130,11 @@
 .edit-toolbar-row .icon-expand-btn span {
   max-width: 0;
   opacity: 0;
-  margin-left: 0;
   overflow: hidden;
   white-space: nowrap;
   transition:
     max-width 0.2s ease,
-    opacity 0.15s ease,
-    margin-left 0.2s ease;
+    opacity 0.15s ease;
 }
 
 .edit-toolbar-row .icon-expand-btn:hover,
@@ -166,7 +152,6 @@
 .edit-toolbar-row .icon-expand-btn.is-running span {
   max-width: 200px;
   opacity: 1;
-  margin-left: 0;
 }
 
 #editPeelOffToggle,
@@ -174,8 +159,7 @@
   max-width: 140px;
 }
 
-.edit-toolbar-row .icon-expand-btn .peeloff-short,
-.edit-toolbar-row .icon-expand-btn .lockspikes-short {
+.edit-toolbar-row .icon-expand-btn .toggle-short {
   max-width: 50px;
   opacity: 1;
   overflow: hidden;
@@ -184,22 +168,17 @@
     max-width 0.2s ease,
     opacity 0.15s ease;
 }
-.edit-toolbar-row .icon-expand-btn:hover .peeloff-short,
-.edit-toolbar-row .icon-expand-btn:hover .lockspikes-short,
-.edit-toolbar-row .icon-expand-btn:focus-visible .peeloff-short,
-.edit-toolbar-row .icon-expand-btn:focus-visible .lockspikes-short {
+.edit-toolbar-row .icon-expand-btn:hover .toggle-short,
+.edit-toolbar-row .icon-expand-btn:focus-visible .toggle-short {
   max-width: 0;
   opacity: 0;
 }
-.edit-toolbar-row .icon-expand-btn .peeloff-full,
-.edit-toolbar-row .icon-expand-btn .lockspikes-full {
+.edit-toolbar-row .icon-expand-btn .toggle-full {
   max-width: 0;
   opacity: 0;
 }
-.edit-toolbar-row .icon-expand-btn:hover .peeloff-full,
-.edit-toolbar-row .icon-expand-btn:hover .lockspikes-full,
-.edit-toolbar-row .icon-expand-btn:focus-visible .peeloff-full,
-.edit-toolbar-row .icon-expand-btn:focus-visible .lockspikes-full {
+.edit-toolbar-row .icon-expand-btn:hover .toggle-full,
+.edit-toolbar-row .icon-expand-btn:focus-visible .toggle-full {
   max-width: 140px;
   opacity: 1;
 }
@@ -208,21 +187,6 @@
   background: var(--surface);
   border: 1px solid var(--border);
   color: var(--mu-4);
-}
-
-.stage-edit {
-  flex: 1;
-  min-height: 0;
-}
-
-.stage-edit .edit-top-row {
-  margin-bottom: 0;
-}
-
-.stage-edit .edit-full {
-  flex: 1 1 0;
-  min-height: 0;
-  overflow: hidden;
 }
 
 /* 1.2 : 2 gives the firing rate the room the edit status line used to take. */

@@ -1,4 +1,7 @@
 /**
+ * Grid counts, names and dimensions, as the catalogue and the backend name them.
+ */
+/**
  * @param {number} value
  * @returns {number | null}
  */

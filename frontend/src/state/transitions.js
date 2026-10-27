@@ -1,3 +1,6 @@
+/**
+ * State changes that span several slices, such as replacing the open raw file.
+ */
 import {
   resetEditSlice,
   setChannelTraces,

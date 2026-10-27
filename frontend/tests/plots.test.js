@@ -506,7 +506,7 @@ describe("drawMiniSeries", () => {
     plots.drawMiniSeries(canvas, null);
     const [rect] = ops(canvas.ctx, "fillRect");
     assert.deepEqual(rect.args, [0, 0, 60, 20]);
-    assert.equal(rect.fillStyle, COLORS.gridEmpty);
+    assert.equal(rect.fillStyle, COLORS.empty);
   });
 
   test("a malformed envelope is treated as missing", () => {

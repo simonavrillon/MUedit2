@@ -1,3 +1,6 @@
+/**
+ * Reads of `state` that need defaults or derivation; use these where one exists.
+ */
 /** @typedef {import("./state.js").State} State */
 /** @typedef {import("../app/context.js").Span} Span */
 

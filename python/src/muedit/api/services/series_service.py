@@ -1,5 +1,4 @@
-"""Viewport series as MUB1 frames: an upload's EMG, grid overview and aux envelopes, and the
-pulse trains and discharge times of a run or an edit session."""
+"""Viewport series as MUB1 frames: upload EMG, grid overview, aux, and run or edit pulse trains."""
 
 from __future__ import annotations
 
@@ -61,11 +60,7 @@ def bandpassed_row(signal: SignalImport, row: int, emg_type: int) -> FloatArray:
 def build_signal_views(
     signal: SignalImport, store: ArrayStore, grid_channel_counts: list[int], emg_types: list[int]
 ) -> tuple[SignalViews, list[FloatArray]]:
-    """Bandpass the grid channels once and keep what the QC stage draws, in ``store``.
-
-    Also returns each grid's per-channel mean ``|EMG|``. Nothing full-length stays on the
-    heap: the EMG pyramid is filled a row at a time, while the next rows are filtered.
-    """
+    """Bandpass the grids once into QC views in ``store``; also each channel's mean ``|EMG|``."""
     n_rows, n_samples = signal.data.shape
     rows_of = grid_rows(grid_channel_counts, n_rows)
     n_grid_rows = rows_of[-1].stop if rows_of else 0
@@ -131,11 +126,7 @@ def _emg_reader(signal: SignalImport, views: SignalViews, grid: int) -> Reader:
 def series_frame(
     kind: SeriesKind, upload_token: str, start: int, end: int, bins: int, grid: int = 0
 ) -> Response:
-    """``[start, end)`` of an upload's ``kind`` series in ``bins`` bins (``end`` 0 = the end).
-
-    The frame holds ``samples`` ``(rows, end - start)`` when the window has no more samples
-    than bins, else ``min`` and ``max`` ``(rows, bins)``.
-    """
+    """``[start, end)`` (``end`` 0 = the end) of an upload series: ``samples`` or min/max bins."""
     held = hold_upload(upload_token)
     if held is None:
         raise missing_upload()
@@ -222,13 +213,7 @@ def _in_view(times: IntArray, start: int, end: int) -> IntArray:
 
 
 def pulse_frame(token: str, mu: int, start: int, end: int, bins: int) -> Response:
-    """``[start, end)`` of one MU's pulse train in ``bins`` bins (``end`` 0 = the end).
-
-    Like the upload series: ``samples`` ``(1, end - start)``, or ``min`` and ``max``
-    ``(1, bins)``. Also ``spikes`` and ``artifacts`` in view (int32) with the train's value
-    at each (``spike_values``, ``artifact_values``). ``meta.version`` changes with every
-    edit of the MU, so a client can cache frames by it.
-    """
+    """``[start, end)`` of an MU's pulse train, as ``series_frame``, with spikes and artifacts."""
     meta: dict[str, Any]
     arrays: dict[str, tuple[Any, str]]
     edit = get_edit_session(token)
@@ -244,6 +229,7 @@ def pulse_frame(token: str, mu: int, start: int, end: int, bins: int) -> Respons
                 series = envelope(lambda a, b: edit.values(mu, a, b), s, e, bins)
                 spikes = _in_view(edit.spike_times[mu], s, e)
                 artifacts = _in_view(edit.artifact_times[mu], s, e)
+                # ``version`` changes with every edit of the MU, so clients cache frames by it.
                 meta = {"version": edit.versions[mu], "flagged": edit.flagged[mu]}
                 arrays = {
                     "spikes": (spikes, "i4"),

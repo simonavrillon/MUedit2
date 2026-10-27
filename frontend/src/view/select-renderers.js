@@ -1,3 +1,6 @@
+/**
+ * Renders paired grid/MU dropdowns.
+ */
 /** @typedef {{ value: number, label: string }} SelectOption */
 
 /**

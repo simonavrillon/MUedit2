@@ -107,8 +107,9 @@ npm run check                     # eslint, prettier --check, tsc, node --test
   beyond what the change needs.
 - **Same concept, same name** across modules and across the backend/frontend boundary
   (`fsamp`, `grid_names`, `muscle_names`, `mu_grid_index`). Grep before naming.
-- **Docstrings are one line; comments say only what the code can't** (a spec rule, a unit fact,
-  an ordering constraint, why a constant has its value).
+- **Python docstrings are one line; each JS module opens with a comment stating its role.**
+  Beyond that, comments say only what the code can't (a spec rule, a unit fact, an ordering
+  constraint, why a constant has its value).
 - **Change both sides of a contract together.** Routes, MUB1 frames, NDJSON events and edit ops
   are listed in [dev/contracts.md](dev/contracts.md). Edit op names and history entry types are
   persisted in users' files: add them, don't rename them.
@@ -134,7 +135,8 @@ Use these terms in code, UI text and docs alike.
 | Term | Meaning | In code |
 |---|---|---|
 | MU, motor unit | one decomposed source | `mu`, `n_mu` |
-| discharge times | the samples an MU fires at (say "discharges" in docs and UI) | `spike_times`, `spikes` |
+| discharge times | the samples an MU fires at (say "discharges" in docs and UI) | `spike_times` (one array per MU), `spikes` (one MU's array) |
+| recording length | samples in the whole recording, or in the array at hand | `total_samples`, `n_samples` |
 | pulse train (IPT) | an MU's source signal, from which discharges are picked | `pulse_trains` |
 | grid | one electrode array; a recording can hold several | `grid_names`, `mu_grid_index` |
 | ROI, analysis window | a stretch of the recording to decompose | `rois` |

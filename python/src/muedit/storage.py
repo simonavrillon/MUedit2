@@ -153,13 +153,11 @@ class SessionStore:
         return view
 
     def discard(self, arr: np.ndarray) -> None:
-        """Delete the file behind ``arr`` if it is one of this store's; live maps keep their pages.
-
-        Windows cannot delete a mapped file: it goes when the store closes.
-        """
+        """Delete the file behind ``arr`` if this store owns it; live maps keep their pages."""
         filename = getattr(arr, "filename", None)
         if not filename or Path(filename).resolve().parent != self.path.resolve():
             return
+        # Windows cannot delete a mapped file: it goes when the store closes.
         with contextlib.suppress(OSError):
             Path(filename).unlink(missing_ok=True)
 
@@ -183,14 +181,12 @@ class SessionStore:
             self.close()
 
     def close(self) -> None:
-        """Delete the folder, or once the last ``hold`` is released.
-
-        What Windows still maps is removed by the next ``purge_stale_sessions``.
-        """
+        """Delete the folder now, or once the last ``hold`` is released."""
         with self._lock:
             self._closing = True
             if self._holds:
                 return
+        # What Windows still maps is left for the next purge_stale_sessions.
         shutil.rmtree(self.path, ignore_errors=True)
 
 

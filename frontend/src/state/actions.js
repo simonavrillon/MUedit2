@@ -1,3 +1,7 @@
+/**
+ * The only setters of `state`: every change to the app state goes through
+ * a function here.
+ */
 import { createEditSlice } from "./state.js";
 
 /** @typedef {import("./state.js").State} State */

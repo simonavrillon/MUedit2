@@ -1,3 +1,7 @@
+/**
+ * Draws the run page from the live run model (`decomp/live.js`): the phase
+ * track, per-iteration dots, timing and the summary.
+ */
 import {
   DOT,
   RUN_PHASES,
@@ -165,7 +169,7 @@ function renderPhases(els, live) {
 function renderCount(els, live) {
   const found = keptTotal(live);
   const summary = live.summary;
-  const value = summary ? summary.muCount : found;
+  const value = summary ? summary.nMu : found;
   if (els.runCount && els.runCount.textContent !== String(value)) {
     els.runCount.textContent = String(value);
     if (!summary && value > 0) replayAnimation(els.runCount, "is-bumped");
@@ -193,7 +197,7 @@ function renderResult(els, live) {
   if (live.status === "done") {
     if (live.saving) saveText = "Saving the decomposition…";
     else if (live.saveError) saveText = `Save failed: ${live.saveError}`;
-    else if (!summary?.muCount) saveText = "No motor units to save.";
+    else if (!summary?.nMu) saveText = "No motor units to save.";
   }
   if (els.runSaveText) els.runSaveText.textContent = saveText;
   if (els.runRetrySaveBtn) els.runRetrySaveBtn.hidden = !live.saveError;

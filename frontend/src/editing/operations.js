@@ -1,3 +1,7 @@
+/**
+ * Edit-stage logic without DOM: the pulse view's range, the grid/MU
+ * dropdown model, discharge rates, and selections turned into edit requests.
+ */
 import { resetEditSlice } from "../state/actions.js";
 import { traceRange } from "../signal/series.js";
 

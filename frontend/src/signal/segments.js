@@ -1,3 +1,7 @@
+/**
+ * Force-target segments: their kinds and glyphs, choosing them as analysis
+ * windows, the BIDS task they imply, and the `/qc/segment` request.
+ */
 import { isCovered, subtractSpan, unionSpans } from "./intervals.js";
 import { setRois, setSegments, setTargetIndex } from "../state/actions.js";
 import { SEGMENT_KINDS, toSegments } from "../api/payloads.js";

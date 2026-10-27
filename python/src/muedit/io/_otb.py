@@ -101,10 +101,7 @@ def _sample_frames(file_path: str, dtype: np.dtype, n_channels: int) -> np.ndarr
 
 
 def _write_rows(out: np.ndarray, frames: np.ndarray, rows: np.ndarray, scale: np.ndarray) -> None:
-    """Write channels ``rows`` of ``frames`` times ``scale`` into ``out``, block by block.
-
-    The product is taken in ``scale.dtype``, as the loaders always scaled.
-    """
+    """Write ``frames[:, rows].T * scale`` into ``out`` block by block, in ``scale.dtype``."""
     factors = scale[:, None]
     for start, stop in sample_blocks(out.shape[1], len(rows), scale.dtype.itemsize):
         block = frames[start:stop, rows].T.astype(scale.dtype)
@@ -228,14 +225,14 @@ def _read_feedback_traces(tmpdir: str) -> list[_Trace]:
                 continue
             frames = values.reshape(-1, n_total)
             first = int(track["AcquisitionChannel"])
-            n_ch = int(track.get("NumberOfChannels", 1))
+            n_channels = int(track.get("NumberOfChannels", 1))
             traces.extend(
                 _Trace(
-                    name=name if n_ch == 1 else f"{name} {i + 1}",
+                    name=name if n_channels == 1 else f"{name} {i + 1}",
                     values=frames[:, first + i].copy(),
                     fsamp=float(track["SamplingFrequency"]),
                 )
-                for i in range(n_ch)
+                for i in range(n_channels)
             )
     return traces
 
@@ -273,11 +270,7 @@ def _write_segments(
 
 
 def _read_sip(path: str, n_samples: int) -> np.ndarray | None:
-    """One ``.sip`` channel (a float64 target or path trace) fitted to the EMG length.
-
-    A longer trace is cut; a shorter one holds its last value to the end, as a force
-    target would. An unreadable or empty file is skipped.
-    """
+    """One ``.sip`` trace, cut or held at its last value to the EMG length; None if unreadable."""
     name = os.path.basename(path)
     try:
         values = np.fromfile(path, dtype=np.float64)
@@ -298,10 +291,10 @@ def _read_sip(path: str, n_samples: int) -> np.ndarray | None:
     return values[:n_samples]
 
 
-def _extract(filepath: str, tmpdir: str, kind: str) -> None:
+def _extract(file_path: str, tmpdir: str, kind: str) -> None:
     """Unpack an OTB+ or OTB4 archive (a tar file) into ``tmpdir``."""
     try:
-        with tarfile.open(filepath, "r") as tar:
+        with tarfile.open(file_path, "r") as tar:
             tar.extractall(tmpdir, filter="data")
     except (tarfile.TarError, OSError) as exc:
         raise SignalLoadError(f"Failed to extract {kind} file: {exc}") from exc
@@ -349,11 +342,11 @@ def _grid_position(device_name: str, adapter_index: str, prefix: str) -> int:
     return 0
 
 
-def load_otb_plus(filepath: str, store: ArrayStore | None = None) -> SignalImport:
+def load_otb_plus(file_path: str, store: ArrayStore | None = None) -> SignalImport:
     """Load an OTB+ archive as a ``SignalImport``, written into ``store`` block by block."""
     store = store if store is not None else RamStore()
     with tempfile.TemporaryDirectory() as tmpdir:
-        _extract(filepath, tmpdir, "OTB+")
+        _extract(file_path, tmpdir, "OTB+")
         signals = sorted(f for f in os.listdir(tmpdir) if f.endswith(".sig"))
         if not signals:
             raise SignalLoadError("No .sig file found in OTB+ archive.")
@@ -361,7 +354,7 @@ def load_otb_plus(filepath: str, store: ArrayStore | None = None) -> SignalImpor
         if len(signals) > 1:
             logger.warning(
                 "%s holds %d .sig files; loading %s, ignoring %s",
-                filepath,
+                file_path,
                 len(signals),
                 sig_file,
                 ", ".join(signals[1:]),
@@ -587,11 +580,11 @@ def _generic_tracks(tmpdir: str, track_list: list[dict[str, Any]]) -> list[_Trac
     return tracks
 
 
-def load_otb4(filepath: str, store: ArrayStore | None = None) -> SignalImport:
+def load_otb4(file_path: str, store: ArrayStore | None = None) -> SignalImport:
     """Load an OTB4 archive as a ``SignalImport``, written into ``store`` block by block."""
     store = store if store is not None else RamStore()
     with tempfile.TemporaryDirectory() as tmpdir:
-        _extract(filepath, tmpdir, "OTB4")
+        _extract(file_path, tmpdir, "OTB4")
         xml_files = [
             os.path.join(root, f)
             for root, _, files in os.walk(tmpdir)

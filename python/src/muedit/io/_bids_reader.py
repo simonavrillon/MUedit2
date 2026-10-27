@@ -404,10 +404,10 @@ def _muscle(row: dict[str, str]) -> str:
     return "" if _blank(row.get("target_muscle")) else (row.get("target_muscle") or "").strip()
 
 
-def load_bids_signal(filepath: str, store: ArrayStore | None = None) -> SignalImport:
+def load_bids_signal(file_path: str, store: ArrayStore | None = None) -> SignalImport:
     """Load a BIDS EMG recording (BDF/EDF + sidecars) as a ``SignalImport``, written into ``store``."""
     store = store if store is not None else RamStore()
-    emg_path = Path(filepath)
+    emg_path = Path(file_path)
 
     if emg_path.is_dir():
         candidates = sorted(emg_path.glob("*_emg.bdf")) + sorted(emg_path.glob("*_emg.edf"))
@@ -420,7 +420,7 @@ def load_bids_signal(filepath: str, store: ArrayStore | None = None) -> SignalIm
         emg_path = candidates[0]
 
     stem = emg_path.stem
-    entity_label = stem[:-4] if stem.endswith("_emg") else stem
+    entity_label = stem.removesuffix("_emg")
 
     channels_tsv = resolve_bids_channels_tsv(emg_path.parent, entity_label)
     recording = _read_recording(emg_path, entity_label, channels_tsv)

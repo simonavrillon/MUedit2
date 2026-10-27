@@ -1,3 +1,7 @@
+/**
+ * QC drawing: the EMG grid with its windows and artifacts, ROI drags, the
+ * channel grid and the aux channels. Draws the state it is given.
+ */
 import { COLORS, canvasFont, traceColors } from "../config.js";
 import {
   drawGridOverlay,

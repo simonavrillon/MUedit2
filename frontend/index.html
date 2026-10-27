@@ -78,7 +78,7 @@
           </div>
           <span
             id="status"
-            class="status-pill app-status"
+            class="app-status"
             role="status"
             aria-live="polite"
           ></span>
@@ -112,7 +112,8 @@
           <div class="landing-card">
             <div
               id="uploadLoader"
-              class="upload-loader hidden"
+              class="upload-loader"
+              hidden
               aria-live="polite"
               aria-label="Uploading file"
             >
@@ -124,19 +125,20 @@
             </div>
             <div
               id="uploadFormatError"
-              class="upload-format-error hidden"
+              class="upload-format-error"
+              hidden
               role="alert"
             ></div>
           </div>
         </section>
 
-        <section class="workspace hidden" id="workspace">
+        <section class="workspace" id="workspace" hidden>
           <div
             class="settings-overlay"
             id="settingsOverlay"
             aria-hidden="true"
           ></div>
-          <aside class="control-panel glass settings-panel" id="settingsPanel">
+          <aside class="settings-panel" id="settingsPanel">
             <button
               class="settings-toggle-btn icon-btn"
               id="settingsToggleBtn"
@@ -421,7 +423,7 @@
                     Peeloff: Off
                   </button>
                 </div>
-                <div class="form-row hidden" id="peelOffSettings">
+                <div class="form-row" id="peelOffSettings" hidden>
                   <label for="peelOffWindow">Window (ms)</label>
                   <input type="number" id="peelOffWindow" value="25" min="1" />
                 </div>
@@ -485,7 +487,7 @@
                     COV tool: Off
                   </button>
                 </div>
-                <div class="form-row hidden" id="covSettings">
+                <div class="form-row" id="covSettings" hidden>
                   <label for="covValue">COV threshold</label>
                   <input type="number" step="0.01" id="covValue" value="0.5" />
                 </div>
@@ -493,10 +495,10 @@
             </section>
           </aside>
 
-          <div class="layout workspace-grid">
+          <div class="layout">
             <div class="visual-panel">
               <!-- Quality Check Stage -->
-              <div class="stage stage-qc active" id="stageQc">
+              <div class="stage active" id="stageQc">
                 <div class="qc-tabs-row">
                   <div class="qc-tabs stage-tabs" id="qcGridTabs">
                     <!-- Dynamically populated Grid 1, Grid 2, etc. -->
@@ -546,11 +548,7 @@
                       />
                     </svg>
                   </button>
-                  <button
-                    class="start-btn qc-run-btn"
-                    id="startBtn"
-                    type="button"
-                  >
+                  <button class="start-btn run-btn" id="startBtn" type="button">
                     <span>Decompose signal</span>
                     <svg
                       xmlns="http://www.w3.org/2000/svg"
@@ -569,12 +567,12 @@
                   </button>
                 </div>
                 <div class="split">
-                  <div class="chart-card qc-card scroll-card glass">
+                  <div class="chart-card scroll-card">
                     <div class="chart-title">EMG channels</div>
                     <div id="qcSection" class="qc-section"></div>
                   </div>
                   <div class="qc-right-column">
-                    <div class="chart-card glass">
+                    <div class="chart-card">
                       <div class="chart-title">Average EMG activity</div>
                       <div class="artifact-controls">
                         <span class="artifact-controls-label">
@@ -601,7 +599,7 @@
                       </div>
                       <canvas id="emgCanvas" height="180"></canvas>
                     </div>
-                    <div class="chart-card glass">
+                    <div class="chart-card">
                       <div class="chart-title">Auxiliary channels</div>
                       <div class="form-row aux-selector-row">
                         <select id="auxSelector"></select>
@@ -675,7 +673,7 @@
                     <p class="run-save-text" id="runSaveText"></p>
                     <div class="run-result-actions">
                       <button
-                        class="start-btn qc-run-btn run-action-btn"
+                        class="start-btn run-btn run-action-btn"
                         id="runRetrySaveBtn"
                         type="button"
                         hidden
@@ -685,11 +683,13 @@
                     </div>
                   </div>
 
-                  <div class="run-search">
+                  <div>
                     <div class="run-legend" aria-hidden="true">
                       <span><i class="run-dot is-kept"></i>kept</span>
                       <span><i class="run-dot is-rejected"></i>rejected</span>
-                      <span><i class="run-dot is-few"></i>too few spikes</span>
+                      <span
+                        ><i class="run-dot is-few"></i>too few discharges</span
+                      >
                     </div>
                     <div class="run-dots" id="runDots"></div>
                   </div>
@@ -706,7 +706,7 @@
                     Cancel
                   </button>
                   <button
-                    class="start-btn qc-run-btn run-action-btn run-again-btn"
+                    class="start-btn run-btn run-action-btn run-again-btn"
                     id="runAgainBtn"
                     type="button"
                   >
@@ -718,9 +718,9 @@
               <!-- Edit Stage -->
               <div class="stage stage-edit" id="stageEdit">
                 <div class="edit-top-row">
-                  <div class="chart-card glass">
+                  <div class="chart-card">
                     <div class="edit-controls-row">
-                      <div class="mu-controls edit-selects">
+                      <div class="edit-selects">
                         <select
                           id="editMuGridSelect"
                           aria-label="Grid"
@@ -844,7 +844,7 @@
                                   d="M12 9v6m3-3H9m12 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
                                 />
                               </svg>
-                              <span>Add spike</span>
+                              <span>Add discharge</span>
                             </button>
                             <button
                               class="pill-toggle icon-expand-btn"
@@ -887,7 +887,7 @@
                                   d="M15 12H9m12 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
                                 />
                               </svg>
-                              <span>Delete spike/artifact</span>
+                              <span>Delete discharge/artifact</span>
                             </button>
                           </div>
                           <div class="edit-toolbar-group">
@@ -920,8 +920,8 @@
                               aria-pressed="false"
                               title="Peel-off: subtract other MU waveforms before recomputing filter"
                             >
-                              <span class="peeloff-short">Off</span>
-                              <span class="peeloff-full">Peel-off: Off</span>
+                              <span class="toggle-short">Off</span>
+                              <span class="toggle-full">Peel-off: Off</span>
                             </button>
                             <button
                               class="pill-toggle icon-expand-btn"
@@ -929,10 +929,10 @@
                               type="button"
                               data-state="off"
                               aria-pressed="false"
-                              title="Lock spikes: keep existing spike times when updating filter"
+                              title="Lock discharges: keep existing discharges when updating filter"
                             >
-                              <span class="lockspikes-short">Off</span>
-                              <span class="lockspikes-full">Lock: Off</span>
+                              <span class="toggle-short">Off</span>
+                              <span class="toggle-full">Lock: Off</span>
                             </button>
                           </div>
                           <div class="edit-toolbar-group">
@@ -979,9 +979,7 @@
                               <span>Reset</span>
                             </button>
                           </div>
-                          <div
-                            class="edit-toolbar-group edit-toolbar-group-save"
-                          >
+                          <div class="edit-toolbar-group">
                             <button
                               class="start-btn icon-expand-btn"
                               id="editSaveBtn"
@@ -1008,19 +1006,19 @@
                         </div>
                       </div>
                     </div>
-                    <p class="hint muted">
+                    <p class="hint">
                       Shortcuts: &lt;/&gt; previous-next MU, R remove outliers,
-                      A add spikes, X add artifact, D delete spikes/artifacts,
-                      Space update filter, P toggle peel-off, L toggle lock
-                      spikes, ←/→ scroll, ↑/↓ zoom.
+                      A add discharges, X add artifact, D delete
+                      discharges/artifacts, Space update filter, P toggle
+                      peel-off, L toggle lock discharges, ←/→ scroll, ↑/↓ zoom.
                     </p>
                   </div>
                 </div>
-                <div class="chart-card glass edit-full" id="editDrCard">
+                <div class="chart-card edit-full" id="editDrCard">
                   <div class="chart-title">Firing rate (pps)</div>
                   <canvas id="editDrCanvas" height="280"></canvas>
                 </div>
-                <div class="chart-card glass edit-full" id="editPulseCard">
+                <div class="chart-card edit-full" id="editPulseCard">
                   <div class="chart-title">Pulse train</div>
                   <canvas id="editPulseCanvas" height="280"></canvas>
                 </div>

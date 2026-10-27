@@ -66,11 +66,7 @@ def adaptive_batch_process(
     artifact_mask: BoolArray | None = None,
     store: ArrayStore | None = None,
 ) -> tuple[FloatArray, list[IntArray]]:
-    """Apply adaptive post-processing across all decomposition windows and grids.
-
-    The adaptation runs in ``params.work_dtype``; the pulse trains are written into
-    ``store`` (heap by default) batch by batch.
-    """
+    """Adapt every window and grid in ``params.work_dtype``, writing pulse trains into ``store``."""
     total_mus = sum(f.shape[1] for f in mu_filters_by_window.values() if f.size > 0)
     if total_mus == 0:
         return np.array([]), []

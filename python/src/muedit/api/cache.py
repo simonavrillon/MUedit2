@@ -27,10 +27,7 @@ from muedit.storage import SessionStore
 
 @dataclass
 class SignalViews:
-    """What the QC stage draws, kept with an upload: min/max pyramids and the grid overview.
-
-    Every array is float32 and memory-mapped from the upload's store.
-    """
+    """An upload's QC drawing data: float32 min/max pyramids and grid overview, memory-mapped."""
 
     fsamp: float
     grid_names: list[str]
@@ -134,12 +131,7 @@ def store_upload(
     views: SignalViews,
     session: str = DEFAULT_SESSION,
 ) -> str:
-    """Keep ``signal`` (and the file it came from), with the QC stage's ``views``; return a token.
-
-    The entry takes over the store ``signal`` and ``views`` were built in and deletes it when
-    dropped. The upload is kept whole: a store is only ever deleted once nothing is still
-    being written into it.
-    """
+    """Keep ``signal`` and QC ``views``, owning (and later deleting) their store; return a token."""
     entry = _UploadEntry(signal=signal, source_path=source_path, views=views, store=store)
     return _UPLOADS.pin(entry, session)
 
@@ -161,10 +153,7 @@ class HeldUpload:
 
 
 def hold_upload(token: str | None) -> HeldUpload | None:
-    """The upload for ``token``, kept from eviction and its store held until ``release``.
-
-    Dropping the upload meanwhile (a new file, a closed tab) closes the store only after.
-    """
+    """The upload for ``token``, unevictable, its store open until ``release`` even if dropped."""
     with BUDGET.locked():
         entry = _UPLOADS.hold(token)
         if entry is None or token is None:
@@ -181,10 +170,7 @@ def store_run_result(
     spike_times: list[IntArray] | None = None,
     extras: RunExtras | None = None,
 ) -> str:
-    """Keep a finished run's pulse trains and discharge times; the run save reads them back.
-
-    With ``store`` (the run's T1 folder holding them), the entry deletes it when dropped.
-    """
+    """Keep a run's pulse trains and discharge times for its save; dropping deletes ``store``."""
     result = RunResult(pulse_trains, store, list(spike_times or []), extras or RunExtras())
     return _RUN_RESULTS.pin(result, session)
 
@@ -210,10 +196,7 @@ def held_run_result(token: str | None) -> Iterator[RunResult | None]:
 
 
 def store_edit_session(edit: EditSession, session: str = DEFAULT_SESSION) -> str:
-    """Keep an edit session for ``session``, in place of its last, and return its token.
-
-    Dropping a session closes it.
-    """
+    """Keep an edit session for ``session``, closing the one it replaces; return its token."""
     return _EDIT_SESSIONS.pin(_EditSessionEntry(edit), session)
 
 

@@ -33,11 +33,7 @@ def spike_array(values: Any) -> IntArray:
 
 
 def _as_2d_float_array(value: Any) -> FloatArray:
-    """Cast value to a 2-D float array, reshaping 1-D input to (1, n).
-
-    float32 input (loader output, memory-mapped or not) is kept without a copy;
-    anything else becomes float64.
-    """
+    """Cast to a 2-D float array (1-D becomes ``(1, n)``); float32 stays uncopied, else float64."""
     arr = np.asarray(value)
     if arr.dtype != np.float32:
         arr = arr.astype(np.float64, copy=False)
@@ -111,12 +107,7 @@ class SignalImport:
         aux_names: str | Iterable[Any] | None = None,
         metadata: Any = None,
     ) -> SignalImport:
-        """Construct from raw loader values, coercing types and filling defaults.
-
-        ``data`` becomes a 2-D float array (a 1-D input is one channel), a missing
-        ``fsamp`` becomes 0.0, a single name becomes a one-item list, and
-        ``aux_data`` is padded or truncated to the EMG sample count.
-        """
+        """Construct from raw loader values, coercing types and filling defaults."""
         data_arr = _as_2d_float_array(data)
         n_samples = int(data_arr.shape[1]) if data_arr.ndim == 2 else 0
         return cls(
@@ -154,11 +145,7 @@ class SignalImport:
 
 @dataclass
 class EditSignalContext:
-    """EMG embedded in a decomposition file, kept for editing and BIDS export.
-
-    Built by ``load_decomposition`` and held in the API edit cache, its EMG usually
-    memory-mapped from the edit session's store.
-    """
+    """EMG from a decomposition file, kept for editing and BIDS export (often memory-mapped)."""
 
     data: FloatArray  # (n_channels, n_samples); (0, 0) when the file holds only a mask
     fsamp: float  # 0.0 when the file does not record it

@@ -132,10 +132,7 @@ def whiten_extended_signal(
 
 
 def whiten_inplace(signal: FloatArray, whiten_mat: FloatArray) -> FloatArray:
-    """Overwrite ``signal`` with ``whiten_mat @ signal``, one column chunk at a time.
-
-    The product is float64 (a float32 chunk is promoted), then stored in ``signal``'s dtype.
-    """
+    """Overwrite ``signal`` with ``whiten_mat @ signal`` chunk by chunk, computed in float64."""
     # Each output column depends only on the same input column, so chunks can
     # be written back without a second full-size array.
     for cols in _column_chunks(signal.shape[1], signal.shape[0]):
@@ -159,10 +156,7 @@ def fixed_point_alg(
     maxiter: int,
     contrast_func: ContrastFunc,
 ) -> FloatArray:
-    """Run one-unit FastICA fixed-point iterations with orthogonalization.
-
-    Projections run in ``x``'s dtype; ``w`` and its updates stay float64.
-    """
+    """One-unit FastICA fixed-point iterations; projections in ``x``'s dtype, ``w`` in float64."""
     k = 0
     delta = 1.0
     basis_bt = basis @ basis.T
@@ -303,10 +297,7 @@ def subtract_mu_waveforms(
     fsamp: float,
     peel_off_win: float,
 ) -> list[tuple[int, int]]:
-    """Subtract the averaged MU waveform from ``x`` at every spike, in place.
-
-    Returns the ``[start, stop)`` column runs that changed, merged and ascending.
-    """
+    """Subtract the mean MU waveform at every spike in place; return the changed column runs."""
     window_l = int(np.round(peel_off_win * fsamp))
     n_cols = x.shape[1]
 
@@ -346,10 +337,10 @@ def _dewhitened_filters(
     w_dewhite = whiten_mat.T @ filters  # (n_ext, n_mu)
     if win_mean is None:
         return w_dewhite, None
-    n_ch = win_mean.size
+    n_channels = win_mean.size
     # Delay k of sample t sees win_mean only when t >= k, so the correction of the
     # first ex_factor - 1 samples (recording start) is a partial sum.
-    per_delay = np.einsum("kcm,c->km", w_dewhite.reshape(ex_factor, n_ch, -1), win_mean)
+    per_delay = np.einsum("kcm,c->km", w_dewhite.reshape(ex_factor, n_channels, -1), win_mean)
     return w_dewhite, np.cumsum(per_delay, axis=0)
 
 
@@ -360,17 +351,14 @@ def _stream_full_trace(
     out: FloatArray,
     rows: IntArray,
 ) -> None:
-    """Write the signed-squared projection of every filter over the whole trace into ``out[rows]``.
-
-    The projection runs in the extender's dtype; a grid with one MU is a one-row product,
-    hence ``zeroed_matmul``.
-    """
+    """Write every filter's signed-squared projection over the whole trace into ``out[rows]``."""
     itemsize = np.dtype(source.dtype).itemsize
     step = max(source.ex_factor, _FULL_TRACE_BATCH_BYTES // (itemsize * source.n_extended))
     last_delay = source.ex_factor - 1
     w_t = w_dewhite.T.astype(source.dtype)
     for start in range(0, source.n_samples, step):
         stop = min(start + step, source.n_samples)
+        # A grid with one MU is a one-row product, hence zeroed_matmul.
         pulse_trains = zeroed_matmul(w_t, source.read(start, stop))
         if corr_cum is not None:
             pulse_trains -= corr_cum[np.minimum(np.arange(start, stop), last_delay)].T
@@ -403,12 +391,7 @@ def batch_process_filters(
     store: ArrayStore | None = None,
     work_dtype: type[np.floating[Any]] | np.dtype[np.floating[Any]] = np.float64,
 ) -> tuple[FloatArray, list[IntArray]]:
-    """Apply MU filters over their windows, or, with ``whiten_mat_by_window``, streamed over
-    each grid's ``grid_data`` (full trace).
-
-    The pulse trains are written into ``store`` (heap by default) as they are produced. The
-    full-trace projection runs in ``work_dtype``; a window's, in the window's dtype.
-    """
+    """Apply MU filters over their windows, or streamed over each grid's trace, into ``store``."""
     sorted_wins = sorted(mu_filters_by_window.keys())
     first_row: dict[int, int] = {}
     total_mus = 0
@@ -522,13 +505,13 @@ def unique_mu_indices(
 ) -> list[int]:
     """Indices of the motor units kept after removing duplicates by lag-aware spike-train overlap."""
     jitter_samples = int(round(jitter * fsamp))
-    n_mus = len(spike_times)
+    n_mu = len(spike_times)
     jittered_spike_times = [_jittered_times(d, jitter_samples, total_samples) for d in spike_times]
 
     kept_indices: list[int] = []
-    active_mus = np.ones(n_mus, dtype=bool)
+    active_mus = np.ones(n_mu, dtype=bool)
 
-    for i in range(n_mus):
+    for i in range(n_mu):
         if not active_mus[i]:
             continue
         ref_expanded = jittered_spike_times[i]
@@ -537,7 +520,7 @@ def unique_mu_indices(
             continue
         duplicates = [i]
 
-        for j in range(i + 1, n_mus):
+        for j in range(i + 1, n_mu):
             if not active_mus[j]:
                 continue
             target_expanded = jittered_spike_times[j]

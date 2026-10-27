@@ -1,3 +1,7 @@
+/**
+ * The UI service: binds the navigation, layout and lifecycle helpers to the
+ * `app` context so features call them as `app.x()`.
+ */
 import {
   setStatus as setStatusController,
   showWorkspace as showWorkspaceController,

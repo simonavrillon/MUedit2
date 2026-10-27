@@ -1,3 +1,7 @@
+/**
+ * The run stage: its service (parameters, start availability, the stream,
+ * rendering and auto-save) and its event bindings.
+ */
 import {
   autoSaveRunDecomposition as autoSaveRunDecompositionFeature,
   cancelDecomposition,

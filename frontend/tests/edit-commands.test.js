@@ -117,10 +117,10 @@ describe("edit commands", () => {
 
   test("keys are ignored on the landing page", () => {
     els.workspace = fakeElement();
-    els.workspace.classList.add("hidden");
+    els.workspace.hidden = true;
     press("a");
     assert.equal(app.state.edit.mode, null);
-    els.workspace.classList.remove("hidden");
+    els.workspace.hidden = false;
     press("a");
     assert.equal(app.state.edit.mode, "add");
   });

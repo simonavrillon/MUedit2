@@ -1,5 +1,4 @@
-"""Decomposition files: the app .npz schema (save + load), MUedit .mat loading,
-and signal-context normalization."""
+"""Decomposition files: the app .npz schema, MUedit .mat loading, signal-context normalization."""
 
 from __future__ import annotations
 
@@ -467,11 +466,7 @@ def _shift_spike_times(values: list[IntArray], shift: int, limit: int) -> list[I
 def _finish_decomposition(
     d: DecompositionLoad, one_based: bool, binary_trains: bool = True
 ) -> LoadedDecomposition:
-    """Flatten per-grid layouts and fill what the file leaves out, for the edit stage.
-
-    Without pulse trains in the file, ``binary_trains`` draws them from the discharge times;
-    otherwise ``pulse_trains`` is left empty.
-    """
+    """Flatten per-grid layouts for editing; ``binary_trains`` draws missing trains from spikes."""
     if d.one_row_per_mu:
         pulse_trains, spike_times, mu_grid_index = (
             d.pulse_trains,
@@ -530,17 +525,15 @@ def _finish_decomposition(
 
 
 def _samples_first(shape: tuple[int, ...], total_samples: int | None) -> bool:
-    """Whether a saved ``(rows, cols)`` EMG holds samples in rows: ``total_samples`` names the axis.
-
-    A file without it, or whose EMG matches it on neither axis, falls back to channels being the
-    shorter axis; a square array matching it is channels-first, as the save writes it.
-    """
+    """Whether a saved ``(rows, cols)`` EMG is samples-first, judged by ``total_samples``."""
     rows, cols = shape
     if total_samples:
+        # Columns first: a square array is channels-first, as the save writes it.
         if cols == total_samples:
             return False
         if rows == total_samples:
             return True
+    # No ``total_samples`` match: channels are the shorter axis.
     return rows > cols
 
 
@@ -762,40 +755,37 @@ _UNREADABLE = (
 
 
 def load_decomposition(
-    filepath: str,
+    file_path: str,
     store: ArrayStore | None = None,
     *,
     with_signal: bool = True,
     binary_trains: bool = True,
 ) -> tuple[LoadedDecomposition, EditSignalContext | None]:
-    """Read a .npz or .mat decomposition once: the decomposition, and its EMG context into ``store``.
-
-    ``binary_trains=False`` leaves ``pulse_trains`` empty for a file without pulse trains.
-    """
+    """Read a .npz or .mat decomposition and its EMG context (into ``store``) in one pass."""
     store = store if store is not None else RamStore()
-    ext = Path(filepath).suffix.lower()
+    ext = Path(file_path).suffix.lower()
     if ext not in (".npz", ".mat"):
         raise DecompositionFileError("Unsupported decomposition format. Expected .mat or .npz")
     ctx: EditSignalContext | None = None
     try:
         if ext == ".npz":
-            with NpzArchive(filepath) as data:
+            with NpzArchive(file_path) as data:
                 d = _npz_v2_decomp(data) if SCHEMA_KEY in data else _npz_v1_decomp(data)
                 if with_signal:
                     ctx = _npz_signal_context(data, store, d.total_samples)
-        elif h5py.is_hdf5(filepath):
-            with h5py.File(filepath, "r") as h5f:
+        elif h5py.is_hdf5(file_path):
+            with h5py.File(file_path, "r") as h5f:
                 d = _mat73_decomp(h5f)
                 if with_signal:
                     ctx = _mat73_signal_context(h5f, store)
         else:
-            mat = scipy.io.loadmat(filepath, simplify_cells=True)
+            mat = scipy.io.loadmat(file_path, simplify_cells=True)
             d = _mat5_decomp(mat)
             if with_signal:
                 ctx = _mat5_signal_context(mat, store)
         loaded = _finish_decomposition(d, one_based=ext == ".mat", binary_trains=binary_trains)
     except _UNREADABLE as exc:
         raise DecompositionFileError(
-            f"Cannot read {Path(filepath).name}: {str(exc) or 'the file is not a decomposition'}"
+            f"Cannot read {Path(file_path).name}: {str(exc) or 'the file is not a decomposition'}"
         ) from exc
     return loaded, ctx

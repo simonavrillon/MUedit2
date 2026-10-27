@@ -24,27 +24,15 @@ textarea {
   font: inherit;
 }
 
-.glass {
-  background: transparent;
-  border: none;
-}
-
-.hidden {
+/* Wins over any class that sets display. */
+[hidden] {
   display: none !important;
 }
 
 #app {
   height: 100dvh;
-  min-height: 100dvh;
   display: flex;
   flex-direction: column;
-}
-
-@supports not (height: 100dvh) {
-  #app {
-    height: 100vh;
-    min-height: 100vh;
-  }
 }
 
 .page {
@@ -59,8 +47,6 @@ canvas {
   width: 100%;
   display: block;
   border-radius: var(--radius-sm);
-  background: transparent;
-  border: none;
 }
 
 /* ── Misc ── */

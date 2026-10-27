@@ -83,7 +83,7 @@ def mu_run(client: TestClient, recording: Path) -> list[dict[str, Any]]:
         client, token, "fixture-mu-run", QUICK, artifact_regions=[{"start": 100, "end": 400}]
     )
     assert events[-1]["stage"] == "done", events[-1]
-    assert events[-1]["summary"]["mu_count"] > 0
+    assert events[-1]["summary"]["n_mu"] > 0
     return events
 
 
@@ -161,11 +161,11 @@ class TestDecomposeStream:
     def test_done_event_shape(self, mu_run: list[dict[str, Any]]) -> None:
         done = mu_run[-1]
         assert {"summary", "preview", "message"} <= set(done)
-        assert set(done["summary"]) == {"grid_names", "mu_count", "parameters"}
+        assert set(done["summary"]) == {"grid_names", "n_mu", "parameters"}
         assert done["summary"]["parameters"]["niter"] == QUICK["niter"]
         # The page shows the recording already: only the MUs' grids and the run's token come back.
         assert set(done["preview"]) == {"mu_grid_index", "run_result_token"}
-        assert len(done["preview"]["mu_grid_index"]) == done["summary"]["mu_count"]
+        assert len(done["preview"]["mu_grid_index"]) == done["summary"]["n_mu"]
 
     def test_the_run_keeps_its_trains_and_discharges_in_its_store(
         self, mu_run: list[dict[str, Any]]
@@ -176,7 +176,7 @@ class TestDecomposeStream:
         assert (entry.store.path / "pulse_trains.npy").is_file()
         assert resident_nbytes(entry.pulse_trains) == 0
         assert entry.pulse_trains.dtype == np.float32
-        n_mu = done["summary"]["mu_count"]
+        n_mu = done["summary"]["n_mu"]
         assert entry.pulse_trains.shape == (n_mu, N_RUN_SAMPLES)
         assert len(entry.spike_times) == n_mu
 

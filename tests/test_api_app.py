@@ -205,7 +205,7 @@ class TestDialog:
     @pytest.fixture()
     def pick(self, monkeypatch: pytest.MonkeyPatch) -> Callable[[object], None]:
         """Replace both native dialog backends with a controllable stub."""
-        import muedit.api.routes.dialog as dialog
+        import muedit.api.services.dialog_service as dialog
 
         def install(behaviour: object) -> None:
             def fake() -> object:

@@ -1,3 +1,6 @@
+/**
+ * Set operations on sample spans: union, subtraction and coverage.
+ */
 /** @typedef {import("../app/context.js").Span} Span */
 
 /**

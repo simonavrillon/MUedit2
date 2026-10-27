@@ -1,3 +1,7 @@
+/**
+ * Starting, streaming, cancelling and auto-saving a decomposition run.
+ * Stream events are applied by `handleStreamMessage` through `live.js`.
+ */
 import {
   setIsRunning,
   setLastRunDownloadKey,
@@ -42,7 +46,7 @@ export async function autoSaveRunDecomposition(app) {
   } = app;
   const live = state.runLive;
 
-  if (state.runDownloadInFlight || !live?.summary?.muCount) return;
+  if (state.runDownloadInFlight || !live?.summary?.nMu) return;
   // The server kept this run's pulse trains and discharge times under its token.
   const token = state.runResultToken;
   if (!token) return;

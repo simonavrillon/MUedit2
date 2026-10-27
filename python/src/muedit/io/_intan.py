@@ -253,9 +253,9 @@ class _IntanRecording:
     settings: dict[str, str]
 
 
-def _resolve_intan_recording(filepath: str | Path) -> _IntanRecording:
+def _resolve_intan_recording(file_path: str | Path) -> _IntanRecording:
     """Locate the header and decide which of the three save layouts applies."""
-    path = Path(filepath)
+    path = Path(file_path)
     if path.is_dir():
         directory = path
         candidates = sorted(directory.glob("*.rhd"))
@@ -501,10 +501,7 @@ def _split_digital_word(words: np.ndarray, channels: list[_IntanChannel]) -> np.
 def _write_stream(
     out: np.ndarray, stream: _Stream, n_samples: int, *, offset: float = 0.0, step: float = 1.0
 ) -> None:
-    """Write ``(x - offset) * step`` into ``out`` block by block.
-
-    A sub-sampled stream is stretched to ``n_samples`` by repeating each stored sample.
-    """
+    """Write ``(x - offset) * step`` into ``out`` by block, repeating sub-sampled samples."""
     if stream.have == 0:
         out[...] = (0.0 - offset) * step
         return
@@ -584,17 +581,17 @@ def _resolve_intan_grids(
 
 
 def load_intan(
-    filepath: str,
+    file_path: str,
     grid_names: str | list[str] | None = None,
     muscle_names: str | list[str] | None = None,
     store: ArrayStore | None = None,
 ) -> SignalImport:
     """Load an Intan RHD recording as a ``SignalImport``, written into ``store`` block by block."""
     store = store if store is not None else RamStore()
-    rec = _resolve_intan_recording(filepath)
+    rec = _resolve_intan_recording(file_path)
     header = rec.header
     if not header.enabled_channels(_AMPLIFIER):
-        raise SignalLoadError(f"Intan recording holds no enabled amplifier channels: {filepath}")
+        raise SignalLoadError(f"Intan recording holds no enabled amplifier channels: {file_path}")
 
     readers = {
         "per_channel": _per_channel_streams,

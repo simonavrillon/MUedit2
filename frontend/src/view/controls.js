@@ -27,16 +27,16 @@ export function isToggleOn(btn) {
  *
  * @param {HTMLElement | null | undefined} btn
  * @param {boolean} on
- * @param {{ shortSel: string, fullSel: string, prefix: string }} labels
+ * @param {string} prefix
  */
-export function applyLabeledToggle(btn, on, { shortSel, fullSel, prefix }) {
+export function applyLabeledToggle(btn, on, prefix) {
   if (!btn) return;
   btn.dataset.state = on ? "on" : "off";
   btn.setAttribute("aria-pressed", on ? "true" : "false");
   btn.classList.toggle("on", on);
   const label = on ? "On" : "Off";
-  const shortEl = btn.querySelector(shortSel);
-  const fullEl = btn.querySelector(fullSel);
+  const shortEl = btn.querySelector(".toggle-short");
+  const fullEl = btn.querySelector(".toggle-full");
   if (shortEl) shortEl.textContent = label;
   if (fullEl) fullEl.textContent = `${prefix}: ${label}`;
 }
@@ -46,7 +46,8 @@ export function applyLabeledToggle(btn, on, { shortSel, fullSel, prefix }) {
  * @param {boolean} show
  */
 export function toggleConditional(id, show) {
-  document.getElementById(id)?.classList.toggle("hidden", !show);
+  const el = document.getElementById(id);
+  if (el) el.hidden = !show;
 }
 
 /**

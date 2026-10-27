@@ -166,9 +166,9 @@ def _read_mat73_emg(node: h5py.Dataset, store: ArrayStore) -> np.ndarray:
     return store.seal(data)
 
 
-def _load_mat73(filepath: str, store: ArrayStore) -> SignalImport:
+def _load_mat73(file_path: str, store: ArrayStore) -> SignalImport:
     """A v7.3 (HDF5) ``signal`` struct; numeric EMG is read in slices straight into ``store``."""
-    with h5py.File(filepath, "r") as h5f:
+    with h5py.File(file_path, "r") as h5f:
         group = h5f.get("signal")
         if group is None:
             raise SignalLoadError("Key 'signal' not found in MAT file.")
@@ -198,10 +198,10 @@ def _load_mat73(filepath: str, store: ArrayStore) -> SignalImport:
     return replace(signal, aux_data=store.seal(aux))
 
 
-def _load_mat5(filepath: str, store: ArrayStore) -> SignalImport:
+def _load_mat5(file_path: str, store: ArrayStore) -> SignalImport:
     """A v5 ``signal`` struct, read whole by scipy, then copied into ``store``."""
     try:
-        mat = scipy.io.loadmat(filepath, struct_as_record=False, squeeze_me=True)
+        mat = scipy.io.loadmat(file_path, struct_as_record=False, squeeze_me=True)
     except (OSError, ValueError, NotImplementedError, scipy.io.matlab.MatReadError) as exc:
         raise SignalLoadError(f"Failed to load MAT file: {exc}") from exc
     struct = mat.pop("signal", None)
@@ -217,12 +217,12 @@ def _load_mat5(filepath: str, store: ArrayStore) -> SignalImport:
     return store_signal(signal, store)
 
 
-def load_mat(filepath: str, store: ArrayStore | None = None) -> SignalImport:
+def load_mat(file_path: str, store: ArrayStore | None = None) -> SignalImport:
     """Load a MATLAB ``signal`` struct (v5 or v7.3) as a ``SignalImport``, written into ``store``."""
     store = store if store is not None else RamStore()
-    if not h5py.is_hdf5(filepath):
-        return _load_mat5(filepath, store)
+    if not h5py.is_hdf5(file_path):
+        return _load_mat5(file_path, store)
     try:
-        return _load_mat73(filepath, store)
+        return _load_mat73(file_path, store)
     except OSError as exc:  # h5py's error for a corrupt or truncated file
         raise SignalLoadError(f"Failed to load MAT v7.3 file: {exc}") from exc

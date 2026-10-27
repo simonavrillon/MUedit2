@@ -43,16 +43,12 @@ from muedit.storage import ArrayStore, SessionStore
 logger = logging.getLogger(__name__)
 
 
-def _build_preview_core(filepath: str, session: str = DEFAULT_SESSION) -> dict[str, Any]:
-    """Load a signal into a session store, build the series the QC stage draws, and the preview.
-
-    The upload is kept only once it is built: a second file opened in the same tab meanwhile
-    drops the uploads kept, never one still being written.
-    """
+def _build_preview_core(file_path: str, session: str = DEFAULT_SESSION) -> dict[str, Any]:
+    """Load a signal into a session store and build the QC series and the preview."""
     release_upload(session)
     store = SessionStore.create("upload")
     try:
-        signal = load_signal(filepath, store=store)
+        signal = load_signal(file_path, store=store)
         coordinates, _, _, emg_type = format_hdemg_signal(signal.grid_names)
         views, channel_means = build_signal_views(
             signal, store, [c.shape[0] for c in coordinates], emg_type
@@ -60,7 +56,8 @@ def _build_preview_core(filepath: str, session: str = DEFAULT_SESSION) -> dict[s
     except BaseException:
         store.close()
         raise
-    upload_token = store_upload(signal, filepath, store, views, session)
+    # Kept only once built: another file opened in this tab meanwhile drops kept uploads, not this.
+    upload_token = store_upload(signal, file_path, store, views, session)
 
     return make_json_safe(
         {
@@ -79,22 +76,21 @@ def _build_preview_core(filepath: str, session: str = DEFAULT_SESSION) -> dict[s
     )
 
 
-def build_preview_from_path(filepath: str, session: str = DEFAULT_SESSION) -> dict[str, Any]:
+def build_preview_from_path(file_path: str, session: str = DEFAULT_SESSION) -> dict[str, Any]:
     """Build preview payload from a file path already available on disk."""
-    require_existing_path(filepath)
-    get_loader(filepath)  # an unsupported file leaves the tab's upload in place
-    result = _build_preview_core(filepath, session)
+    require_existing_path(file_path)
+    get_loader(file_path)  # an unsupported file leaves the tab's upload in place
+    result = _build_preview_core(file_path, session)
 
     # Best-effort: enrich with participant and hardware info from BIDS sidecars.
     try:
-        bids_root = dataset_root_of(filepath)
+        bids_root = dataset_root_of(file_path)
         if bids_root is not None:
             result["project"] = config.project_of(bids_root)
-            entity_label = parse_entity_label(Path(filepath).name)
+            entity_label = parse_entity_label(Path(file_path).name)
             result.update(read_sidecar_meta(bids_root, entity_label))
-    except Exception:  # noqa: BLE001
-        # Best-effort; never block the preview on sidecar errors.
-        logger.warning("Cannot read the BIDS sidecars of %s", filepath, exc_info=True)
+    except Exception:  # noqa: BLE001  (logged; sidecar errors never block the preview)
+        logger.warning("Cannot read the BIDS sidecars of %s", file_path, exc_info=True)
 
     return result
 

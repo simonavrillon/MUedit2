@@ -131,11 +131,7 @@ class EditLog:
 
 
 def find_recoverable(source: str | Path, live: set[Path]) -> RecoverableLog | None:
-    """The newest log of unsaved edits to ``source`` that no open session is writing.
-
-    Logs written against another version of the file are deleted. Those without net edits
-    are left to ``purge_old_logs``: one may belong to a session another tab is opening.
-    """
+    """The newest log of unsaved edits to ``source`` that no open session writes; stale ones go."""
     folder = edit_logs_dir()
     if not folder.is_dir():
         return None
@@ -155,6 +151,7 @@ def find_recoverable(source: str | Path, live: set[Path]) -> RecoverableLog | No
         if not all(header.get(k) == current[k] for k in ("source", "size", "mtime_ns")):
             path.unlink(missing_ok=True)
             continue
+        # Left to purge_old_logs: it may belong to a session another tab is opening.
         if net_edits(records) == 0:
             continue
         found.append((mtime, RecoverableLog(path, records)))

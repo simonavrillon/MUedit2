@@ -1,3 +1,7 @@
+/**
+ * Assembles the `app` context from the core singletons and each service;
+ * two services exporting the same member name is an error.
+ */
 import { createUiService } from "./services/ui.js";
 import { createFileSessionService } from "./services/file-session.js";
 import { createQcStageService } from "./stages/qc-stage.js";

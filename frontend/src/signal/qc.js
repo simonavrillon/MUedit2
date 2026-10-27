@@ -1,3 +1,7 @@
+/**
+ * QC requests and the analysis windows: picking and syncing ROIs, automatic
+ * QC, the channel traces kept on view, and opening a raw file's preview.
+ */
 import {
   ensureDiscardMasks,
   setArtifactMode,

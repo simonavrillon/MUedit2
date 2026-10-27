@@ -1,3 +1,7 @@
+/**
+ * The settings panel's open state and toggle icon, and the resize policy
+ * that redraws the visible stage when its canvases change size.
+ */
 import { positionStepIndicator } from "./navigation.js";
 
 /** @typedef {import("../context.js").App} App */

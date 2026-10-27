@@ -18,7 +18,7 @@ from muedit.storage import ArrayStore, RamStore, copy_into
 
 
 def run_decomposition(
-    filepath: str,
+    file_path: str,
     duration: float | None = None,
     manual_roi: bool = False,
     params: DecompositionParameters | None = None,
@@ -36,15 +36,11 @@ def run_decomposition(
     store: ArrayStore | None = None,
     target_index: int | None = None,
 ) -> DecompositionResult:
-    """Execute the full load → preprocess → (BIDS export) → decompose → postprocess pipeline.
-
-    With ``store`` (the run's T1 folder), the filtered EMG and the pulse trains are
-    memory-mapped files there; the filtered file is deleted once the run is exported.
-    """
+    """Run load → preprocess → (BIDS export) → decompose → postprocess, mapped in ``store``."""
     params = params or DecompositionParameters()
     rng = np.random.default_rng(params.random_seed)
 
-    loaded = load_step(filepath, file_label, preloaded_signal, progress_cb)
+    loaded = load_step(file_path, file_label, preloaded_signal, progress_cb)
     if progress_cb:
         progress_cb("progress", {"message": "Filtering signal", "phase": "preprocess"})
     preprocessed = preprocess_step(

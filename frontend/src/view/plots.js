@@ -427,7 +427,7 @@ function drawAxes(
   plotHeight,
   { hideYAxis, min, span },
 ) {
-  ctx.strokeStyle = COLORS.gridAxis;
+  ctx.strokeStyle = COLORS.axis;
   ctx.lineWidth = 1;
   ctx.beginPath();
   if (!hideYAxis) {
@@ -447,7 +447,7 @@ function drawAxes(
     const t = i / yTicks;
     const y = padding.top + plotHeight - t * plotHeight;
     const value = min + t * span;
-    ctx.strokeStyle = COLORS.gridLineDim;
+    ctx.strokeStyle = COLORS.gridline;
     ctx.beginPath();
     ctx.moveTo(padding.left, y);
     ctx.lineTo(padding.left + plotWidth, y);
@@ -508,7 +508,7 @@ function drawTimeAxis(ctx, padding, plotWidth, plotHeight, view, fsamp) {
   ctx.font = canvasFont();
   for (let t = first; t <= tEnd; t += step) {
     const x = toX(t * fsamp);
-    ctx.strokeStyle = COLORS.gridLineDim;
+    ctx.strokeStyle = COLORS.gridline;
     ctx.beginPath();
     ctx.moveTo(x, padding.top);
     ctx.lineTo(x, padding.top + plotHeight);
@@ -586,7 +586,7 @@ export function drawMiniSeries(canvas, series, off = false) {
   if (!prepared) return;
   const { ctx, width, height } = prepared;
   if (!series || !seriesPoints(series)) {
-    ctx.fillStyle = COLORS.gridEmpty;
+    ctx.fillStyle = COLORS.empty;
     ctx.fillRect(0, 0, width, height);
     return;
   }

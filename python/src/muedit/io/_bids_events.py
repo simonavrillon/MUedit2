@@ -283,7 +283,7 @@ def export_bids_events(
     target_segments: dict[str, Any] | None = None,
 ) -> Path | None:
     """Merge the recording's trigger pulses and target segments into its ``*_events.tsv``, or ``None``."""
-    entity = emg_path.stem[: -len("_emg")] if emg_path.stem.endswith("_emg") else emg_path.stem
+    entity = emg_path.stem.removesuffix("_emg")
     events_tsv = emg_path.with_name(f"{entity}_events.tsv")
     events_json = events_tsv.with_suffix(".json")
 

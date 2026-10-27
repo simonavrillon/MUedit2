@@ -1,3 +1,7 @@
+/**
+ * Draws the BIDS session form: entity defaults, participant fields and
+ * muscle rows. Reads and writes the DOM only.
+ */
 import { naToEmpty } from "../io/bids.js";
 
 /** @typedef {import("../app/context.js").Els} Els */
@@ -18,10 +22,7 @@ export function resetBidsEntityDefaults(els, fileName) {
     els.bidsTask.value = "trapezoid";
     delete els.bidsTask.dataset.keep;
   }
-  if (els.fileName && fileName) {
-    els.fileName.textContent = fileName;
-    els.fileName.classList.remove("loading");
-  }
+  if (els.fileName && fileName) els.fileName.textContent = fileName;
 }
 
 /**
@@ -73,10 +74,8 @@ export function renderBidsMuscleFields(els, rows) {
  */
 export function applySessionInfoToDom(els, payload) {
   if (!payload) return;
-  if (els.fileName) {
+  if (els.fileName)
     els.fileName.textContent = payload.fileLabel || "decomposition";
-    els.fileName.classList.remove("loading");
-  }
   if (els.fsamp && payload.fsampText) {
     els.fsamp.value = payload.fsampText;
   }
@@ -130,8 +129,7 @@ export function applySessionInfoToDom(els, payload) {
   if (els.bidsGroundLocation && payload.bids?.groundLocation)
     els.bidsGroundLocation.value = payload.bids.groundLocation;
   // The description row shows with the Other scheme, which requires it.
-  els.bidsPlacementDescRow?.classList.toggle(
-    "hidden",
-    (els.bidsPlacementScheme?.value || "Other") !== "Other",
-  );
+  if (els.bidsPlacementDescRow)
+    els.bidsPlacementDescRow.hidden =
+      (els.bidsPlacementScheme?.value || "Other") !== "Other";
 }

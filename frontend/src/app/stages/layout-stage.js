@@ -1,3 +1,6 @@
+/**
+ * Event bindings for the settings panel: its collapsible sections and toggle.
+ */
 import {
   ensureSettingsToggleIcon,
   initLayoutResizePolicy,

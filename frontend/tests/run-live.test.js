@@ -116,7 +116,7 @@ describe("searchSecondsLeft", () => {
 describe("buildRunSummary", () => {
   test("counts units per grid", () => {
     const summary = live.buildRunSummary(
-      { mu_count: 3, grid_names: ["A", "B"] },
+      { n_mu: 3, grid_names: ["A", "B"] },
       { mu_grid_index: [0, 1, 1] },
     );
     assert.deepEqual(summary.perGrid, [1, 2]);
@@ -124,10 +124,7 @@ describe("buildRunSummary", () => {
   });
 
   test("no units", () => {
-    const summary = live.buildRunSummary(
-      { mu_count: 0, grid_names: ["A"] },
-      null,
-    );
+    const summary = live.buildRunSummary({ n_mu: 0, grid_names: ["A"] }, null);
     assert.deepEqual(summary.perGrid, [0]);
   });
 });
@@ -156,7 +153,7 @@ describe("run stream handling", () => {
     const app = testApp();
     app.handleStreamMessage({
       stage: "done",
-      summary: { mu_count: 2, grid_names: ["A"], sil: [0.9, 0.92] },
+      summary: { n_mu: 2, grid_names: ["A"], sil: [0.9, 0.92] },
       preview: {
         run_result_token: "run-1",
         mu_grid_index: [0, 0],
@@ -169,7 +166,7 @@ describe("run stream handling", () => {
     const run = app.state.runLive;
     assert.equal(run.status, "done");
     assert.equal(run.phase, "save");
-    assert.equal(run.summary.muCount, 2);
+    assert.equal(run.summary.nMu, 2);
     assert.equal(app.state.runResultToken, "run-1");
     assert.equal(app.autoSaveRunDecomposition.calls.length, 1);
   });
@@ -184,7 +181,7 @@ describe("run stream handling", () => {
     const channelMeans = app.state.channelMeans;
     app.handleStreamMessage({
       stage: "done",
-      summary: { mu_count: 1, grid_names: ["A"], sil: [0.9] },
+      summary: { n_mu: 1, grid_names: ["A"], sil: [0.9] },
       preview: {
         run_result_token: "run-1",
         mu_grid_index: [0],
@@ -230,7 +227,7 @@ describe("run stream handling", () => {
       gridNames: ["A"],
     });
     app.state.runLive.summary = {
-      muCount: 2,
+      nMu: 2,
       perGrid: [2],
       muGridIndex: [0, 0],
     };

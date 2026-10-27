@@ -38,10 +38,7 @@ logger = logging.getLogger(__name__)
 def extended_window(
     prep: PreprocessStepOutput, params: DecompositionParameters, win_global: int
 ) -> tuple[FloatArray, FloatArray, int, int]:
-    """Window ``win_global``'s kept channels demeaned, extended and trimmed.
-
-    Also returns the channel means, ``ex_factor`` and the trim cut from each end.
-    """
+    """Window ``win_global`` demeaned, extended, trimmed; with means, ``ex_factor`` and trim."""
     kept = kept_rows(prep.discard_channels)[win_global // len(prep.rois)]
     start = prep.coordinates_plateau[win_global * 2]
     end = prep.coordinates_plateau[win_global * 2 + 1]

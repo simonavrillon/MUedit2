@@ -250,7 +250,7 @@ export function drawEditPulse(els, state) {
         {
           positions: shown.spikes,
           values: spikeValues,
-          color: COLORS.muPurple,
+          color: COLORS.mu4,
         },
         {
           positions: shown.artifacts,
@@ -291,9 +291,7 @@ export function drawEditRates(els, state) {
     showAxes: true,
     hideYAxis: false,
     fsamp: state.edit.fsamp,
-    markers: [
-      { positions: dr.positions, values: dr.rates, color: COLORS.muPurple },
-    ],
+    markers: [{ positions: dr.positions, values: dr.rates, color: COLORS.mu4 }],
   });
 }
 
@@ -304,7 +302,7 @@ export function drawEditRates(els, state) {
  * @type {Partial<Record<import("../state/state.js").EditMode, { edit: "addSpikesInSelection" | "addArtifactInSelection" | "deleteSpikesInSelection", hint?: string }>>}
  */
 const PULSE_BOX_EDITS = {
-  add: { edit: "addSpikesInSelection", hint: "Drag a box to add spikes" },
+  add: { edit: "addSpikesInSelection", hint: "Drag a box to add discharges" },
   add_artifact: {
     edit: "addArtifactInSelection",
     hint: "Drag a box to mark an artifact",

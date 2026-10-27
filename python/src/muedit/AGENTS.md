@@ -41,8 +41,9 @@ Architecture: [dev/architecture.md](../../../dev/architecture.md). Wire formats:
 
 - Single-line docstrings on every module, class and function. Comment only what the code can't
   say: a spec rule (BIDS), a unit fact, an ordering constraint, why a constant has its value.
-- Reuse the codebase's name for a concept: `fsamp`, `n_samples`, `data`, `grid_names`,
-  `muscle_names`, `aux_data`, `aux_names`, `store`, `spike_times`, `mu_grid_index`. Grep first.
+- Reuse the codebase's name for a concept: `fsamp`, `n_samples`, `n_channels`, `n_mu`, `data`,
+  `grid_names`, `muscle_names`, `aux_data`, `aux_names`, `store`, `spike_times`, `mu_grid_index`,
+  `file_path`. Grep first.
 - Write the simplest change that does the job: no new abstraction layers or speculative options.
 - Settings and results are `@dataclass` (frozen where nothing mutates them); request models are
   Pydantic, in `api/schemas.py` only.

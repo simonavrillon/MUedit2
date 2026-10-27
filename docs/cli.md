@@ -37,12 +37,12 @@ same origin. This is the same server the launchers (`MUedit.command`,
 
 ---
 
-## `muedit decompose <filepath>`
+## `muedit decompose <file_path>`
 
 Runs an end-to-end decomposition and writes a `.npz`. With `--bids-root` it also
 exports the raw EMG into a BIDS dataset (see [saved-files.md](saved-files.md)).
 
-`filepath` is a recording file (`.mat`, `.otb+`, `.otb4`, `.bdf`, `.edf`, `.rhd`,
+`file_path` is a recording file (`.mat`, `.otb+`, `.otb4`, `.bdf`, `.edf`, `.rhd`,
 `.oebin`) or a BIDS EMG / Intan / Open Ephys **recording folder**.
 
 Flags marked *(app: …)* map to the same setting in the app's settings panel; flags

@@ -98,7 +98,7 @@ and folded into `state.runLive` by `decomp/live.js`.
 |---|---|
 | progress | `message`, `phase` (`load` \| `preprocess` \| `decompose` \| `postprocess` \| `export`) |
 | decompose search | + `grid`, `ngrid`, `window`, `nwindows`, `niter`, `iter`, `outcomes` (one letter per iteration since the last event: `k` kept, `r` rejected, `f` too few spikes), `window_done` |
-| `stage: "done"` | `preview: {run_result_token?, mu_grid_index}`, `summary: {mu_count, grid_names, parameters}` |
+| `stage: "done"` | `preview: {run_result_token?, mu_grid_index}`, `summary: {n_mu, grid_names, parameters}` |
 | `stage: "error"` | `message`, `detail` (a `MueditError`'s message, else a generic one) |
 | `stage: "cancelled"` | `message` |
 

@@ -51,8 +51,5 @@ def series_pulse(
     end: int = _END,
     bins: int = _BINS,
 ) -> Response:
-    """One MU's pulse train, as a min/max envelope (MUB1), with its discharges in view.
-
-    ``token`` names an edit session or a finished run.
-    """
+    """One MU's pulse train envelope (MUB1) with its discharges; ``token`` is a session or a run."""
     return pulse_frame(token, mu, start, end, bins)

@@ -1,3 +1,7 @@
+/**
+ * The QC stage: its service (channel traces and plots, the aux channels, the
+ * selected grid) and its event bindings.
+ */
 import {
   syncRois,
   requestAutoQc,

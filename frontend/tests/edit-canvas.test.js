@@ -250,7 +250,7 @@ describe("pulse canvas drag", () => {
     dragPulse([100, 30], [103, 30]);
     assert.equal(app.addSpikesInSelection.calls.length, 0);
     assert.deepEqual(app.setStatus.calls, [
-      ["Drag a box to add spikes", "muted"],
+      ["Drag a box to add discharges", "muted"],
     ]);
   });
 

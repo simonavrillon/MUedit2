@@ -1,3 +1,7 @@
+/**
+ * The HTTP layer under `api/client.js`: the tab's session id header,
+ * timeouts, and the backend's error envelope as `ApiError`.
+ */
 /** @typedef {import("../app/context.js").JsonObject} JsonObject */
 
 export const SESSION_HEADER = "X-MUedit-Session";

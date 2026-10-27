@@ -14,7 +14,7 @@ from muedit.io._otb import load_otb4, load_otb_plus
 from muedit.models import SignalImport
 from muedit.storage import ArrayStore
 
-#: ``loader(filepath, store=None)``: the signal, its arrays written into ``store`` when given.
+#: ``loader(file_path, store=None)``: the signal, its arrays written into ``store`` when given.
 LoaderFn = Callable[..., SignalImport]
 
 _LOADERS: dict[str, LoaderFn] = {
@@ -45,9 +45,9 @@ def supported_extensions() -> tuple[str, ...]:
     return tuple(sorted(_LOADERS))
 
 
-def get_loader(filepath: str | Path) -> LoaderFn:
-    """Return loader function for filepath extension; accepts BIDS EMG, Intan or Open Ephys directories."""
-    path = Path(filepath)
+def get_loader(file_path: str | Path) -> LoaderFn:
+    """Return loader function for file_path extension; accepts BIDS EMG, Intan or Open Ephys directories."""
+    path = Path(file_path)
     if path.is_dir():
         if any(path.glob("*_emg.bdf")) or any(path.glob("*_emg.edf")):
             return load_bids_signal
@@ -69,6 +69,6 @@ def get_loader(filepath: str | Path) -> LoaderFn:
     return loader
 
 
-def load_signal(filepath: str | Path, store: ArrayStore | None = None) -> SignalImport:
+def load_signal(file_path: str | Path, store: ArrayStore | None = None) -> SignalImport:
     """Load a raw signal file with the loader registered for its extension, into ``store`` when given."""
-    return get_loader(filepath)(str(filepath), store=store)
+    return get_loader(file_path)(str(file_path), store=store)

@@ -166,10 +166,10 @@ class _FileExtras:
     artifact_times: list[Any] | None = None
 
 
-def _file_extras(filepath: str, file_label: str, decomp: LoadedDecomposition) -> _FileExtras:
+def _file_extras(file_path: str, file_label: str, decomp: LoadedDecomposition) -> _FileExtras:
     """Read the BIDS sidecars and ``.json`` edit log next to a decomposition; updates ``decomp``."""
     extras = _FileExtras()
-    bids_root = dataset_root_of(filepath)
+    bids_root = dataset_root_of(file_path)
     if bids_root is not None:
         extras.bids_root = bids_root
         extras.project = config.project_of(bids_root)
@@ -188,9 +188,9 @@ def _file_extras(filepath: str, file_label: str, decomp: LoadedDecomposition) ->
             if fsamp and fsamp > 0:
                 decomp.fsamp = fsamp
         except (ValueError, OSError, csv.Error, KeyError) as exc:
-            logger.warning("Cannot read the BIDS sidecars of %s: %s", filepath, exc)
+            logger.warning("Cannot read the BIDS sidecars of %s: %s", file_path, exc)
 
-    editlog_path = Path(filepath).with_suffix(".json")
+    editlog_path = Path(file_path).with_suffix(".json")
     if editlog_path.exists():
         try:
             with editlog_path.open("r", encoding="utf-8") as fh:
@@ -225,13 +225,13 @@ def _session_pulse_trains(decomp: LoadedDecomposition, store: SessionStore) -> F
 
 
 def _new_session(
-    filepath: str,
+    file_path: str,
     decomp: LoadedDecomposition,
     signal: EditSignalContext | None,
     store: SessionStore,
 ) -> EditSession:
-    file_label = Path(filepath).name
-    extras = _file_extras(filepath, file_label, decomp)
+    file_label = Path(file_path).name
+    extras = _file_extras(file_path, file_label, decomp)
     n_mu = len(decomp.spike_times)
     fsamp = float(decomp.fsamp)
     total = int(decomp.total_samples)
@@ -246,10 +246,10 @@ def _new_session(
         except (ValueError, FileNotFoundError):
             return None  # not in a BIDS dataset: the session refits on its embedded EMG
 
-    def duplicates(spikes: list[IntArray], grids: list[int]) -> list[int]:
+    def duplicates(spike_times: list[IntArray], mu_grid_index: list[int]) -> list[int]:
         if fsamp <= 0:
             raise EditError("fsamp is required for deduplication")
-        return _dedup(spikes, grids, parameters, fsamp, total)
+        return _dedup(spike_times, mu_grid_index, parameters, fsamp, total)
 
     uids = extras.mu_uids
     edit = EditSession(
@@ -272,7 +272,7 @@ def _new_session(
         edit.sil_by_uid = dict(zip(edit.mu_uids, map(float, decomp.sil), strict=True))
     edit.meta = {
         "file_label": file_label,
-        "source_path": str(Path(filepath).resolve()),
+        "source_path": str(Path(file_path).resolve()),
         "fsamp": fsamp or None,
         "total_samples": total,
         "grid_names": list(decomp.grid_names),
@@ -286,31 +286,27 @@ def _new_session(
     return edit
 
 
-def open_edit_session(filepath: str, session: str = DEFAULT_SESSION) -> Response:
-    """Open a decomposition for editing; the frame holds its fields and discharge times.
-
-    The tab's previous edit session closes once this one is built: a file that fails to open
-    leaves it open. ``recoverable_edits`` counts the unsaved edits an earlier session left for
-    this file (``/edit/session/recover``).
-    """
-    require_existing_path(filepath)
+def open_edit_session(file_path: str, session: str = DEFAULT_SESSION) -> Response:
+    """Open a decomposition for editing: its fields, discharge times and ``recoverable_edits``."""
+    require_existing_path(file_path)
     store = SessionStore.create("edit")
     try:
-        decomp, signal = load_decomposition(filepath, store, binary_trains=False)
-        edit = _new_session(filepath, decomp, signal, store)
+        decomp, signal = load_decomposition(file_path, store, binary_trains=False)
+        edit = _new_session(file_path, decomp, signal, store)
     except BaseException:
         store.close()
         raise
+    # Replaces the tab's previous session only now: a file that fails to open leaves it open.
     token = store_edit_session(edit, session)
     # Before edit.lock: the budget lock is never taken under it (a dropped session closes under it).
     live_logs = live_edit_logs()
     with edit.lock:
         _check_open(edit)
         # Created first: a log another tab opens meanwhile is in its live set or has edits.
-        edit.log = EditLog.create(filepath, token)
+        edit.log = EditLog.create(file_path, token)
         if edit.log is not None:
             live_logs.add(edit.log.path)
-        edit.recovery = find_recoverable(filepath, live_logs)
+        edit.recovery = find_recoverable(file_path, live_logs)
         return _state_response(edit, token)
 
 
@@ -346,9 +342,11 @@ def _per_mu(edit: EditSession) -> dict[str, Any]:
     }
 
 
-def _spike_arrays(spikes: list[IntArray], artifacts: list[IntArray]) -> dict[str, tuple[Any, str]]:
-    values, offsets = pack_csr(spikes, np.int32)
-    art_values, art_offsets = pack_csr(artifacts, np.int32)
+def _spike_arrays(
+    spike_times: list[IntArray], artifact_times: list[IntArray]
+) -> dict[str, tuple[Any, str]]:
+    values, offsets = pack_csr(spike_times, np.int32)
+    art_values, art_offsets = pack_csr(artifact_times, np.int32)
     return {
         "spikes": (values, "i4"),
         "spike_offsets": (offsets, "i8"),
@@ -667,11 +665,7 @@ def _write_decomposition(
 
 
 def _save(req: _SaveRequest) -> tuple[dict[str, Any], list[int], list[dict[str, Any]]]:
-    """Write the edited decomposition and its BIDS files.
-
-    Returns the response, the indices of the MUs the file keeps, and the log entries
-    for the MUs dropped on save.
-    """
+    """Write the edited decomposition and BIDS files; return the response, kept MUs, drop log."""
     form = req.form
     grid_names = _pad_grid_names(req.grid_names, max(req.mu_grid_index, default=0) + 1, [])
     parameters = dict(req.parameters)

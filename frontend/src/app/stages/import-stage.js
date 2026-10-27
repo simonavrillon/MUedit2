@@ -1,3 +1,7 @@
+/**
+ * The import stage: what a picked file is (a recording or a decomposition)
+ * and opening it, one open at a time.
+ */
 import { parseBidsEntitiesFromLabel } from "../../io/bids.js";
 import { handleError } from "../services/error-service.js";
 
@@ -10,7 +14,7 @@ import { handleError } from "../services/error-service.js";
 function clearUploadFormatError(els) {
   if (!els.uploadFormatError) return;
   els.uploadFormatError.textContent = "";
-  els.uploadFormatError.classList.add("hidden");
+  els.uploadFormatError.hidden = true;
 }
 
 /** @param {Els} els */
@@ -18,7 +22,7 @@ function showUnsupportedUploadFormatError(els) {
   if (!els.uploadFormatError) return;
   els.uploadFormatError.textContent =
     "Accepted: raw (.mat, .otb+, .otb4, .bdf, .edf, .rhd, .oebin) or decomposition (.npz, .mat)";
-  els.uploadFormatError.classList.remove("hidden");
+  els.uploadFormatError.hidden = false;
 }
 
 /** @typedef {"raw" | "decomposition" | "ambiguous_mat" | "unsupported"} FileKind */
@@ -175,8 +179,8 @@ export function setupImportEvents(app) {
   const openStageFromStepper = (/** @type {StageKey} */ target) => {
     if (!state.file && target !== "edit") {
       setStatus("Import a file first", "muted");
-      if (els.landing) els.landing.classList.remove("hidden");
-      if (els.workspace) els.workspace.classList.add("hidden");
+      if (els.landing) els.landing.hidden = false;
+      if (els.workspace) els.workspace.hidden = true;
       updateWorkflowStepper("import");
       return;
     }
@@ -193,8 +197,8 @@ export function setupImportEvents(app) {
     openStageFromStepper("edit");
   });
   els.stepImport?.addEventListener("click", () => {
-    if (els.landing) els.landing.classList.remove("hidden");
-    if (els.workspace) els.workspace.classList.add("hidden");
+    if (els.landing) els.landing.hidden = false;
+    if (els.workspace) els.workspace.hidden = true;
     updateWorkflowStepper("import");
   });
 }

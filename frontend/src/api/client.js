@@ -197,11 +197,11 @@ export function createApiClient({ apiFetch, apiJson, API_BASE, sessionId }) {
      * Open a decomposition in a server-side edit session: its fields and every
      * MU's discharge times. The pulse trains stay on the server.
      *
-     * @param {string} filepath
+     * @param {string} filePath
      */
-    editOpen(filepath) {
+    editOpen(filePath) {
       return postForSession(`${API_BASE}${routes.editSessionOpen}`, {
-        path: filepath,
+        path: filePath,
       });
     },
 

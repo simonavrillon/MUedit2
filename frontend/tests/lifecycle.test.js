@@ -133,7 +133,7 @@ describe("switchStage", () => {
   test("leaving Edit clears the armed edit mode", () => {
     app.state.edit.spikeTimes = [[1]];
     app.switchStage("edit");
-    app.setEditMode("add", "Drag a box on pulse train to add spikes");
+    app.setEditMode("add", "Drag a box on pulse train to add discharges");
     app.setStatus = recorder();
     app.switchStage("qc");
     assert.equal(app.state.edit.mode, null);
@@ -163,7 +163,7 @@ describe("showWorkspace", () => {
     globalThis.window.requestAnimationFrame = (fn) => frames.push(fn);
     try {
       els.workspace = fakeElement();
-      els.workspace.classList.add("hidden");
+      els.workspace.hidden = true;
       els.landing = fakeElement();
       const switched = [];
       const switchStage = app.switchStage;
@@ -174,14 +174,14 @@ describe("showWorkspace", () => {
       app.renderRunStage = recorder();
       app.showWorkspace("run");
       assert.deepEqual(switched, ["run"]);
-      assert.ok(!els.workspace.classList.contains("hidden"));
-      assert.ok(!els.landing.classList.contains("hidden"));
+      assert.ok(!els.workspace.hidden);
+      assert.ok(!els.landing.hidden);
       // The page's redraw runs first in the frame, then the landing goes.
       frames.shift()();
       assert.equal(app.renderRunStage.calls.length, 1);
-      assert.ok(!els.landing.classList.contains("hidden"));
+      assert.ok(!els.landing.hidden);
       frames.shift()();
-      assert.ok(els.landing.classList.contains("hidden"));
+      assert.ok(els.landing.hidden);
     } finally {
       globalThis.window.requestAnimationFrame = () => 0;
     }

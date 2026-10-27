@@ -71,8 +71,7 @@ def execute(job: RunJob, store: ArrayStore, send: Send) -> None:
     except MueditError as exc:
         send({"stage": "error", "message": "Decomposition failed", "detail": str(exc)})
         return
-    except Exception:  # noqa: BLE001
-        # The server logs the traceback and keeps it from the client.
+    except Exception:  # noqa: BLE001  (the server logs the traceback; the client gets none)
         send(
             {
                 "stage": "error",
@@ -98,7 +97,7 @@ def _summary(result: DecompositionResult) -> dict[str, Any]:
     """What the run page's result panel shows."""
     return {
         "grid_names": result.grid_names,
-        "mu_count": len(result.spike_times),
+        "n_mu": len(result.spike_times),
         "parameters": result.parameters,
     }
 

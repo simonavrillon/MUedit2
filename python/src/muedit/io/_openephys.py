@@ -71,9 +71,9 @@ class _OpenEphysRecording:
     ttl: list[_TtlLine]
 
 
-def _read_structure(filepath: str | Path) -> tuple[Path, dict[str, Any]]:
+def _read_structure(file_path: str | Path) -> tuple[Path, dict[str, Any]]:
     """Locate and parse ``structure.oebin`` from the file itself or its recording folder."""
-    path = Path(filepath)
+    path = Path(file_path)
     if path.is_dir():
         path = path / _OEBIN
         if not path.exists():
@@ -134,9 +134,9 @@ def _read_ttl(
     return lines
 
 
-def _resolve_openephys_recording(filepath: str | Path) -> _OpenEphysRecording:
+def _resolve_openephys_recording(file_path: str | Path) -> _OpenEphysRecording:
     """Pick the continuous stream holding ephys channels and check its data file."""
-    directory, structure = _read_structure(filepath)
+    directory, structure = _read_structure(file_path)
     candidates = []
     for stream in structure.get("continuous", []):
         channels = _parse_channels(stream)
@@ -296,14 +296,14 @@ def _ttl_row(line: _TtlLine, start: int, stop: int) -> np.ndarray:
 
 
 def load_openephys(
-    filepath: str,
+    file_path: str,
     grid_names: str | list[str] | None = None,
     muscle_names: str | list[str] | None = None,
     store: ArrayStore | None = None,
 ) -> SignalImport:
     """Load an Open Ephys binary recording as a ``SignalImport``, written into ``store`` block by block."""
     store = store if store is not None else RamStore()
-    rec = _resolve_openephys_recording(filepath)
+    rec = _resolve_openephys_recording(file_path)
     channels = rec.channels
     emg_rows = [i for i, c in enumerate(channels) if c.kind == _EPHYS]
     aux_rows = [i for i, c in enumerate(channels) if c.kind != _EPHYS]

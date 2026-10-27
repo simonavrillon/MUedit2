@@ -1,10 +1,4 @@
-"""The edit session: one decomposition being edited, held at full resolution by the server.
-
-Pulse trains stay where they were loaded (a memory-mapped file member or the session
-store); an MU whose train an edit changes gets its own copy in the store first. Discharge
-times are sorted int32 arrays, one per MU. Every operation can be undone, and each one is
-recorded in an ``EditLog`` so unsaved edits can be replayed after a crash.
-"""
+"""The edit session: one decomposition being edited, held at full resolution by the server."""
 
 from __future__ import annotations
 
@@ -407,11 +401,7 @@ class EditSession:
             self.log = None
 
     def replay(self, records: Sequence[dict[str, Any]]) -> int:
-        """Re-run logged operations; returns how many applied.
-
-        An operation the session refuses is skipped. Any other failure stops the
-        replay there, since the operations after it were made on its result.
-        """
+        """Re-run logged operations, skipping refused ones, stopping at a failure; return the count."""
         applied = 0
         for record in records:
             try:
@@ -524,11 +514,7 @@ class EditSession:
         project: str | None = None,
         peel_off_win: float | None = None,
     ) -> Change:
-        """Refit the MU filter on the EMG in view and redetect its discharges there.
-
-        Settings are the run's (``meta["parameters"]``), else the run defaults; ``peel_off_win``
-        left None is the run's too.
-        """
+        """Refit the MU filter on the EMG in view with the run's settings; redetect its discharges."""
         self.check_mu(mu)
         run = self.meta.get("parameters") or {}
         nbextchan = int(run.get("nbextchan") or DEFAULT_NBEXTCHAN)
@@ -641,12 +627,12 @@ class EditSession:
         if not 0 <= grid < len(coordinates):
             raise out_of_range("grid", grid, len(coordinates))
         span = grid_rows([c.shape[0] for c in coordinates])[grid]
-        n_ch = span.stop - span.start
+        n_channels = span.stop - span.start
         masks = ctx.discard_channels
         discard_mask = (
             np.asarray(masks[grid], dtype=int)
-            if grid < len(masks) and len(masks[grid]) == n_ch
-            else np.zeros(n_ch, dtype=int)
+            if grid < len(masks) and len(masks[grid]) == n_channels
+            else np.zeros(n_channels, dtype=int)
         )
         rows = ctx.data[span, :]
         if ctx.prefiltered:  # a v1 file's EMG went through these filters before it was saved

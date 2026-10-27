@@ -101,8 +101,8 @@ def _resolve_rois(
     nwindows: int = 1,
 ) -> list[tuple[int, int]]:
     """Resolve the analysis ROI from the various supported input methods."""
-    total_len = data.shape[1]
-    if total_len == 0:
+    n_samples = data.shape[1]
+    if n_samples == 0:
         raise MueditError("Input signal contains zero samples; cannot define ROI.")
     explicit_rois = bool(rois)
     n_rois = len(rois) if rois is not None else 0
@@ -116,17 +116,16 @@ def _resolve_rois(
     if rois:
         resolved = []
         for r in rois:
-            s = max(0, min(int(r[0]), total_len - 1))
-            e = max(s + 1, min(int(r[1]), total_len))
+            s = max(0, min(int(r[0]), n_samples - 1))
+            e = max(s + 1, min(int(r[1]), n_samples))
             resolved.append((s, e))
     elif manual_roi:
         s, e = select_roi_interactively(data, fsamp)
         resolved = [(s, e)]
     elif duration is not None:
-        total_samples = max(1, min(total_len, int(duration * fsamp)))
-        resolved = [(0, total_samples)]
+        resolved = [(0, max(1, min(n_samples, int(duration * fsamp))))]
     else:
-        resolved = [(0, total_len)]
+        resolved = [(0, n_samples)]
 
     if nwindows > 1 and not explicit_rois and len(resolved) == 1:
         s, e = resolved[0]
@@ -166,22 +165,22 @@ def _filter_grids(
 
 
 def load_step(
-    filepath: str,
+    file_path: str,
     file_label: str | None,
     preloaded_signal: SignalImport | None,
     progress_cb: Callable[[str, dict[str, Any]], None] | None,
 ) -> LoadStepOutput:
     """Load input signal data from disk, or share a preloaded signal read-only."""
-    filename = file_label or Path(filepath).name
+    filename = file_label or Path(file_path).name
     logger.info("Processing %s...", filename)
     if progress_cb:
         progress_cb("start", {"message": "Loading signal", "file": filename, "phase": "load"})
 
     signal = (
-        preloaded_signal.readonly_view() if preloaded_signal is not None else load_signal(filepath)
+        preloaded_signal.readonly_view() if preloaded_signal is not None else load_signal(file_path)
     )
     logger.info("Loaded data: %s, Fs=%s", signal.data.shape, signal.fsamp)
-    return LoadStepOutput(full_path=filepath, signal=signal)
+    return LoadStepOutput(full_path=file_path, signal=signal)
 
 
 def build_manual_artifact_mask(
@@ -236,12 +235,7 @@ def preprocess_step(
     store: ArrayStore | None = None,
     target_index: int | None = None,
 ) -> PreprocessStepOutput:
-    """Apply channel formatting, filtering, ROI selection and, if asked, automatic QC.
-
-    The filtered copy (``params.compute_dtype``) is allocated in ``store`` (the run's T1
-    folder), so every later step reads windows and batches from the memory-mapped file.
-    The filters themselves compute in float64.
-    """
+    """Format channels, filter, select ROIs and optionally auto-QC, into a copy in ``store``."""
     store = store if store is not None else RamStore()
     fsamp = loaded.signal.fsamp
     raw = loaded.signal.data

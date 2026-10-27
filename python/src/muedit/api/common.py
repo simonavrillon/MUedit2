@@ -37,11 +37,11 @@ def bids_root_for(project: str | None) -> Path:
         raise MueditError(str(exc), "project") from exc
 
 
-def dataset_root_of(filepath: str) -> Path | None:
+def dataset_root_of(file_path: str) -> Path | None:
     """The BIDS dataset a file sits in, else the default project folder above it, else ``None``."""
-    if not filepath:
+    if not file_path:
         return None
-    path = Path(filepath).expanduser().resolve()
+    path = Path(file_path).expanduser().resolve()
     root = dataset_root(path)
     if root is None:
         root = next((p for p in path.parents if p.name.lower() == config.DEFAULT_PROJECT), None)

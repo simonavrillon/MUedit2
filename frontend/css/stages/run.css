@@ -1,22 +1,3 @@
-/* ── MU Controls ── */
-
-.mu-controls {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  align-items: flex-end;
-  margin-bottom: 10px;
-}
-
-.mu-controls select {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  color: var(--text);
-  padding: 6px 10px;
-  border-radius: var(--radius-sm);
-  min-width: 160px;
-}
-
 /* ── Run page: plan, live search, result ── */
 
 .stage-run {
@@ -40,11 +21,6 @@
 
 .run-action-btn {
   align-self: flex-start;
-}
-
-.run-action-btn[hidden],
-.cancel-run-btn[hidden] {
-  display: none;
 }
 
 .cancel-run-btn {
@@ -196,16 +172,12 @@
 
 .run-error {
   padding: 10px 12px;
-  border: 1px solid var(--danger-border-clr);
+  border: 1px solid var(--danger-border);
   border-radius: var(--radius-sm);
   background: var(--danger-surface);
   color: var(--danger-text);
   font-size: var(--fs-md);
   overflow-wrap: anywhere;
-}
-
-.run-error[hidden] {
-  display: none;
 }
 
 /* Result */
@@ -359,10 +331,5 @@
   .run-row {
     grid-template-columns: 1fr;
     gap: 6px;
-  }
-
-  .run-time {
-    margin-left: 0;
-    text-align: left;
   }
 }

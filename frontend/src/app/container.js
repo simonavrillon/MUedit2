@@ -1,3 +1,7 @@
+/**
+ * Starts the app: builds the `app` context, binds every stage's events,
+ * and waits for the backend before enabling the page.
+ */
 import { API_BASE } from "../config.js";
 import { createApiClient } from "../api/client.js";
 import { createApp } from "./create-app.js";

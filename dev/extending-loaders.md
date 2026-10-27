@@ -8,10 +8,10 @@ the rules they all follow and every file a new format touches. Paths are relativ
 ## Add a loader
 
 1. **Module** `io/_<format>.py`, shaped like the others:
-   - `load_<format>(filepath: str, store: ArrayStore | None = None) -> SignalImport`, starting
+   - `load_<format>(file_path: str, store: ArrayStore | None = None) -> SignalImport`, starting
      with `store = store if store is not None else RamStore()`.
    - Resolve and validate first: a `_<Format>Recording` dataclass built by
-     `_resolve_<format>_recording(filepath)`, raising `SignalLoadError` with a specific
+     `_resolve_<format>_recording(file_path)`, raising `SignalLoadError` with a specific
      message (the user reads it as-is).
    - Allocate full-length arrays with `store.allocate(...)`, fill them block by block
      (`storage.sample_blocks`), then `store.seal(...)`. A long recording never sits whole on the heap.

@@ -180,11 +180,7 @@ class _Run:
         return kept
 
     def _done_event(self, message: dict[str, Any]) -> tuple[dict[str, Any], bool]:
-        """The ``done`` event for a finished run, and whether its pulse trains were kept.
-
-        The page already shows the recording, so the event carries only the MU-to-grid index:
-        the pulse trains and discharge times stay on the server under the run token.
-        """
+        """A run's ``done`` event (just its MU-to-grid index), and whether its trains were kept."""
         preview: dict[str, Any] = message.get("preview") or {}
         preview_payload = make_json_safe({"mu_grid_index": preview.get("mu_grid_index", [])})
         pulse_trains = preview.get("pulse_trains_full")
