@@ -16,6 +16,7 @@ const { COLORS } = await import("../src/config.js");
 const plots = await import("../src/view/plots.js");
 
 const ramp = (n) => Array.from({ length: n }, (_, i) => i);
+const f32 = (values) => Float32Array.from(values);
 
 beforeEach(() => resetDom());
 
@@ -443,14 +444,7 @@ describe("drawRoiRects", () => {
 describe("drawGridOverlay", () => {
   test("shares one scale across grids, one colour each", () => {
     const canvas = fakeCanvas({ width: 100, height: 50 });
-    plots.drawGridOverlay(
-      canvas,
-      [
-        [0, 10],
-        [5, 20],
-      ],
-      ["#a", "#b"],
-    );
+    plots.drawGridOverlay(canvas, [f32([0, 10]), f32([5, 20])], ["#a", "#b"]);
     assert.deepEqual(pathPoints(canvas.ctx), [
       ["moveTo", 0, 50],
       ["lineTo", 100, 25],
@@ -463,14 +457,20 @@ describe("drawGridOverlay", () => {
 
   test("a grid with no data leaves the others their colours", () => {
     const canvas = fakeCanvas({ width: 100, height: 50 });
-    plots.drawGridOverlay(canvas, [[], [0, 10]], ["#a", "#b"]);
+    plots.drawGridOverlay(canvas, [f32([]), f32([0, 10])], ["#a", "#b"]);
     const colours = ops(canvas.ctx, "lineTo").map((c) => c.strokeStyle);
     assert.deepEqual(colours, ["#b"]);
   });
 
   test("draws the ROI windows under the traces", () => {
     const canvas = fakeCanvas({ width: 100, height: 50 });
-    plots.drawGridOverlay(canvas, [[0, 1]], ["#a"], [{ start: 0, end: 1 }], 2);
+    plots.drawGridOverlay(
+      canvas,
+      [f32([0, 1])],
+      ["#a"],
+      [{ start: 0, end: 1 }],
+      2,
+    );
     assert.deepEqual(ops(canvas.ctx, "fillRect")[0].args, [0, 0, 50, 50]);
   });
 
@@ -491,11 +491,11 @@ describe("drawGridOverlay", () => {
 
   test("reports missing or non-numeric data", () => {
     const empty = fakeCanvas();
-    plots.drawGridOverlay(empty, [[], null, "x"]);
+    plots.drawGridOverlay(empty, [f32([]), null]);
     assert.deepEqual(texts(empty.ctx), ["No data"]);
 
     const nan = fakeCanvas();
-    plots.drawGridOverlay(nan, [[NaN, NaN]]);
+    plots.drawGridOverlay(nan, [f32([NaN, NaN])]);
     assert.deepEqual(texts(nan.ctx), ["No numeric data"]);
   });
 });
@@ -509,16 +509,9 @@ describe("drawMiniSeries", () => {
     assert.equal(rect.fillStyle, COLORS.empty);
   });
 
-  test("a malformed envelope is treated as missing", () => {
-    const canvas = fakeCanvas({ width: 60, height: 20 });
-    plots.drawMiniSeries(canvas, /** @type {any} */ ({ min: 1, max: 2 }));
-    assert.equal(ops(canvas.ctx, "fillRect").length, 1);
-    assert.deepEqual(pathPoints(canvas.ctx), []);
-  });
-
   test("a raw trace is one line, amber when the channel is discarded", () => {
     const on = fakeCanvas({ width: 60, height: 20 });
-    plots.drawMiniSeries(on, [0, 2]);
+    plots.drawMiniSeries(on, f32([0, 2]));
     assert.deepEqual(pathPoints(on.ctx), [
       ["moveTo", 0, 20],
       ["lineTo", 60, 0],
@@ -526,7 +519,7 @@ describe("drawMiniSeries", () => {
     assert.equal(ops(on.ctx, "stroke")[0].strokeStyle, COLORS.primary);
 
     const off = fakeCanvas({ width: 60, height: 20 });
-    plots.drawMiniSeries(off, [0, 2], true);
+    plots.drawMiniSeries(off, f32([0, 2]), true);
     assert.equal(ops(off.ctx, "stroke")[0].strokeStyle, COLORS.warning);
   });
 
@@ -555,7 +548,7 @@ describe("drawMiniSeries", () => {
 
   test("an unsized cell gets a default size", () => {
     const canvas = fakeCanvas({ width: 0, height: 0 });
-    plots.drawMiniSeries(canvas, [1, 2]);
+    plots.drawMiniSeries(canvas, f32([1, 2]));
     assert.equal(canvas.width, 60);
     assert.equal(canvas.height, 28);
   });

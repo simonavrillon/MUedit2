@@ -16,33 +16,29 @@
  */
 
 /**
- * @param {unknown} x
- * @returns {x is ArrayLike<number>}
+ * @param {ChannelTrace | null | undefined} row
+ * @returns {row is Float32Array}
  */
-export function isValues(x) {
-  return (
-    Array.isArray(x) || (ArrayBuffer.isView(x) && !(x instanceof DataView))
-  );
+function isValues(row) {
+  return row instanceof Float32Array;
 }
 
 /**
- * @param {unknown} row
+ * @param {ChannelTrace | null | undefined} row
  * @returns {row is import("../api/binary-payloads.js").Envelope}
  */
 export function isEnvelope(row) {
-  if (!row || typeof row !== "object" || isValues(row)) return false;
-  const env = /** @type {{ min?: unknown, max?: unknown }} */ (row);
-  return isValues(env.min) && isValues(env.max);
+  return !!row && !isValues(row);
 }
 
 /**
- * Points in a viewport row: its bins, or its samples (0 when it is neither).
+ * Points in a viewport row: its bins, or its samples (0 without a row).
  *
  * @param {ChannelTrace | null | undefined} row
  */
 export function seriesPoints(row) {
-  if (isEnvelope(row)) return row.min.length;
-  return isValues(row) ? row.length : 0;
+  if (!row) return 0;
+  return isEnvelope(row) ? row.min.length : row.length;
 }
 
 /**

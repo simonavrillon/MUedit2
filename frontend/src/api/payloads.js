@@ -1,7 +1,7 @@
 /**
- * Normalises backend JSON at the boundary: the preview payload, regions
- * as `Span`s, `/qc/segment` segments and a run's `done` summary. Malformed
- * entries are dropped here.
+ * Normalises backend JSON at the boundary: the preview payload, the
+ * `/qc/auto` and `/qc/segment` responses (regions become `Span`s) and a run's
+ * `done` summary. Malformed entries are dropped here.
  */
 /** @typedef {import("../app/context.js").JsonObject} JsonObject */
 /** @typedef {import("../app/context.js").Span} Span */
@@ -29,7 +29,7 @@
  * @param {unknown} regions
  * @returns {Span[]}
  */
-export function toSpans(regions) {
+function toSpans(regions) {
   if (!Array.isArray(regions)) return [];
   return regions
     .filter(Array.isArray)
@@ -37,7 +37,12 @@ export function toSpans(regions) {
     .filter((r) => Number.isFinite(r.start) && Number.isFinite(r.end));
 }
 
-export const SEGMENT_KINDS = ["ramp", "plateau", "sinusoid", "irregular"];
+export const SEGMENT_KINDS = /** @type {const} */ ([
+  "ramp",
+  "plateau",
+  "sinusoid",
+  "irregular",
+]);
 
 /**
  * The segments of a `/qc/segment` response; one with an unknown kind or bounds is dropped.
@@ -66,6 +71,37 @@ export function toSegments(segments) {
         Number.isFinite(s.end) &&
         s.end > s.start,
     );
+}
+
+/**
+ * A `/qc/auto` response: each grid's bad channels (null when absent) and the
+ * artifact windows found.
+ *
+ * @param {JsonObject} data
+ */
+export function toAutoQc(data) {
+  return {
+    badChannelsPerGrid: Array.isArray(data.bad_channels_per_grid)
+      ? data.bad_channels_per_grid
+      : null,
+    artifactRegions: toSpans(data.artifact_regions),
+  };
+}
+
+/**
+ * A `/qc/segment` response: the segments and the auxiliary channel they split.
+ *
+ * @param {JsonObject} data
+ */
+export function toSegmentation(data) {
+  return {
+    segments: toSegments(data.segments),
+    targetIndex: Number.isInteger(data.target_index)
+      ? Number(data.target_index)
+      : null,
+    targetName:
+      typeof data.target_name === "string" ? data.target_name : "Target",
+  };
 }
 
 /**

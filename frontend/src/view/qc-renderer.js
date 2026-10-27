@@ -12,16 +12,17 @@ import {
 } from "./plots.js";
 import { seriesPoints, seriesRange } from "../signal/series.js";
 import { gridColumnCount } from "../io/grid.js";
-import { pickRoiSlot, syncRois } from "../signal/qc.js";
 import {
   describeWindow,
   drawnRois,
   isPlaceholder,
   isSegmentChosen,
+  pickRoiSlot,
   segmentAt,
   segmentGlyph,
   segmentTypes,
   syncChosenWindows,
+  syncRois,
   toggleSegment,
 } from "../signal/segments.js";
 import { getCurrentGrid } from "../state/selectors.js";
@@ -59,12 +60,12 @@ export function buildSelections(state) {
     glyph: segmentGlyph(s),
     cycles: s.cycles,
   }));
-  const total = state.totalSamples || 0;
+  const totalSamples = state.totalSamples || 0;
   // A whole-recording placeholder stays faint, or it would hide every segment.
   const rois = (
     state.roiDraft ? [...(state.rois || []), state.roiDraft] : state.rois || []
   ).map((r) =>
-    segments.length > 0 && !isPlaceholder(r, total)
+    segments.length > 0 && !isPlaceholder(r, totalSamples)
       ? { start: r.start, end: r.end, strong: true }
       : r,
   );
@@ -190,19 +191,18 @@ export function enableRoiSelection(app, canvasId) {
 
   const toSamples = (/** @type {number} */ sx, /** @type {number} */ ex) => {
     const width = canvas.clientWidth || 1;
-    const total = state.totalSamples || 0;
+    const totalSamples = state.totalSamples || 0;
     const s = Math.max(0, Math.min(width, Math.min(sx, ex)));
     const e = Math.max(0, Math.min(width, Math.max(sx, ex)));
-    const startSample = Math.round((s / width) * total);
-    const endSample = Math.round((e / width) * total);
+    const startSample = Math.round((s / width) * totalSamples);
+    const endSample = Math.round((e / width) * totalSamples);
     return { startSample, endSample };
   };
 
   const commitSelection = () => {
     if (!state.totalSamples) return;
     const { startSample, endSample } = toSamples(startX, endX);
-    const nwin = Number(els.nwindows?.value) || 1;
-    syncRois(state, nwin);
+    syncRois(state, Number(els.nwindows?.value) || 1);
     const span = {
       start: startSample,
       end: Math.max(startSample + 1, endSample),
@@ -216,7 +216,7 @@ export function enableRoiSelection(app, canvasId) {
     refreshVisuals();
     app.ensureQcTraces();
     setStatus(
-      `ROI updated (${state.rois.length} window${state.rois.length > 1 ? "s" : ""})`,
+      `Analysis window updated (${state.rois.length} window${state.rois.length > 1 ? "s" : ""})`,
     );
   };
 
@@ -237,15 +237,15 @@ export function enableRoiSelection(app, canvasId) {
   const toggleSegmentAt = (/** @type {number} */ x) => {
     const idx = segmentAt(state.segments, toSamples(x, x).startSample);
     if (idx < 0) return;
-    const total = syncChosenWindows(app, toggleSegment(state, idx));
+    const windowsText = syncChosenWindows(app, toggleSegment(state, idx));
     const seg = state.segments[idx];
     const holder = drawnRois(state).find(
       (r) => r.start <= seg.start && r.end >= seg.end,
     );
     setStatus(
       holder
-        ? `Window ${state.rois.indexOf(holder) + 1}: ${describeWindow(state, holder)} — ${total}`
-        : `Segment removed — ${total}`,
+        ? `Window ${state.rois.indexOf(holder) + 1}: ${describeWindow(state, holder)} — ${windowsText}`
+        : `Segment removed — ${windowsText}`,
     );
   };
 

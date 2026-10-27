@@ -23,6 +23,7 @@ const { buildSelections, enableRoiSelection, renderArtifactControls } =
   await import("../src/view/qc-renderer.js");
 
 const pristine = structuredClone(initialState);
+const f32 = (values) => Float32Array.from(values);
 
 let app;
 let els;
@@ -74,7 +75,9 @@ describe("ROI drag on the overview", () => {
     ]);
     assert.equal(app.state.roiDraft, null);
     assert.equal(app.ensureQcTraces.calls.length, 1);
-    assert.deepEqual(app.setStatus.calls.at(-1), ["ROI updated (2 windows)"]);
+    assert.deepEqual(app.setStatus.calls.at(-1), [
+      "Analysis window updated (2 windows)",
+    ]);
   });
 
   test("drawing windows one after another fills each in turn", () => {
@@ -214,14 +217,7 @@ describe("channel grid", () => {
         ],
       ],
       discardMasks: [[0, 1, 0, 0]],
-      channelTraces: [
-        [
-          [0, 1],
-          [1, 0],
-          [0, 0],
-          [2, 2],
-        ],
-      ],
+      channelTraces: [[f32([0, 1]), f32([1, 0]), f32([0, 0]), f32([2, 2])]],
     });
   });
 
@@ -341,10 +337,7 @@ describe("channel grid", () => {
 describe("auxiliary channels", () => {
   beforeEach(() => {
     Object.assign(app.state, {
-      auxSeries: [
-        [0, 10],
-        [5, 20],
-      ],
+      auxSeries: [f32([0, 10]), f32([5, 20])],
       auxNames: ["Force", ""],
       rois: [{ start: 0, end: 500 }],
     });
@@ -429,8 +422,8 @@ describe("automatic QC", () => {
   test("keeps the traces it has and redraws them with the new marks", async () => {
     const traces = [
       [
-        { min: [0], max: [1] },
-        { min: [0], max: [1] },
+        { min: f32([0]), max: f32([1]) },
+        { min: f32([0]), max: f32([1]) },
       ],
     ];
     Object.assign(app.state, {

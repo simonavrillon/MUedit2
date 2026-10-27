@@ -84,15 +84,19 @@ describe("setGridNames", () => {
 });
 
 describe("ROIs and artifact regions", () => {
-  test("setRoiForIndex pads earlier slots and ignores negative indices", () => {
-    actions.setRoiForIndex(state, 2, { start: 10, end: 20, extra: true });
+  test("setRoiForIndex replaces one window and ignores a missing index", () => {
+    state.rois = [
+      { start: 0, end: 5 },
+      { start: 0, end: 5 },
+    ];
+    actions.setRoiForIndex(state, 1, { start: 10, end: 20, extra: true });
     assert.deepEqual(state.rois, [
-      { start: 0, end: 0 },
-      { start: 0, end: 0 },
+      { start: 0, end: 5 },
       { start: 10, end: 20 },
     ]);
+    actions.setRoiForIndex(state, 2, { start: 1, end: 2 });
     actions.setRoiForIndex(state, -1, { start: 1, end: 2 });
-    assert.equal(state.rois.length, 3);
+    assert.equal(state.rois.length, 2);
   });
 
   test("removeLastArtifactRegion reports whether it removed anything", () => {

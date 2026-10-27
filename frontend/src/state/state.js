@@ -11,7 +11,7 @@
 /** @typedef {{ mu: number, position: number }} Bookmark Where the user last edited an MU. */
 /** @typedef {import("../api/binary-payloads.js").SeriesRow} ChannelTrace One row of a viewport: its samples, or their min/max per bin. */
 /** @typedef {import("../api/binary-payloads.js").PulseView} PulseView */
-/** @typedef {"ramp" | "plateau" | "sinusoid" | "irregular"} SegmentKind */
+/** @typedef {typeof import("../api/payloads.js").SEGMENT_KINDS[number]} SegmentKind */
 
 /**
  * One stretch of the force target, as `/qc/segment` splits it.

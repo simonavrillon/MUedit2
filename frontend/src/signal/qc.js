@@ -1,6 +1,6 @@
 /**
- * QC requests and the analysis windows: picking and syncing ROIs, automatic
- * QC, the channel traces kept on view, and opening a raw file's preview.
+ * QC requests: automatic QC, the channel traces kept on view, and opening a
+ * raw file's preview.
  */
 import {
   ensureDiscardMasks,
@@ -26,66 +26,17 @@ import { getCurrentGrid, roiStart, roiEnd } from "../state/selectors.js";
 import { handleError } from "../app/services/error-service.js";
 import {
   normalizePreviewPayload,
+  toAutoQc,
   toSegments,
-  toSpans,
 } from "../api/payloads.js";
+import { syncRois } from "./segments.js";
 import { createViewFetcher } from "../app/services/view-fetcher.js";
 import { withUpload } from "../app/services/upload.js";
 import { beginRawPreviewTransition } from "../state/transitions.js";
 import { OVERVIEW_BINS, QC_TRACE_BINS } from "../config.js";
 
 /** @typedef {import("../app/context.js").App} App */
-/** @typedef {import("../state/state.js").State} State */
 /** @typedef {import("../state/state.js").FileRef} FileRef */
-
-/**
- * The analysis window a new drag should replace. A drag over a drawn window
- * adjusts the one it overlaps most; otherwise it fills the first window not
- * drawn yet (a placeholder spanning the whole recording); once every window is
- * drawn, the one starting nearest the drag.
- *
- * @param {{ start: number, end: number }[]} rois
- * @param {{ start: number, end: number }} span
- * @param {number} total
- */
-export function pickRoiSlot(rois, span, total) {
-  const drawn = (/** @type {{ start: number, end: number }} */ r) =>
-    !(r.start <= 0 && r.end >= total);
-  let overlapIdx = -1;
-  let overlapBest = 0;
-  rois.forEach((r, i) => {
-    if (!drawn(r)) return;
-    const overlap = Math.min(r.end, span.end) - Math.max(r.start, span.start);
-    if (overlap > overlapBest) {
-      overlapBest = overlap;
-      overlapIdx = i;
-    }
-  });
-  if (overlapIdx >= 0) return overlapIdx;
-  const empty = rois.findIndex((r) => !drawn(r));
-  if (empty >= 0) return empty;
-  let idx = 0;
-  let best = Number.MAX_SAFE_INTEGER;
-  rois.forEach((r, i) => {
-    const dist = Math.abs(r.start - span.start);
-    if (dist < best) {
-      best = dist;
-      idx = i;
-    }
-  });
-  return idx;
-}
-
-/**
- * @param {State} state
- * @param {number} nwin
- */
-export function syncRois(state, nwin) {
-  if (state.rois.length > nwin) state.rois = state.rois.slice(0, nwin);
-  while (state.rois.length < nwin) {
-    state.rois.push({ start: 0, end: state.totalSamples || 0 });
-  }
-}
 
 /**
  * Run the automatic QC pipeline server-side and load the result into the
@@ -108,13 +59,11 @@ export async function requestAutoQc(app) {
   setStatus("Running automatic QC...", "muted");
 
   try {
-    const data = await withUpload(app, (token) =>
-      api.runAutoQc({ upload_token: token }),
+    const { badChannelsPerGrid, artifactRegions } = toAutoQc(
+      await withUpload(app, (token) => api.runAutoQc({ upload_token: token })),
     );
-    if (Array.isArray(data?.bad_channels_per_grid)) {
-      setDiscardMasks(state, data.bad_channels_per_grid);
-    }
-    setArtifactRegions(state, toSpans(data?.artifact_regions));
+    setDiscardMasks(state, badChannelsPerGrid);
+    setArtifactRegions(state, artifactRegions);
     setArtifactMode(state, false);
 
     const nBad = state.discardMasks.flat().filter(Boolean).length;
@@ -250,8 +199,7 @@ export async function requestPreview(app, { file, silentFailure = false }) {
     syncRois(state, Number(els.nwindows?.value) || 1);
     setArtifactRegions(state, []);
     setArtifactMode(state, false);
-    // Raw preview resets edit slice first; ensure BIDS rows render in QC context
-    // so they source run grid names instead of edit fallback ("Grid1").
+    // Before the muscle rows: outside Edit they name the recording's grids.
     showWorkspace("qc");
     prefillHardwareFields();
     renderBidsMuscleFields();

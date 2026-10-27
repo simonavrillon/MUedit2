@@ -2,7 +2,14 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 
-import { normalizePreviewPayload, toSpans } from "../src/api/payloads.js";
+import {
+  normalizePreviewPayload,
+  toAutoQc,
+  toSegmentation,
+} from "../src/api/payloads.js";
+
+const toSpans = (regions) =>
+  toAutoQc({ artifact_regions: regions }).artifactRegions;
 
 describe("normalizePreviewPayload", () => {
   test("every array field defaults to an empty array", () => {
@@ -35,7 +42,7 @@ describe("normalizePreviewPayload", () => {
   });
 });
 
-describe("toSpans", () => {
+describe("toAutoQc artifact windows", () => {
   test("reads [start, end] pairs", () => {
     assert.deepEqual(
       toSpans([
@@ -59,5 +66,31 @@ describe("toSpans", () => {
   test("anything but an array gives no regions", () => {
     assert.deepEqual(toSpans(undefined), []);
     assert.deepEqual(toSpans("0-10"), []);
+  });
+});
+
+describe("QC replies", () => {
+  test("toAutoQc keeps the bad channels per grid, or null without them", () => {
+    assert.deepEqual(toAutoQc({ bad_channels_per_grid: [[0, 1]] }), {
+      badChannelsPerGrid: [[0, 1]],
+      artifactRegions: [],
+    });
+    assert.equal(toAutoQc({}).badChannelsPerGrid, null);
+  });
+
+  test("toSegmentation reads the target, falling back when it is missing", () => {
+    assert.deepEqual(
+      toSegmentation({ target_index: 2, target_name: "Force" }),
+      {
+        segments: [],
+        targetIndex: 2,
+        targetName: "Force",
+      },
+    );
+    assert.deepEqual(toSegmentation({ target_index: 1.5 }), {
+      segments: [],
+      targetIndex: null,
+      targetName: "Target",
+    });
   });
 });

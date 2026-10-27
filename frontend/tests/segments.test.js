@@ -28,7 +28,6 @@ const { setupSessionFormEvents } =
 const {
   chooseSegmentType,
   describeWindow,
-  inferTask,
   isSegmentChosen,
   requestSegmentation,
   segmentAt,
@@ -199,12 +198,12 @@ describe("segment types", () => {
   });
 });
 
-describe("inferTask", () => {
-  const up = seg(0, 1, "ramp", { direction: "up" });
-  const down = seg(0, 1, "ramp", { direction: "down" });
-  const flat = seg(0, 1, "plateau");
-  const sine = seg(0, 1, "sinusoid");
-  const rough = seg(0, 1, "irregular");
+describe("the task segmentation infers", () => {
+  const up = { kind: "ramp", direction: "up" };
+  const down = { kind: "ramp", direction: "down" };
+  const flat = { kind: "plateau" };
+  const sine = { kind: "sinusoid" };
+  const rough = { kind: "irregular" };
 
   for (const [segments, task] of [
     [[up, flat, sine], "sinusoid"],
@@ -219,8 +218,13 @@ describe("inferTask", () => {
     [[up, down, up, flat, down], "dynamic"],
     [[rough], "dynamic"],
   ]) {
-    test(`${segments.map((s) => s.direction ?? s.kind).join(" ")} is ${task}`, () => {
-      assert.equal(inferTask(segments), task);
+    test(`${segments.map((s) => s.direction ?? s.kind).join(" ")} is ${task}`, async () => {
+      els.bidsTask = fakeElement("input");
+      app.api.segmentTarget = async () => ({
+        segments: segments.map((s, i) => ({ start: i, end: i + 1, ...s })),
+      });
+      await requestSegmentation(app);
+      assert.equal(els.bidsTask.value, task);
     });
   }
 });

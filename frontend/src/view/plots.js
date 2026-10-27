@@ -7,7 +7,6 @@
 import { COLORS, canvasFont } from "../config.js";
 import {
   isEnvelope,
-  isValues,
   seriesPoints,
   seriesRange,
   traceRange,
@@ -376,7 +375,7 @@ export function drawTrace(canvas, trace, view, options = {}) {
         to(toX(at), toY(row.max[i]));
         ctx.lineTo(toX(at), toY(row.min[i]));
       }
-    } else if (isValues(row)) {
+    } else {
       for (let i = 0; i < n; i++) {
         const at = trace.start + i;
         if (inView(at)) to(toX(at), toY(row[i]));

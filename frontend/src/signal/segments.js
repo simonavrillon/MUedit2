@@ -1,10 +1,11 @@
 /**
- * Force-target segments: their kinds and glyphs, choosing them as analysis
- * windows, the BIDS task they imply, and the `/qc/segment` request.
+ * Analysis windows and force-target segments: drawing and syncing windows,
+ * segment kinds and glyphs, choosing segments as windows, the BIDS task they
+ * imply, and the `/qc/segment` request.
  */
 import { isCovered, subtractSpan, unionSpans } from "./intervals.js";
 import { setRois, setSegments, setTargetIndex } from "../state/actions.js";
-import { SEGMENT_KINDS, toSegments } from "../api/payloads.js";
+import { SEGMENT_KINDS, toSegmentation } from "../api/payloads.js";
 import { handleError } from "../app/services/error-service.js";
 import { withUpload } from "../app/services/upload.js";
 import { MIN_ROI_S } from "../config.js";
@@ -47,10 +48,65 @@ function segmentLabel(seg) {
  * Whether `roi` is a whole-recording placeholder, a window not drawn yet.
  *
  * @param {Span} roi
- * @param {number} total
+ * @param {number} totalSamples
  */
-export function isPlaceholder(roi, total) {
-  return roi.start <= 0 && roi.end >= total;
+export function isPlaceholder(roi, totalSamples) {
+  return roi.start <= 0 && roi.end >= totalSamples;
+}
+
+/**
+ * @param {State} state
+ * @returns {Span}
+ */
+function placeholder(state) {
+  return { start: 0, end: state.totalSamples || 0 };
+}
+
+/**
+ * Keep `nwindows` windows: drop the last ones, or add placeholders.
+ *
+ * @param {State} state
+ * @param {number} nwindows
+ */
+export function syncRois(state, nwindows) {
+  const rois = state.rois.slice(0, nwindows);
+  while (rois.length < nwindows) rois.push(placeholder(state));
+  setRois(state, rois);
+}
+
+/**
+ * The analysis window a new drag should replace. A drag over a drawn window
+ * adjusts the one it overlaps most; otherwise it fills the first placeholder;
+ * once every window is drawn, the one starting nearest the drag.
+ *
+ * @param {Span[]} rois
+ * @param {Span} span
+ * @param {number} totalSamples
+ */
+export function pickRoiSlot(rois, span, totalSamples) {
+  let overlapIdx = -1;
+  let overlapBest = 0;
+  rois.forEach((r, i) => {
+    if (isPlaceholder(r, totalSamples)) return;
+    const overlap = Math.min(r.end, span.end) - Math.max(r.start, span.start);
+    if (overlap > overlapBest) {
+      overlapBest = overlap;
+      overlapIdx = i;
+    }
+  });
+  if (overlapIdx >= 0) return overlapIdx;
+  const empty = rois.findIndex((r) => isPlaceholder(r, totalSamples));
+  if (empty >= 0) return empty;
+  let idx = 0;
+  let best = Number.MAX_SAFE_INTEGER;
+  rois.forEach((r, i) => {
+    const dist = Math.abs(r.start - span.start);
+    if (dist < best) {
+      best = dist;
+      idx = i;
+    }
+  });
+  return idx;
 }
 
 /**
@@ -96,10 +152,7 @@ function chooseSegments(state, segs, on) {
   const next = on
     ? unionSpans([...drawn, ...segs])
     : segs.reduce((spans, seg) => subtractSpan(spans, seg, minLength), drawn);
-  setRois(
-    state,
-    next.length ? next : [{ start: 0, end: state.totalSamples || 0 }],
-  );
+  setRois(state, next.length ? next : [placeholder(state)]);
   return next.length;
 }
 
@@ -169,7 +222,7 @@ export function segmentTypes(state) {
  *
  * @param {TargetSegment[]} segments
  */
-export function inferTask(segments) {
+function inferTask(segments) {
   if (segments.some((s) => s.kind === "sinusoid")) return "sinusoid";
   // One letter per segment: Up ramp, Down ramp, Plateau.
   const order = segments
@@ -209,7 +262,7 @@ export function describeWindow(state, roi) {
  * @param {App} app
  * @returns {number | null}
  */
-function segmentationChannel(app) {
+function segmentationTarget(app) {
   const shown = parseInt(app.els.auxSelector?.value ?? "-1", 10);
   if (shown >= 0) return shown;
   return app.state.targetIndex;
@@ -225,10 +278,10 @@ function summarize(segments) {
   const parts = SEGMENT_KINDS.filter((k) => counts[k]).map(
     (k) => `${counts[k]} ${k}${counts[k] > 1 ? "s" : ""}`,
   );
-  const sine = segments.find((s) => s.kind === "sinusoid" && s.frequencyHz);
-  return (
-    parts.join(", ") + (sine ? ` (${sine.frequencyHz?.toFixed(2)} Hz)` : "")
-  );
+  const hz = segments.find(
+    (s) => s.kind === "sinusoid" && s.frequencyHz,
+  )?.frequencyHz;
+  return parts.join(", ") + (hz ? ` (${hz.toFixed(2)} Hz)` : "");
 }
 
 /**
@@ -243,17 +296,19 @@ export async function requestSegmentation(app) {
     setStatus("Load a signal first", "error");
     return false;
   }
-  const channel = segmentationChannel(app);
+  const targetIndex = segmentationTarget(app);
   if (els.qcSegmentBtn) els.qcSegmentBtn.disabled = true;
   setStatus("Segmenting the target...", "muted");
   try {
-    const data = await withUpload(app, (token) =>
-      api.segmentTarget({
-        upload_token: token,
-        ...(channel === null ? {} : { target_index: channel }),
-      }),
+    const reply = toSegmentation(
+      await withUpload(app, (token) =>
+        api.segmentTarget({
+          upload_token: token,
+          ...(targetIndex === null ? {} : { target_index: targetIndex }),
+        }),
+      ),
     );
-    const segments = toSegments(data?.segments);
+    const { segments } = reply;
     setSegments(state, segments);
     // A task typed in, or read from the file, stays.
     const task =
@@ -261,13 +316,13 @@ export async function requestSegmentation(app) {
         ? inferTask(segments)
         : null;
     if (task) els.bidsTask.value = task;
-    setTargetIndex(state, data?.target_index);
+    setTargetIndex(state, reply.targetIndex);
     if (els.auxSelector && state.targetIndex !== null) {
       els.auxSelector.value = String(state.targetIndex);
     }
     app.refreshVisuals();
     setStatus(
-      `${data?.target_name ?? "Target"}: ${summarize(segments)}.${task ? ` Task set to ${task}.` : ""} Click the windows to decompose`,
+      `${reply.targetName}: ${summarize(segments)}.${task ? ` Task set to ${task}.` : ""} Click the windows to decompose`,
       "success",
     );
     return true;

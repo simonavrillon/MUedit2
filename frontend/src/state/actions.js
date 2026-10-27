@@ -371,11 +371,9 @@ export function setRoiDraft(state, draft) {
  * @param {Span} roi
  */
 export function setRoiForIndex(state, idx, roi) {
-  if (idx < 0) return;
-  while (state.rois.length <= idx) {
-    state.rois.push({ start: 0, end: 0 });
-  }
-  state.rois[idx] = { start: roi.start, end: roi.end };
+  state.rois = state.rois.map((r, i) =>
+    i === idx ? { start: roi.start, end: roi.end } : r,
+  );
 }
 
 /**

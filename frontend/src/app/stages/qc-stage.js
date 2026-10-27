@@ -3,7 +3,6 @@
  * selected grid) and its event bindings.
  */
 import {
-  syncRois,
   requestAutoQc,
   createQcTraces,
   requestPreview,
@@ -25,6 +24,7 @@ import {
   chooseSegmentType,
   requestSegmentation,
   syncChosenWindows,
+  syncRois,
 } from "../../signal/segments.js";
 import { getCurrentGrid } from "../../state/selectors.js";
 
@@ -149,10 +149,10 @@ function setSegmentMenuOpen(els, open) {
  */
 function chooseTypeFromBox(app, box) {
   const count = chooseSegmentType(app.state, box.value, box.checked);
-  const total = syncChosenWindows(app, count);
+  const windowsText = syncChosenWindows(app, count);
   app.refreshVisuals();
   app.setStatus(
-    `${box.checked ? "Added" : "Removed"} ${box.value}s — ${total}`,
+    `${box.checked ? "Added" : "Removed"} ${box.value}s — ${windowsText}`,
   );
 }
 
