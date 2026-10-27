@@ -85,7 +85,7 @@ Check: `tests/test_decomp_decomposition_file.py`, `tests/test_api_editing.py` (`
 
 Read it in the module that uses it, its name a `*_ENV` constant at the top beside its default
 (`paths.py: CACHE_DIR_ENV`, `api/memory.py: BUDGET_ENV`, `storage.py: DISK_RESERVE_ENV`), and add
-a row to the environment-variable table in `docs/cli.md`. If the launchers need it,
+a row to the environment-variable table in `docs/cli.md`. If the launchers need to set it,
 update both `scripts/run_MUedit.sh` and `scripts/run_MUedit.ps1`.
 
 ## Add a loader or an electrode grid

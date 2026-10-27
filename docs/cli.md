@@ -26,14 +26,8 @@ same origin. This is the same server the launchers (`MUedit.command`,
 | Environment variable | Default | Effect |
 |---|---|---|
 | `MUEDIT_HOST` | `127.0.0.1` | Bind host. A loopback host enables a Host-header check so only this machine's browser can call the API. |
-| `MUEDIT_PORT` | `8000` | Bind port. The page opens at `http://127.0.0.1:<port>/`. |
-
-> **A note on the port.** The launcher scripts set `MUEDIT_PORT` from
-> `MUEDIT_BACKEND_PORT` (`export MUEDIT_PORT="${MUEDIT_BACKEND_PORT:-8000}"`), so a
-> `MUEDIT_PORT` you export yourself is **overwritten** when you launch via
-> `MUedit.command` / `MUedit.bat` / `scripts/run_MUedit.*`. To change the port there,
-> set **`MUEDIT_BACKEND_PORT`**. When you run `muedit api` directly, set
-> **`MUEDIT_PORT`**. See [Environment variables](#environment-variables).
+| `MUEDIT_PORT` | `8000` | Bind port, for the launchers too. The page opens at `http://127.0.0.1:<port>/`. |
+| `MUEDIT_OPEN_BROWSER` | `0` (`1` in the launchers) | `1` opens the page in the browser once the server is listening. |
 
 ---
 
@@ -186,9 +180,7 @@ MUedit reads these variables. Set them before launching.
 | `MUEDIT_DATA_ROOT` | the repo's `data/`, else `~/Documents/MUedit` | backend | Output root; each project is a folder inside it. |
 | `MUEDIT_HOST` | `127.0.0.1` | `muedit api` | Bind host. |
 | `MUEDIT_PORT` | `8000` | `muedit api` | Bind port. |
-| `MUEDIT_BACKEND_PORT` | `8000` | launchers only | Copied into `MUEDIT_PORT` by the launcher scripts — the port override when launching via `MUedit.command` / `MUedit.bat` / `scripts/run_MUedit.*`. |
-| `MUEDIT_OPEN_BROWSER` | `1` | launchers only | `0` skips opening the browser. |
-| `MUEDIT_NO_UV` | `0` | launchers only | `1` forces plain `python` instead of `uv run`. |
+| `MUEDIT_OPEN_BROWSER` | `0` (`1` in the launchers) | `muedit api` | `1` opens the page in the browser once the server is listening. |
 | `MUEDIT_CACHE_DIR` | the OS per-user cache (`MUedit` on macOS/Windows, `muedit` on Linux) | backend | Where session stores and unsaved-edit logs live. |
 | `MUEDIT_CACHE_BUDGET_MB` | clamp(10% of RAM, 256 MB, 1 GB) | backend | In-memory budget shared by every API cache. |
 | `MUEDIT_DISK_RESERVE_MB` | `1024` | backend | Free disk a session store keeps; arrays that would cut into it stay in RAM. |

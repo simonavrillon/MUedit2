@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -52,10 +53,13 @@ def _served_app(monkeypatch: pytest.MonkeyPatch, **env: str) -> tuple[FastAPI, s
 
     served: dict[str, Any] = {}
     monkeypatch.setattr(
-        cli.uvicorn, "run", lambda app, host, **_: served.update(app=app, host=host)
+        cli.uvicorn.Server,
+        "run",
+        lambda server: served.update(app=server.config.app, host=server.config.host),
     )
     monkeypatch.setattr(cli, "log_to_file", lambda _path: None)
     monkeypatch.delenv("MUEDIT_HOST", raising=False)
+    monkeypatch.delenv("MUEDIT_OPEN_BROWSER", raising=False)
     for key, value in env.items():
         monkeypatch.setenv(key, value)
     cli.serve_api()
@@ -105,3 +109,26 @@ class TestOriginAndHost:
         assert host == "0.0.0.0"  # noqa: S104
         with TestClient(app, base_url="http://192.168.1.20:8000") as c:
             assert c.get(f"{API}/health").status_code == 200
+
+
+def test_opens_the_browser_once_the_server_has_started(monkeypatch: pytest.MonkeyPatch) -> None:
+    import muedit.cli as cli
+
+    opened: list[str] = []
+    done = threading.Event()
+
+    def run(server: Any) -> None:
+        server.started = True
+        done.wait(timeout=5)
+
+    def open_url(url: str) -> None:
+        opened.append(url)
+        done.set()
+
+    monkeypatch.setattr(cli.uvicorn.Server, "run", run)
+    monkeypatch.setattr(cli.webbrowser, "open", open_url)
+    monkeypatch.setattr(cli, "log_to_file", lambda _path: None)
+    monkeypatch.setenv("MUEDIT_OPEN_BROWSER", "1")
+    monkeypatch.setenv("MUEDIT_PORT", "8123")
+    cli.serve_api()
+    assert opened == ["http://127.0.0.1:8123/"]

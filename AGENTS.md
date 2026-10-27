@@ -70,9 +70,9 @@ uv run muedit api                # backend only — http://127.0.0.1:8000
 uv run muedit decompose FILE     # decomposition without the UI (see docs/cli.md)
 ```
 
-The launchers set `MUEDIT_HOST` / `MUEDIT_PORT` (the port override is
-`MUEDIT_BACKEND_PORT`) and open the browser at `http://127.0.0.1:8000/`. The app runs in
-the launcher's terminal — quit with `Ctrl+C`. See [docs/cli.md](docs/cli.md) for every
+The launchers run `uv run muedit api` with `MUEDIT_OPEN_BROWSER=1`, so the server opens the
+browser at `http://127.0.0.1:8000/` once it is listening. The app runs in the launcher's
+terminal — quit with `Ctrl+C`. See [docs/cli.md](docs/cli.md) for every
 environment variable.
 
 ## Test

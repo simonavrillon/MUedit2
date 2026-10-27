@@ -156,13 +156,6 @@ the rules every change follows, and links to the architecture, contracts and cha
 in [dev/](dev/). Optional extras: `--extra notebook` (JupyterLab), `--extra research`
 (Optuna), `--extra plot` (matplotlib, for the CLI's `--manual-roi`).
 
-> **Migrating from conda:** `environment.yml` is deprecated and kept for one
-> release so in-flight work is not disrupted. It is no longer tested in CI and
-> will be removed; `uv sync` reproduces the same package versions it pinned.
-> `deno`, used only by the BIDS validation cell in
-> `notebooks/bids_dataset_metadata.ipynb`, is not a Python package and is now
-> installed separately (that notebook explains how).
-
 ## License
 
 MUedit is free software, released under the [GNU General Public License v3.0](LICENSE).

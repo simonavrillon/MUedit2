@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import logging
 import multiprocessing
 import os
 import sys
+import threading
+import time
+import webbrowser
 from pathlib import Path
 from typing import get_args
 
@@ -50,6 +54,16 @@ def _parse_rois(value: str) -> list[tuple[int, int]]:
 
 
 LOOPBACK_HOSTS = ("127.0.0.1", "localhost")
+HOST_ENV = "MUEDIT_HOST"
+PORT_ENV = "MUEDIT_PORT"
+OPEN_BROWSER_ENV = "MUEDIT_OPEN_BROWSER"
+
+
+def _open_when_started(server: uvicorn.Server, url: str) -> None:
+    """Open ``url`` in the browser once ``server`` accepts connections."""
+    while not server.started:
+        time.sleep(0.1)
+    webbrowser.open(url)
 
 
 def serve_api() -> None:
@@ -58,14 +72,24 @@ def serve_api() -> None:
     multiprocessing.freeze_support()
     log_to_file(log_dir() / "muedit.log")
     # /preview-by-path reads any local path, so only this machine's frontend may call it.
-    host = os.environ.get("MUEDIT_HOST", "127.0.0.1")
-    port = int(os.environ.get("MUEDIT_PORT", "8000"))
+    host = os.environ.get(HOST_ENV, "127.0.0.1")
+    port = int(os.environ.get(PORT_ENV, "8000"))
     app = create_app(allowed_hosts=LOOPBACK_HOSTS if host in LOOPBACK_HOSTS else None)
     include_routers(app)
     frontend = frontend_dir()
     if frontend is not None:
         mount_frontend(app, frontend)
-    uvicorn.run(app, host=host, port=port, log_level="warning", access_log=False)
+    server = uvicorn.Server(
+        uvicorn.Config(app, host=host, port=port, log_level="warning", access_log=False)
+    )
+    url = f"http://127.0.0.1:{port}/"
+    print(f"MUedit is starting at {url}. Quit with Ctrl+C.", flush=True)
+    # A daemon thread, so a server that fails to start does not leave it waiting.
+    if os.environ.get(OPEN_BROWSER_ENV) == "1":
+        threading.Thread(target=_open_when_started, args=(server, url), daemon=True).start()
+    # uvicorn re-raises Ctrl+C after its graceful shutdown; uvicorn.run swallows it the same way.
+    with contextlib.suppress(KeyboardInterrupt):
+        server.run()
 
 
 def run_decomposition_cli(argv: list[str] | None = None) -> None:
