@@ -2,17 +2,17 @@
  * Edit-stage logic without DOM: the pulse view's range, the grid/MU
  * dropdown model, discharge rates, and selections turned into edit requests.
  */
-import { resetEditSlice } from "../state/actions.js";
+import { getEditMuIndicesForGrid } from "../state/selectors.js";
 import { traceRange } from "../signal/series.js";
 
 /** @typedef {import("../state/state.js").State} State */
 /** @typedef {import("../state/state.js").Selection} Selection */
+/** @typedef {import("../app/context.js").App} App */
 /** @typedef {import("../app/context.js").Span} Span */
+/** @typedef {import("../app/context.js").RoiOp} RoiOp */
 /** @typedef {ReturnType<typeof buildEditDropdownModel>} EditDropdownModel */
 
-/** @typedef {import("../app/context.js").App} App */
-
-// --- State helpers ---
+// --- Pulse view and dropdowns ---
 
 /**
  * The window on screen and the value range of the current MU's pulse train
@@ -22,61 +22,50 @@ import { traceRange } from "../signal/series.js";
  * @param {State} state
  */
 export function getPulseViewMeta(state) {
-  const muIdx = state.edit.currentMu ?? 0;
+  const mu = state.edit.currentMu;
   const shown = state.edit.pulseView;
-  if (
-    !shown ||
-    shown.mu !== muIdx ||
-    shown.version !== state.edit.versions?.[muIdx]
-  ) {
+  if (!shown || shown.mu !== mu || shown.version !== state.edit.versions[mu]) {
     return null;
   }
-  const total = state.edit.totalSamples || 0;
-  const view = state.edit.view || { start: 0, end: total };
-  const s = Math.max(0, Math.min(total, view.start));
-  const e = Math.max(s + 1, Math.min(total, view.end));
+  const totalSamples = state.edit.totalSamples;
+  const view = state.edit.view || { start: 0, end: totalSamples };
+  const start = Math.max(0, Math.min(totalSamples, view.start));
+  const end = Math.max(start + 1, Math.min(totalSamples, view.end));
   const { min, max } = traceRange(shown);
-  return { s, e, minVal: min, maxVal: max, span: max - min || 1 };
+  return { start, end, minVal: min, span: max - min || 1 };
 }
 
-// Compute the dropdown model: which grid to select, which MU list to show,
-// and whether the current grid/MU needs switching. Pure logic — no DOM,
-// no state mutation. The caller applies mutations and renders.
 /**
+ * The dropdowns' model: which grid to select, which MU list to show, and
+ * whether the current grid/MU needs switching. The caller applies the
+ * switches and renders.
+ *
  * @param {State} state
- * @param {(gridIdx: number) => number[]} getEditMuIndices
  */
-export function buildEditDropdownModel(state, getEditMuIndices) {
-  const gridNames = state.edit.gridNames || [];
-  let targetGrid = state.edit.currentMuGrid || 0;
-  let mus = getEditMuIndices(targetGrid);
-  if (!mus.length && gridNames.length) {
-    for (let g = 0; g < gridNames.length; g++) {
-      const list = getEditMuIndices(g);
+export function buildEditDropdownModel(state) {
+  const gridNames = state.edit.gridNames;
+  let targetGrid = state.edit.currentMuGrid;
+  let mus = getEditMuIndicesForGrid(state, targetGrid);
+  if (!mus.length) {
+    for (let grid = 0; grid < gridNames.length; grid++) {
+      const list = getEditMuIndicesForGrid(state, grid);
       if (list.length) {
-        targetGrid = g;
+        targetGrid = grid;
         mus = list;
         break;
       }
     }
   }
   const currentMu = state.edit.currentMu;
-  const needsMuSwitch = mus.length && !mus.includes(currentMu);
+  const needsMuSwitch = mus.length > 0 && !mus.includes(currentMu);
   return {
     gridNames,
     targetGrid,
     muOptions: mus,
     currentMu: needsMuSwitch ? mus[0] : currentMu,
-    needsGridSwitch: targetGrid !== (state.edit.currentMuGrid || 0),
+    needsGridSwitch: targetGrid !== state.edit.currentMuGrid,
     needsMuSwitch,
   };
-}
-
-/** @param {App} app */
-export function resetEditState(app) {
-  const { state, refreshEditModeButtons } = app;
-  resetEditSlice(state);
-  refreshEditModeButtons();
 }
 
 // --- Discharge rates ---
@@ -108,7 +97,7 @@ export function dischargeRates(spikes, fsamp, totalSamples) {
  * Discharge rates by MU's discharge times. An edit replaces an MU's array, so
  * an entry outlives no change to it; redraws while panning reuse it.
  *
- * @type {WeakMap<ArrayLike<number>, { fsamp: number | null, total: number, rates: ReturnType<typeof dischargeRates> }>}
+ * @type {WeakMap<ArrayLike<number>, { fsamp: number | null, totalSamples: number, rates: ReturnType<typeof dischargeRates> }>}
  */
 const ratesCache = new WeakMap();
 
@@ -117,20 +106,22 @@ const ratesCache = new WeakMap();
  *
  * @param {ArrayLike<number>} spikes
  * @param {number | null} fsamp
- * @param {number} total
+ * @param {number} totalSamples
  */
-export function cachedDischargeRates(spikes, fsamp, total) {
+export function cachedDischargeRates(spikes, fsamp, totalSamples) {
   const hit = ratesCache.get(spikes);
-  if (hit && hit.fsamp === fsamp && hit.total === total) return hit.rates;
-  const rates = dischargeRates(spikes, fsamp, total);
-  ratesCache.set(spikes, { fsamp, total, rates });
+  if (hit && hit.fsamp === fsamp && hit.totalSamples === totalSamples) {
+    return hit.rates;
+  }
+  const rates = dischargeRates(spikes, fsamp, totalSamples);
+  ratesCache.set(spikes, { fsamp, totalSamples, rates });
   return rates;
 }
 
 /**
  * The fastest rate whose midpoint is in `view`: the top of the rate plot.
  *
- * @param {{ positions: number[], rates: number[] }} dr
+ * @param {ReturnType<typeof dischargeRates>} rates
  * @param {Span} view
  */
 export function fastestRateInView({ positions, rates }, view) {
@@ -143,11 +134,12 @@ export function fastestRateInView({ positions, rates }, view) {
   return fastest;
 }
 
-// --- Selection coordinators (bridge canvas coordinates → API actions) ---
+// --- Selections to edit requests (one per op, as the backend's session) ---
 
 /**
- * The drawn box in samples, clamped to the view, and its pixel rows clamped
- * to the plot; null until the window on screen has been fetched.
+ * The drawn box as an edit payload: samples clamped to the view, and its pixel
+ * rows clamped to the plot as pulse values; null until the window on screen
+ * has been fetched.
  *
  * @param {App} app
  * @param {Selection} sel
@@ -155,20 +147,37 @@ export function fastestRateInView({ positions, rates }, view) {
 function pulseBox(app, sel) {
   const meta = getPulseViewMeta(app.state);
   if (!meta) return null;
-  const { s, e } = meta;
-  const start = Math.max(s, Math.min(e, sel.start));
-  const end = Math.max(start + 1, Math.min(e, sel.end));
+  const xStart = Math.max(meta.start, Math.min(meta.end, sel.start));
+  const xEnd = Math.max(xStart + 1, Math.min(meta.end, sel.end));
   const height = app.getPulsePlotHeight();
   const y1 = Math.max(0, Math.min(height, sel.yMin ?? 0));
   const y2 = Math.max(0, Math.min(height, sel.yMax ?? height));
   /** @param {number} y */
   const toValue = (y) => meta.minVal + (1 - y / height) * meta.span;
   return {
-    start,
-    end,
-    top: toValue(Math.min(y1, y2)),
-    low: toValue(Math.max(y1, y2)),
+    mu: app.state.edit.currentMu,
+    xStart,
+    xEnd,
+    yMin: toValue(Math.max(y1, y2)),
+    yMax: toValue(Math.min(y1, y2)),
   };
+}
+
+/**
+ * Send `op` on the drawn box; only `delete-spikes` takes the box's top.
+ *
+ * @param {App} app
+ * @param {RoiOp} op
+ * @param {Selection} sel
+ */
+function editInSelection(app, op, sel) {
+  const box = pulseBox(app, sel);
+  if (!box) return;
+  const { mu, xStart, xEnd, yMin } = box;
+  app.requestRoiEdit(
+    op,
+    op === "delete-spikes" ? box : { mu, xStart, xEnd, yMin },
+  );
 }
 
 /**
@@ -176,14 +185,7 @@ function pulseBox(app, sel) {
  * @param {Selection} sel
  */
 export function addSpikesInSelection(app, sel) {
-  const box = pulseBox(app, sel);
-  if (!box) return;
-  app.requestRoiEdit("add-spikes", {
-    mu: app.state.edit.currentMu ?? 0,
-    xStart: box.start,
-    xEnd: box.end,
-    yMin: box.low,
-  });
+  editInSelection(app, "add-spikes", sel);
 }
 
 /**
@@ -191,14 +193,7 @@ export function addSpikesInSelection(app, sel) {
  * @param {Selection} sel
  */
 export function addArtifactInSelection(app, sel) {
-  const box = pulseBox(app, sel);
-  if (!box) return;
-  app.requestRoiEdit("add-artifact", {
-    mu: app.state.edit.currentMu ?? 0,
-    xStart: box.start,
-    xEnd: box.end,
-    yMin: box.low,
-  });
+  editInSelection(app, "add-artifact", sel);
 }
 
 /**
@@ -206,34 +201,26 @@ export function addArtifactInSelection(app, sel) {
  * @param {Selection} sel
  */
 export function deleteSpikesInSelection(app, sel) {
-  const box = pulseBox(app, sel);
-  if (!box) return;
-  app.requestRoiEdit("delete-spikes", {
-    mu: app.state.edit.currentMu ?? 0,
-    xStart: box.start,
-    xEnd: box.end,
-    yMin: box.low,
-    yMax: box.top,
-  });
+  editInSelection(app, "delete-spikes", sel);
 }
 
 /**
- * Place a `span`-wide view at `start`, shifted to stay inside [0, total].
+ * Place a `span`-wide view at `start`, shifted to stay inside [0, totalSamples].
  * @param {number} start
  * @param {number} span
- * @param {number} total
+ * @param {number} totalSamples
  * @returns {Span}
  */
-export function clampView(start, span, total) {
+export function clampView(start, span, totalSamples) {
   let s = start;
   let e = s + span;
   if (s < 0) {
     e -= s;
     s = 0;
   }
-  if (e > total) {
-    s = Math.max(0, s - (e - total));
-    e = total;
+  if (e > totalSamples) {
+    s = Math.max(0, s - (e - totalSamples));
+    e = totalSamples;
   }
   return { start: s, end: e };
 }

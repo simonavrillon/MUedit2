@@ -188,9 +188,9 @@ function adjustView(view, total, action) {
  */
 function goToMu(app, direction) {
   const { state } = app;
-  const mus = getEditMuIndicesForGrid(state, state.edit.currentMuGrid || 0);
+  const mus = getEditMuIndicesForGrid(state, state.edit.currentMuGrid);
   if (!mus.length) return;
-  const idx = mus.indexOf(state.edit.currentMu ?? mus[0]);
+  const idx = mus.indexOf(state.edit.currentMu);
   const offset = direction === "prev" ? -1 : 1;
   setEditCurrentMu(state, mus[(idx + offset + mus.length) % mus.length], {
     resetView: true,
@@ -224,9 +224,7 @@ export function handleKeyboardNavigation(app, e) {
   if (!action) return;
   if (action === "zoom_out") setShowBookmark(state, true);
 
-  const total = state.edit.spikeTimes?.length
-    ? state.edit.totalSamples || 0
-    : 0;
+  const total = state.edit.spikeTimes?.length ? state.edit.totalSamples : 0;
   if (!total) return;
   const view = state.edit.view || { start: 0, end: total };
   setEditView(state, adjustView(view, total, action));

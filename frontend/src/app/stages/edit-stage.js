@@ -3,7 +3,6 @@
  * requests), the toolbar commands and their keys, and its event bindings.
  */
 import {
-  resetEditState as resetEditStateFeature,
   addSpikesInSelection as addSpikesInSelectionFeature,
   addArtifactInSelection as addArtifactInSelectionFeature,
   deleteSpikesInSelection as deleteSpikesInSelectionFeature,
@@ -36,8 +35,8 @@ import {
   setEditCurrentMuGrid,
   setEditPulseView,
   setEditView,
+  resetEditSlice,
 } from "../../state/actions.js";
-import { getEditMuIndicesForGrid } from "../../state/selectors.js";
 import { getCanvasPlotMetrics, oncePerFrame } from "../../view/plots.js";
 import { handleKeyboardNavigation } from "../services/navigation.js";
 import { createViewFetcher } from "../services/view-fetcher.js";
@@ -92,7 +91,8 @@ export function createEditStageService(app) {
 
   /** @type {EditStage["resetEditState"]} */
   function resetEditState() {
-    resetEditStateFeature(app);
+    resetEditSlice(state);
+    refreshEditModeButtons();
     app.setBidsProject("");
   }
 
@@ -101,16 +101,14 @@ export function createEditStageService(app) {
    * grid that has MUs, one of its MUs, and a view inside the recording.
    */
   function settleEditSelection() {
-    const model = buildEditDropdownModel(state, (grid) =>
-      getEditMuIndicesForGrid(state, grid),
-    );
+    const model = buildEditDropdownModel(state);
     if (model.needsGridSwitch) {
       setEditCurrentMuGrid(state, model.targetGrid, { resetView: false });
     }
     if (model.needsMuSwitch) {
       setEditCurrentMu(state, model.currentMu, { resetView: false });
     }
-    const total = state.edit.totalSamples || 0;
+    const total = state.edit.totalSamples;
     if (!state.edit.view || state.edit.view.end > total) {
       setEditView(state, { start: 0, end: total });
     }
@@ -161,8 +159,8 @@ export function createEditStageService(app) {
   function ensureEditPulseView() {
     const e = state.edit;
     const canvas = els.editPulseCanvas;
-    const total = e.totalSamples || 0;
-    const mu = e.currentMu ?? 0;
+    const total = e.totalSamples;
+    const mu = e.currentMu;
     if (!e.token || !canvas || !total || e.spikeTimes?.[mu] === undefined)
       return;
     const { start, end } = e.view || { start: 0, end: total };

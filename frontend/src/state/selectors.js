@@ -37,10 +37,10 @@ export function roiEnd(roi, fallback = /** @type {F} */ (0)) {
 /**
  * @param {ArrayLike<number>[] | null | undefined} spikeTimes one entry per MU
  * @param {number[] | null | undefined} mapping
- * @param {number} gridIdx
+ * @param {number} grid
  * @returns {number[]}
  */
-function muIndicesForGrid(spikeTimes, mapping, gridIdx) {
+function muIndicesForGrid(spikeTimes, mapping, grid) {
   const mus = spikeTimes || [];
   if (!mus.length) return [];
   const map = mapping || [];
@@ -49,18 +49,14 @@ function muIndicesForGrid(spikeTimes, mapping, gridIdx) {
   }
   return map
     .map((g, idx) => ({ g, idx }))
-    .filter((item) => Number(item.g) === Number(gridIdx))
+    .filter((item) => Number(item.g) === Number(grid))
     .map((item) => item.idx);
 }
 
 /**
  * @param {State} state
- * @param {number} gridIdx
+ * @param {number} grid
  */
-export function getEditMuIndicesForGrid(state, gridIdx) {
-  return muIndicesForGrid(
-    state.edit.spikeTimes,
-    state.edit.muGridIndex,
-    gridIdx,
-  );
+export function getEditMuIndicesForGrid(state, grid) {
+  return muIndicesForGrid(state.edit.spikeTimes, state.edit.muGridIndex, grid);
 }

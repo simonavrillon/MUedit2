@@ -33,8 +33,8 @@ export function ensureDiscardMasks(state) {
   if (!state.channelMeans.length) return;
   if (state.discardMasks.length !== state.channelMeans.length) {
     const badPerGrid = state.metadata?.bad_channels_per_grid;
-    state.discardMasks = state.channelMeans.map((cm, gridIdx) => {
-      const bad = badPerGrid?.[gridIdx];
+    state.discardMasks = state.channelMeans.map((cm, grid) => {
+      const bad = badPerGrid?.[grid];
       if (Array.isArray(bad) && bad.length === cm.length) {
         return bad.map((v) => (v === 1 ? 1 : 0));
       }
@@ -188,11 +188,11 @@ export function setChannelTraces(state, traces) {
 
 /**
  * @param {State} state
- * @param {number} gridIdx
+ * @param {number} grid
  * @param {ChannelTrace[]} trace
  */
-export function setChannelTraceForGrid(state, gridIdx, trace) {
-  state.channelTraces[gridIdx] = trace;
+export function setChannelTraceForGrid(state, grid, trace) {
+  state.channelTraces[grid] = trace;
 }
 
 /**
@@ -432,12 +432,12 @@ export function setDiscardMasks(state, masks) {
 
 /**
  * @param {State} state
- * @param {number} gridIdx
+ * @param {number} grid
  * @param {number} chIdx
  * @param {number} value
  */
-export function setDiscardMaskChannel(state, gridIdx, chIdx, value) {
-  (state.discardMasks[gridIdx] ??= [])[chIdx] = value ? 1 : 0;
+export function setDiscardMaskChannel(state, grid, chIdx, value) {
+  (state.discardMasks[grid] ??= [])[chIdx] = value ? 1 : 0;
 }
 
 /**
@@ -454,7 +454,7 @@ function keepEditMus(state, keptIdx) {
   const pick = (times) => keptIdx.map((i) => times[i] ?? new Int32Array(0));
   e.spikeTimes = pick(e.spikeTimes);
   e.artifactTimes = pick(e.artifactTimes);
-  e.currentMu = Math.max(0, keptIdx.indexOf(e.currentMu ?? 0));
+  e.currentMu = Math.max(0, keptIdx.indexOf(e.currentMu));
   const bookmarkIdx = e.bookmarkPosition
     ? keptIdx.indexOf(e.bookmarkPosition.mu)
     : -1;

@@ -306,7 +306,7 @@ export function enableRoiSelection(app, canvasId) {
  * and trace canvas.
  *
  * @typedef {object} BuiltGrid
- * @property {number} gridIdx
+ * @property {number} grid
  * @property {number[]} means
  * @property {number[][] | undefined} coords
  * @property {{ cell: HTMLElement, mini: HTMLCanvasElement }[]} cells
@@ -316,17 +316,17 @@ export function enableRoiSelection(app, canvasId) {
 const builtGrids = new WeakMap();
 
 /**
- * Lay out one cell per channel of `gridIdx`. A click toggles that channel
+ * Lay out one cell per channel of `grid`. A click toggles that channel
  * alone: its mask, its cell and its trace.
  *
  * @param {App} app
  * @param {HTMLElement} section
- * @param {number} gridIdx
+ * @param {number} grid
  * @param {number[]} means
  * @param {number[][] | undefined} coords
  * @returns {BuiltGrid}
  */
-function buildChannelGrid(app, section, gridIdx, means, coords) {
+function buildChannelGrid(app, section, grid, means, coords) {
   const { state } = app;
   const positions = coords || [];
   const { cols } = gridDimensionsFor(positions);
@@ -356,10 +356,10 @@ function buildChannelGrid(app, section, gridIdx, means, coords) {
     const meanText = Number.isFinite(meanVal) ? meanVal.toFixed(3) : "n/a";
     cell.title = `Channel ${chIdx + 1} • mean |EMG| ${meanText}`;
     cell.addEventListener("click", () => {
-      const off = state.discardMasks[gridIdx]?.[chIdx] !== 1;
-      setDiscardMaskChannel(state, gridIdx, chIdx, off ? 1 : 0);
+      const off = state.discardMasks[grid]?.[chIdx] !== 1;
+      setDiscardMaskChannel(state, grid, chIdx, off ? 1 : 0);
       cell.classList.toggle("off", off);
-      drawMiniSeries(mini, state.channelTraces[gridIdx]?.[chIdx], off);
+      drawMiniSeries(mini, state.channelTraces[grid]?.[chIdx], off);
     });
     cellsEl.appendChild(cell);
     return { cell, mini };
@@ -368,7 +368,7 @@ function buildChannelGrid(app, section, gridIdx, means, coords) {
   wrap.appendChild(cellsEl);
   section.innerHTML = "";
   section.appendChild(wrap);
-  return { gridIdx, means, coords, cells };
+  return { grid, means, coords, cells };
 }
 
 /**
@@ -381,27 +381,27 @@ export function drawChannelQC(app) {
   const { state, els } = app;
   const section = els.qcSection;
   if (!section) return;
-  const gridIdx = getCurrentGrid(state);
-  const means = state.channelMeans[gridIdx];
+  const grid = getCurrentGrid(state);
+  const means = state.channelMeans[grid];
   if (!means?.length) {
     section.innerHTML = "";
     builtGrids.delete(section);
     return;
   }
-  const coords = state.coordinates[gridIdx];
+  const coords = state.coordinates[grid];
   let built = builtGrids.get(section);
   const fresh =
     !built ||
-    built.gridIdx !== gridIdx ||
+    built.grid !== grid ||
     built.means !== means ||
     built.coords !== coords;
   if (!built || fresh) {
-    built = buildChannelGrid(app, section, gridIdx, means, coords);
+    built = buildChannelGrid(app, section, grid, means, coords);
     builtGrids.set(section, built);
   }
 
-  const mask = state.discardMasks[gridIdx] || [];
-  const traces = state.channelTraces[gridIdx] || [];
+  const mask = state.discardMasks[grid] || [];
+  const traces = state.channelTraces[grid] || [];
   const { cells } = built;
   cells.forEach(({ cell }, chIdx) => {
     cell.classList.toggle("off", mask[chIdx] === 1);

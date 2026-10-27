@@ -149,19 +149,19 @@ describe("getPulseViewMeta", () => {
   test("a null view spans the whole recording, ranged on the window", () => {
     const meta = ops.getPulseViewMeta(state);
     assert.deepEqual(
-      [meta.s, meta.e, meta.minVal, meta.maxVal, meta.span],
-      [0, 10, 0, 9, 9],
+      [meta.start, meta.end, meta.minVal, meta.span],
+      [0, 10, 0, 9],
     );
   });
 
   test("the view is clamped to the recording and at least one sample wide", () => {
     state.edit.view = { start: -50, end: 500 };
     let meta = ops.getPulseViewMeta(state);
-    assert.deepEqual([meta.s, meta.e], [0, 10]);
+    assert.deepEqual([meta.start, meta.end], [0, 10]);
 
     state.edit.view = { start: 4, end: 4 };
     meta = ops.getPulseViewMeta(state);
-    assert.deepEqual([meta.s, meta.e], [4, 5]);
+    assert.deepEqual([meta.start, meta.end], [4, 5]);
   });
 
   test("a flat window has a span of 1, not 0", () => {
@@ -175,7 +175,7 @@ describe("getPulseViewMeta", () => {
       max: Float32Array.from([1, 7]),
     };
     const meta = ops.getPulseViewMeta(state);
-    assert.deepEqual([meta.minVal, meta.maxVal], [-2, 7]);
+    assert.deepEqual([meta.minVal, meta.span], [-2, 9]);
   });
 
   test("null until the window of the MU as it is now has arrived", () => {
@@ -188,11 +188,15 @@ describe("getPulseViewMeta", () => {
 });
 
 describe("buildEditDropdownModel", () => {
-  const byGrid = (lists) => (g) => lists[g] || [];
+  /** MU i on grid `muGridIndex[i]`. */
+  function onGrids(muGridIndex) {
+    state.edit.muGridIndex = muGridIndex;
+    state.edit.spikeTimes = muGridIndex.map(() => ints());
+  }
 
   test("keeps the current grid and MU when both are valid", () => {
     state.edit.currentMu = 1;
-    const model = ops.buildEditDropdownModel(state, byGrid([[0, 1]]));
+    const model = ops.buildEditDropdownModel(state);
     assert.equal(model.targetGrid, 0);
     assert.equal(model.currentMu, 1);
     assert.equal(model.needsGridSwitch, false);
@@ -200,8 +204,10 @@ describe("buildEditDropdownModel", () => {
   });
 
   test("switches to the grid's first MU when the current one is elsewhere", () => {
+    state.edit.gridNames = ["A", "B"];
     state.edit.currentMu = 5;
-    const model = ops.buildEditDropdownModel(state, byGrid([[2, 3]]));
+    onGrids([1, 1, 0, 0, 1, 1]);
+    const model = ops.buildEditDropdownModel(state);
     assert.equal(model.currentMu, 2);
     assert.ok(model.needsMuSwitch);
   });
@@ -209,16 +215,19 @@ describe("buildEditDropdownModel", () => {
   test("falls through to the first grid that has MUs", () => {
     state.edit.gridNames = ["A", "B", "C"];
     state.edit.currentMuGrid = 0;
-    const model = ops.buildEditDropdownModel(state, byGrid([[], [], [4]]));
+    state.edit.currentMu = 1;
+    onGrids([2]);
+    const model = ops.buildEditDropdownModel(state);
     assert.equal(model.targetGrid, 2);
-    assert.deepEqual(model.muOptions, [4]);
+    assert.deepEqual(model.muOptions, [0]);
     assert.equal(model.needsGridSwitch, true);
-    assert.equal(model.currentMu, 4);
+    assert.equal(model.currentMu, 0);
   });
 
   test("no MUs anywhere asks for no switch", () => {
     state.edit.gridNames = ["A", "B"];
-    const model = ops.buildEditDropdownModel(state, byGrid([]));
+    onGrids([]);
+    const model = ops.buildEditDropdownModel(state);
     assert.equal(model.targetGrid, 0);
     assert.deepEqual(model.muOptions, []);
     assert.ok(!model.needsMuSwitch);

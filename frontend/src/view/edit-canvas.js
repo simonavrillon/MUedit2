@@ -57,12 +57,12 @@ function pxToViewSample(canvas, px, view) {
 /**
  * @param {HTMLCanvasElement} canvas
  * @param {State} state
- * @param {number} muIdx
+ * @param {number} mu
  * @param {Span | null} view
  */
-function renderBookmark(canvas, state, muIdx, view) {
+function renderBookmark(canvas, state, mu, view) {
   const bookmark = state.edit.bookmarkPosition;
-  if (!view || !bookmark || bookmark.mu !== muIdx) return;
+  if (!view || !bookmark || bookmark.mu !== mu) return;
   if (!state.edit.showBookmark) return;
 
   const ctx = canvas.getContext("2d");
@@ -170,9 +170,9 @@ export function renderEditDropdownsView(els, model) {
     value: idx,
     label: `Grid ${idx + 1}${name ? ` • ${name}` : ""}`,
   }));
-  const muOptions = model.muOptions.map((muIdx) => ({
-    value: muIdx,
-    label: `MU ${muIdx + 1}`,
+  const muOptions = model.muOptions.map((mu) => ({
+    value: mu,
+    label: `MU ${mu + 1}`,
   }));
   renderSelectPair(
     els.editMuGridSelect,
@@ -222,22 +222,21 @@ function displayedPulse(shown, flagged) {
  * @param {State} state
  */
 export function drawEditPulse(els, state) {
-  const muIdx = state.edit.currentMu ?? 0;
-  const total = state.edit.totalSamples || 0;
+  const mu = state.edit.currentMu;
+  const total = state.edit.totalSamples;
   const view = state.edit.view || { start: 0, end: total };
   const overlays = [];
   if (state.edit.selectionPulse) overlays.push(state.edit.selectionPulse);
   if (state.edit.draftSelectionPulse)
     overlays.push(state.edit.draftSelectionPulse);
   // A window of another MU is not drawn; one of this MU still loading is.
-  const shown =
-    state.edit.pulseView?.mu === muIdx ? state.edit.pulseView : null;
+  const shown = state.edit.pulseView?.mu === mu ? state.edit.pulseView : null;
   const canvasEl = els.editPulseCanvas;
   const hasData = !!(state.edit.spikeTimes?.length && total);
   if (shown) {
     const { trace, spikeValues, artifactValues, range } = displayedPulse(
       shown,
-      !!state.edit.flagged?.[muIdx],
+      !!state.edit.flagged?.[mu],
     );
     drawTrace(canvasEl, trace, view, {
       color: COLORS.pulse,
@@ -265,7 +264,7 @@ export function drawEditPulse(els, state) {
     drawTrace(canvasEl, null, view, { noDataText: hasData ? "" : "No data" });
   }
   if (canvasEl) {
-    renderBookmark(canvasEl, state, muIdx, state.edit.view);
+    renderBookmark(canvasEl, state, mu, state.edit.view);
   }
 }
 
@@ -277,10 +276,10 @@ export function drawEditPulse(els, state) {
  */
 export function drawEditRates(els, state) {
   const canvas = els.editDrCanvas;
-  const muIdx = state.edit.currentMu ?? 0;
-  const spikes = state.edit.spikeTimes?.[muIdx] || [];
-  const total = state.edit.totalSamples || 0;
-  if (state.edit.flagged?.[muIdx] || !total || !spikes.length) {
+  const mu = state.edit.currentMu;
+  const spikes = state.edit.spikeTimes?.[mu] || [];
+  const total = state.edit.totalSamples;
+  if (state.edit.flagged?.[mu] || !total || !spikes.length) {
     drawTrace(canvas, null, { start: 0, end: 0 });
     return;
   }
@@ -319,13 +318,13 @@ export function bindEditCanvas(app) {
 
   const hasMu = () =>
     !!state.edit.totalSamples &&
-    state.edit.spikeTimes?.[state.edit.currentMu ?? 0] !== undefined;
+    state.edit.spikeTimes?.[state.edit.currentMu] !== undefined;
 
   const pxToSample = (/** @type {number} */ px) =>
     pxToViewSample(
       canvas,
       px,
-      state.edit.view || { start: 0, end: state.edit.totalSamples || 0 },
+      state.edit.view || { start: 0, end: state.edit.totalSamples },
     );
 
   const drag = createDragState(canvas, pxToSample);
@@ -413,10 +412,8 @@ export function drawEditTimeline(els, state) {
   if (!prepared) return;
   const { ctx, width } = prepared;
 
-  const muIdx = state.edit.currentMu ?? 0;
-  const total = state.edit.spikeTimes?.[muIdx]
-    ? state.edit.totalSamples || 0
-    : 0;
+  const mu = state.edit.currentMu;
+  const total = state.edit.spikeTimes?.[mu] ? state.edit.totalSamples : 0;
   if (!total) return;
 
   const bw = Math.max(1, width - TIMELINE_PAD_L - TIMELINE_PAD_R);
@@ -425,7 +422,7 @@ export function drawEditTimeline(els, state) {
   ctx.fillRect(TIMELINE_PAD_L, TIMELINE_BAR_TOP, bw, TIMELINE_BAR_H);
 
   // Last edit action for this MU: green = added, red = removed
-  const muUid = state.edit.muUids?.[muIdx];
+  const muUid = state.edit.muUids?.[mu];
   if (muUid) {
     const lastEntry = state.edit.editHistory.findLast(
       (e) => e.mu_uid === muUid,
@@ -448,7 +445,7 @@ export function drawEditTimeline(els, state) {
 
   // Current spike positions (faint purple, drawn on top of history)
   ctx.fillStyle = COLORS.timelineSpikes;
-  fillTicks(ctx, state.edit.spikeTimes?.[muIdx] || [], total, bw);
+  fillTicks(ctx, state.edit.spikeTimes?.[mu] || [], total, bw);
 
   // View window
   const view = state.edit.view || { start: 0, end: total };
@@ -478,7 +475,7 @@ export function bindEditTimeline(app) {
   let dragViewStart = 0;
   let didMove = false;
 
-  const getTotal = () => state.edit.totalSamples || 0;
+  const getTotal = () => state.edit.totalSamples;
 
   const fracFromClientX = (/** @type {number} */ clientX) => {
     const rect = canvas.getBoundingClientRect();

@@ -30,8 +30,9 @@ import {
 
 /** @typedef {import("../context.js").App} App */
 /** @typedef {import("../context.js").JsonObject} JsonObject */
-/** @typedef {import("../context.js").RoiAction} RoiAction */
-/** @typedef {import("../context.js").RoiEditRequest} RoiEditRequest */
+/** @typedef {import("../context.js").RoiOp} RoiOp */
+/** @typedef {import("../context.js").RoiAddPayload} RoiAddPayload */
+/** @typedef {import("../context.js").RoiDeletePayload} RoiDeletePayload */
 /** @typedef {import("../context.js").Tone} Tone */
 /** @typedef {import("../../state/state.js").State} State */
 /** @typedef {import("../../state/state.js").FileRef} FileRef */
@@ -196,22 +197,26 @@ async function editAction(app, { pending, failed, run }) {
 
 /**
  * @param {App} app
- * @param {RoiAction} action
- * @param {RoiEditRequest} payload
+ * @param {RoiOp} op
+ * @param {RoiAddPayload | RoiDeletePayload} payload
  */
-export async function requestRoiEdit(app, action, payload) {
+export async function requestRoiEdit(app, op, payload) {
   const { state } = app;
   return editAction(app, {
     pending: "Applying ROI...",
     failed: "ROI failed",
     async run() {
-      await requestEditOp(app, action, {
+      const args = {
         mu: payload.mu,
         x_start: payload.xStart,
         x_end: payload.xEnd,
         y_min: payload.yMin,
-        y_max: payload.yMax,
-      });
+      };
+      await requestEditOp(
+        app,
+        op,
+        "yMax" in payload ? { ...args, y_max: payload.yMax } : args,
+      );
       const bookmarkPos = Math.round((payload.xStart + payload.xEnd) / 2);
       setEditBookmarkAndHide(state, payload.mu, bookmarkPos);
       clearEditPulseSelections(state);
@@ -243,8 +248,8 @@ export function prepareEditGrid(app, grid) {
 export async function requestFilterUpdate(app) {
   const { state, els, setStatus } = app;
   if (!state.edit.spikeTimes?.length) return;
-  const muIdx = state.edit.currentMu ?? 0;
-  const total = state.edit.totalSamples || 0;
+  const mu = state.edit.currentMu;
+  const total = state.edit.totalSamples;
   if (!total) {
     setStatus("No pulse train available", "muted");
     return;
@@ -257,14 +262,14 @@ export async function requestFilterUpdate(app) {
     failed: "Filter update failed",
     async run() {
       await requestEditOp(app, "update-filter", {
-        mu: muIdx,
+        mu,
         view_start: start,
         view_end: end,
         use_peeloff: isToggleOn(els.editPeelOffToggle),
         lock_spikes: isToggleOn(els.editLockSpikesToggle),
         project: state.edit.project || "",
       });
-      setEditBookmarkAndHide(state, muIdx, Math.round((start + end) / 2));
+      setEditBookmarkAndHide(state, mu, Math.round((start + end) / 2));
       return ["MU filter updated", "success"];
     },
   });
@@ -273,8 +278,8 @@ export async function requestFilterUpdate(app) {
 /** @param {App} app */
 export async function removeOutliers(app) {
   const { state, setStatus } = app;
-  const muIdx = state.edit.currentMu ?? 0;
-  if ((state.edit.spikeTimes?.[muIdx]?.length ?? 0) < 3) {
+  const mu = state.edit.currentMu;
+  if ((state.edit.spikeTimes?.[mu]?.length ?? 0) < 3) {
     setStatus("Not enough discharges for outlier removal", "muted");
     return;
   }
@@ -282,12 +287,12 @@ export async function removeOutliers(app) {
     pending: "Removing outliers...",
     failed: "Outlier removal failed",
     async run() {
-      const meta = await requestEditOp(app, "remove-outliers", { mu: muIdx });
-      const after = state.edit.spikeTimes[muIdx];
+      const meta = await requestEditOp(app, "remove-outliers", { mu });
+      const after = state.edit.spikeTimes[mu];
       const centerPos = after.length
         ? Math.round((after[0] + after[after.length - 1]) / 2)
-        : Math.round((state.edit.totalSamples || 0) / 2);
-      setEditBookmarkAndHide(state, muIdx, centerPos);
+        : Math.round(state.edit.totalSamples / 2);
+      setEditBookmarkAndHide(state, mu, centerPos);
       return (Number(meta.removed_count) || 0) > 0
         ? ["Outliers removed", "success"]
         : ["No outliers detected", "muted"];
@@ -321,17 +326,17 @@ export async function removeDuplicateMus(app) {
 /** @param {App} app */
 export async function flagMuForDeletion(app) {
   const { state, setStatus } = app;
-  const muIdx = state.edit.currentMu ?? 0;
+  const mu = state.edit.currentMu;
   if (!state.edit.spikeTimes?.length) {
     setStatus("No MU loaded", "muted");
     return;
   }
-  const flag = !state.edit.flagged?.[muIdx];
+  const flag = !state.edit.flagged?.[mu];
   return editAction(app, {
     pending: flag ? "Flagging MU for deletion..." : "Unflagging MU...",
     failed: "Flagging failed",
     async run() {
-      await requestEditOp(app, "flag", { mu: muIdx, flag });
+      await requestEditOp(app, "flag", { mu, flag });
       setShowBookmark(state, false);
       return [flag ? "MU flagged for deletion" : "MU unflagged", "success"];
     },
@@ -362,7 +367,7 @@ export async function resetCurrentMuEdits(app) {
   return editAction(app, {
     failed: "Reset failed",
     async run() {
-      await requestEditOp(app, "reset", { mu: state.edit.currentMu ?? 0 });
+      await requestEditOp(app, "reset", { mu: state.edit.currentMu });
       clearEditPulseSelections(state);
     },
   });
@@ -379,7 +384,7 @@ export async function duplicateMu(app) {
     failed: "Duplicate failed",
     async run() {
       const meta = await requestEditOp(app, "duplicate", {
-        mu: state.edit.currentMu ?? 0,
+        mu: state.edit.currentMu,
       });
       const newIdx = Number(
         meta.changed?.[0] ?? state.edit.spikeTimes.length - 1,
@@ -455,7 +460,7 @@ export async function saveEditedFile(app) {
  * @param {State} state
  */
 function resumePosition(state) {
-  const total = state.edit.totalSamples || 0;
+  const total = state.edit.totalSamples;
   const lastEntry = state.edit.editHistory.findLast((e) => e.mu_uid);
   let targetMu = 0;
   let targetView = { start: 0, end: total };

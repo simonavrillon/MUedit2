@@ -22,18 +22,22 @@
 /** @typedef {import("../io/bids.js").BidsEntities} BidsEntities */
 /** @typedef {import("../decomp/params.js").DecomposeParams} DecomposeParams */
 /** @typedef {"emgCanvas" | "auxCanvas"} RoiCanvasId Canvases that take ROI and artifact drags. */
-/** @typedef {"add-spikes" | "add-artifact" | "delete-spikes"} RoiAction */
+/** @typedef {"add-spikes" | "add-artifact" | "delete-spikes"} RoiOp */
 
 /**
- * A box drawn on an edit canvas, in samples and pulse-train units (Hz on the
- * discharge-rate plot).
+ * `add-spikes` / `add-artifact`: the peaks above `yMin` in `[xStart, xEnd]`,
+ * in samples and pulse-train units.
  *
- * @typedef {object} RoiEditRequest
+ * @typedef {object} RoiAddPayload
  * @property {number} mu
  * @property {number} xStart
  * @property {number} xEnd
  * @property {number} yMin
- * @property {number} [yMax]
+ */
+/**
+ * `delete-spikes`: the discharges and artifacts in the box.
+ *
+ * @typedef {RoiAddPayload & { yMax: number }} RoiDeletePayload
  */
 /** @typedef {"muted" | "success" | "error"} Tone */
 /** @typedef {{ start: number, end: number }} Span */
@@ -109,7 +113,7 @@
  * @property {(mode: EditMode | null, message?: string) => void} setEditMode
  * @property {() => void} renderEditExplorer Settle the MU and view the data allows, draw the edit page, and ask for the pulse window it lacks.
  * @property {() => void} scheduleEditRender Redraw the edit plots at the next frame, once however often asked.
- * @property {(action: RoiAction, payload: RoiEditRequest) => Promise<void>} requestRoiEdit
+ * @property {(op: RoiOp, payload: RoiAddPayload | RoiDeletePayload) => Promise<void>} requestRoiEdit
  * @property {(sel: Selection) => void} addSpikesInSelection
  * @property {(sel: Selection) => void} addArtifactInSelection
  * @property {(sel: Selection) => void} deleteSpikesInSelection
