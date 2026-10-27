@@ -475,9 +475,9 @@ export function applyEditChange(state, { meta, spikeTimes }) {
   });
   setEditPerMu(state, meta);
   const start = Math.max(0, Number(meta.history_start) || 0);
-  const offset = e.editHistoryStart || 0;
+  const offset = e.editHistoryStart;
   e.editHistory = [
-    ...(e.editHistory || []).slice(0, Math.max(0, start - offset)),
+    ...e.editHistory.slice(0, Math.max(0, start - offset)),
     ...(Array.isArray(meta.history) ? meta.history : []),
   ];
   e.editHistoryStart = Math.min(offset, start);

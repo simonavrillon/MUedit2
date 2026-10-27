@@ -1,5 +1,4 @@
-"""The decomposition files MUedit writes (a run's ``_decomp.npz``, an edit's ``_edited.npz``
-with its ``.json`` edit log) and the older files it still opens."""
+"""The decomposition files MUedit writes (``_decomp.npz``, ``_edited.npz`` and its edit log) and the older ones it opens."""
 
 from __future__ import annotations
 

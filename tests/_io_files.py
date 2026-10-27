@@ -433,11 +433,9 @@ OTB4_FEEDBACK = np.array([[0.0, 0.0], [5.0, 10.0], [10.0, 20.0]])
 
 
 def write_otb4(path: Path, device: str, *, emg: bool = True, missing_signal: bool = False) -> Path:
-    """An ``.otb4``: two 64-channel grids and one aux track, plus feedback track files.
-
-    ``Novecento+`` keeps each stream's tracks in its own int32 file; every other device writes
-    one int16 file of all tracks.
-    """
+    """An ``.otb4``: two 64-channel grids and one aux track, plus feedback track files."""
+    # Novecento+ keeps each stream's tracks in its own int32 file; every other device writes
+    # one int16 file of all tracks.
     filters = {
         "HighPassFilter": "10 Hz",
         "LowPassFilter": "Fsamp/4",

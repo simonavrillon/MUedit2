@@ -10,20 +10,15 @@ import pytest
 from muedit.decomp import adaptive_batch
 from muedit.decomp.adaptation import AdaptiveDecomp
 from muedit.decomp.types import ComputeDtype, DecompositionParameters
-from tests._synthetic_emg import calibration_case, short_recording
-
-
-@pytest.fixture(scope="module")
-def raw() -> np.ndarray:
-    return short_recording()
+from tests._synthetic_emg import calibration_case
 
 
 @pytest.mark.parametrize("compute_dtype", ["float32", "float64"])
 def test_adaptive_route_computes_in_the_work_dtype(
-    raw: np.ndarray, compute_dtype: ComputeDtype, monkeypatch: pytest.MonkeyPatch
+    short_emg: np.ndarray, compute_dtype: ComputeDtype, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """``compute_dtype`` reaches the adaptive state and the extended signal it reads."""
-    whiten_mat, mu_filters, win_mean = calibration_case(raw)
+    whiten_mat, mu_filters, win_mean = calibration_case(short_emg)
     seen: list[tuple[np.dtype[Any], ...]] = []
 
     class Spy(AdaptiveDecomp):
@@ -35,9 +30,9 @@ def test_adaptive_route_computes_in_the_work_dtype(
     adaptive_batch.adaptive_batch_process(
         {0: mu_filters},
         {0: whiten_mat},
-        {0: raw},
+        {0: short_emg},
         [200, 2600],
-        raw.shape[1],
+        short_emg.shape[1],
         2000,
         1,
         {0: win_mean},

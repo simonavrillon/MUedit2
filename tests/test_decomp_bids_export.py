@@ -1,13 +1,12 @@
-"""BIDS EMG export, checked against the EMG-BIDS specification, its paper and its tutorials.
+"""BIDS EMG export, checked against the EMG-BIDS specification, its paper and its tutorials."""
 
-References (precedence as listed):
-- [S] BIDS specification, Electromyography (BIDS 1.11):
-  https://bids-specification.readthedocs.io/en/stable/modality-specific-files/electromyography.html
-- [P] Shirazi et al. (2026), EMG-BIDS: an extension to the Brain Imaging Data Structure for
-  electromyography, bioRxiv 10.64898/2026.07.21.739911.
-- [T] MUnitQuest EMG-BIDS tutorials 1 and 2:
-  https://github.com/MUnitQuest/MUnitQuest_tutorials/tree/13af32d
-"""
+# References (precedence as listed):
+# - [S] BIDS specification, Electromyography (BIDS 1.11):
+#   https://bids-specification.readthedocs.io/en/stable/modality-specific-files/electromyography.html
+# - [P] Shirazi et al. (2026), EMG-BIDS: an extension to the Brain Imaging Data Structure for
+#   electromyography, bioRxiv 10.64898/2026.07.21.739911.
+# - [T] MUnitQuest EMG-BIDS tutorials 1 and 2:
+#   https://github.com/MUnitQuest/MUnitQuest_tutorials/tree/13af32d
 
 from __future__ import annotations
 

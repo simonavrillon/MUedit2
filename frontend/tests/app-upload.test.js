@@ -2,17 +2,10 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 
+import { missingUpload } from "./_app.js";
+
 const { ApiError } = await import("../src/app/http.js");
 const { withUpload } = await import("../src/app/services/upload.js");
-
-const missingUpload = () =>
-  new ApiError(
-    "Missing or expired upload; request /api/v1/preview-by-path first",
-    {
-      status: 400,
-      field: "upload_token",
-    },
-  );
 
 /** @param {(path: string) => Promise<unknown>} fetchPreviewByPath */
 function appWith(fetchPreviewByPath) {

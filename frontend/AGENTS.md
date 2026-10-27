@@ -56,10 +56,26 @@ Architecture: [dev/architecture.md](../dev/architecture.md#frontend-shape). Wire
 
 ## Tests
 
-`node --test tests/*.test.js`. `tests/fake-dom.js` (a minimal DOM and a recording 2D context)
-and `tests/frames.js` (MUB1 encoding like the backend's `pack_frame`) are helpers, not tests.
-Replace `app` members with recorders to test a stage alone. When a frame layout changes, update
-`frames.js` together with `api/binary.py`.
+`node --test tests/*.test.js`, laid out like the pytest suite (`tests/AGENTS.md`):
+
+- One file per source module: `<package>-<module>.test.js` (`api-payloads.test.js` for
+  `src/api/payloads.js`). Under `app/`, the `services/` and `stages/` folders and the `-service`
+  suffix drop, as in the pytest suite: `app-editing.test.js` is `app/services/editing-service.js`.
+  Add to the existing file before creating one.
+- One `describe` per function or behaviour; test names are sentences about behaviour.
+- Test what the user would notice, or what the other side of a contract relies on; no guards
+  for input the backend never sends.
+
+| Helper         | For                                                                                                            |
+| -------------- | -------------------------------------------------------------------------------------------------------------- |
+| `_app.js`      | `testApp` (the real `createApp`, `setStatus` recorded), `freshState`, `loadedState`, `missingUpload`, `settle` |
+| `_dom.js`      | a minimal DOM, a recording 2D context, `recorder`                                                              |
+| `_frames.js`   | MUB1 encoding like the backend's `pack_frame`: change it with `api/binary.py`                                  |
+| `_segments.js` | a segmented recording and the QC page over it                                                                  |
+
+Import `_app.js` (or call `installDom()`) before any source module that reads the page:
+`config.js` reads `window.location` at import.
+Replace `app` members with recorders to test a stage alone.
 
 ## Before you finish
 

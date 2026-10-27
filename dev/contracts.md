@@ -66,7 +66,7 @@ The alignment lets the page read every array as a zero-copy typed-array view. Pe
 (discharge times, artifacts) travel as CSR pairs (`<name>` + `<name>_offsets`). Media type
 `application/x-muedit-frame`, header `x-muedit-format: mub1`.
 
-Test helpers mirror both ends: `tests/_frames.py` decodes like the page; `frontend/tests/frames.js`
+Test helpers mirror both ends: `tests/_frames.py` decodes like the page; `frontend/tests/_frames.js`
 encodes like `pack_frame`. Change all four together.
 
 | Frame | Routes | Arrays |

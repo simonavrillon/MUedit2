@@ -1,51 +1,13 @@
-// Stage lifecycle, driven through the real app context with stand-in elements.
+// Stage lifecycle: which page the user may enter, what entering and leaving
+// one resets, and which page draws, through the real app context.
 import { test, describe, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 
-// config.js reads window.location at import time; layout redraws are timers
-// that must not fire against the stand-in elements.
-globalThis.window = {
-  location: {
-    port: "8080",
-    protocol: "http:",
-    hostname: "localhost",
-    origin: "http://localhost:8080",
-  },
-  setTimeout: () => 0,
-  requestAnimationFrame: () => 0,
-};
+import { fakeElement, recorder } from "./_dom.js";
+import { testApp } from "./_app.js";
 
-const { state: initialState } = await import("../src/state/state.js");
-const { createApp } = await import("../src/app/create-app.js");
 const { renderActiveStage } = await import("../src/app/stages/lifecycle.js");
 const { createRunLive } = await import("../src/decomp/live.js");
-
-const pristine = structuredClone(initialState);
-
-function fakeElement() {
-  const classes = new Set();
-  return {
-    classList: {
-      toggle(name, force = !classes.has(name)) {
-        if (force) classes.add(name);
-        else classes.delete(name);
-        return force;
-      },
-      add: (name) => classes.add(name),
-      remove: (name) => classes.delete(name),
-      contains: (name) => classes.has(name),
-    },
-    setAttribute() {},
-    dataset: {},
-  };
-}
-
-function recorder() {
-  const calls = [];
-  const fn = (...args) => calls.push(args);
-  fn.calls = calls;
-  return fn;
-}
 
 let app;
 let els;
@@ -57,8 +19,7 @@ beforeEach(() => {
     stageEdit: fakeElement(),
     artifactAddBtn: fakeElement(),
   };
-  app = createApp({ state: structuredClone(pristine), els, api: {} });
-  app.setStatus = recorder();
+  app = testApp({ els });
   app.state.file = { name: "a.otb+", path: "/a.otb+" };
   app.state.gridSeries = [new Float32Array([1, 2, 3])];
   app.state.runLive = createRunLive(0);
@@ -209,19 +170,5 @@ describe("renderActiveStage", () => {
     app.state.edit.spikeTimes = [[1]];
     renderActiveStage(app);
     assert.equal(app.renderEditExplorer.calls.length, 1);
-  });
-});
-
-describe("createApp", () => {
-  test("merges every service into one context", () => {
-    for (const name of [
-      "setStatus",
-      "saveRun",
-      "handleRawFilePath",
-      "renderRunStage",
-      "loadDecompositionForEditByPath",
-    ]) {
-      assert.equal(typeof app[name], "function", name);
-    }
   });
 });

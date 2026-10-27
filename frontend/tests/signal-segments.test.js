@@ -1,28 +1,11 @@
-// Target segments: choosing them merges touching ones into one window, the
-// request loads them, and clicks on the canvases toggle them.
+// Target segments: choosing them merges touching ones into analysis windows,
+// by segment or by type, and the request that loads them names the task.
 import { test, describe, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 
-import {
-  dispatchWindow,
-  fakeCanvas,
-  fakeElement,
-  installDom,
-  ops,
-  recorder,
-  resetDom,
-  texts,
-} from "./fake-dom.js";
+import { fakeElement, recorder, resetDom } from "./_dom.js";
+import { seg, segmentedApp } from "./_segments.js";
 
-installDom();
-const { COLORS } = await import("../src/config.js");
-const { state: initialState } = await import("../src/state/state.js");
-const { createApp } = await import("../src/app/create-app.js");
-const { toSegments } = await import("../src/api/payloads.js");
-const { drawOverlayRects } = await import("../src/view/plots.js");
-const { buildOverlays, enableRoiSelection, renderSegmentTypes } =
-  await import("../src/view/qc-renderer.js");
-const { setupQcEvents } = await import("../src/app/stages/qc-stage.js");
 const { setupSessionFormEvents } =
   await import("../src/app/services/file-session.js");
 const {
@@ -35,60 +18,14 @@ const {
   toggleSegment,
 } = await import("../src/signal/segments.js");
 
-const pristine = structuredClone(initialState);
-
-const seg = (start, end, kind, extra = {}) => ({
-  start,
-  end,
-  kind,
-  direction: null,
-  cycles: [],
-  frequencyHz: null,
-  ...extra,
-});
-
-// A trapezoid, rest, then a sinusoid block, over 1000 samples at 10 Hz.
-const SEGMENTS = [
-  seg(100, 200, "ramp", { direction: "up" }),
-  seg(200, 400, "plateau"),
-  seg(400, 500, "ramp", { direction: "down" }),
-  seg(600, 900, "sinusoid", { cycles: [650, 750, 850], frequencyHz: 0.1 }),
-];
+console.error = () => {};
 
 let app;
 let els;
 
 beforeEach(() => {
   resetDom();
-  const state = structuredClone(pristine);
-  Object.assign(state, {
-    totalSamples: 1000,
-    fsamp: 10,
-    uploadToken: "tok",
-    auxNames: ["Acc", "Target"],
-    targetIndex: 1,
-    rois: [{ start: 0, end: 1000 }],
-    segments: structuredClone(SEGMENTS),
-  });
-  els = {
-    emgCanvas: fakeCanvas({ width: 1000, height: 80 }),
-    auxCanvas: fakeCanvas({ width: 1000, height: 50 }),
-    auxSelector: Object.assign(fakeElement("select"), { value: "-1" }),
-    nwindows: Object.assign(fakeElement("input"), { value: "1" }),
-    qcSegmentBtn: fakeElement("button"),
-    segmentTypeBtn: fakeElement("button"),
-    segmentTypeMenu: Object.assign(fakeElement("div"), {
-      hidden: true,
-      contains: () => false,
-    }),
-  };
-  app = createApp({ state, els, api: {} });
-  Object.assign(app, {
-    refreshVisuals: recorder(),
-    scheduleRefreshVisuals: recorder(),
-    ensureQcTraces: recorder(),
-    setStatus: recorder(),
-  });
+  ({ app, els } = segmentedApp());
 });
 
 const chosen = () =>
@@ -229,63 +166,6 @@ describe("the task segmentation infers", () => {
   }
 });
 
-describe("the segment-type picker", () => {
-  const rows = () => els.segmentTypeMenu.children;
-  const box = (i) => rows()[i].children[0];
-
-  test("lists the types, ticked when chosen, half-ticked when partly", () => {
-    app.state.segments.push(seg(950, 990, "ramp", { direction: "up" }));
-    toggleSegment(app.state, 1);
-    toggleSegment(app.state, 0);
-    renderSegmentTypes(els, app.state);
-    assert.equal(els.segmentTypeBtn.disabled, false);
-    assert.equal(els.segmentTypeBtn.textContent, "— plateau");
-    assert.deepEqual(
-      rows().map((r) => r.children[2].textContent),
-      ["up ramp (2)", "down ramp (1)", "plateau (1)", "sinusoid (1)"],
-    );
-    assert.deepEqual(
-      [0, 1, 2, 3].map((i) => [box(i).checked, box(i).indeterminate]),
-      [
-        [false, true],
-        [false, false],
-        [true, false],
-        [false, false],
-      ],
-    );
-  });
-
-  test("keeps its rows while the types stay, and empties without segments", () => {
-    renderSegmentTypes(els, app.state);
-    const first = rows()[0];
-    toggleSegment(app.state, 0);
-    renderSegmentTypes(els, app.state);
-    assert.equal(rows()[0], first);
-    assert.equal(box(0).checked, true);
-    els.segmentTypeMenu.hidden = false;
-    app.state.segments = [];
-    renderSegmentTypes(els, app.state);
-    assert.equal(rows().length, 0);
-    assert.equal(els.segmentTypeBtn.disabled, true);
-    assert.equal(els.segmentTypeBtn.textContent, "No segments");
-    assert.equal(els.segmentTypeMenu.hidden, true);
-  });
-
-  test("a ticked box chooses its type and syncs the window count", () => {
-    setupQcEvents(app);
-    renderSegmentTypes(els, app.state);
-    els.segmentTypeBtn.dispatch("click");
-    assert.equal(els.segmentTypeMenu.hidden, false);
-    box(0).checked = true;
-    els.segmentTypeMenu.dispatch("change", { target: box(0) });
-    assert.deepEqual(app.state.rois, [{ start: 100, end: 200 }]);
-    assert.equal(els.nwindows.value, "1");
-    assert.deepEqual(app.setStatus.calls.at(-1), ["Added up ramps — 1 window"]);
-    dispatchWindow("keydown", { key: "Escape" });
-    assert.equal(els.segmentTypeMenu.hidden, true);
-  });
-});
-
 describe("segment helpers", () => {
   test("segmentAt finds the segment under a sample, or -1 over rest", () => {
     assert.equal(segmentAt(app.state.segments, 250), 1);
@@ -302,103 +182,6 @@ describe("segment helpers", () => {
       describeWindow(app.state, { start: 600, end: 900 }),
       "∿ sinusoid (30.0 s)",
     );
-  });
-
-  test("toSegments reads the server's fields and drops malformed ones", () => {
-    assert.deepEqual(
-      toSegments([
-        {
-          start: 0,
-          end: 10,
-          kind: "sinusoid",
-          direction: null,
-          cycles: [2, 7],
-          frequency_hz: 0.5,
-          amplitude: 2,
-        },
-        { start: 10, end: 20, kind: "ramp", direction: "down" },
-        { start: 20, end: 20, kind: "plateau" },
-        { start: 30, end: 40, kind: "rest" },
-      ]),
-      [
-        seg(0, 10, "sinusoid", {
-          cycles: [2, 7],
-          frequencyHz: 0.5,
-        }),
-        seg(10, 20, "ramp", { direction: "down" }),
-      ],
-    );
-    assert.deepEqual(toSegments(null), []);
-  });
-});
-
-describe("drawing", () => {
-  test("segments come first, chosen ones leave their fill to the window", () => {
-    toggleSegment(app.state, 1);
-    const overlays = buildOverlays(app.state);
-    assert.deepEqual(
-      overlays.map((s) => [s.kind, s.chosen, s.strong]),
-      [
-        ["ramp", false, undefined],
-        ["plateau", true, undefined],
-        ["ramp", false, undefined],
-        ["sinusoid", false, undefined],
-        [undefined, undefined, true],
-      ],
-    );
-    const canvas = fakeCanvas({ width: 1000, height: 50 });
-    drawOverlayRects(canvas.ctx, overlays, 1000, 1000, 50);
-    const fills = ops(canvas.ctx, "fillRect").map((c) => c.fillStyle);
-    assert.deepEqual(fills, [
-      COLORS.rampFill,
-      COLORS.rampFill,
-      COLORS.sinusoidFill,
-      COLORS.roiStrongFill,
-    ]);
-    assert.deepEqual(texts(canvas.ctx), ["↗", "—", "↘", "∿"]);
-  });
-
-  test("the whole-recording placeholder stays faint", () => {
-    const placeholder = buildOverlays(app.state).find(
-      (s) => s.kind === undefined,
-    );
-    assert.equal(placeholder.strong, undefined);
-  });
-});
-
-describe("clicks on the canvas", () => {
-  beforeEach(() => enableRoiSelection(app, "emgCanvas"));
-
-  const click = (x) => {
-    els.emgCanvas.dispatch("pointerdown", { clientX: x });
-    els.emgCanvas.dispatch("pointerup");
-  };
-
-  test("a click toggles the segment under it and syncs the window count", () => {
-    click(150);
-    click(300);
-    assert.deepEqual(app.state.rois, [{ start: 100, end: 400 }]);
-    assert.equal(els.nwindows.value, "1");
-    assert.match(
-      app.setStatus.calls.at(-1)[0],
-      /^Window 1: ↗ up ramp \+ — plateau \(30\.0 s\)/,
-    );
-    click(700);
-    assert.equal(els.nwindows.value, "2");
-    click(300);
-    assert.equal(els.nwindows.value, "2");
-    assert.match(app.setStatus.calls.at(-1)[0], /^Segment removed — 2 windows/);
-  });
-
-  test("a click over rest changes nothing", () => {
-    click(550);
-    assert.deepEqual(app.state.rois, [{ start: 0, end: 1000 }]);
-  });
-
-  test("an armed artifact click does not toggle a segment", () => {
-    app.state.artifactMode = true;
-    click(150);
-    assert.deepEqual(app.state.rois, [{ start: 0, end: 1000 }]);
   });
 });
 

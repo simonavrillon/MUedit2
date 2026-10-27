@@ -1,30 +1,15 @@
-// The QC stage asks for viewport series (/series/*), never whole-recording lists.
-// Run with `npm test` (Node's built-in test runner, no dependencies).
-import { test, describe } from "node:test";
+// QC requests: the channel traces kept on view, automatic QC, and opening a
+// raw file's preview, which replaces the file shown only once it has all arrived.
+import { test, describe, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 
-// config.js reads window.location at import time.
-globalThis.window = {
-  location: {
-    port: "8080",
-    protocol: "http:",
-    hostname: "localhost",
-    origin: "http://localhost:8080",
-  },
-  requestAnimationFrame: (fn) => setTimeout(fn, 0),
-};
+import { recorder } from "./_dom.js";
+import { freshState, loadedState, settle, testApp } from "./_app.js";
+
+const { OVERVIEW_BINS, QC_TRACE_BINS, requestAutoQc } =
+  await import("../src/signal/qc.js");
+
 console.error = () => {};
-
-const { state: initialState } = await import("../src/state/state.js");
-const { createApp } = await import("../src/app/create-app.js");
-const { OVERVIEW_BINS, QC_TRACE_BINS } = await import("../src/signal/qc.js");
-
-function recorder() {
-  const calls = [];
-  const fn = (...args) => calls.push(args);
-  fn.calls = calls;
-  return fn;
-}
 
 /** An API whose series are one envelope row per requested kind. */
 function seriesApi() {
@@ -53,9 +38,6 @@ function seriesApi() {
     }),
   };
 }
-
-/** Let pending promise callbacks run. */
-const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 /**
  * An API whose EMG requests wait until released, so a test can order the
@@ -88,10 +70,10 @@ function heldSeriesApi() {
   };
 }
 
-function testApp(api) {
-  const app = createApp({ state: structuredClone(initialState), els: {}, api });
+/** The app over `state` and `api`, with the redraws it triggers recorded. */
+function qcApp(api, state = freshState()) {
+  const app = testApp({ state, api });
   Object.assign(app, {
-    setStatus: recorder(),
     updateProgress: recorder(),
     switchStage: recorder(),
     renderChannelQC: recorder(),
@@ -104,7 +86,7 @@ function testApp(api) {
 describe("QC series requests", () => {
   test("a grid's mini traces are one envelope per channel over the ROI", async () => {
     const api = seriesApi();
-    const app = testApp(api);
+    const app = qcApp(api);
     Object.assign(app.state, {
       uploadToken: "tok",
       totalSamples: 1000,
@@ -130,7 +112,7 @@ describe("QC series requests", () => {
 
   test("traces already on screen are not asked for again", async () => {
     const api = seriesApi();
-    const app = testApp(api);
+    const app = qcApp(api);
     Object.assign(app.state, { uploadToken: "tok", totalSamples: 1000 });
     app.ensureQcTraces();
     await settle();
@@ -141,7 +123,7 @@ describe("QC series requests", () => {
 
   test("traces for a window the user moved off are dropped", async () => {
     const api = heldSeriesApi();
-    const app = testApp(api);
+    const app = qcApp(api);
     Object.assign(app.state, {
       uploadToken: "tok",
       totalSamples: 1000,
@@ -167,7 +149,7 @@ describe("QC series requests", () => {
 
   test("each grid keeps the traces of its own window", async () => {
     const api = heldSeriesApi();
-    const app = testApp(api);
+    const app = qcApp(api);
     Object.assign(app.state, { uploadToken: "tok", totalSamples: 1000 });
     app.ensureQcTraces();
     app.state.currentGrid = 1;
@@ -186,7 +168,7 @@ describe("QC series requests", () => {
 
   test("a preview fetches the overview and aux envelopes of the whole recording", async () => {
     const api = seriesApi();
-    const app = testApp(api);
+    const app = qcApp(api);
     const ok = await app.handleRawFilePath("/data/rec.mat", "rec.mat");
     assert.equal(ok, true);
     const whole = { upload_token: "tok", bins: OVERVIEW_BINS };
@@ -197,5 +179,121 @@ describe("QC series requests", () => {
     assert.deepEqual(app.state.gridSeries, [api.row]);
     assert.deepEqual(app.state.auxSeries, [api.row]);
     assert.deepEqual(app.state.auxNames, ["force"]);
+  });
+});
+
+describe("requestAutoQc", () => {
+  let app;
+
+  beforeEach(() => {
+    app = qcApp({});
+  });
+
+  test("marks the bad channels and the artifact windows it found", async () => {
+    app.state.uploadToken = "tok";
+    app.state.channelMeans = [[1, 1]];
+    app.api.runAutoQc = async () => ({
+      bad_channels_per_grid: [[0, 1]],
+      artifact_regions: [
+        [100, 200],
+        [400, 450],
+      ],
+    });
+    assert.equal(await requestAutoQc(app), true);
+    assert.deepEqual(app.state.artifactRegions, [
+      { start: 100, end: 200 },
+      { start: 400, end: 450 },
+    ]);
+    assert.deepEqual(app.state.discardChannels, [[0, 1]]);
+  });
+
+  test("keeps the traces it has and redraws them with the new marks", async () => {
+    const traces = [
+      [
+        { min: Float32Array.of(0), max: Float32Array.of(1) },
+        { min: Float32Array.of(0), max: Float32Array.of(1) },
+      ],
+    ];
+    Object.assign(app.state, {
+      uploadToken: "tok",
+      channelMeans: [[1, 1]],
+      channelTraces: traces,
+    });
+    app.api.runAutoQc = async () => ({ bad_channels_per_grid: [[0, 1]] });
+    assert.equal(await requestAutoQc(app), true);
+    assert.equal(app.state.channelTraces, traces);
+    assert.equal(app.renderChannelQC.calls.length, 1);
+  });
+});
+
+describe("opening a raw file", () => {
+  let state;
+  const failingApi = {
+    fetchPreviewByPath: async () => {
+      throw new Error("HTTP 400: unsupported format");
+    },
+  };
+
+  beforeEach(() => {
+    state = loadedState();
+  });
+
+  test("a file that fails to open leaves the current one as it was", async () => {
+    state.edit.token = "edit-1";
+    const before = structuredClone(state);
+    const app = qcApp(failingApi, state);
+    const ok = await app.handleRawFilePath("/data/new.mat", "new.mat");
+
+    assert.equal(ok, false);
+    assert.deepEqual(state, before);
+    assert.deepEqual(app.setStatus.calls.at(-1), [
+      "Preview failed: HTTP 400: unsupported format",
+      "error",
+    ]);
+  });
+
+  test("the file shown changes only once the new preview has arrived", async () => {
+    let release;
+    const api = {
+      fetchPreviewByPath: () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+      fetchSeries: async () => ({ rows: [new Float32Array([4, 5])] }),
+    };
+    const app = qcApp(api, state);
+    Object.assign(app, {
+      resetSessionForm: recorder(),
+      applyPreviewMetadata: recorder(),
+      populateAuxSelector: recorder(),
+      populateGridTabs: recorder(),
+      prefillHardwareFields: recorder(),
+      renderBidsMuscleFields: recorder(),
+      showWorkspace: recorder(),
+    });
+    const opening = app.handleRawFilePath("/data/new.mat", "new.mat");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(state.file.path, "/data/old.otb+");
+    assert.equal(state.uploadToken, "old-token");
+
+    release({ upload_token: "new-token", total_samples: 2 });
+    assert.equal(await opening, true);
+    assert.deepEqual(state.file, { name: "new.mat", path: "/data/new.mat" });
+    assert.equal(state.uploadToken, "new-token");
+    assert.deepEqual(app.resetSessionForm.calls, [["new.mat"]]);
+  });
+
+  test("silent failure skips the status message", async () => {
+    const app = qcApp(failingApi, state);
+    const ok = await app.handleRawFilePath("/data/new.mat", "new.mat", {
+      silentFailure: true,
+    });
+
+    assert.equal(ok, false);
+    assert.ok(
+      !app.setStatus.calls.some(([text]) => text.startsWith("Preview failed")),
+      "no 'Preview failed' status for a silent attempt",
+    );
+    assert.equal(state.file.path, "/data/old.otb+");
   });
 });

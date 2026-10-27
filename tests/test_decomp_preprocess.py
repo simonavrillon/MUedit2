@@ -7,26 +7,22 @@ from typing import Any
 import numpy as np
 import pytest
 
-from muedit.decomp.preprocess import build_manual_artifact_mask, load_step, preprocess_step
+from muedit.decomp.preprocess import build_manual_artifact_mask, preprocess_step
 from muedit.decomp.types import DecompositionParameters, LoadStepOutput, PreprocessStepOutput
 from muedit.models import SignalImport, resident_nbytes
 from muedit.signal.filters import bandpass_signals
 from muedit.signal.qc_pipeline import QCPipelineResult
-from muedit.storage import SessionStore
-from tests._synthetic_emg import ACTIVE_ROI, FSAMP, N_CHANNELS, N_SAMPLES, synthetic_recording
+from tests._synthetic_emg import FSAMP, N_CHANNELS, N_SAMPLES, STORE_PARAMS
 
 GRID = "GR08MM1305"
-
-
-_STORE_PARAMS = DecompositionParameters(niter=8)
 
 
 def _raw_emg(ngrid: int = 1, seed: int = 0) -> np.ndarray:
     """Band-limited noise with a shared component (all channels well correlated)."""
     rng = np.random.default_rng(seed)
-    n_ch = N_CHANNELS * ngrid
+    n_channels = N_CHANNELS * ngrid
     common = rng.normal(0, 1, (1, N_SAMPLES))
-    raw = 0.8 * common + 0.6 * rng.normal(0, 1, (n_ch, N_SAMPLES))
+    raw = 0.8 * common + 0.6 * rng.normal(0, 1, (n_channels, N_SAMPLES))
     return (0.05 * bandpass_signals(raw.astype(np.float32), FSAMP, emg_type=1)).astype(np.float64)
 
 
@@ -52,25 +48,6 @@ def _preprocess(data: np.ndarray, grids: list[str], **kwargs: Any) -> Preprocess
         discard_overrides=kwargs.pop("discard_overrides", None),
         **kwargs,
     )
-
-
-@pytest.fixture(scope="module")
-def store_prep() -> dict[str, PreprocessStepOutput]:
-    """Preprocessing of the synthetic recording on the heap and into a session store."""
-    loaded = load_step("synthetic.mat", None, synthetic_recording(), None)
-
-    def prep(store: SessionStore | None) -> PreprocessStepOutput:
-        return preprocess_step(
-            loaded=loaded,
-            duration=None,
-            manual_roi=False,
-            rois=[ACTIVE_ROI],
-            params=_STORE_PARAMS,
-            discard_overrides=None,
-            store=store,
-        )
-
-    return {"heap": prep(None), "stored": prep(SessionStore.create("parity"))}
 
 
 class TestBuildManualArtifactMask:
@@ -168,6 +145,6 @@ class TestPreprocessArtifactMask:
 def test_filtered_emg_in_the_store_matches_the_heap(store_prep: dict) -> None:
     heap, stored = store_prep["heap"], store_prep["stored"]
     np.testing.assert_array_equal(stored.data, heap.data)
-    assert stored.data.dtype == _STORE_PARAMS.work_dtype
+    assert stored.data.dtype == STORE_PARAMS.work_dtype
     assert resident_nbytes(stored.data) == 0
     assert not stored.data.flags.writeable

@@ -21,7 +21,7 @@ import { traceRange } from "../signal/series.js";
  *
  * @param {State} state
  */
-export function getPulseViewMeta(state) {
+function getPulseViewMeta(state) {
   const mu = state.edit.currentMu;
   const shown = state.edit.pulseView;
   if (!shown || shown.mu !== mu || shown.version !== state.edit.versions[mu]) {

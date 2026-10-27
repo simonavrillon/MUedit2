@@ -3,26 +3,24 @@
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 from muedit.decomp.adaptation import AdaptiveDecomp, Calibration
 from muedit.decomp.types import DecompositionParameters
 from muedit.signal.streaming import StreamedExtender
-from tests._synthetic_emg import EX, calibration_case, short_recording
-
-
-@pytest.fixture(scope="module")
-def raw() -> np.ndarray:
-    return short_recording()
+from tests._synthetic_emg import EX, calibration_case
 
 
 def _model(
-    raw: np.ndarray, calibration: tuple[int, int] | Calibration, params: DecompositionParameters
+    short_emg: np.ndarray,
+    calibration: tuple[int, int] | Calibration,
+    params: DecompositionParameters,
 ) -> AdaptiveDecomp:
-    """A pass over ``raw`` with the whitening and filters fitted on samples 200-2600."""
-    whiten_mat, mu_filters, win_mean = calibration_case(raw)
+    """A pass over ``short_emg`` with the whitening and filters fitted on samples 200-2600."""
+    whiten_mat, mu_filters, win_mean = calibration_case(short_emg)
     return AdaptiveDecomp(
-        source=StreamedExtender(raw, EX, offset=win_mean, dtype=np.float32, samples_first=True),
+        source=StreamedExtender(
+            short_emg, EX, offset=win_mean, dtype=np.float32, samples_first=True
+        ),
         whiten_mat=whiten_mat,
         mu_filters=mu_filters,
         calibration=calibration,
@@ -31,14 +29,14 @@ def _model(
     )
 
 
-def test_backward_pass_reads_complete_lookback(raw: np.ndarray) -> None:
+def test_backward_pass_reads_complete_lookback(short_emg: np.ndarray) -> None:
     """Frozen, a backward pass is a plain projection of complete samples, in any batch order."""
     params = DecompositionParameters(
         adapt_batch_ms=50, adapt_wh=False, adapt_sv=False, adapt_sd=False
     )
-    model = _model(raw, (200, 2600), params)
+    model = _model(short_emg, (200, 2600), params)
     starts: list[int] = []
-    pulse_trains = np.full((raw.shape[1], model.n_mu), np.nan, dtype=np.float32)
+    pulse_trains = np.full((short_emg.shape[1], model.n_mu), np.nan, dtype=np.float32)
 
     def sink(start: int, batch: np.ndarray, _spikes: np.ndarray) -> None:
         starts.append(start)
@@ -58,16 +56,16 @@ def test_backward_pass_reads_complete_lookback(raw: np.ndarray) -> None:
     )
 
 
-def test_backward_pass_starts_from_the_calibration_centroids(raw: np.ndarray) -> None:
+def test_backward_pass_starts_from_the_calibration_centroids(short_emg: np.ndarray) -> None:
     """The forward pass adapts its centroids; the backward pass starts from the fitted ones."""
     params = DecompositionParameters(adapt_batch_ms=50)
-    fwd = _model(raw, (200, 2600), params)
+    fwd = _model(short_emg, (200, 2600), params)
     fitted = (fwd.base_centr.copy(), fwd.spikes_centr.copy())
-    fwd.run(200, raw.shape[1])
+    fwd.run(200, short_emg.shape[1])
     assert not (
         np.array_equal(fwd.base_centr, fitted[0]) and np.array_equal(fwd.spikes_centr, fitted[1])
     )
-    bwd = _model(raw, fwd.calibration, params)
+    bwd = _model(short_emg, fwd.calibration, params)
     np.testing.assert_array_equal(bwd.base_centr, fitted[0])
     np.testing.assert_array_equal(bwd.spikes_centr, fitted[1])
 

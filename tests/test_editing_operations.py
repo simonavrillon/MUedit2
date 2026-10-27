@@ -24,14 +24,7 @@ from tests._editing_data import (
     in_view,
     match_count,
     pulse_with_peaks,
-    synthetic_mu,
 )
-
-
-@pytest.fixture(scope="module", name="synthetic_mu")
-def synthetic_mu_fixture() -> dict[str, np.ndarray]:
-    return synthetic_mu()
-
 
 # ── peaks_in_roi ─────────────────────────────────────────────────────────────
 

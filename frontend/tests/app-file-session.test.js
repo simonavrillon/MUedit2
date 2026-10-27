@@ -1,5 +1,6 @@
-// A run and a save read the session form alike, so the raw EMG a run exports
-// and the decomposition saved with it carry the same BIDS entities.
+// The session form: a run and a save read it alike, so the raw EMG a run exports
+// and the decomposition saved with it carry the same BIDS entities; the project
+// field, the required fields and the hardware pre-fill.
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 
@@ -17,37 +18,6 @@ function serviceWith(values) {
 }
 
 describe("session form", () => {
-  test("a run sends the acquisition with the other entities", () => {
-    const session = serviceWith({
-      bidsSubject: "01",
-      bidsTask: "mvc",
-      bidsAcquisition: "ramp",
-    });
-    assert.deepEqual(session.collectBidsEntities(), {
-      subject: "01",
-      task: "mvc",
-      acquisition: "ramp",
-      placement_scheme: "Other",
-    });
-  });
-
-  test("reference and ground locations travel with a run and a save", () => {
-    const session = serviceWith({
-      bidsReferenceLocation: "wet band around the ankle",
-      bidsGroundLocation: "wet band around the wrist",
-    });
-    const run = session.collectBidsEntities();
-    const saved = session.withBidsSaveFields({});
-    for (const fields of [run, saved]) {
-      assert.equal(fields.reference_location, "wet band around the ankle");
-      assert.equal(fields.ground_location, "wet band around the wrist");
-    }
-    assert.equal(
-      serviceWith({}).withBidsSaveFields({}).reference_location,
-      null,
-    );
-  });
-
   test("a recording in a BIDS dataset sets its placement", () => {
     const session = serviceWith({
       bidsPlacementScheme: "Other",
@@ -135,11 +105,13 @@ describe("session form", () => {
     assert.equal(saved.entity_label, "sub-S01_task-rampup_acq-hdemg_run-2");
   });
 
-  test("participant and hardware fields travel with both", () => {
+  test("participant, hardware and electrode fields travel with a run and a save", () => {
     const session = serviceWith({
       bidsParticipantAge: "31",
       bidsPowerlineFreq: "60",
       bidsManufacturer: "OT Bioelettronica",
+      bidsReferenceLocation: "wet band around the ankle",
+      bidsGroundLocation: "wet band around the wrist",
     });
     const run = session.collectBidsEntities();
     const saved = session.withBidsSaveFields({});
@@ -152,6 +124,14 @@ describe("session form", () => {
     assert.equal(saved.manufacturer, "OT Bioelettronica");
     assert.equal(saved.manufacturers_model_name, null);
     assert.equal("manufacturers_model_name" in run, false);
+    for (const fields of [run, saved]) {
+      assert.equal(fields.reference_location, "wet band around the ankle");
+      assert.equal(fields.ground_location, "wet band around the wrist");
+    }
+    assert.equal(
+      serviceWith({}).withBidsSaveFields({}).reference_location,
+      null,
+    );
   });
 });
 

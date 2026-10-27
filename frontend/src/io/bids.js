@@ -94,7 +94,7 @@ export function buildBidsMuscleRowsModel(state) {
   const gridNames = normalizeGridNames(
     inEditStage && !state.edit.token ? [] : state.gridNames,
   );
-  const muscleNames = state.muscleNames || [];
+  const { muscleNames } = state;
   const rowCount = inferGridCount({
     gridNames,
     muGridIndex: inEditStage ? state.edit.muGridIndex : [],

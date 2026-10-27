@@ -41,10 +41,10 @@ def _inject_burst(
 ) -> np.ndarray:
     """Inject a physiological burst on a few channels."""
     data = data.copy()
-    n_ch = data.shape[0]
+    n_channels = data.shape[0]
     t = np.arange(data.shape[1])
     envelope = amplitude * np.exp(-((t - center) ** 2) / (2 * half_width**2))
-    active = np.random.default_rng(99).choice(n_ch, size=n_active_channels, replace=False)
+    active = np.random.default_rng(99).choice(n_channels, size=n_active_channels, replace=False)
     data[active] += envelope[np.newaxis, :]
     return data
 

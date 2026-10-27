@@ -42,7 +42,7 @@ Op names, argument names and history types are persisted (see
 [contracts.md](contracts.md#edit-operations)): pick them once.
 
 Check: `tests/test_editing_operations.py`, `tests/test_editing_session.py` (undo, replay),
-`tests/test_api_editing.py`, `frontend/tests/edit-commands.test.js`.
+`tests/test_api_editing.py`, `frontend/tests/app-edit-stage.test.js`.
 
 ## Add a decomposition parameter
 
@@ -79,7 +79,7 @@ Check: `npm run check`, and run the app (`uv run muedit api`) to see it.
    (`api/services/editing_service.py: _write_decomposition`).
 3. Document it in `docs/saved-files.md` (NPZ file format).
 
-Check: `tests/test_decomp_decomposition_file.py`, `tests/test_api_editing_save.py`.
+Check: `tests/test_decomp_decomposition_file.py`, `tests/test_api_editing.py` (`TestRunSave`, `TestSessionSave`).
 
 ## Add an environment variable
 

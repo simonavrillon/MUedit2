@@ -56,10 +56,8 @@ def _muedit_signals() -> tuple[np.ndarray, np.ndarray]:
 
 
 def _muedit_dataset(tmp_path: Path) -> Path:
-    """A BDF MUedit exported, with MUniverse's task phases in its events.tsv.
-
-    The dataset sits below a folder named ``sub-lab``, which is not its subject folder.
-    """
+    """A BDF MUedit exported, with MUniverse's task phases in its events.tsv."""
+    # The dataset sits below a folder named sub-lab, which is not its subject folder.
     data, aux = _muedit_signals()
     coordinates, ied, discard, _ = format_hdemg_signal(["GR08MM1305"])
     out = export_bids_emg(

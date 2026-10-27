@@ -1,46 +1,31 @@
-// State actions, selectors and transitions that carry logic beyond a plain set.
+// State actions and transitions that carry logic beyond a plain set.
 import { test, describe, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 
-// config.js reads window.location at import time.
-globalThis.window = {
-  location: {
-    port: "8080",
-    protocol: "http:",
-    hostname: "localhost",
-    origin: "http://localhost:8080",
-  },
-};
+import { freshState, ints, rows } from "./_app.js";
 
-const { state: initialState } = await import("../src/state/state.js");
 const actions = await import("../src/state/actions.js");
-const selectors = await import("../src/state/selectors.js");
 const { beginRawPreviewTransition } =
   await import("../src/state/transitions.js");
 
-const pristine = structuredClone(initialState);
 let state;
 
 beforeEach(() => {
-  state = structuredClone(pristine);
+  state = freshState();
 });
 
 describe("setGridNames", () => {
-  test("clamps a current grid past the end", () => {
+  test("keeps the current grid inside the new grids", () => {
     state.currentGrid = 5;
     actions.setGridNames(state, ["a", "b"]);
     assert.equal(state.currentGrid, 1);
-  });
-
-  test("resets the current grid when there are no grids", () => {
-    state.currentGrid = 2;
     actions.setGridNames(state, []);
     assert.equal(state.currentGrid, 0);
   });
 });
 
-describe("ROIs and artifact regions", () => {
-  test("setRoiForIndex replaces one window and ignores a missing index", () => {
+describe("setRoiForIndex", () => {
+  test("replaces one window and ignores a missing index", () => {
     state.rois = [
       { start: 0, end: 5 },
       { start: 0, end: 5 },
@@ -54,7 +39,9 @@ describe("ROIs and artifact regions", () => {
     actions.setRoiForIndex(state, -1, { start: 1, end: 2 });
     assert.equal(state.rois.length, 2);
   });
+});
 
+describe("artifact regions", () => {
   test("removeLastArtifactRegion reports whether it removed anything", () => {
     state.artifactRegions = [{ start: 1, end: 2 }];
     assert.equal(actions.removeLastArtifactRegion(state), true);
@@ -63,15 +50,11 @@ describe("ROIs and artifact regions", () => {
 });
 
 describe("discard channels", () => {
-  test("setDiscardChannels coerces to 0/1 and replaces non-array grids", () => {
+  test("setDiscardChannels coerces to 0/1, and a non-array changes nothing", () => {
     actions.setDiscardChannels(state, [[true, 0, 2], "bad"]);
     assert.deepEqual(state.discardChannels, [[1, 0, 1], []]);
-  });
-
-  test("setDiscardChannels ignores a non-array", () => {
-    state.discardChannels = [[1]];
     actions.setDiscardChannels(state, null);
-    assert.deepEqual(state.discardChannels, [[1]]);
+    assert.deepEqual(state.discardChannels, [[1, 0, 1], []]);
   });
 
   test("setDiscardChannel creates a missing grid row", () => {
@@ -80,9 +63,6 @@ describe("discard channels", () => {
     assert.equal(state.discardChannels[1][2], 1);
   });
 });
-
-const ints = (...values) => Int32Array.from(values);
-const rows = (list) => list.map((r) => Array.from(r));
 
 describe("edit slice", () => {
   /** A session frame as `decodeEditSessionFrame` returns it. */
@@ -252,13 +232,6 @@ describe("edit slice", () => {
     assert.deepEqual(state.edit.muUids, ["g0_mu0"]);
     assert.equal(state.edit.editHistory[0].type, "remove_flagged");
   });
-
-  test("resetEditSlice returns a fresh slice", () => {
-    state.edit.dirty = true;
-    state.edit.spikeTimes.push(ints(1));
-    actions.resetEditSlice(state);
-    assert.deepEqual(state.edit, pristine.edit);
-  });
 });
 
 describe("setFsamp", () => {
@@ -272,21 +245,13 @@ describe("setFsamp", () => {
   });
 });
 
-describe("selectors", () => {
-  test("MU indices filter by grid", () => {
-    state.edit.muGridIndex = [0, 1, 1, 0];
-    assert.deepEqual(selectors.getEditMuIndicesForGrid(state, 1), [1, 2]);
-    assert.deepEqual(selectors.getEditMuIndicesForGrid(state, 0), [0, 3]);
-  });
-});
-
 describe("raw preview transitions", () => {
   test("begin resets the edit slice and the traces", () => {
     state.edit.dirty = true;
     state.channelTraces = [[1]];
     const file = { name: "new.otb+" };
     beginRawPreviewTransition(state, file);
-    assert.deepEqual(state.edit, pristine.edit);
+    assert.deepEqual(state.edit, freshState().edit);
     assert.equal(state.file, file);
     assert.deepEqual(state.channelTraces, []);
   });

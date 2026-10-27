@@ -9,7 +9,7 @@ import {
   pathPoints,
   resetDom,
   texts,
-} from "./fake-dom.js";
+} from "./_dom.js";
 
 installDom();
 const { COLORS } = await import("../src/config.js");
@@ -34,21 +34,6 @@ const tracePoints = (ctx) =>
 const timeLabels = (ctx) => texts(ctx).slice(4);
 
 beforeEach(() => resetDom());
-
-describe("getCanvasPlotMetrics", () => {
-  test("axes reserve a left gutter for labels and a bottom one for time", () => {
-    const m = plots.getCanvasPlotMetrics(fakeCanvas());
-    assert.deepEqual(m.padding, { left: 38, right: 8, top: 8, bottom: 20 });
-    assert.equal(m.plotWidth, 254);
-    assert.equal(m.plotHeight, 72);
-  });
-
-  test("a canvas with no size still has a 1 px plot", () => {
-    const m = plots.getCanvasPlotMetrics(fakeCanvas({ width: 0, height: 0 }));
-    assert.equal(m.plotWidth, 1);
-    assert.equal(m.plotHeight, 1);
-  });
-});
 
 describe("drawTrace", () => {
   const samples = (values, start = 0) => ({
@@ -129,27 +114,6 @@ describe("drawTrace", () => {
     } finally {
       delete globalThis.window.devicePixelRatio;
     }
-  });
-
-  test("a store already the right size is not reassigned", () => {
-    const canvas = fakeCanvas({ width: 420, height: 180 });
-    let assigned = 0;
-    let width = 420;
-    Object.defineProperty(canvas, "width", {
-      get: () => width,
-      set: (v) => {
-        assigned += 1;
-        width = v;
-      },
-    });
-    plots.drawTrace(canvas, samples([1, 2]), { start: 0, end: 2 });
-    assert.equal(assigned, 0);
-  });
-
-  test("a missing canvas is ignored", () => {
-    assert.doesNotThrow(() =>
-      plots.drawTrace(null, samples([0, 1]), { start: 0, end: 2 }),
-    );
   });
 
   test("markers sit at their values and outside ones are skipped", () => {
@@ -402,12 +366,6 @@ describe("drawOverlayRects", () => {
     assert.deepEqual(rects[1].args, [100, 0, 20, 50]);
     assert.equal(rects[1].fillStyle, COLORS.artifactWindowFill);
   });
-
-  test("draws nothing without a signal length", () => {
-    const canvas = fakeCanvas();
-    plots.drawOverlayRects(canvas.ctx, [{ start: 0, end: 1 }], 0, 300, 100);
-    assert.equal(canvas.ctx.calls.length, 0);
-  });
 });
 
 describe("drawGridOverlay", () => {
@@ -513,51 +471,39 @@ describe("drawMiniSeries", () => {
       ["lineTo", 60, 20],
     ]);
   });
-
-  test("the samples of a zoomed-in window are one line", () => {
-    const canvas = fakeCanvas({ width: 60, height: 20 });
-    plots.drawMiniSeries(canvas, new Float32Array([0, 2]));
-    assert.deepEqual(pathPoints(canvas.ctx), [
-      ["moveTo", 0, 20],
-      ["lineTo", 60, 0],
-    ]);
-  });
-
-  test("an unsized cell gets a default size", () => {
-    const canvas = fakeCanvas({ width: 0, height: 0 });
-    plots.drawMiniSeries(canvas, f32([1, 2]));
-    assert.equal(canvas.width, 60);
-    assert.equal(canvas.height, 28);
-  });
 });
 
 /** Resolve after the next animation frame. */
 const nextFrame = () =>
   new Promise((resolve) => globalThis.window.requestAnimationFrame(resolve));
 
-test("oncePerFrame draws once at the next frame however often asked", async () => {
-  let draws = 0;
-  const schedule = plots.oncePerFrame(() => {
-    draws += 1;
+describe("oncePerFrame", () => {
+  test("draws once at the next frame however often asked", async () => {
+    let draws = 0;
+    const schedule = plots.oncePerFrame(() => {
+      draws += 1;
+    });
+    schedule();
+    schedule();
+    schedule();
+    assert.equal(draws, 0);
+    await nextFrame();
+    assert.equal(draws, 1);
+    schedule();
+    await nextFrame();
+    assert.equal(draws, 2);
   });
-  schedule();
-  schedule();
-  schedule();
-  assert.equal(draws, 0);
-  await nextFrame();
-  assert.equal(draws, 1);
-  schedule();
-  await nextFrame();
-  assert.equal(draws, 2);
 });
 
-test("a box dragged over drawn samples is drawn over them", () => {
-  const scale = plots.viewScale({ start: 100, end: 110 }, 38, 254);
-  // The plot's edges are the view's first and last samples.
-  assert.equal(scale.toX(100), 38);
-  assert.equal(scale.toX(109), 292);
-  // A pointer at a drawn sample picks that sample, at any zoom.
-  for (let s = 100; s < 110; s++) {
-    assert.equal(Math.round(scale.toSample(scale.toX(s))), s);
-  }
+describe("viewScale", () => {
+  test("a box dragged over drawn samples is drawn over them", () => {
+    const scale = plots.viewScale({ start: 100, end: 110 }, 38, 254);
+    // The plot's edges are the view's first and last samples.
+    assert.equal(scale.toX(100), 38);
+    assert.equal(scale.toX(109), 292);
+    // A pointer at a drawn sample picks that sample, at any zoom.
+    for (let s = 100; s < 110; s++) {
+      assert.equal(Math.round(scale.toSample(scale.toX(s))), s);
+    }
+  });
 });

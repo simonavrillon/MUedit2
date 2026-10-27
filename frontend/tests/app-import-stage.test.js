@@ -2,22 +2,12 @@
 import { test, describe, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 
-// config.js reads window.location at import time.
-globalThis.window = {
-  location: {
-    port: "8080",
-    protocol: "http:",
-    hostname: "localhost",
-    origin: "http://localhost:8080",
-  },
-};
+import { freshState, settle } from "./_app.js";
 
-const { state: initialState } = await import("../src/state/state.js");
 const { createApp } = await import("../src/app/create-app.js");
 const { setupImportEvents } = await import("../src/app/stages/import-stage.js");
 
-const pristine = structuredClone(initialState);
-
+/** A recorder that answers every call with `result`. */
 function recorder(result) {
   const calls = [];
   const fn = (...args) => {
@@ -41,14 +31,12 @@ function browseButton() {
   return button;
 }
 
-const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
-
 /**
  * @param {string} picked The path the file dialog answers.
  * @param {boolean} dirty Whether the open decomposition has unsaved edits.
  */
 function browsing(picked, dirty) {
-  const state = structuredClone(pristine);
+  const state = freshState();
   state.edit.token = "edit-1";
   state.edit.dirty = dirty;
   const browse = browseButton();

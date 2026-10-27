@@ -33,7 +33,6 @@ from tests._editing_data import (
     VIEW_START,
     noisy_pulse_trains,
     spike_train,
-    synthetic_mu,
 )
 from tests._platform import deleted
 
@@ -54,11 +53,6 @@ def _session(
         mu_uids=[f"g0_mu{i}" for i in range(len(spikes))],
         **kw,
     )
-
-
-@pytest.fixture(scope="module", name="synthetic_mu")
-def synthetic_mu_fixture() -> dict[str, np.ndarray]:
-    return synthetic_mu()
 
 
 @pytest.fixture()

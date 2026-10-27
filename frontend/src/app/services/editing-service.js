@@ -236,11 +236,9 @@ export async function requestRoiEdit(app, op, payload) {
 export function prepareEditGrid(app, grid) {
   const { state, api } = app;
   if (!state.edit.token) return;
-  api
-    .editPrepareGrid(state.edit.token, grid, state.edit.project || "")
-    .catch(() => {
-      // The filter update filters the grid itself, and reports what fails.
-    });
+  api.editPrepareGrid(state.edit.token, grid, state.edit.project).catch(() => {
+    // The filter update filters the grid itself, and reports what fails.
+  });
 }
 
 /** @param {App} app */
@@ -266,7 +264,7 @@ export async function requestFilterUpdate(app) {
         view_end: end,
         use_peeloff: isToggleOn(els.editPeelOffToggle),
         lock_spikes: isToggleOn(els.editLockSpikesToggle),
-        project: state.edit.project || "",
+        project: state.edit.project,
       });
       setEditBookmarkAndHide(state, mu, Math.round((start + end) / 2));
       return ["MU filter updated", "success"];
@@ -420,7 +418,7 @@ export async function saveEditedFile(app) {
           token,
           muscle_names: getBidsMuscleNames(),
           file_label: getSuggestedNpzName(filename, "_edited"),
-          software_versions: state.edit.softwareVersions || null,
+          software_versions: state.edit.softwareVersions,
         }),
       );
       requireSameSession(state, token);

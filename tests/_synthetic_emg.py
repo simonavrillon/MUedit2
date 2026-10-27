@@ -1,10 +1,11 @@
-"""Synthetic HD-EMG shared by the QC test modules."""
+"""Synthetic HD-EMG shared by the QC and decomposition test modules."""
 
 from __future__ import annotations
 
 import numpy as np
 
 from muedit.decomp.algorithm import pca_extended_signal, whiten_extended_signal
+from muedit.decomp.types import DecompositionParameters
 from muedit.models import SignalImport
 from muedit.signal.decomp_primitives import extend_signal
 from muedit.signal.filters import bandpass_signals
@@ -104,6 +105,9 @@ def motor_unit_emg(
 
 #: Where ``synthetic_recording`` contracts: the window the decomposition tests decompose.
 ACTIVE_ROI = (5_000, 35_000)
+
+#: Few iterations: the store tests compare a run in a store with the same run on the heap.
+STORE_PARAMS = DecompositionParameters(niter=8)
 
 
 def synthetic_recording() -> SignalImport:

@@ -304,8 +304,8 @@ export function createFileSessionService(app) {
     return false;
   }
 
-  // The BIDS entity label from the session form, else the payload's, and
-  // the participant and hardware fields every save carries.
+  // The session form's BIDS entity label, and the participant and hardware
+  // fields every save carries.
   /** @type {FileSessionService["withBidsSaveFields"]} */
   function withBidsSaveFields(payload) {
     const form = readSessionForm();

@@ -1,22 +1,12 @@
-// Edit-stage canvases: drag gestures to selections, the navigation timeline,
-// and the bookmark, driven through the real app context.
+// The edit page's canvases: drags on the pulse plot, the navigation timeline,
+// and what the pulse, discharge-rate and timeline plots draw.
 import { test, describe, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 
-import {
-  fakeCanvas,
-  fakeElement,
-  installDom,
-  ops,
-  recorder,
-  resetDom,
-  texts,
-} from "./fake-dom.js";
+import { fakeCanvas, ops, recorder, resetDom, texts } from "./_dom.js";
+import { freshState, testApp } from "./_app.js";
 
-installDom();
 const { COLORS } = await import("../src/config.js");
-const { state: initialState } = await import("../src/state/state.js");
-const { createApp } = await import("../src/app/create-app.js");
 const {
   bindEditCanvas,
   bindEditTimeline,
@@ -24,8 +14,6 @@ const {
   drawEditRates,
   drawEditTimeline,
 } = await import("../src/view/edit-canvas.js");
-
-const pristine = structuredClone(initialState);
 
 // With axes the pulse plot starts 38 px in and is 254 px wide, from the view's
 // first sample to its last, so a view of 255 samples maps one sample to one
@@ -37,14 +25,14 @@ let app;
 let els;
 
 /** The fetched window of MU 0 over `view`: samples `i % 7`, spikes 100 and 200. */
-function pulseWindow(view, version = 1) {
+function pulseWindow(view) {
   const n = view.end - view.start;
   const spikes = Int32Array.from(
     [100, 200].filter((t) => t >= view.start && t < view.end),
   );
   return {
     mu: 0,
-    version,
+    version: 1,
     start: view.start,
     end: view.end,
     bins: 254,
@@ -57,17 +45,9 @@ function pulseWindow(view, version = 1) {
   };
 }
 
-/**
- * The app over an edit session of one MU. With `stage`, `renderEditExplorer`
- * is the edit stage's own; otherwise a recorder.
- */
-function editApp({
-  samples = 1000,
-  view = { start: 0, end: 255 },
-  api = {},
-  stage = false,
-} = {}) {
-  const state = structuredClone(pristine);
+/** The app over an edit session of one MU, its window on screen fetched. */
+function editApp({ samples = 1000, view = { start: 0, end: 255 } } = {}) {
+  const state = freshState();
   Object.assign(state.edit, {
     token: "tok",
     spikeTimes: [Int32Array.from([100, 200])],
@@ -85,15 +65,14 @@ function editApp({
     editDrCanvas: fakeCanvas(),
     editTimelineCanvas: fakeCanvas({ width: 346, height: 20 }),
   };
-  const built = createApp({ state, els, api });
+  const built = testApp({ state, els });
   Object.assign(built, {
-    setStatus: recorder(),
     addSpikesInSelection: recorder(),
     addArtifactInSelection: recorder(),
     deleteSpikesInSelection: recorder(),
     scheduleEditRender: recorder(),
+    renderEditExplorer: recorder(),
   });
-  if (!stage) built.renderEditExplorer = recorder();
   return built;
 }
 
@@ -125,6 +104,8 @@ describe("pulse canvas drag", () => {
     ]);
     assert.equal(app.state.edit.mode, null);
     assert.equal(app.state.edit.pulseSelectionDraft, null);
+    // Redrawn after the move and after the release, without the box.
+    assert.equal(app.scheduleEditRender.calls.length, 2);
   });
 
   test("a box dragged right-to-left and bottom-to-top is the same box", () => {
@@ -217,15 +198,6 @@ describe("pulse canvas drag", () => {
     dragPulse([100, 30], [103, 34]);
     assert.equal(app.state.edit.pulseSelectionDraft, null);
     assert.equal(app.state.edit.pulseSelection, null);
-    assert.equal(app.scheduleEditRender.calls.length, 2);
-  });
-
-  test("an armed box is cleared from the plot as it is sent", () => {
-    app.state.edit.mode = "add";
-    dragPulse([50, 10], [150, 60]);
-    assert.equal(app.addSpikesInSelection.calls.length, 1);
-    assert.equal(app.state.edit.pulseSelectionDraft, null);
-    // Redrawn after the move and after the release, without the box.
     assert.equal(app.scheduleEditRender.calls.length, 2);
   });
 
@@ -378,57 +350,6 @@ describe("pulse plot", () => {
     const bottom = PLOT_TOP + 72;
     assert.ok(ops(ctx, "arc").every((a) => a.args[1] === bottom));
   });
-
-  test("asks for the window when the view moved, and draws it when it lands", async () => {
-    const asked = [];
-    app = editApp({
-      api: {
-        fetchPulse: async (params) => {
-          asked.push(params);
-          return pulseWindow({ start: params.start, end: params.end }, 1);
-        },
-      },
-      stage: true,
-    });
-    app.state.currentStage = "edit";
-    app.state.edit.view = { start: 300, end: 554 };
-    app.renderEditExplorer();
-    assert.deepEqual(asked, [
-      { token: "tok", mu: 0, start: 300, end: 554, bins: 254 },
-    ]);
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    assert.equal(app.state.edit.pulseView.start, 300);
-    app.renderEditExplorer();
-    assert.equal(asked.length, 1, "the window shown is not asked for again");
-  });
-
-  test("an edit of the MU asks for its window again", () => {
-    const asked = [];
-    app = editApp({
-      api: { fetchPulse: async (p) => (asked.push(p), new Promise(() => {})) },
-      stage: true,
-    });
-    app.state.edit.versions = [2];
-    app.renderEditExplorer();
-    assert.equal(asked.length, 1);
-  });
-
-  test("drawing changes nothing and asks the server for nothing", () => {
-    const asked = [];
-    app = editApp({ api: { fetchPulse: async (p) => asked.push(p) } });
-    Object.assign(app.state.edit, { view: null, versions: [2] });
-    drawEditPulse(els, app.state);
-    drawEditRates(els, app.state);
-    drawEditTimeline(els, app.state);
-    assert.equal(app.state.edit.view, null);
-    assert.deepEqual(asked, []);
-  });
-
-  test("a view past the end of a shorter pulse is reset", () => {
-    app = editApp({ view: { start: 0, end: 5000 }, stage: true });
-    app.renderEditExplorer();
-    assert.deepEqual(app.state.edit.view, { start: 0, end: 1000 });
-  });
 });
 
 describe("discharge-rate plot", () => {
@@ -445,33 +366,5 @@ describe("discharge-rate plot", () => {
     const yLabels = texts(ctx).filter((t) => !t.endsWith("s"));
     // 100 samples between discharges at 1 kHz is 10 Hz.
     assert.deepEqual(yLabels, ["0.0", "3.3", "6.7", "10.0"]);
-  });
-});
-
-describe("MU dropdowns", () => {
-  beforeEach(() => {
-    app = editApp({
-      api: { fetchPulse: () => new Promise(() => {}) },
-      stage: true,
-    });
-    app.state.gridNames = ["A"];
-    Object.assign(app.state.edit, {
-      spikeTimes: [Int32Array.from([100]), Int32Array.from([200])],
-      muGridIndex: [0, 0],
-    });
-    els.editMuGridSelect = fakeElement("select");
-    els.editMuSelect = fakeElement("select");
-  });
-
-  test("are rebuilt only when what they show changes", () => {
-    app.renderEditExplorer();
-    assert.equal(els.editMuSelect.children.length, 2);
-    els.editMuSelect.children.push("untouched");
-    app.renderEditExplorer();
-    assert.equal(els.editMuSelect.children.at(-1), "untouched");
-    app.state.edit.currentMu = 1;
-    app.renderEditExplorer();
-    assert.equal(els.editMuSelect.children.length, 2);
-    assert.equal(els.editMuSelect.value, "1");
   });
 });

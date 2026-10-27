@@ -36,10 +36,10 @@ def _signal() -> SignalImport:
 
 
 class TestSignalViews:
-    """The preview's single pass gives what the stored QC copy gave (``_build_preview_core``)."""
+    """The preview's single pass over the upload gives the views of its bandpassed grids."""
 
-    def _before(self, signal: SignalImport) -> tuple[list[np.ndarray], np.ndarray, np.ndarray]:
-        """Channel means and grid overviews as computed from the float32 QC copy until stage 12."""
+    def _expected(self, signal: SignalImport) -> tuple[list[np.ndarray], np.ndarray, np.ndarray]:
+        """Channel means, grid overviews and the float32 bandpassed EMG, computed grid by grid."""
         qc = np.vstack(
             [
                 bandpass_signals(np.asarray(signal.data[:12], np.float64), FSAMP, 1),
@@ -54,16 +54,16 @@ class TestSignalViews:
         return means, np.vstack(overviews), qc
 
     @pytest.mark.parametrize("store_kind", ["ram", "session"])
-    def test_channel_means_and_overview_are_unchanged(self, store_kind: str) -> None:
+    def test_views_are_those_of_the_bandpassed_grids(self, store_kind: str) -> None:
         signal = _signal()
         store = RamStore() if store_kind == "ram" else SessionStore.create("views")
         views, channel_means = build_signal_views(signal, store, [12, 8], [1, 1])
-        means, overview, qc = self._before(signal)
+        means, overview, qc = self._expected(signal)
         for got, want in zip(channel_means, means, strict=True):
             np.testing.assert_array_equal(got, want)
         np.testing.assert_array_equal(views.overview, overview)
         assert views.grid_rows == [(0, 12), (12, 20)]
-        # The EMG pyramid is the pyramid of the bandpassed copy the QC stage used to keep.
+        # The EMG pyramid is that of the bandpassed EMG; the aux pyramid that of the raw aux.
         np.testing.assert_array_equal(views.emg.levels[0], _pyramid_of(qc).levels[0])
         np.testing.assert_array_equal(views.aux.levels[0], _pyramid_of(signal.aux_data).levels[0])
 

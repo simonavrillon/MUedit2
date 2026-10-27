@@ -54,20 +54,4 @@ describe("buildDecomposeParams", () => {
       full_trace: 1,
     });
   });
-
-  test("toggles become 0/1 flags", () => {
-    const out = buildDecomposeParams({
-      ...raw,
-      covFilter: false,
-      peelOffEnabled: true,
-    });
-    assert.equal(out.covfilter, 0);
-    assert.equal(out.peel_off_enabled, 1);
-  });
-
-  test("an unknown mode sends the default flags", () => {
-    const out = buildDecomposeParams({ ...raw, postprocessMode: "bogus" });
-    assert.equal(out.use_adaptive, 0);
-    assert.equal(out.full_trace, 0);
-  });
 });

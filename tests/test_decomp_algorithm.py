@@ -1,5 +1,4 @@
-"""Tests for :mod:`muedit.decomp.algorithm`: whitening, FastICA, peel-off, filter application
-and duplicate removal."""
+"""``decomp.algorithm``: whitening, FastICA, peel-off, filter application and duplicate removal."""
 
 from __future__ import annotations
 
@@ -117,174 +116,189 @@ class TestChunkedFastIca:
         np.testing.assert_array_equal(column_energy(extended), np.sum(extended**2, axis=0))
 
 
-@pytest.mark.parametrize(
-    ("n_samples", "edges_sec", "ex_factor", "expected"),
-    [
-        (2000, 0.2, 16, 400),  # edges_sec, wider than the 15 zero-padded columns
-        (2000, 0.0, 16, 15),  # no edges: the padded columns still go
-        (2000, 0.002, 16, 15),  # edges narrower than the padding
-        (500, 0.2, 16, 15),  # too short for edges_sec, long enough for the padding
-        (20, 0.2, 16, 0),  # too short for either
-        (2000, 0.0, 1, 0),  # nothing extended, nothing padded
-    ],
-)
-def test_window_trim(n_samples: int, edges_sec: float, ex_factor: int, expected: int) -> None:
-    assert algorithm.window_trim(n_samples, 2000.0, edges_sec, ex_factor) == expected
+class TestWindowTrim:
+    """The samples a window loses at each edge to the delay embedding."""
 
-
-def test_float32_covariance_accumulates_in_float64(window32: np.ndarray) -> None:
-    np.testing.assert_allclose(
-        covariance(window32), covariance(window32.astype(np.float64)), rtol=1e-10, atol=1e-10
+    @pytest.mark.parametrize(
+        ("n_samples", "edges_sec", "ex_factor", "expected"),
+        [
+            (2000, 0.2, 16, 400),  # edges_sec, wider than the 15 zero-padded columns
+            (2000, 0.0, 16, 15),  # no edges: the padded columns still go
+            (2000, 0.002, 16, 15),  # edges narrower than the padding
+            (500, 0.2, 16, 15),  # too short for edges_sec, long enough for the padding
+            (20, 0.2, 16, 0),  # too short for either
+            (2000, 0.0, 1, 0),  # nothing extended, nothing padded
+        ],
     )
+    def test_window_trim(
+        self, n_samples: int, edges_sec: float, ex_factor: int, expected: int
+    ) -> None:
+        assert algorithm.window_trim(n_samples, 2000.0, edges_sec, ex_factor) == expected
 
 
-def test_fixed_point_never_promotes_the_window(window32: np.ndarray) -> None:
-    """A float64 ``w`` against a float32 window must not copy the window as float64."""
-    w = np.random.default_rng(2).standard_normal(window32.shape[0])
-    w /= np.linalg.norm(w)
-    basis = np.zeros((window32.shape[0], 0))
-    tracemalloc.start()
-    out = fixed_point_alg(w, window32, basis, 50, "skew")
-    get_spikes(out, window32, FSAMP)
-    peak = tracemalloc.get_traced_memory()[1]
-    tracemalloc.stop()
-    assert out.dtype == np.float64
-    assert peak < window32.nbytes, (
-        f"peak {peak / 1e6:.1f} MB for a {window32.nbytes / 1e6:.1f} MB window"
-    )
+class TestWorkDtype:
+    """A float32 window stays float32 through the search, and its sums run in float64."""
+
+    def test_float32_covariance_accumulates_in_float64(self, window32: np.ndarray) -> None:
+        np.testing.assert_allclose(
+            covariance(window32), covariance(window32.astype(np.float64)), rtol=1e-10, atol=1e-10
+        )
+
+    def test_fixed_point_never_promotes_the_window(self, window32: np.ndarray) -> None:
+        """A float64 ``w`` against a float32 window must not copy the window as float64."""
+        w = np.random.default_rng(2).standard_normal(window32.shape[0])
+        w /= np.linalg.norm(w)
+        basis = np.zeros((window32.shape[0], 0))
+        tracemalloc.start()
+        out = fixed_point_alg(w, window32, basis, 50, "skew")
+        get_spikes(out, window32, FSAMP)
+        peak = tracemalloc.get_traced_memory()[1]
+        tracemalloc.stop()
+        assert out.dtype == np.float64
+        assert peak < window32.nbytes, (
+            f"peak {peak / 1e6:.1f} MB for a {window32.nbytes / 1e6:.1f} MB window"
+        )
 
 
-def test_vec_mat_ignores_stale_output_memory() -> None:
-    """A NaN left in freed memory never reaches ``v @ m``.
+class TestStaleOutputMemory:
+    """Products into fresh buffers never read the memory those buffers reuse."""
 
-    Accelerate's float32 ``cblas_sgemv`` (transposed) computes ``0 * old`` for some outputs
-    when beta = 0 (here the last 39 of 20519 columns); a fresh buffer that reuses freed
-    NaN memory then yields NaN. ``vec_mat`` writes into a zeroed buffer instead.
-    """
-    rng = np.random.default_rng(0)
-    m = rng.standard_normal((1024, 20519)).astype(np.float32)
-    v = rng.standard_normal(1024)
-    expected = v @ m.astype(np.float64)
-    for _ in range(20):
-        stale = np.full(m.shape[1], np.nan, dtype=np.float32)
-        del stale  # the next buffer of this size reuses its memory
-        out = vec_mat(v, m)
-        assert np.isfinite(out).all()
-        np.testing.assert_allclose(out, expected, rtol=1e-4, atol=1e-3)
+    def test_vec_mat_ignores_stale_output_memory(self) -> None:
+        """A NaN left in freed memory never reaches ``v @ m``."""
+        # Accelerate's float32 cblas_sgemv (transposed) computes 0 * old for some outputs when
+        # beta = 0 (here the last 39 of 20519 columns); a fresh buffer that reuses freed NaN memory
+        # then yields NaN. vec_mat writes into a zeroed buffer instead.
+        rng = np.random.default_rng(0)
+        m = rng.standard_normal((1024, 20519)).astype(np.float32)
+        v = rng.standard_normal(1024)
+        expected = v @ m.astype(np.float64)
+        for _ in range(20):
+            stale = np.full(m.shape[1], np.nan, dtype=np.float32)
+            del stale  # the next buffer of this size reuses its memory
+            out = vec_mat(v, m)
+            assert np.isfinite(out).all()
+            np.testing.assert_allclose(out, expected, rtol=1e-4, atol=1e-3)
 
-
-def test_single_mu_full_trace_ignores_stale_output_memory() -> None:
-    """The streamed full-trace pass of a grid with one MU over one batch of 12345 samples."""
-    rng = np.random.default_rng(1)
-    n_ch, ex, n = 64, 16, 12345
-    source = StreamedExtender(
-        rng.standard_normal((n_ch, n)).astype(np.float32), ex, dtype=np.float32
-    )
-    w = rng.standard_normal((n_ch * ex, 1))
-    for _ in range(10):
-        out = np.zeros((1, n), dtype=np.float32)  # before the stale buffer, or it takes its memory
-        stale = np.full((1, n), np.nan, dtype=np.float32)
-        del stale
-        _stream_full_trace(source, w, None, out, np.array([0]))
-        assert np.isfinite(out).all()
-
-
-@pytest.mark.parametrize("dtype", [np.float32, np.float64])
-def test_peel_off_matches_the_gathered_mean(dtype: type) -> None:
-    rng = np.random.default_rng(1)
-    x: FloatArray = rng.standard_normal((40, 20_000)).astype(dtype)
-    spikes = _spikes(rng, x.shape[1])
-    expected = x.copy()
-    _reference_subtract(expected, spikes, FSAMP, WIN)
-    subtract_mu_waveforms(x, spikes, FSAMP, WIN)
-    np.testing.assert_array_equal(x, expected)
+    def test_single_mu_full_trace_ignores_stale_output_memory(self) -> None:
+        """The streamed full-trace pass of a grid with one MU over one batch of 12345 samples."""
+        rng = np.random.default_rng(1)
+        n_channels, ex, n = 64, 16, 12345
+        source = StreamedExtender(
+            rng.standard_normal((n_channels, n)).astype(np.float32), ex, dtype=np.float32
+        )
+        w = rng.standard_normal((n_channels * ex, 1))
+        for _ in range(10):
+            out = np.zeros(
+                (1, n), dtype=np.float32
+            )  # before the stale buffer, or it takes its memory
+            stale = np.full((1, n), np.nan, dtype=np.float32)
+            del stale
+            _stream_full_trace(source, w, None, out, np.array([0]))
+            assert np.isfinite(out).all()
 
 
-def test_peel_off_reports_exactly_the_columns_it_changed() -> None:
-    rng = np.random.default_rng(2)
-    x = rng.standard_normal((8, 20_000))
-    before = x.copy()
-    runs = subtract_mu_waveforms(x, _spikes(rng, x.shape[1]), FSAMP, WIN)
-    reported = np.zeros(x.shape[1], dtype=bool)
-    for lo, hi in runs:
-        reported[lo:hi] = True
-    assert np.array_equal(reported, (x != before).any(axis=0))
-    assert all(hi < lo for (_, hi), (lo, _) in pairwise(runs))
+class TestPeelOff:
+    """Subtracting a unit's waveforms, and the column energies it leaves."""
+
+    @pytest.mark.parametrize("dtype", [np.float32, np.float64])
+    def test_peel_off_matches_the_gathered_mean(self, dtype: type) -> None:
+        rng = np.random.default_rng(1)
+        x: FloatArray = rng.standard_normal((40, 20_000)).astype(dtype)
+        spikes = _spikes(rng, x.shape[1])
+        expected = x.copy()
+        _reference_subtract(expected, spikes, FSAMP, WIN)
+        subtract_mu_waveforms(x, spikes, FSAMP, WIN)
+        np.testing.assert_array_equal(x, expected)
+
+    def test_peel_off_reports_exactly_the_columns_it_changed(self) -> None:
+        rng = np.random.default_rng(2)
+        x = rng.standard_normal((8, 20_000))
+        before = x.copy()
+        runs = subtract_mu_waveforms(x, _spikes(rng, x.shape[1]), FSAMP, WIN)
+        reported = np.zeros(x.shape[1], dtype=bool)
+        for lo, hi in runs:
+            reported[lo:hi] = True
+        assert np.array_equal(reported, (x != before).any(axis=0))
+        assert all(hi < lo for (_, hi), (lo, _) in pairwise(runs))
+
+    def test_peel_off_without_valid_spikes_changes_nothing(self) -> None:
+        x = np.ones((4, 100))
+        assert subtract_mu_waveforms(x, np.array([0, 99]), FSAMP, WIN) == []
+        assert np.all(x == 1)
+
+    @pytest.mark.parametrize("dtype", [np.float32, np.float64])
+    def test_energy_updated_on_changed_runs_equals_a_full_recount(self, dtype: type) -> None:
+        rng = np.random.default_rng(3)
+        x: FloatArray = rng.standard_normal((300, 30_000)).astype(dtype)
+        energy = column_energy(x)
+        for lo, hi in subtract_mu_waveforms(x, _spikes(rng, x.shape[1]), FSAMP, WIN):
+            energy[lo:hi] = column_energy(x[:, lo:hi])
+        np.testing.assert_array_equal(energy, column_energy(x))
 
 
-def test_peel_off_without_valid_spikes_changes_nothing() -> None:
-    x = np.ones((4, 100))
-    assert subtract_mu_waveforms(x, np.array([0, 99]), FSAMP, WIN) == []
-    assert np.all(x == 1)
+class TestWindowedFilters:
+    """Applying each window's filters to the whole recording."""
+
+    @pytest.mark.parametrize("dtype", [np.float32, np.float64])
+    def test_windowed_filters_give_the_per_filter_projections(self, dtype: type) -> None:
+        rng = np.random.default_rng(4)
+        windows: dict[int, FloatArray] = {
+            0: rng.standard_normal((60, 5_000)).astype(dtype),
+            1: rng.standard_normal((60, 4_000)).astype(dtype),
+        }
+        filters: dict[int, FloatArray] = {
+            0: rng.standard_normal((60, 3)),
+            1: rng.standard_normal((60, 1)),
+        }
+        starts = [100, 5_100, 6_000, 10_000]
+        total_samples = 10_500
+        pulse_trains, _ = batch_process_filters(
+            filters,
+            windows.__getitem__,
+            starts,
+            total_samples,
+            FSAMP,
+            grid_data={0: np.empty((60, 0))},  # the windowed route reads only its channel count
+            window_to_grid={0: 0, 1: 0},
+        )
+
+        row = 0
+        for win_global in (0, 1):
+            start = starts[2 * win_global]
+            for j in range(filters[win_global].shape[1]):
+                expected = np.zeros(total_samples)
+                expected[start : start + windows[win_global].shape[1]] = vec_mat(
+                    filters[win_global][:, j], windows[win_global]
+                )[: total_samples - start]
+                # Pulse trains are stored as float32 whatever the window's dtype.
+                peak = float(np.max(expected**2))
+                np.testing.assert_allclose(
+                    pulse_trains[row], signed_square(expected), rtol=1e-5, atol=1e-5 * peak
+                )
+                row += 1
 
 
-@pytest.mark.parametrize("dtype", [np.float32, np.float64])
-def test_energy_updated_on_changed_runs_equals_a_full_recount(dtype: type) -> None:
-    rng = np.random.default_rng(3)
-    x: FloatArray = rng.standard_normal((300, 30_000)).astype(dtype)
-    energy = column_energy(x)
-    for lo, hi in subtract_mu_waveforms(x, _spikes(rng, x.shape[1]), FSAMP, WIN):
-        energy[lo:hi] = column_energy(x[:, lo:hi])
-    np.testing.assert_array_equal(energy, column_energy(x))
+class TestWhitening:
+    """Convolutive sphering of the extended signal."""
 
+    def test_whitening_decorrelates(self, extended: np.ndarray) -> None:
+        """Convolutive sphering: the whitened covariance is a projector."""
+        eigvecs, eigvals = pca_extended_signal(extended)
+        whitened, _ = whiten_extended_signal(extended.copy(), eigvecs, eigvals)
 
-@pytest.mark.parametrize("dtype", [np.float32, np.float64])
-def test_windowed_filters_give_the_per_filter_projections(dtype: type) -> None:
-    rng = np.random.default_rng(4)
-    windows: dict[int, FloatArray] = {
-        0: rng.standard_normal((60, 5_000)).astype(dtype),
-        1: rng.standard_normal((60, 4_000)).astype(dtype),
-    }
-    filters: dict[int, FloatArray] = {
-        0: rng.standard_normal((60, 3)),
-        1: rng.standard_normal((60, 1)),
-    }
-    starts = [100, 5_100, 6_000, 10_000]
-    total_samples = 10_500
-    pulse_trains, _ = batch_process_filters(
-        filters,
-        windows.__getitem__,
-        starts,
-        total_samples,
-        FSAMP,
-        grid_data={0: np.empty((60, 0))},  # the windowed route reads only its channel count
-        window_to_grid={0: 0, 1: 0},
-    )
-
-    row = 0
-    for win_global in (0, 1):
-        start = starts[2 * win_global]
-        for j in range(filters[win_global].shape[1]):
-            expected = np.zeros(total_samples)
-            expected[start : start + windows[win_global].shape[1]] = vec_mat(
-                filters[win_global][:, j], windows[win_global]
-            )[: total_samples - start]
-            # Pulse trains are stored as float32 whatever the window's dtype.
-            peak = float(np.max(expected**2))
-            np.testing.assert_allclose(
-                pulse_trains[row], signed_square(expected), rtol=1e-5, atol=1e-5 * peak
-            )
-            row += 1
-
-
-def test_whitening_decorrelates(extended: np.ndarray) -> None:
-    """Convolutive sphering: the whitened covariance is a projector."""
-    eigvecs, eigvals = pca_extended_signal(extended)
-    whitened, _ = whiten_extended_signal(extended.copy(), eigvecs, eigvals)
-
-    n_comp = eigvecs.shape[1]
-    cov_whitened = np.cov(whitened, bias=True)
-    np.testing.assert_allclose(cov_whitened, cov_whitened.T, atol=1e-10)
-    np.testing.assert_allclose(
-        cov_whitened @ cov_whitened,
-        cov_whitened,
-        atol=1e-4,
-        err_msg="whitened covariance must be idempotent (a projector)",
-    )
-    # n_comp eigenvalues ~1 (sphered), the rest ~0.
-    eigvals_w = np.linalg.eigvalsh(cov_whitened)[::-1]
-    np.testing.assert_allclose(eigvals_w[:n_comp], 1.0, atol=1e-3)
-    np.testing.assert_allclose(eigvals_w[n_comp:], 0.0, atol=1e-4)
+        n_comp = eigvecs.shape[1]
+        cov_whitened = np.cov(whitened, bias=True)
+        np.testing.assert_allclose(cov_whitened, cov_whitened.T, atol=1e-10)
+        np.testing.assert_allclose(
+            cov_whitened @ cov_whitened,
+            cov_whitened,
+            atol=1e-4,
+            err_msg="whitened covariance must be idempotent (a projector)",
+        )
+        # n_comp eigenvalues ~1 (sphered), the rest ~0.
+        eigvals_w = np.linalg.eigvalsh(cov_whitened)[::-1]
+        np.testing.assert_allclose(eigvals_w[:n_comp], 1.0, atol=1e-3)
+        np.testing.assert_allclose(eigvals_w[n_comp:], 0.0, atol=1e-4)
 
 
 class TestRemDuplicatesCore:

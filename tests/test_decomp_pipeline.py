@@ -6,24 +6,18 @@ import numpy as np
 import pytest
 
 from muedit.decomp.pipeline import run_decomposition
-from muedit.decomp.types import DecompositionParameters, DecompositionResult
+from muedit.decomp.types import DecompositionResult
 from muedit.models import resident_nbytes
 from muedit.signal.decomp_primitives import POSTPROC_MIN_ISI_SEC
 from muedit.storage import SessionStore
-from tests._platform import MAPPED_FILES_STAY
-from tests._synthetic_emg import ACTIVE_ROI, synthetic_recording
-
-_STORE_PARAMS = DecompositionParameters(niter=8)
-
-
-def _store_files(store: SessionStore) -> list[str]:
-    return sorted(p.name.split("-")[0].removesuffix(".npy") for p in store.path.glob("*.npy"))
+from tests._platform import MAPPED_FILES_STAY, store_files
+from tests._synthetic_emg import ACTIVE_ROI, STORE_PARAMS, synthetic_recording
 
 
 def _run(store: SessionStore | None) -> DecompositionResult:
     return run_decomposition(
         "synthetic.mat",
-        params=_STORE_PARAMS,
+        params=STORE_PARAMS,
         save_npz=False,
         rois=[ACTIVE_ROI],
         include_full_preview=True,
@@ -45,7 +39,7 @@ def test_a_run_gives_one_clean_entry_per_motor_unit(heap_run: DecompositionResul
     assert heap_run.pulse_trains.shape == (n_mu, total_samples)
     assert np.isfinite(heap_run.pulse_trains).all()
     assert len(heap_run.sil) == len(heap_run.mu_grid_index) == n_mu
-    assert min(heap_run.sil) >= _STORE_PARAMS.sil_thr
+    assert min(heap_run.sil) >= STORE_PARAMS.sil_thr
     refractory = int(np.round(heap_run.fsamp * POSTPROC_MIN_ISI_SEC))
     for spikes in heap_run.spike_times:
         assert np.all(np.diff(spikes) >= refractory)
@@ -61,4 +55,4 @@ def test_a_run_in_a_store_matches_the_heap_run(heap_run: DecompositionResult) ->
     assert resident_nbytes(stored.preview["pulse_trains_full"]) == 0
     # Only the kept pulse trains outlive the run: the filtered EMG and the
     # pre-dedup matrix were deleted.
-    assert MAPPED_FILES_STAY or _store_files(store) == ["pulse_trains"]
+    assert MAPPED_FILES_STAY or store_files(store) == ["pulse_trains"]

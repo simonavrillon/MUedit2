@@ -15,6 +15,7 @@ import scipy.io
 from starlette.testclient import TestClient
 
 from muedit import storage
+from muedit.decomp.types import DecomposeStepOutput, PreprocessStepOutput
 from muedit.models import SignalImport
 from muedit.paths import CACHE_DIR_ENV
 
@@ -264,3 +265,58 @@ def api(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]
     monkeypatch.setenv("MUEDIT_CACHE_DIR", str(tmp_path / "cache"))
     with api_client(tmp_path / "data") as client:
         yield client
+
+
+# ── Synthetic decomposition inputs ───────────────────────────────────────────
+
+
+@pytest.fixture(scope="module")
+def short_emg() -> np.ndarray:
+    """``short_recording``: ten channels of MU activity, for the extender and adaptive tests."""
+    from tests._synthetic_emg import short_recording
+
+    return short_recording()
+
+
+@pytest.fixture(scope="module")
+def synthetic_mu() -> dict[str, np.ndarray]:
+    """EMG with one target MU, one interfering MU and noise, for the edit operations."""
+    from tests import _editing_data
+
+    return _editing_data.synthetic_mu()
+
+
+@pytest.fixture(scope="module")
+def store_prep() -> dict[str, Any]:
+    """``synthetic_recording`` preprocessed on the heap and into a session store."""
+    from muedit.decomp.preprocess import load_step, preprocess_step
+    from tests._synthetic_emg import ACTIVE_ROI, STORE_PARAMS, synthetic_recording
+
+    loaded = load_step("synthetic.mat", None, synthetic_recording(), None)
+
+    def prep(store: storage.SessionStore | None) -> PreprocessStepOutput:
+        return preprocess_step(
+            loaded=loaded,
+            duration=None,
+            manual_roi=False,
+            rois=[ACTIVE_ROI],
+            params=STORE_PARAMS,
+            discard_overrides=None,
+            store=store,
+        )
+
+    store = storage.SessionStore.create("parity")
+    return {"heap": prep(None), "stored": prep(store), "store": store}
+
+
+@pytest.fixture(scope="module")
+def decomposed(store_prep: dict[str, Any]) -> DecomposeStepOutput:
+    """One decomposition of ``store_prep``'s heap preprocessing, with filters to apply."""
+    from muedit.decomp.core import decompose_step
+    from tests._synthetic_emg import STORE_PARAMS
+
+    out = decompose_step(
+        prep=store_prep["heap"], params=STORE_PARAMS, rng=np.random.default_rng(0), progress_cb=None
+    )
+    assert sum(f.shape[1] for f in out.mu_filters_by_window.values() if f.size), "no filters"
+    return out
