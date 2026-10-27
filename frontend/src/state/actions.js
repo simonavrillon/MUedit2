@@ -501,11 +501,13 @@ function setEditPerMu(state, meta) {
  * @param {State} state
  * @param {EditSessionFrame} frame
  */
-export function setEditSession(state, { meta, spikes, artifacts }) {
+export function setEditSession(state, { meta, spikeTimes, artifactTimes }) {
   const e = state.edit;
   e.token = String(meta.token || "");
-  e.spikeTimes = spikes;
-  e.artifactTimes = spikes.map((_, i) => artifacts[i] ?? new Int32Array(0));
+  e.spikeTimes = spikeTimes;
+  e.artifactTimes = spikeTimes.map(
+    (_, i) => artifactTimes[i] ?? new Int32Array(0),
+  );
   setEditPerMu(state, meta);
   e.editHistory = Array.isArray(meta.edit_history) ? meta.edit_history : [];
   e.editHistoryStart = Number(meta.edit_history_start) || 0;
@@ -525,7 +527,7 @@ export function setEditSession(state, { meta, spikes, artifacts }) {
  * @param {State} state
  * @param {EditSessionFrame} frame
  */
-export function applyEditChange(state, { meta, spikes, artifacts }) {
+export function applyEditChange(state, { meta, spikeTimes, artifactTimes }) {
   const e = state.edit;
   if (Array.isArray(meta.kept_indices)) keepEditMus(state, meta.kept_indices);
   const n = Number(meta.n_mu) || 0;
@@ -534,8 +536,8 @@ export function applyEditChange(state, { meta, spikes, artifacts }) {
   e.spikeTimes.length = n;
   e.artifactTimes.length = n;
   (Array.isArray(meta.changed) ? meta.changed : []).forEach((mu, i) => {
-    e.spikeTimes[mu] = spikes[i] ?? new Int32Array(0);
-    e.artifactTimes[mu] = artifacts[i] ?? new Int32Array(0);
+    e.spikeTimes[mu] = spikeTimes[i] ?? new Int32Array(0);
+    e.artifactTimes[mu] = artifactTimes[i] ?? new Int32Array(0);
   });
   setEditPerMu(state, meta);
   const start = Math.max(0, Number(meta.history_start) || 0);

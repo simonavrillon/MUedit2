@@ -1,7 +1,7 @@
 /**
- * API client seam. Wraps URL composition and response decoding so domain
- * modules (signal/, decomp/, editing/) never import routes or binary
- * decoders directly. Created once in the container and injected via deps.
+ * API client seam. Wraps URL composition and response decoding so other
+ * modules never import routes or binary decoders directly. Created once in
+ * the container and injected via deps.
  */
 import { routes } from "./routes.js";
 import {
@@ -28,51 +28,52 @@ const SERIES_ROUTES = {
 };
 
 /**
+ * @param {JsonObject} body
+ * @returns {RequestInit}
+ */
+function jsonPost(body) {
+  return {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  };
+}
+
+/** @param {Record<string, unknown>} params */
+function queryOf(params) {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null) query.set(key, String(value));
+  }
+  return query;
+}
+
+/**
  * @param {{ apiFetch: typeof import("../app/http.js").apiFetch, apiJson: typeof import("../app/http.js").apiJson, API_BASE: string, sessionId: string }} deps
  */
 export function createApiClient({ apiFetch, apiJson, API_BASE, sessionId }) {
+  /** @param {string} route */
+  const urlOf = (route) => `${API_BASE}${route}`;
+
   /**
-   * @param {string} url
+   * @param {string} route
    * @param {JsonObject} body
    * @param {number} [timeoutMs]
    */
-  function postJson(url, body, timeoutMs) {
-    return apiJson(
-      url,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      },
-      timeoutMs,
-    );
+  function postJson(route, body, timeoutMs) {
+    return apiJson(urlOf(route), jsonPost(body), timeoutMs);
   }
 
   /**
-   * @param {string} url
+   * POST JSON and decode the edit-session frame it answers with.
+   *
+   * @param {string} route
    * @param {JsonObject} body
    * @param {number} [timeoutMs]
    */
-  async function postForSession(url, body, timeoutMs) {
-    const res = await apiFetch(
-      url,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      },
-      timeoutMs,
-    );
+  async function postForSession(route, body, timeoutMs) {
+    const res = await apiFetch(urlOf(route), jsonPost(body), timeoutMs);
     return decodeEditSessionFrame(await res.arrayBuffer());
-  }
-
-  /** @param {Record<string, unknown>} params */
-  function queryOf(params) {
-    const query = new URLSearchParams();
-    for (const [key, value] of Object.entries(params)) {
-      if (value !== undefined && value !== null) query.set(key, String(value));
-    }
-    return query;
   }
 
   /**
@@ -87,7 +88,7 @@ export function createApiClient({ apiFetch, apiJson, API_BASE, sessionId }) {
    */
   async function getFrame(route, params, decode, timeoutMs) {
     const res = await apiFetch(
-      `${API_BASE}${route}?${queryOf(params)}`,
+      `${urlOf(route)}?${queryOf(params)}`,
       {
         method: "GET",
         headers: { Accept: "application/octet-stream" },
@@ -115,25 +116,21 @@ export function createApiClient({ apiFetch, apiJson, API_BASE, sessionId }) {
      * @param {JsonObject} payload
      */
     runAutoQc(payload) {
-      return postJson(
-        `${API_BASE}${routes.qcAuto}`,
-        payload,
-        AUTO_QC_TIMEOUT_MS,
-      );
+      return postJson(routes.qcAuto, payload, AUTO_QC_TIMEOUT_MS);
     },
 
     /**
      * @param {{ upload_token: string, target_index?: number }} payload
      */
     segmentTarget(payload) {
-      return postJson(`${API_BASE}${routes.qcSegment}`, payload);
+      return postJson(routes.qcSegment, payload);
     },
 
     /**
      * @param {string} path
      */
     fetchPreviewByPath(path) {
-      return postJson(`${API_BASE}${routes.previewByPath}`, { path });
+      return postJson(routes.previewByPath, { path });
     },
 
     /**
@@ -144,37 +141,35 @@ export function createApiClient({ apiFetch, apiJson, API_BASE, sessionId }) {
      */
     decomposeStream(payload, timeoutMs) {
       return apiFetch(
-        `${API_BASE}${routes.decomposeStream}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        },
+        urlOf(routes.decomposeStream),
+        jsonPost(payload),
         timeoutMs,
       );
     },
 
     /** Stops this tab's decomposition; its stream then ends with a `cancelled` event. */
     cancelDecomposition() {
-      return postJson(`${API_BASE}${routes.decomposeCancel}`, {});
+      return postJson(routes.decomposeCancel, {});
     },
 
     /**
      * Frees what the backend holds for this tab. `keepalive` lets the request
-     * outlive the page being unloaded; unlike a beacon, it can carry the
-     * session header.
+     * outlive the page being unloaded; the backend reads the session from the
+     * query, not the header.
      */
     closeSession() {
-      const query = `session=${encodeURIComponent(sessionId)}`;
-      apiFetch(`${API_BASE}${routes.sessionClose}?${query}`, {
-        method: "POST",
-        keepalive: true,
-      }).catch(() => {});
+      apiFetch(
+        `${urlOf(routes.sessionClose)}?${queryOf({ session: sessionId })}`,
+        {
+          method: "POST",
+          keepalive: true,
+        },
+      ).catch(() => {});
     },
 
     /** @returns {Promise<{ path: string | null, name: string | null }>} */
     async openFileDialog() {
-      const picked = await apiJson(`${API_BASE}${routes.dialogOpenFile}`);
+      const picked = await apiJson(urlOf(routes.dialogOpenFile));
       return {
         path: typeof picked.path === "string" ? picked.path : null,
         name: typeof picked.name === "string" ? picked.name : null,
@@ -197,12 +192,10 @@ export function createApiClient({ apiFetch, apiJson, API_BASE, sessionId }) {
      * Open a decomposition in a server-side edit session: its fields and every
      * MU's discharge times. The pulse trains stay on the server.
      *
-     * @param {string} filePath
+     * @param {string} path
      */
-    editOpen(filePath) {
-      return postForSession(`${API_BASE}${routes.editSessionOpen}`, {
-        path: filePath,
-      });
+    editOpen(path) {
+      return postForSession(routes.editSessionOpen, { path });
     },
 
     /**
@@ -228,10 +221,7 @@ export function createApiClient({ apiFetch, apiJson, API_BASE, sessionId }) {
      * @param {boolean} apply
      */
     editRecover(token, apply) {
-      return postForSession(`${API_BASE}${routes.editSessionRecover}`, {
-        token,
-        apply,
-      });
+      return postForSession(routes.editSessionRecover, { token, apply });
     },
 
     /**
@@ -244,7 +234,7 @@ export function createApiClient({ apiFetch, apiJson, API_BASE, sessionId }) {
      */
     editPrepareGrid(token, grid, project) {
       return postJson(
-        `${API_BASE}${routes.editSessionPrepareGrid}`,
+        routes.editSessionPrepareGrid,
         { token, grid, project },
         GRID_FILTER_TIMEOUT_MS,
       );
@@ -258,7 +248,7 @@ export function createApiClient({ apiFetch, apiJson, API_BASE, sessionId }) {
      */
     editOp(op, payload) {
       return postForSession(
-        `${API_BASE}${routes.editOp(op)}`,
+        routes.editOp(op),
         payload,
         op === "update-filter" ? GRID_FILTER_TIMEOUT_MS : undefined,
       );
@@ -270,7 +260,7 @@ export function createApiClient({ apiFetch, apiJson, API_BASE, sessionId }) {
      * @param {JsonObject} payload
      */
     editSessionSave(payload) {
-      return postJson(`${API_BASE}${routes.editSessionSave}`, payload);
+      return postJson(routes.editSessionSave, payload);
     },
 
     /**
@@ -279,17 +269,17 @@ export function createApiClient({ apiFetch, apiJson, API_BASE, sessionId }) {
      *
      * @param {JsonObject} payload
      */
-    editSave(payload) {
-      return postJson(`${API_BASE}${routes.editSave}`, payload);
+    saveRun(payload) {
+      return postJson(routes.editSave, payload);
     },
 
     /** The projects in the output folder. */
     listProjects() {
-      return apiJson(`${API_BASE}${routes.projects}`);
+      return apiJson(urlOf(routes.projects));
     },
 
     healthUrl() {
-      return `${API_BASE}${routes.health}`;
+      return urlOf(routes.health);
     },
   };
 }

@@ -13,33 +13,17 @@
 
 const textDecoder = new TextDecoder();
 
-/**
- * @param {ArrayBuffer} buffer
- * @param {string} magic
- */
-function hasMagic(buffer, magic) {
-  if (!buffer || buffer.byteLength < magic.length) return false;
-  const sig = new Uint8Array(buffer, 0, magic.length);
-  for (let i = 0; i < magic.length; i++) {
-    if (sig[i] !== magic.charCodeAt(i)) return false;
-  }
-  return true;
-}
-
-const FRAME_MAGIC = "MUB1";
 const FRAME_ALIGN = 8;
 
 const FRAME_TYPES = {
   f4: Float32Array,
   i4: Int32Array,
   i8: BigInt64Array,
-  u1: Uint8Array,
-  i2: Int16Array,
 };
 
 /**
  * @typedef {keyof typeof FRAME_TYPES} FrameDtype
- * @typedef {Float32Array | Int32Array | BigInt64Array | Uint8Array | Int16Array} FrameData
+ * @typedef {Float32Array | Int32Array | BigInt64Array} FrameData
  * @typedef {{ dtype: FrameDtype, shape: number[], data: FrameData }} FrameArray
  */
 
@@ -59,8 +43,12 @@ function frameCount(shape) {
  * @param {ArrayBuffer} buffer
  * @returns {{ meta: JsonObject, arrays: Record<string, FrameArray> }}
  */
-export function decodeFrame(buffer) {
-  if (!hasMagic(buffer, FRAME_MAGIC) || buffer.byteLength < 8) {
+function decodeFrame(buffer) {
+  if (
+    !buffer ||
+    buffer.byteLength < 8 ||
+    textDecoder.decode(new Uint8Array(buffer, 0, 4)) !== "MUB1"
+  ) {
     throw new Error("Invalid MUB1 frame");
   }
   const headerLen = new DataView(buffer).getUint32(4, true);
@@ -98,7 +86,7 @@ export function decodeFrame(buffer) {
  * @param {FrameArray | undefined} offsets
  * @returns {Int32Array[]}
  */
-export function csrRows(values, offsets) {
+function csrRows(values, offsets) {
   if (!values || !offsets) return [];
   const data = /** @type {Int32Array} */ (values.data);
   const ends = /** @type {BigInt64Array} */ (offsets.data);
@@ -112,8 +100,8 @@ export function csrRows(values, offsets) {
 /**
  * @typedef {object} EditSessionFrame What the edit session sends: its fields, and per-MU times.
  * @property {JsonObject} meta
- * @property {Int32Array[]} spikes Discharge times of every MU (open) or of the changed ones (an edit).
- * @property {Int32Array[]} artifacts Artifact times, likewise.
+ * @property {Int32Array[]} spikeTimes Discharge times of every MU (open) or of the changed ones (an edit).
+ * @property {Int32Array[]} artifactTimes Artifact times, likewise.
  */
 
 /**
@@ -124,8 +112,8 @@ export function decodeEditSessionFrame(buffer) {
   const { meta, arrays } = decodeFrame(buffer);
   return {
     meta,
-    spikes: csrRows(arrays.spikes, arrays.spike_offsets),
-    artifacts: csrRows(arrays.artifacts, arrays.artifact_offsets),
+    spikeTimes: csrRows(arrays.spikes, arrays.spike_offsets),
+    artifactTimes: csrRows(arrays.artifacts, arrays.artifact_offsets),
   };
 }
 
@@ -149,6 +137,19 @@ function frameRowViews(arr) {
 }
 
 /**
+ * A viewport's rows: the samples, or min/max per bin.
+ *
+ * @param {JsonObject} meta
+ * @param {Record<string, FrameArray>} arrays
+ * @returns {SeriesRow[]}
+ */
+function seriesRows(meta, arrays) {
+  if (meta.kind === "samples") return frameRowViews(arrays.samples);
+  const maxs = frameRowViews(arrays.max);
+  return frameRowViews(arrays.min).map((min, r) => ({ min, max: maxs[r] }));
+}
+
+/**
  * Decode a `/series/*` frame into one row per channel, as views into `buffer`.
  *
  * @param {ArrayBuffer} buffer
@@ -156,14 +157,7 @@ function frameRowViews(arr) {
  */
 export function decodeSeriesFrame(buffer) {
   const { meta, arrays } = decodeFrame(buffer);
-  if (meta.kind === "samples") {
-    return { meta, rows: frameRowViews(arrays.samples) };
-  }
-  const maxs = frameRowViews(arrays.max);
-  return {
-    meta,
-    rows: frameRowViews(arrays.min).map((min, r) => ({ min, max: maxs[r] })),
-  };
+  return { meta, rows: seriesRows(meta, arrays) };
 }
 
 /**
@@ -192,13 +186,6 @@ export function decodeSeriesFrame(buffer) {
  */
 export function decodePulseFrame(buffer) {
   const { meta, arrays } = decodeFrame(buffer);
-  const row =
-    meta.kind === "samples"
-      ? frameRowViews(arrays.samples)[0]
-      : {
-          min: frameRowViews(arrays.min)[0],
-          max: frameRowViews(arrays.max)[0],
-        };
   const ints = (/** @type {string} */ name) =>
     /** @type {Int32Array} */ (arrays[name]?.data ?? new Int32Array(0));
   const floats = (/** @type {string} */ name) =>
@@ -210,7 +197,7 @@ export function decodePulseFrame(buffer) {
     bins: Number(meta.bins),
     version: Number(meta.version),
     flagged: !!meta.flagged,
-    row,
+    row: seriesRows(meta, arrays)[0],
     spikes: ints("spikes"),
     spikeValues: floats("spike_values"),
     artifacts: ints("artifacts"),

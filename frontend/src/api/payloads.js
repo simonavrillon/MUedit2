@@ -22,19 +22,8 @@
  */
 
 /**
- * @param {unknown} value
- * @param {number} [fallback]
- * @returns {number}
- */
-function toFiniteNumber(value, fallback = 0) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : fallback;
-}
-
-/**
- * Artifact windows arrive as `{start, end}` objects or as `[start, end]`
- * pairs; everything past this point uses `Span` objects only.
- * Regions with a non-finite bound are dropped.
+ * Artifact windows arrive as `[start, end]` pairs; everything past this
+ * point uses `Span` objects only. Regions with a non-finite bound are dropped.
  *
  * @param {unknown} regions
  * @returns {Span[]}
@@ -42,10 +31,8 @@ function toFiniteNumber(value, fallback = 0) {
 export function toSpans(regions) {
   if (!Array.isArray(regions)) return [];
   return regions
-    .map((r) => ({
-      start: Number(Array.isArray(r) ? r[0] : r?.start),
-      end: Number(Array.isArray(r) ? r[1] : r?.end),
-    }))
+    .filter(Array.isArray)
+    .map(([start, end]) => ({ start: Number(start), end: Number(end) }))
     .filter((r) => Number.isFinite(r.start) && Number.isFinite(r.end));
 }
 
@@ -98,16 +85,10 @@ export function normalizePreviewPayload(payload) {
       source.metadata && typeof source.metadata === "object"
         ? source.metadata
         : {},
-    muscle_names: Array.isArray(source.muscle_names)
-      ? source.muscle_names
-      : Array.isArray(source.muscle)
-        ? source.muscle
-        : [],
-    aux_names: Array.isArray(source.aux_names)
-      ? source.aux_names
-      : Array.isArray(source.auxiliary_names)
-        ? source.auxiliary_names
-        : [],
-    total_samples: toFiniteNumber(source.total_samples, 0),
+    muscle_names: Array.isArray(source.muscle_names) ? source.muscle_names : [],
+    aux_names: Array.isArray(source.aux_names) ? source.aux_names : [],
+    total_samples: Number.isFinite(Number(source.total_samples))
+      ? Number(source.total_samples)
+      : 0,
   };
 }

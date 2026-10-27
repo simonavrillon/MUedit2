@@ -235,8 +235,8 @@ export async function requestPreview(app, { file, silentFailure = false }) {
     setChannelMeans(state, data.channel_means);
     setCoordinates(state, data.coordinates);
     setMetadata(state, data.metadata);
-    setMuscle(state, data.muscle_names ?? data.muscle);
-    setAuxData(state, aux.rows, data.aux_names ?? data.auxiliary_names);
+    setMuscle(state, data.muscle_names);
+    setAuxData(state, aux.rows, data.aux_names);
     // A BIDS recording brings the target phases its events.tsv lists.
     setSegments(state, toSegments(data.segments));
     setTargetIndex(state, data.target_index);

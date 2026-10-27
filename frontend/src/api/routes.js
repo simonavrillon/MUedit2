@@ -1,7 +1,7 @@
 /**
- * Central API endpoint path table. Callers compose the full URL by
- * prepending API_BASE (injected via deps): `${API_BASE}${routes.seriesEmg}`.
- * Dynamic routes are functions that return the path segment.
+ * Backend paths, relative to API_BASE; only `client.js` reads them, and
+ * `tests/test_api_app.py` checks the backend serves each one. A dynamic
+ * route is a function returning its path.
  */
 export const routes = {
   seriesEmg: "/series/emg",

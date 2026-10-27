@@ -143,8 +143,8 @@ describe("edit slice", () => {
         total_samples: 5000,
         parameters: { duplicatesthresh: 0.3 },
       },
-      spikes: [ints(10, 20), ints(30)],
-      artifacts: [ints(), ints(31)],
+      spikeTimes: [ints(10, 20), ints(30)],
+      artifactTimes: [ints(), ints(31)],
     };
   }
 
@@ -179,8 +179,8 @@ describe("edit slice", () => {
         history_start: 1,
         history: [{ type: "delete_spikes", mu_uid: "g0_mu0" }],
       },
-      spikes: [ints(10)],
-      artifacts: [ints()],
+      spikeTimes: [ints(10)],
+      artifactTimes: [ints()],
     });
     const e = state.edit;
     assert.deepEqual(rows(e.spikeTimes), [[10], [30]]);
@@ -210,8 +210,8 @@ describe("edit slice", () => {
         history_start: 1,
         history: [{ type: "duplicate_mu" }],
       },
-      spikes: [ints(30)],
-      artifacts: [ints()],
+      spikeTimes: [ints(30)],
+      artifactTimes: [ints()],
     });
     assert.deepEqual(rows(state.edit.spikeTimes), [[10, 20], [30], [30]]);
     actions.applyEditChange(state, {
@@ -222,8 +222,8 @@ describe("edit slice", () => {
         history_start: 1,
         history: [],
       },
-      spikes: [],
-      artifacts: [],
+      spikeTimes: [],
+      artifactTimes: [],
     });
     assert.deepEqual(rows(state.edit.spikeTimes), [[10, 20], [30]]);
     assert.equal(state.edit.editHistory.length, 1);
@@ -237,8 +237,8 @@ describe("edit slice", () => {
     const change = (start, history) =>
       actions.applyEditChange(state, {
         meta: { ...frame.meta, changed: [], history_start: start, history },
-        spikes: [],
-        artifacts: [],
+        spikeTimes: [],
+        artifactTimes: [],
       });
     change(42, [{ type: "delete_spikes" }]);
     assert.deepEqual(
@@ -273,7 +273,7 @@ describe("edit slice", () => {
   test("keepEditMus falls back to MU 0 and drops a bookmark on a removed MU", () => {
     Object.assign(state.edit, {
       spikeTimes: [ints(0), ints(1)],
-      muUids: ["u0", "u1"],
+      muUids: ["g0_mu0", "g0_mu1"],
       currentMu: 1,
       bookmarkPosition: { muIdx: 1, position: 5 },
     });

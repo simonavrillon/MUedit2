@@ -7,8 +7,6 @@ const TYPES = {
   f4: Float32Array,
   i4: Int32Array,
   i8: BigInt64Array,
-  u1: Uint8Array,
-  i2: Int16Array,
 };
 
 const aligned = (n) => n + ((ALIGN - (n % ALIGN)) % ALIGN);

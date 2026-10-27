@@ -71,7 +71,11 @@ describe("edit commands", () => {
     };
     press("r");
     assert.equal(els.editOutliersBtn.dataset.busy, "1");
-    answer({ meta: { removed_count: 0, n_mu: 1 }, spikes: [], artifacts: [] });
+    answer({
+      meta: { removed_count: 0, n_mu: 1 },
+      spikeTimes: [],
+      artifactTimes: [],
+    });
     await new Promise((resolve) => setTimeout(resolve, 0));
     assert.equal(els.editOutliersBtn.dataset.busy, undefined);
     assert.deepEqual(app.setStatus.calls.at(-1), [
@@ -100,7 +104,11 @@ describe("edit commands", () => {
       "Wait for the current edit to finish",
       "muted",
     ]);
-    answer({ meta: { removed_count: 0, n_mu: 1 }, spikes: [], artifacts: [] });
+    answer({
+      meta: { removed_count: 0, n_mu: 1 },
+      spikeTimes: [],
+      artifactTimes: [],
+    });
     await new Promise((resolve) => setTimeout(resolve, 0));
     press(" ");
     assert.deepEqual(sent, ["remove-outliers", "update-filter"]);

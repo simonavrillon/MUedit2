@@ -36,17 +36,24 @@ describe("normalizePreviewPayload", () => {
 });
 
 describe("toSpans", () => {
-  test("accepts objects and [start, end] pairs", () => {
-    assert.deepEqual(toSpans([{ start: "1", end: 2 }, [3, 4]]), [
-      { start: 1, end: 2 },
-      { start: 3, end: 4 },
-    ]);
+  test("reads [start, end] pairs", () => {
+    assert.deepEqual(
+      toSpans([
+        ["1", 2],
+        [3, 4],
+      ]),
+      [
+        { start: 1, end: 2 },
+        { start: 3, end: 4 },
+      ],
+    );
   });
 
   test("drops regions with a missing or non-finite bound", () => {
-    assert.deepEqual(toSpans([{ start: 5 }, null, [1, NaN], [6, 7]]), [
-      { start: 6, end: 7 },
-    ]);
+    assert.deepEqual(
+      toSpans([[5], null, { start: 1, end: 2 }, [1, NaN], [6, 7]]),
+      [{ start: 6, end: 7 }],
+    );
   });
 
   test("anything but an array gives no regions", () => {

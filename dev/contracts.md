@@ -59,7 +59,7 @@ The one binary format, server to client only (`api/binary.py: pack_frame`;
 array data, each array at an 8-byte-aligned offset from the data start
 
 header = {"meta": {...}, "arrays": [{"name", "dtype", "shape", "offset"}, ...]}
-dtype ∈ f4, i4, i8, u1, i2
+dtype ∈ f4, i4, i8
 ```
 
 The alignment lets the page read every array as a zero-copy typed-array view. Per-MU lists

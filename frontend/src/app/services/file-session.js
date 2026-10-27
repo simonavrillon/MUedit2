@@ -352,7 +352,7 @@ export function createFileSessionService(app) {
 
   /** @type {FileSessionService["persistNpzBySaveTarget"]} */
   async function persistNpzBySaveTarget(payload, fallbackName) {
-    const data = await api.editSave(
+    const data = await api.saveRun(
       withBidsSaveFields({
         ...payload,
         file_label: payload.file_label || fallbackName || "decomposition.npz",

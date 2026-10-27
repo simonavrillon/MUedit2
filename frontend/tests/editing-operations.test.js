@@ -107,8 +107,8 @@ function changeFrame(meta, spikes = []) {
       history: [],
       ...meta,
     },
-    spikes: spikes.map((r) => ints(...r)),
-    artifacts: spikes.map(() => ints()),
+    spikeTimes: spikes.map((r) => ints(...r)),
+    artifactTimes: spikes.map(() => ints()),
   };
 }
 
@@ -591,8 +591,8 @@ describe("a session left during an edit", () => {
 describe("an edit the page gave up on", () => {
   test("the page takes the session as the server left it", async () => {
     const served = changeFrame({ token: "tok" }, []);
-    served.spikes = [ints(2, 6), ints(1, 4)];
-    served.artifacts = [ints(), ints()];
+    served.spikeTimes = [ints(2, 6), ints(1, 4)];
+    served.artifactTimes = [ints(), ints()];
     app.api = {
       editOp: async () => {
         throw new RequestTimeout();

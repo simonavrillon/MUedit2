@@ -4,9 +4,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  csrRows,
   decodeEditSessionFrame,
-  decodeFrame,
   decodePulseFrame,
   decodeSeriesFrame,
 } from "../src/api/binary-payloads.js";
@@ -37,60 +35,11 @@ function jsonBuffer(obj) {
 }
 
 describe("MUB1 frames", () => {
-  test("encode then decode round-trips metadata and every array", () => {
-    const meta = { fsamp: 2048, names: ["a", "b"] };
-    const buf = encodeFrame(meta, {
-      pulse: {
-        dtype: "f4",
-        shape: [2, 3],
-        rows: [
-          [0.5, -1.25, 2],
-          [3, 4.5, -0.75],
-        ],
-      },
-      spikes: { dtype: "i4", shape: [3], data: [7, -1, 2 ** 30] },
-      flags: { dtype: "u1", shape: [2], data: [0, 255] },
-      grid: { dtype: "i2", shape: [1], data: [-300] },
-    });
-    const { meta: gotMeta, arrays } = decodeFrame(buf);
-    assert.deepEqual(gotMeta, meta);
-    assert.deepEqual(
-      Array.from(arrays.pulse.data),
-      [0.5, -1.25, 2, 3, 4.5, -0.75],
-    );
-    assert.deepEqual(arrays.pulse.shape, [2, 3]);
-    assert.deepEqual(Array.from(arrays.spikes.data), [7, -1, 2 ** 30]);
-    assert.deepEqual(Array.from(arrays.flags.data), [0, 255]);
-    assert.deepEqual(Array.from(arrays.grid.data), [-300]);
-  });
-
-  test("decoded arrays are views into the buffer, 8-byte aligned", () => {
-    const buf = encodeFrame(
-      { name: "odd" },
-      {
-        a: { dtype: "u1", shape: [3], data: [1, 2, 3] },
-        b: { dtype: "f4", shape: [2], data: [1, 2] },
-      },
-    );
-    const { arrays } = decodeFrame(buf);
-    for (const arr of Object.values(arrays)) {
-      assert.equal(arr.data.buffer, buf);
-      assert.equal(arr.data.byteOffset % 8, 0);
-    }
-  });
-
-  test("empty arrays keep their shape", () => {
-    const buf = encodeFrame(
-      {},
-      { p: { dtype: "f4", shape: [0, 5], rows: [] } },
-    );
-    const { arrays } = decodeFrame(buf);
-    assert.deepEqual(arrays.p.shape, [0, 5]);
-    assert.equal(arrays.p.data.length, 0);
-  });
-
   test("rejects a buffer without the magic", () => {
-    assert.throws(() => decodeFrame(jsonBuffer({ a: 1 })), /Invalid MUB1/);
+    assert.throws(
+      () => decodeSeriesFrame(jsonBuffer({ a: 1 })),
+      /Invalid MUB1/,
+    );
   });
 
   test("rejects an array that runs past the end", () => {
@@ -99,7 +48,7 @@ describe("MUB1 frames", () => {
       { a: { dtype: "f4", shape: [2], data: [1, 2] } },
     );
     assert.throws(
-      () => decodeFrame(buf.slice(0, buf.byteLength - 4)),
+      () => decodeSeriesFrame(buf.slice(0, buf.byteLength - 4)),
       /past the end/,
     );
   });
@@ -116,7 +65,7 @@ describe("MUB1 frames", () => {
       u32(header.byteLength),
       header,
     ]);
-    assert.throws(() => decodeFrame(buf), /Unsupported MUB1 dtype: f8/);
+    assert.throws(() => decodeSeriesFrame(buf), /Unsupported MUB1 dtype: f8/);
   });
 });
 
@@ -130,30 +79,8 @@ function csr(rows) {
   };
 }
 
-describe("csrRows", () => {
-  test("gives one Int32Array view per row, empty rows included", () => {
-    const { values, offsets } = csr([[1, 2], [], [7]]);
-    const { arrays } = decodeFrame(encodeFrame({}, { values, offsets }));
-    const rows = csrRows(arrays.values, arrays.offsets);
-    assert.deepEqual(
-      rows.map((r) => Array.from(r)),
-      [[1, 2], [], [7]],
-    );
-    assert.ok(rows.every((r) => r instanceof Int32Array));
-    assert.equal(
-      rows[0].buffer,
-      arrays.values.data.buffer,
-      "views, not copies",
-    );
-  });
-
-  test("missing arrays give no rows", () => {
-    assert.deepEqual(csrRows(undefined, undefined), []);
-  });
-});
-
 describe("decodeEditSessionFrame", () => {
-  test("splits discharge and artifact times per MU", () => {
+  test("splits discharge and artifact times per MU, as views", () => {
     const spikes = csr([[10, 20], [30]]);
     const artifacts = csr([[], [31]]);
     const buf = encodeFrame(
@@ -168,13 +95,15 @@ describe("decodeEditSessionFrame", () => {
     const frame = decodeEditSessionFrame(buf);
     assert.deepEqual(frame.meta, { token: "abc", n_mu: 2 });
     assert.deepEqual(
-      frame.spikes.map((r) => Array.from(r)),
+      frame.spikeTimes.map((r) => Array.from(r)),
       [[10, 20], [30]],
     );
     assert.deepEqual(
-      frame.artifacts.map((r) => Array.from(r)),
+      frame.artifactTimes.map((r) => Array.from(r)),
       [[], [31]],
     );
+    assert.ok(frame.spikeTimes[0] instanceof Int32Array);
+    assert.equal(frame.spikeTimes[0].buffer, buf, "views, not copies");
   });
 });
 

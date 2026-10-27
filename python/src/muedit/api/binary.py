@@ -20,7 +20,7 @@ FRAME_FORMAT = "mub1"  # x-muedit-format header value
 # Offsets are 8-byte aligned so the client reads every dtype as a zero-copy typed-array view.
 _ALIGN = 8
 _PREFIX = struct.Struct("<4sI")  # magic, header_len
-_WIRE_DTYPES = frozenset({"f4", "i4", "i8", "u1", "i2"})
+_WIRE_DTYPES = frozenset({"f4", "i4", "i8"})
 
 
 def _aligned(n: int) -> int:
