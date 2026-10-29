@@ -273,7 +273,8 @@
   border-bottom: 1px solid var(--border);
 }
 
-.panel-section:not(.collapsed) {
+/* Only the open rail shows a section's content; the icon rail keeps every row one height. */
+.workspace.settings-open .panel-section:not(.collapsed) {
   padding-bottom: 10px;
 }
 
@@ -321,6 +322,82 @@
 
 .panel-section.collapsed .section-content {
   display: none;
+}
+
+/* The hint names the output folder: a long path wraps instead of widening the panel. */
+#dataFolderHint {
+  overflow-wrap: anywhere;
+}
+
+/* ── Project tree ── */
+
+.project-tree {
+  display: flex;
+  flex-direction: column;
+  font-size: var(--fs-sm);
+}
+
+.tree-project {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 6px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text);
+  font-size: var(--fs-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.tree-project svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  color: var(--muted);
+}
+
+.tree-project span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* "+ New project…" has no icon: its text lines up with the names. */
+.tree-project:not(:has(svg)) {
+  padding-left: 28px;
+  color: var(--muted);
+}
+
+.tree-project:hover:not(:disabled) {
+  background: var(--surface);
+}
+
+.tree-project:disabled,
+#dataFolderBtn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.tree-project:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.tree-project[aria-current] {
+  background: var(--surface-active);
+  color: var(--accent);
+  font-weight: var(--fw-semibold);
+}
+
+.tree-project[aria-current] svg {
+  color: var(--accent);
+}
+
+#dataFolderBtn {
+  margin-top: 6px;
 }
 
 #bidsMuscleContainer {

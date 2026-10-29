@@ -19,8 +19,8 @@ come back for the detail on any control or setting. For the files MUedit writes,
    on Windows). It opens in your browser at <http://127.0.0.1:8000>.
 2. **Open** your recording — on the landing page, click the folder icon and pick your
    file.
-3. **Describe** it — open the settings panel (the icon rail on the left) and fill in
-   **Project**, **Subject**, **Session**, **Task**, **Muscle**, and the participant and
+3. **Describe** it — open the settings panel (the icon rail on the left), pick a project
+   under **Projects**, and fill in **Subject**, **Session**, **Task**, **Muscle**, and the participant and
    hardware fields. A decomposition will not start until these are filled in.
 4. **Choose** what to decompose — drag across the **Average EMG activity** chart to
    select the window you care about. Optionally run **Automatic QC** to flag bad
@@ -44,9 +44,10 @@ A session moves through four stages, shown as buttons across the top of the wind
   confirmations, edit feedback) appears here. It is hidden when empty and truncates
   long messages with an ellipsis — **hover over it to read the full text**.
 - **Settings rail (left)** — a narrow icon rail that expands into the settings panel.
-  It holds three collapsible sections — **Session info**, **Decomposition settings**,
-  **Quality filters** — and is shared across the QC, Decompose, and Edit stages. Click
-  the rail's icon to open it; press `Escape` or click the backdrop to close it.
+  It holds four collapsible sections — **Projects**, **Session info**,
+  **Decomposition settings**, **Quality filters** — and is shared across the QC,
+  Decompose, and Edit stages. Click the rail's icon to open it; press `Escape` or
+  click the backdrop to close it.
 - **Landing page vs. workspace** — before you open a file you see the landing page
   ("Select your file to get started"). Clicking the **Import** button returns to it at
   any time without unloading anything; the Edit-stage keyboard shortcuts are inactive
@@ -170,15 +171,28 @@ same ROI, artifact, and segment overlays as the EMG chart.
 
 ### Settings panel (left rail)
 
-Three collapsible sections. Open the rail with its icon on the left; click a section
+Four collapsible sections. Open the rail with its icon on the left; click a section
 header to expand it.
+
+**Projects**
+
+The projects in the output folder, each with a folder icon, as **Projects are saved in …**
+above them names it. Click one to save into it (`<output>/<project>/`); the one picked is
+highlighted, and MUedit picks it again next time. Click **+ New project…** and type a
+folder name, not a path, for a new one.
+
+**Change output folder** picks another output folder: the list is redrawn from it, and
+MUedit remembers it for the next launch. It is refused while `MUEDIT_DATA_ROOT` is set.
+
+While a decomposition you opened is being edited, the tree, **New project** and **Change
+output folder** are disabled, so its edits save back where it came from. Opening a recording
+enables them again.
 
 **Session info**
 
 | Field | Description |
 |---|---|
 | File | Loaded filename (read-only) |
-| Project | Pick a project from the output folder, or **+ New project…** and type its name — output is saved under `<output>/<project>/`. A folder name, not a path |
 | Subject | BIDS subject label — alphanumeric (e.g. `1`, `S06`, `pilot01`) |
 | Session | BIDS session label — alphanumeric (e.g. `1`, `pre`, `post`) |
 | Acquisition | BIDS `acq` label, for sequential recordings of the same task. Optional, alphanumeric |
@@ -194,7 +208,7 @@ Electrode details (type, material, inter-electrode distance) are derived automat
 from the grid model name and do not need to be entered.
 
 > **Fill in the session info before you decompose.** A decomposition will not start
-> until **Project**, **Subject**, **Session**, **Task**, every **Muscle**, **Age**,
+> until a project, **Subject**, **Session**, **Task**, every **Muscle**, **Age**,
 > **Sex**, **Handedness**, **Manufacturer**, and **Device model** are filled in, and —
 > with the default placement scheme `Other` — the **Description**. Saving an edited
 > decomposition asks for the description too. Pressing **Decompose signal** with any of
@@ -384,10 +398,10 @@ are removed on save.
 
 ## Where files are saved
 
-Output goes into the BIDS dataset the **Project** field names, inside MUedit's output folder:
+Output goes into the BIDS dataset picked under **Projects**, inside MUedit's output folder:
 `<output>/<project>/`. Pick a project, or **+ New project…** and type a folder name. A
-decomposition opened from a dataset elsewhere is saved back into it while you leave its
-**Project** unchanged. The decomposition to analyse is the `_edited.npz` under
+decomposition you open is saved back into its own dataset, wherever it lies; the project
+cannot be changed while it is open. The decomposition to analyse is the `_edited.npz` under
 `derivatives/muedit/`.
 
 [Saved files](saved-files.md) has the path rules, every file a run and a save write, the NPZ

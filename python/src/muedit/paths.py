@@ -28,6 +28,11 @@ def log_dir() -> Path:
     return Path(platformdirs.user_log_dir(_APP, appauthor=False))
 
 
+def config_file() -> Path:
+    """The platform's per-user ``config.json`` for MUedit."""
+    return Path(platformdirs.user_config_dir(_APP, appauthor=False)) / "config.json"
+
+
 def documents_dir() -> Path:
     """``MUedit`` in the user's Documents folder, wherever the OS has moved it."""
     return Path(platformdirs.user_documents_dir()) / "MUedit"

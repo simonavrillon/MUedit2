@@ -23,11 +23,13 @@ import {
   setFsamp,
   setMuscleNames,
 } from "../../state/actions.js";
+import { renderProjectTree } from "../../view/project-tree.js";
+import { handleError } from "./error-service.js";
 
 /** @typedef {import("../context.js").App} App */
 /** @typedef {import("../context.js").FileSessionService} FileSessionService */
 
-/** The project last picked in the Project field, kept across visits. */
+/** The project last picked in the project tree, kept across visits. */
 const LAST_PROJECT_KEY = "muedit.project";
 
 /**
@@ -37,30 +39,30 @@ const LAST_PROJECT_KEY = "muedit.project";
 export function createFileSessionService(app) {
   const { els, state, api } = app;
 
-  // The "New project…" option has the empty value: its name is typed below.
+  /** @type {string[]} The projects the tree lists. */
+  let projects = [];
+  // "" is "New project…": its name is typed below the tree.
+  let picked = "";
+  // A decomposition open for editing saves back where it came from.
+  let locked = false;
+
   /** @type {FileSessionService["getBidsProject"]} */
   function getBidsProject() {
-    const project = els.bidsProject?.value || els.bidsProjectNew?.value || "";
-    return project.trim();
+    return (picked || els.bidsProjectNew?.value || "").trim();
   }
 
   /** @type {FileSessionService["setBidsProject"]} */
   function setBidsProject(project) {
-    const select = els.bidsProject;
-    if (select) {
-      const listed = Array.from(select.options, (option) => option.value);
-      if (project && !listed.includes(project)) {
-        select.add(new Option(project, project), select.options.length - 1);
-      }
-      select.value = project;
-    }
+    if (project && !projects.includes(project))
+      projects = [...projects, project];
+    picked = project;
     if (els.bidsProjectNew) els.bidsProjectNew.value = "";
+    renderProjectTree(els, projects, picked, locked);
     syncBidsProject();
   }
 
   /** @type {FileSessionService["syncBidsProject"]} */
   function syncBidsProject() {
-    const picked = els.bidsProject?.value || "";
     if (els.bidsProjectNewRow) els.bidsProjectNewRow.hidden = !!picked;
     setEditProject(state, getBidsProject());
     try {
@@ -72,22 +74,55 @@ export function createFileSessionService(app) {
 
   /** @type {FileSessionService["loadProjects"]} */
   async function loadProjects() {
-    const { projects = [] } = await api.listProjects();
+    const { projects: listed = [], data_root: dataRoot } =
+      await api.listProjects();
+    if (els.dataFolderHint && dataRoot) {
+      els.dataFolderHint.textContent = `Projects are saved in ${dataRoot}.`;
+    }
     let last = "";
     try {
       last = localStorage.getItem(LAST_PROJECT_KEY) || "";
     } catch {
       // storage blocked
     }
-    els.bidsProject?.replaceChildren(
-      ...projects.map((/** @type {string} */ name) => new Option(name, name)),
-      new Option("+ New project…", ""),
-    );
-    setBidsProject(projects.includes(last) ? last : projects[0] || "");
+    projects = listed;
+    setBidsProject(listed.includes(last) ? last : listed[0] || "");
+  }
+
+  /** @type {FileSessionService["setProjectLocked"]} */
+  function setProjectLocked(value) {
+    locked = value;
+    if (els.bidsProjectNew) els.bidsProjectNew.disabled = locked;
+    if (els.dataFolderBtn) els.dataFolderBtn.disabled = locked;
+    // The rows drawn already; a later redraw takes `locked` from here.
+    const rows = els.projectTree?.querySelectorAll(".tree-project") ?? [];
+    for (const row of rows) {
+      /** @type {HTMLButtonElement} */ (row).disabled = locked;
+    }
+  }
+
+  /** @type {FileSessionService["onChooseDataFolder"]} */
+  async function onChooseDataFolder() {
+    let dataRoot;
+    try {
+      ({ data_root: dataRoot } = await api.chooseDataFolder());
+    } catch (err) {
+      handleError(err, app.setStatus, "Output folder");
+      return;
+    }
+    if (!dataRoot) return;
+    try {
+      await loadProjects();
+    } catch (err) {
+      handleError(err, app.setStatus, "Projects");
+      return;
+    }
+    app.setStatus(`The output folder is now ${dataRoot}.`, "success");
   }
 
   /** @type {FileSessionService["resetSessionForm"]} */
   function resetSessionForm(fileName) {
+    setProjectLocked(false);
     resetBidsEntityDefaults(els, fileName);
   }
 
@@ -206,7 +241,7 @@ export function createFileSessionService(app) {
   /** @type {FileSessionService["applySessionInfoFromDecomposition"]} */
   function applySessionInfoFromDecomposition(file, data) {
     const fileLabel = file?.name || data.file_label || "decomposition";
-    // The Project field is the caller's: it comes with the edit session's project.
+    // The project is the caller's: it comes with the edit session's project.
     resetBidsEntityDefaults(els, fileLabel);
     resetSidecarFields(els);
     setBidsEntitiesInput(parseBidsEntitiesFromLabel(fileLabel));
@@ -249,7 +284,7 @@ export function createFileSessionService(app) {
       )
     );
     return [
-      els.bidsProject?.value ? els.bidsProject : els.bidsProjectNew,
+      picked ? null : els.bidsProjectNew,
       els.bidsSubject,
       els.bidsSession,
       els.bidsTask,
@@ -340,7 +375,9 @@ export function createFileSessionService(app) {
     setBidsProject,
     syncBidsProject,
     loadProjects,
+    onChooseDataFolder,
     resetSessionForm,
+    setProjectLocked,
     getBidsMuscleNames,
     collectBidsEntities,
     checkSessionForm,
@@ -360,9 +397,18 @@ export function createFileSessionService(app) {
 export function setupSessionFormEvents(app) {
   const { els } = app;
 
-  for (const field of [els.bidsProject, els.bidsProjectNew]) {
-    field?.addEventListener("input", () => app.syncBidsProject());
-  }
+  els.projectTree?.addEventListener("click", (e) => {
+    const row =
+      e.target instanceof Element ? e.target.closest(".tree-project") : null;
+    if (!(row instanceof HTMLButtonElement) || row.disabled) return;
+    const project = row.dataset.project ?? "";
+    app.setBidsProject(project);
+    if (!project) els.bidsProjectNew?.focus();
+  });
+  els.bidsProjectNew?.addEventListener("input", () => app.syncBidsProject());
+  els.dataFolderBtn?.addEventListener("click", () => {
+    void app.onChooseDataFolder();
+  });
   els.bidsPlacementScheme?.addEventListener("change", () =>
     syncPlacementDescriptionRow(els),
   );

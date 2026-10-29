@@ -58,6 +58,16 @@ def pytest_configure(config: pytest.Config) -> None:
         config.add_cleanup(lambda: shutil.rmtree(folder, ignore_errors=True))
 
 
+@pytest.fixture(autouse=True)
+def config_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A config file of the test's own, so no test reads or writes the user's."""
+    from muedit.api import config
+
+    path = tmp_path / "config" / "config.json"
+    monkeypatch.setattr(config, "config_file", lambda: path)
+    return path
+
+
 @pytest.fixture
 def cache_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A per-test cache folder for session stores, with the default disk reserve."""

@@ -21,6 +21,7 @@ export const routes = {
   editSessionSave: "/edit/session/save",
   editOp: (/** @type {string} */ op) => `/edit/ops/${op}`,
   dialogOpenFile: "/dialog/open-file",
+  dialogDataFolder: "/dialog/data-folder",
   sessionClose: "/session/close",
   health: "/health",
   projects: "/projects",

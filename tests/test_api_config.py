@@ -63,6 +63,15 @@ class TestDataRoot:
         monkeypatch.setenv(config.DATA_ROOT_ENV, str(tmp_path / "env"))
         assert config.default_data_root() == tmp_path / "env"
 
+    def test_then_the_folder_chosen_in_the_app(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        monkeypatch.delenv(config.DATA_ROOT_ENV, raising=False)
+        monkeypatch.setattr(config, "DATA_ROOT", config.DATA_ROOT)
+        config.set_data_root(tmp_path / "lab")
+        assert tmp_path / "lab" == config.DATA_ROOT
+        assert config.default_data_root() == tmp_path / "lab"
+
     def test_then_the_checkout_data_folder_else_documents(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "muedit"
-version = "2.2.0"
+version = "2.2.1"
 description = "FastICA-based Motor Unit decomposition of High-Density EMG signals"
 readme = "README.md"
 license = { file = "LICENSE" }

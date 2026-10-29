@@ -112,8 +112,8 @@ The [user guide](docs/user-guide.md) covers every control, setting and keyboard 
 
 ## Where your results go
 
-Results land in a BIDS dataset named after the **Project** field, inside `data/` in the
-MUedit folder: pick **+ New project…**, type `study1`, and your results appear in
+Results land in a BIDS dataset named after the project picked under **Projects**, inside
+`data/` in the MUedit folder: pick **+ New project…**, type `study1`, and your results appear in
 `data/study1/`. The file to analyse is the `_edited.npz` under `derivatives/muedit/`.
 [Saved files](docs/saved-files.md) documents every file MUedit writes and how to read them in
 your own scripts, and how to keep your data somewhere else.

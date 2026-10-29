@@ -521,6 +521,9 @@ function showEditSession(app, file, frame, { open = true } = {}) {
   });
   setGridNames(state, resolvedGridNames);
   applySessionInfoFromDecomposition(file, meta);
+  // An opened decomposition saves back into its own project; the one a run
+  // preloads leaves the panel free for the next run.
+  app.setProjectLocked(open);
   app.setBidsProject(String(meta.project || "").trim());
   setEditFilename(state, file.name || meta.file_label || "decomposition");
   setEditSession(state, frame);

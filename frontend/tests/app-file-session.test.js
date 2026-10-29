@@ -136,49 +136,84 @@ describe("session form", () => {
 });
 
 describe("project field", () => {
-  globalThis.Option ??= /** @type {any} */ (
-    function Option(text, value) {
-      return { text, value };
-    }
-  );
+  // Just enough DOM for the tree's rows: each keeps its project and marks.
+  globalThis.document ??= /** @type {any} */ ({
+    createElement: () => {
+      const attrs = new Map();
+      return {
+        dataset: {},
+        textContent: "",
+        children: /** @type {any[]} */ ([]),
+        append(...nodes) {
+          this.children.push(...nodes);
+        },
+        setAttribute: (name, value) => attrs.set(name, value),
+        hasAttribute: (name) => attrs.has(name),
+      };
+    },
+  });
 
-  /** A select over `projects`, then "New project…", and the new-name row. */
+  /** A tree over `projects`, then "New project…", and the new-name row. */
   function projectField(projects, listProjects = projects) {
-    const options = [...projects, ""].map(
-      (value) => new globalThis.Option(value, value),
-    );
+    /** @type {any[]} */
+    let rows = [];
     const els = {
-      bidsProject: {
-        value: projects[0] ?? "",
-        options,
-        add: (option, before) => options.splice(before, 0, option),
-        replaceChildren: (...next) => options.splice(0, Infinity, ...next),
+      projectTree: {
+        replaceChildren: (/** @type {any[]} */ ...next) => {
+          rows = next;
+        },
+        querySelectorAll: () => rows,
       },
       bidsProjectNew: { value: "" },
       bidsProjectNewRow: { hidden: false },
+      dataFolderHint: { textContent: "" },
     };
     const state = { edit: { project: "" } };
-    const api = { listProjects: async () => ({ projects: listProjects }) };
+    /** @type {any} */
+    const api = {
+      listProjects: async () => ({
+        projects: listProjects,
+        data_root: "/data",
+      }),
+    };
+    /** @type {[string, string | undefined][]} */
+    const statuses = [];
     const session = createFileSessionService(
-      /** @type {any} */ ({ els, state, api }),
+      /** @type {any} */ ({
+        els,
+        state,
+        api,
+        setStatus: (/** @type {string} */ text, /** @type {string} */ tone) =>
+          statuses.push([text, tone]),
+      }),
     );
-    const listed = () => options.map((option) => option.value);
+    for (const project of projects.slice().reverse()) {
+      session.setBidsProject(project);
+    }
+    const listed = () => rows.map((row) => row.dataset.project);
+    const current = () =>
+      rows.find((row) => row.hasAttribute("aria-current"))?.dataset.project;
     return {
       session,
       els,
       state,
+      api,
+      statuses,
       listed,
+      current,
+      rows: () => rows,
       rowHidden: () => els.bidsProjectNewRow.hidden,
     };
   }
 
   test("setting it sets the edit session's project too, even to empty", () => {
-    const { session, els, state, rowHidden } = projectField(["study1"]);
+    const { session, state, current, rowHidden } = projectField(["study1"]);
     session.setBidsProject("study1");
     assert.equal(state.edit.project, "study1");
+    assert.equal(current(), "study1");
     assert.ok(rowHidden());
     session.setBidsProject("");
-    assert.equal(els.bidsProject.value, "");
+    assert.equal(current(), "");
     assert.equal(state.edit.project, "");
     assert.equal(rowHidden(), false);
   });
@@ -192,12 +227,12 @@ describe("project field", () => {
 
   test("New project takes the typed name", () => {
     const { session, els, state } = projectField(["study1"]);
-    els.bidsProject.value = "";
+    session.setBidsProject("");
     els.bidsProjectNew.value = " study3 ";
     session.syncBidsProject();
     assert.equal(session.getBidsProject(), "study3");
     assert.equal(state.edit.project, "study3");
-    els.bidsProject.value = "study1";
+    session.setBidsProject("study1");
     assert.equal(session.getBidsProject(), "study1");
   });
 
@@ -208,10 +243,62 @@ describe("project field", () => {
     assert.ok(["MUsic", "study1"].includes(session.getBidsProject()));
   });
 
-  test("an empty output folder starts on New project", async () => {
-    const { session, els, rowHidden } = projectField([], []);
+  test("loading names the output folder", async () => {
+    const { session, els } = projectField([], ["study1"]);
     await session.loadProjects();
-    assert.equal(els.bidsProject.value, "");
+    assert.equal(
+      els.dataFolderHint.textContent,
+      "Projects are saved in /data.",
+    );
+  });
+
+  test("choosing another output folder refills the field from it", async () => {
+    const { session, api, statuses, listed } = projectField(["study1"]);
+    api.chooseDataFolder = async () => ({ data_root: "/lab" });
+    api.listProjects = async () => ({ projects: ["pilot"], data_root: "/lab" });
+    await session.onChooseDataFolder();
+    assert.deepEqual(listed(), ["pilot", ""]);
+    assert.deepEqual(statuses, [["The output folder is now /lab.", "success"]]);
+  });
+
+  test("a dismissed folder dialog keeps the field", async () => {
+    const { session, api, statuses, listed } = projectField(["study1"]);
+    api.chooseDataFolder = async () => ({ data_root: null });
+    await session.onChooseDataFolder();
+    assert.deepEqual(listed(), ["study1", ""]);
+    assert.deepEqual(statuses, []);
+  });
+
+  test("a refused folder dialog says why", async () => {
+    const { session, api, statuses } = projectField(["study1"]);
+    api.chooseDataFolder = async () => {
+      throw new Error("The output folder is set by MUEDIT_DATA_ROOT.");
+    };
+    await session.onChooseDataFolder();
+    assert.deepEqual(statuses, [
+      ["Output folder: The output folder is set by MUEDIT_DATA_ROOT.", "error"],
+    ]);
+  });
+
+  test("locking disables the tree, the new name and the folder button", () => {
+    const { session, els, rows } = projectField(["study1"]);
+    Object.assign(els, { dataFolderBtn: { disabled: false } });
+    session.setProjectLocked(true);
+    assert.ok(rows().every((row) => row.disabled));
+    assert.equal(els.bidsProjectNew.disabled, true);
+    assert.equal(/** @type {any} */ (els).dataFolderBtn.disabled, true);
+    // A redraw while locked keeps the rows disabled.
+    session.setBidsProject("study2");
+    assert.ok(rows().every((row) => row.disabled));
+    session.setProjectLocked(false);
+    assert.ok(rows().every((row) => !row.disabled));
+    assert.equal(/** @type {any} */ (els).dataFolderBtn.disabled, false);
+  });
+
+  test("an empty output folder starts on New project", async () => {
+    const { session, current, rowHidden } = projectField([], []);
+    await session.loadProjects();
+    assert.equal(current(), "");
     assert.equal(rowHidden(), false);
   });
 });
@@ -249,7 +336,9 @@ describe("required session fields", () => {
     /** @type {Record<string, any>} */
     const els = {};
     for (const [id, value] of Object.entries(values)) {
-      els[id] = field(value, section);
+      // `project` is picked in the tree and `muscle` is built just below, so
+      // neither names a field of the form.
+      if (id !== "project" && id !== "muscle") els[id] = field(value, section);
     }
     const muscle = field(values.muscle ?? "", section);
     els.bidsMuscleContainer = { querySelectorAll: () => [muscle] };
@@ -257,16 +346,19 @@ describe("required session fields", () => {
     const session = createFileSessionService(
       /** @type {any} */ ({
         els,
-        state: {},
+        state: { edit: {} },
         api: {},
         setSettingsOpen: (open) => opened.push(open),
       }),
     );
+    // The project is picked in the tree, not typed: setting it clears the new name.
+    session.setBidsProject(values.project ?? "");
+    if (els.bidsProjectNew) els.bidsProjectNew.value = values.bidsProjectNew;
     return { session, els, muscle, section, opened };
   }
 
   const filled = {
-    bidsProject: "study1",
+    project: "study1",
     bidsSubject: "1",
     bidsSession: "1",
     bidsTask: "trapezoid",
@@ -288,7 +380,7 @@ describe("required session fields", () => {
   test("empty fields are marked and the panel opens on the first", () => {
     const { session, els, muscle, section, opened } = formWith({
       ...filled,
-      bidsProject: "",
+      project: "",
       bidsProjectNew: " ",
       muscle: "",
     });

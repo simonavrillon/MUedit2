@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.1] - 2026-10-29
+
+### Added
+
+- A **Projects** section at the top of the settings panel lists the output folder's projects
+  as a tree with folder icons, replacing the **Project** dropdown. **Change output folder**
+  under it picks another folder of projects, and MUedit remembers it for the next launch. Both
+  are disabled while an opened decomposition is being edited, so it saves back where it came
+  from.
+
 ## [2.2.0] - 2026-10-27
 
 ### Added
@@ -40,5 +50,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - A local file read vulnerability through the API.
 
-[Unreleased]: https://github.com/simonavrillon/MUedit2/compare/v2.2.0...HEAD
+[Unreleased]: https://github.com/simonavrillon/MUedit2/compare/v2.2.1...HEAD
+[2.2.1]: https://github.com/simonavrillon/MUedit2/releases/tag/v2.2.1
 [2.2.0]: https://github.com/simonavrillon/MUedit2/releases/tag/v2.2.0

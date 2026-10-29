@@ -14,5 +14,5 @@ router = APIRouter(prefix="/api/v1")
 
 @router.get("/projects")
 def projects() -> dict[str, Any]:
-    """The projects in the output folder, for the Project field's dropdown."""
-    return success_payload({"projects": config.list_projects()})
+    """The projects in the output folder and its path, for the settings panel's project tree."""
+    return success_payload({"projects": config.list_projects(), "data_root": str(config.DATA_ROOT)})

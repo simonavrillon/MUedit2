@@ -94,6 +94,7 @@ export function createEditStageService(app) {
   function resetEditState() {
     resetEditSlice(state);
     refreshEditModeButtons();
+    app.setProjectLocked(false);
     app.setBidsProject("");
   }
 

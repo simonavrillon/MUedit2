@@ -22,6 +22,7 @@ from tests.conftest import REPO_ROOT
 LIVE_ENDPOINTS: list[tuple[str, str]] = [
     ("GET", "/health"),
     ("GET", "/dialog/open-file"),
+    ("POST", "/dialog/data-folder"),
     ("POST", "/preview-by-path"),
     ("GET", "/series/emg"),
     ("GET", "/series/overview"),
@@ -136,7 +137,7 @@ def test_projects_lists_the_bids_datasets_in_the_output_folder(
     (tmp_path / "study1").mkdir()
     (tmp_path / "study1" / "dataset_description.json").write_text("{}")
     monkeypatch.setattr(config, "DATA_ROOT", tmp_path)
-    assert ok(client.get(f"{API}/projects")) == {"projects": ["study1"]}
+    assert ok(client.get(f"{API}/projects")) == {"projects": ["study1"], "data_root": str(tmp_path)}
 
 
 # ── Tab sessions ────────────────────────────────────────────────────────────
@@ -241,3 +242,59 @@ class TestDialog:
         pick(RuntimeError("no display"))
         err = error(client.get(f"{API}/dialog/open-file"), 500)
         assert err["message"] == "Could not open the file dialog; see the server log"
+
+
+# ── /dialog/data-folder ─────────────────────────────────────────────────────
+
+
+class TestDataFolderDialog:
+    @pytest.fixture(autouse=True)
+    def no_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from muedit.api import config
+
+        monkeypatch.delenv(config.DATA_ROOT_ENV, raising=False)
+        # The route rebinds the output root; the test's patch puts it back.
+        monkeypatch.setattr(config, "DATA_ROOT", config.DATA_ROOT)
+
+    def _pick(self, monkeypatch: pytest.MonkeyPatch, folder: Path | None) -> None:
+        import muedit.api.services.dialog_service as dialog
+
+        monkeypatch.setattr(dialog, "choose_folder", lambda start: folder)
+
+    def test_the_picked_folder_is_listed_and_remembered(
+        self,
+        client: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        config_file: Path,
+    ) -> None:
+        from muedit.api import config
+
+        picked = tmp_path / "lab"
+        (picked / "study1").mkdir(parents=True)
+        (picked / "study1" / "dataset_description.json").write_text("{}")
+        self._pick(monkeypatch, picked)
+        assert ok(client.post(f"{API}/dialog/data-folder")) == {"data_root": str(picked)}
+        assert ok(client.get(f"{API}/projects")) == {
+            "projects": ["study1"],
+            "data_root": str(picked),
+        }
+        assert config.default_data_root() == picked
+        assert config_file.is_file()
+
+    def test_cancelled_keeps_the_folder(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch, config_file: Path
+    ) -> None:
+        self._pick(monkeypatch, None)
+        assert ok(client.post(f"{API}/dialog/data-folder")) == {"data_root": None}
+        assert not config_file.exists()
+
+    def test_the_env_override_refuses_a_choice(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        from muedit.api import config
+
+        monkeypatch.setenv(config.DATA_ROOT_ENV, str(tmp_path))
+        self._pick(monkeypatch, tmp_path / "other")
+        err = error(client.post(f"{API}/dialog/data-folder"), 400)
+        assert config.DATA_ROOT_ENV in err["message"]

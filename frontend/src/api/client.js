@@ -20,6 +20,11 @@ const AUTO_QC_TIMEOUT_MS = 300000;
  * filter update waits for it, and so does a request queued behind that update.
  */
 const GRID_FILTER_TIMEOUT_MS = 600000;
+/**
+ * Longer than the 120 s the server keeps its file and folder dialogs open, so
+ * the server's "… dialog timed out" arrives before this request gives up.
+ */
+const DIALOG_TIMEOUT_MS = 130000;
 
 const SERIES_ROUTES = {
   emg: routes.seriesEmg,
@@ -169,7 +174,11 @@ export function createApiClient({ apiFetch, apiJson, API_BASE, sessionId }) {
 
     /** @returns {Promise<{ path: string | null, name: string | null }>} */
     async openFileDialog() {
-      const picked = await apiJson(urlOf(routes.dialogOpenFile));
+      const picked = await apiJson(
+        urlOf(routes.dialogOpenFile),
+        {},
+        DIALOG_TIMEOUT_MS,
+      );
       return {
         path: typeof picked.path === "string" ? picked.path : null,
         name: typeof picked.name === "string" ? picked.name : null,
@@ -273,9 +282,18 @@ export function createApiClient({ apiFetch, apiJson, API_BASE, sessionId }) {
       return postJson(routes.editSave, payload);
     },
 
-    /** The projects in the output folder. */
+    /** The projects in the output folder, and the folder's path. */
     listProjects() {
       return apiJson(urlOf(routes.projects));
+    },
+
+    /** Pick another output folder in the native dialog; the server remembers it. */
+    chooseDataFolder() {
+      return apiJson(
+        urlOf(routes.dialogDataFolder),
+        { method: "POST" },
+        DIALOG_TIMEOUT_MS,
+      );
     },
 
     healthUrl() {

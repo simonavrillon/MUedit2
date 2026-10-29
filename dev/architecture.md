@@ -122,8 +122,10 @@ Decisions worth knowing before changing this area:
   `.json` edit log to temporary files and rename them over the previous pair; a failure there
   fails the save. The participant row, BIDS EMG and MU derivatives after it only report
   failures (`bids_emg_error`, `bids_warnings`).
-- **A file saves back into its own dataset** while the Project field still names the project it
-  opened from (`editing_service._dataset_root`); typing another project sends it there.
+- **A file saves back into its own dataset** while the picked project is still the one it
+  opened from (`editing_service._dataset_root`). The page keeps it so: opening a
+  decomposition locks the Projects tree and Change output folder (`setProjectLocked`), and
+  opening a recording unlocks them.
 
 ## Known asymmetries
 

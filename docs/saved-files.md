@@ -5,21 +5,22 @@ before you analyse results in your own scripts.
 
 ## Where files go
 
-**In the app**, you never type a path. The **Project** field of the settings panel names a
+**In the app**, you never type a path. The project picked under **Projects** in the settings panel names a
 BIDS dataset inside MUedit's output folder:
 
 ```text
 <output>/<project>/      ← BIDS dataset root (the folder that contains sub-<subject>/)
 ```
 
-- `<output>` is, in order: the `MUEDIT_DATA_ROOT` environment variable; the repository's
-  `data/` folder; `MUedit` in your Documents folder when MUedit is installed as a package.
+- `<output>` is, in order: the `MUEDIT_DATA_ROOT` environment variable; the folder picked with
+  **Change output folder** under **Projects**; the repository's `data/` folder; `MUedit` in
+  your Documents folder when MUedit is installed as a package.
 - The project is a single folder name. A path such as `../study1` or `/data/x` is refused, so
   outputs always stay inside `<output>`. (An API call with no project writes to
   `<output>/muedit_out/`; the app always sends one.)
-- A decomposition you open from a BIDS dataset elsewhere on disk is saved back into **that**
-  dataset as long as you leave its **Project** field unchanged; pick another project to save it
-  there instead. A save back into the file's own dataset keeps its subject: an entity label
+- A decomposition you open is saved back where it came from: into its project, or into
+  **that** dataset when it lies elsewhere on disk. While it is open, the **Projects** tree and
+  **Change output folder** are disabled; open a recording to use them again. A save back into the file's own dataset keeps its subject: an entity label
   naming another subject is refused, so a save never lands in another subject's folder.
 
 Inside the dataset, raw EMG goes under `sub-<subject>/[ses-<session>/]emg/` and decompositions

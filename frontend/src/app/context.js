@@ -65,9 +65,11 @@
 /**
  * @typedef {object} FileSessionService
  * @property {() => string} getBidsProject
- * @property {(project: string) => void} setBidsProject The Project field, and the edit session's project with it; `""` picks "New project…".
- * @property {() => void} syncBidsProject After the Project field changes: the new-name row, the edit session's project and the remembered pick.
- * @property {() => Promise<void>} loadProjects Fill the Project field with the output folder's projects, on the last one picked.
+ * @property {(project: string) => void} setBidsProject Pick `project` in the project tree, and make it the edit session's project; `""` picks "New project…".
+ * @property {() => void} syncBidsProject After the pick or the new name changes: the new-name row, the edit session's project and the remembered pick.
+ * @property {(locked: boolean) => void} setProjectLocked Disable the project tree, the new-name field and Change output folder, or enable them again.
+ * @property {() => Promise<void>} loadProjects Fill the project tree with the output folder's projects, on the last one picked.
+ * @property {() => Promise<void>} onChooseDataFolder Pick another output folder in the native dialog, then refill the project tree from it.
  * @property {(fileName: string) => void} resetSessionForm The entity fields back to their defaults for a new raw file.
  * @property {() => string[]} getBidsMuscleNames
  * @property {() => JsonObject} collectBidsEntities

@@ -177,7 +177,7 @@ MUedit reads these variables. Set them before launching.
 
 | Variable | Default | Read by | Effect |
 |---|---|---|---|
-| `MUEDIT_DATA_ROOT` | the repo's `data/`, else `~/Documents/MUedit` | backend | Output root; each project is a folder inside it. |
+| `MUEDIT_DATA_ROOT` | the folder chosen with **Change output folder**, else the repo's `data/`, else `~/Documents/MUedit` | backend | Output root; each project is a folder inside it. While it is set, **Change output folder** is refused. |
 | `MUEDIT_HOST` | `127.0.0.1` | `muedit api` | Bind host. |
 | `MUEDIT_PORT` | `8000` | `muedit api` | Bind port. |
 | `MUEDIT_OPEN_BROWSER` | `0` (`1` in the launchers) | `muedit api` | `1` opens the page in the browser once the server is listening. |
@@ -185,6 +185,11 @@ MUedit reads these variables. Set them before launching.
 | `MUEDIT_CACHE_BUDGET_MB` | clamp(10% of RAM, 256 MB, 1 GB) | backend | In-memory budget shared by every API cache. |
 | `MUEDIT_DISK_RESERVE_MB` | `1024` | backend | Free disk a session store keeps; arrays that would cut into it stay in RAM. |
 | `MUEDIT_LOG_FILE` | set by the server | internal | The log file that spawned decomposition workers append to. |
+
+The output folder chosen in the app is kept in a per-user `config.json`: in
+`~/Library/Application Support/MUedit/` on macOS, `%LOCALAPPDATA%\MUedit\` on Windows, and
+`~/.config/muedit/` (or `$XDG_CONFIG_HOME/muedit/`) on Linux. Delete it to return to the
+default.
 
 Related: [saved-files.md](saved-files.md) (output paths and file formats) and
 [troubleshooting.md](troubleshooting.md) (logs and common failures).
